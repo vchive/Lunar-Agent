@@ -11,7 +11,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,11 @@ class Runtime(Protocol):
 
     def cancel(self) -> None:
         """Request cancellation of the active invocation, when supported."""
+
+    def set_process_observer(
+        self, observer: Callable[[int, int | None], None] | None
+    ) -> None:
+        """Observe a spawned local process, if the adapter supports one."""
 
 
 class RuntimeExecutionError(RuntimeError):
@@ -52,6 +57,14 @@ class MockRuntime:
     def cancel(self) -> None:
         return None
 
+    def process_info(self) -> tuple[int | None, int | None]:
+        return (None, None)
+
+    def set_process_observer(
+        self, observer: Callable[[int, int | None], None] | None
+    ) -> None:
+        del observer
+
 
 class SubprocessRuntime:
     """Run an explicitly configured command, without searching agent-specific global state."""
@@ -71,6 +84,12 @@ class SubprocessRuntime:
                 "subprocess runtime requires FAMOU_RUNTIME_COMMAND or an explicit command"
             )
         self._process: subprocess.Popen[str] | None = None
+        self._process_observer: Callable[[int, int | None], None] | None = None
+
+    def set_process_observer(
+        self, observer: Callable[[int, int | None], None] | None
+    ) -> None:
+        self._process_observer = observer
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -85,6 +104,15 @@ class SubprocessRuntime:
                 stderr=subprocess.PIPE,
             )
             self._process = process
+            if self._process_observer is not None:
+                try:
+                    pgid = os.getpgid(process.pid)
+                except OSError:
+                    pgid = None
+                try:
+                    self._process_observer(process.pid, pgid)
+                except Exception:  # noqa: BLE001 - metadata observation must not break execution
+                    pass
             stdout, stderr = process.communicate(input=prompt, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             if process is not None:
@@ -112,6 +140,15 @@ class SubprocessRuntime:
     def cancel(self) -> None:
         if self._process and self._process.poll() is None:
             self._process.terminate()
+
+    def process_info(self) -> tuple[int | None, int | None]:
+        process = self._process
+        if process is None or process.poll() is not None:
+            return (None, None)
+        try:
+            return (process.pid, os.getpgid(process.pid))
+        except OSError:
+            return (process.pid, None)
 
 
 def build_runtime(name: str, command: str | None = None) -> Runtime:

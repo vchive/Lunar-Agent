@@ -106,7 +106,16 @@ keeps domain, storage, runtime, and CLI boundaries visible without premature ser
 2. Document the Runtime Adapter and CLI contracts.
 3. Provide a quickstart that proves a clean-environment mock run and resume workflow.
 
+## Phase 2 completion design
+
+The P2 increment keeps orchestration in one local controller process. SQLite stores the dependency
+array and runner process identity; the filesystem stores result and evaluator JSON artifacts. A plan
+is validated in memory and inserted in one transaction, so a bad plan cannot leave an orphan run.
+The scheduler promotes only dependency-satisfied tasks and marks downstream work blocked when an
+upstream task fails. Handoff is explicit: the dependent prompt contains run-relative artifact paths
+and bounded previews, while the task workspace remains the source of truth for large files.
+
 ## Complexity Tracking
 
-No constitution violations are expected. A separate evaluator process and background launch agent are
-intentionally deferred until the durable P1 loop is proven.
+No constitution violations are expected. A separate evaluator service and distributed queue remain
+out of scope; detached execution uses a local process group and durable PID metadata only.

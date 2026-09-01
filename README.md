@@ -34,6 +34,9 @@ uv run famou events <run-id>
 uv run famou resume <run-id>
 ```
 
+The installed `lunar-agent` command is an equivalent alias for `famou`, which is convenient when a
+parent Agent wants to invoke the project by its repository name.
+
 The default home is `.famou/` in the current working directory. Set `FAMOU_HOME` or pass
 `--home PATH` to use another local directory. The mock runtime is deterministic and requires no
 network, credentials, model, or user-global Hermes state.
@@ -49,6 +52,31 @@ uv run famou run "Inspect this repository" --runtime subprocess
 
 The command receives the task prompt on stdin and runs inside the task workspace. Lunar-Agent never
 searches for Hermes or imports `~/.hermes`.
+
+## Multi-step plans
+
+For dependent work, provide a JSON plan. The controller validates the graph before creating a run,
+executes ready tasks in order, and adds verified predecessor artifact paths/previews to each
+dependent prompt:
+
+```json
+{
+  "goal": "prepare a report",
+  "tasks": [
+    {"id": "research", "title": "Research", "prompt": "Collect facts"},
+    {"id": "write", "title": "Write", "prompt": "Draft the report", "depends_on": ["research"]}
+  ]
+}
+```
+
+```bash
+uv run famou run --plan plan.json --runtime mock --json
+```
+
+Malformed plans (duplicate IDs, unknown dependencies, or cycles) are rejected without leaving a
+partial run in SQLite. A failed or rejected prerequisite blocks downstream tasks and the run settles
+as failed. Each evaluator decision is also written to `evaluation.json` within the attempt
+workspace and emitted as a structured event.
 
 ## Called by another Agent
 
@@ -70,6 +98,10 @@ uv run famou status "$run_id" --json
 ```
 
 The detached controller log is stored at `<run-workspace>/controller.log`.
+
+`cancel` updates the ledger first, then terminates the detached controller's persisted process group.
+If a runtime races with cancellation, its late result is discarded and recorded as
+`task_result_discarded`; it cannot turn the run back to succeeded.
 
 Long goals can be piped without shell escaping:
 

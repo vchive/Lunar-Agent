@@ -48,10 +48,10 @@ resume the run, and assert one successful terminal result and one artifact.
 **Independent Test**: Run a two-task plan with a rejecting evaluator and verify that dependent task
 ordering and non-success settlement are visible in the ledger.
 
-- [ ] T016 [P] [US2] Add dependency-aware task creation and ready-queue scheduling in `src/famou/controller.py`
+- [x] T016 [P] [US2] Add dependency-aware task creation and ready-queue scheduling in `src/famou/controller.py`
 - [x] T017 [P] [US2] Add structured evaluator protocol and default acceptance evaluator in `src/famou/evaluator.py`
-- [ ] T018 [US2] Add plan input format and CLI option in `src/famou/cli.py`
-- [ ] T019 [US2] Add multi-step/evaluator integration tests in `tests/test_plan.py`
+- [x] T018 [US2] Add plan input format and CLI option in `src/famou/cli.py`
+- [x] T019 [US2] Add multi-step/evaluator integration tests in `tests/test_plan.py`
 
 ## Phase 5: User Story 3 - Use a Self-Contained Runtime Boundary (Priority: P3)
 
@@ -66,10 +66,11 @@ execute a subprocess fixture through the adapter.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T023 [P] Add launchd/systemd user-runner documentation for detached local execution in `docs/background-runner.md`
+- [x] T023 [P] Add launchd/systemd user-runner documentation for detached local execution in `docs/background-runner.md`
 - [x] T024 [P] Add JSON output mode and stable CLI exit-code documentation in `src/famou/cli.py` and `specs/001-standalone-local-agent/contracts/runtime-adapter.md`
-- [ ] T025 Run the [quickstart](./quickstart.md), recovery suite, and static checks in CI configuration `.github/workflows/test.yml`
+- [x] T025 Run the [quickstart](./quickstart.md), recovery suite, and static checks in CI configuration `.github/workflows/test.yml`
 - [x] T026 Add `run --detach` durable-handle launch and coverage in `src/famou/cli.py` and `tests/test_cli.py`
+- [x] T027 Persist detached runner PID/PGID, terminate its process group on cancel, and discard late results in `src/famou/controller.py` and `tests/test_plan.py`
 
 ## Dependencies & Execution Order
 

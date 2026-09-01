@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-01
 
-**Status**: Draft
+**Status**: Implementing
 
 **Input**: User description: "Create a standalone local Famou Agent that does not depend on a
 machine-wide Hermes environment and can resume long-running work."
@@ -50,6 +50,25 @@ the final status.
    scheduled only after its verified artifact is available.
 2. **Given** an evaluator rejection, **When** the controller processes the result, **Then** the task
    is marked failed or returned for replanning and the run is not reported as successful.
+
+#### Plan input contract
+
+The local CLI accepts a JSON plan with a run goal and an acyclic task graph. A minimal plan is:
+
+```json
+{
+  "goal": "prepare a report",
+  "tasks": [
+    {"id": "research", "title": "Research", "prompt": "Collect facts"},
+    {"id": "write", "title": "Write", "prompt": "Draft the report", "depends_on": ["research"]}
+  ]
+}
+```
+
+`run --plan plan.json` validates unique task IDs, dependency references, and cycles before any
+runtime is invoked. Tasks without dependencies enter the ready queue; dependent tasks remain
+waiting until every dependency is verified successful. A task receives the relative paths and
+bounded text previews of verified dependency artifacts in its runtime prompt.
 
 ### User Story 3 - Use a Self-Contained Runtime Boundary (Priority: P3)
 
@@ -110,6 +129,13 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
   a parent Agent can invoke Lunar-Agent without shell-escaping long prompts.
 - **FR-013**: The `run --detach --json` command MUST persist the run and return its durable run ID
   before task execution begins; the child controller MUST write its output under the run workspace.
+- **FR-014**: A plan MUST be persisted before execution, and its dependency graph MUST be acyclic;
+  malformed plans MUST fail without creating a partially initialized run.
+- **FR-015**: Detached execution MUST persist its controller process ID/group ID. `cancel` MUST
+  request termination of that process group and reject late runtime results after the run is
+  cancelled.
+- **FR-016**: Each evaluator decision MUST be persisted as a structured JSON audit file and an
+  event; a rejected decision MUST prevent a successful run settlement.
 
 ### Key Entities
 
@@ -143,6 +169,8 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
 - **SC-007**: A parent Agent can start a detached mock run and receive a valid run ID in under one
   second, then observe the run transition through `status --json` without keeping the parent process
   attached.
+- **SC-008**: A valid two-task plan executes in dependency order, and the dependent task can locate
+  the predecessor's verified result artifact from its prompt/workspace.
 
 ## Assumptions
 

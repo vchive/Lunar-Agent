@@ -15,6 +15,12 @@ class Runtime(Protocol):
 
     def cancel(self) -> None:
         """Request cancellation of the active invocation, if any."""
+
+    def set_process_observer(self, observer: Callable[[int, int | None], None] | None) -> None:
+        """Observe a spawned process for durable attempt metadata, when supported."""
+
+    def process_info(self) -> tuple[int | None, int | None]:
+        """Return local PID/PGID for detached cancellation, or ``(None, None)``."""
 ```
 
 `RuntimeResult` contains:
@@ -29,6 +35,8 @@ class Runtime(Protocol):
 
 The controller validates artifact paths, hashes files, persists the result, and decides whether the
 task is verified. A runtime MUST NOT mark a database task successful itself.
+When a detached controller is cancelled, a result that arrives after cancellation MUST be discarded
+and recorded as `task_result_discarded`, never attached as a successful artifact.
 
 ## Subprocess protocol
 
@@ -46,6 +54,7 @@ reads `~/.hermes`.
 
 ```text
 python -m famou run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json] [--detach]
+python -m famou run [<goal>] --plan PLAN.json [--runtime mock|subprocess] [--home PATH] [--json]
 python -m famou run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
 python -m famou resume <run-id> [--home PATH] [--json]
 python -m famou status <run-id> [--home PATH] [--json]

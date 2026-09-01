@@ -60,3 +60,30 @@ def test_cli_detach_returns_durable_handle_before_execution(tmp_path: Path, caps
     assert main(["status", payload["run_id"], "--json", "--home", str(tmp_path)]) == 0
     status_payload = json.loads(capsys.readouterr().out)
     assert status_payload["run"]["status"] == "pending"
+
+
+def test_cli_accepts_json_plan_and_rejects_malformed_plan(tmp_path: Path, capsys) -> None:
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "goal": "cli plan",
+                "tasks": [
+                    {"id": "one", "prompt": "one"},
+                    {"id": "two", "prompt": "two", "depends_on": ["one"]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["run", "--plan", str(plan_path), "--runtime", "mock", "--json", "--home", str(tmp_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "succeeded"
+
+    bad_path = tmp_path / "bad.json"
+    bad_path.write_text(
+        '{"goal":"bad","tasks":[{"id":"a","prompt":"a","depends_on":["a"]}]}',
+        encoding="utf-8",
+    )
+    assert main(["run", "--plan", str(bad_path), "--json", "--home", str(tmp_path / "bad-home")]) == 2
+    assert "depend" in capsys.readouterr().err

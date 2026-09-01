@@ -38,6 +38,30 @@ uv run python -m famou resume <run-id>
 To exercise recovery, stop a run after its task has been persisted, then run `resume`. The resumed
 run must reach `succeeded` without creating a second terminal result or duplicate artifact.
 
+## Run a dependent plan
+
+Create `plan.json`:
+
+```json
+{
+  "goal": "prepare a report",
+  "tasks": [
+    {"id": "research", "title": "Research", "prompt": "Collect facts"},
+    {"id": "write", "title": "Write", "prompt": "Draft the report", "depends_on": ["research"]}
+  ]
+}
+```
+
+Then execute it with:
+
+```bash
+uv run python -m famou run --plan plan.json --runtime mock --json
+```
+
+The `write` task is not claimed until `research` has a verified result. Its prompt contains the
+run-relative result path and a bounded text preview of predecessor artifacts. Duplicate IDs,
+unknown dependencies, and cycles are rejected before a run is inserted.
+
 ## Agent-to-agent invocation
 
 Use the JSON mode when Codex or another Agent invokes Lunar-Agent as a child process:
@@ -59,6 +83,8 @@ uv run python -m famou run "Long analysis" --runtime subprocess --detach --json
 
 This returns before execution completes. Poll `status --json`, inspect `events --json`, or call
 `cancel` with the returned run ID; the detached controller writes its log in the run workspace.
+`cancel` terminates the persisted detached process group, and a late result is discarded with a
+`task_result_discarded` event.
 
 ## Test
 

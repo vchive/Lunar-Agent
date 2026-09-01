@@ -22,6 +22,7 @@ lint = [
 
 [project.scripts]
 famou = "famou.cli:main"
+lunar-agent = "famou.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

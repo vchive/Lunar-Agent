@@ -35,6 +35,8 @@ class Run:
     workspace: Path
     created_at: str
     updated_at: str
+    runner_pid: int | None = None
+    runner_pgid: int | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,8 @@ class Task:
     last_error: str | None
     created_at: str
     updated_at: str
+    dependencies: tuple[str, ...] = ()
+    acceptance: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,3 +64,5 @@ class Attempt:
     started_at: str
     finished_at: str | None
     error: str | None
+    pid: int | None = None
+    pgid: int | None = None

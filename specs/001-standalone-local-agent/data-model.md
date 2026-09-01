@@ -26,8 +26,10 @@ Represents an executable unit in a run plan.
 | `prompt` | string | Runtime input, persisted before execution |
 | `state` | enum | `pending`, `ready`, `running`, `waiting`, `blocked`, `succeeded`, `failed`, `cancelled`, `uncertain` |
 | `dependencies` | JSON array | Task IDs that must be verified before scheduling |
+| `acceptance` | string/object/null | Optional local criterion applied with the configured evaluator |
 | `attempts` | integer | Non-negative count |
 | `result_path` | path/null | Run-scoped result artifact |
+| `dependencies` | JSON array | Task IDs that must be verified before scheduling |
 
 ## Attempt
 
@@ -44,6 +46,7 @@ Represents one invocation of a Runtime Adapter.
 | `finished_at` | timestamp/null | UTC |
 | `heartbeat_at` | timestamp/null | UTC |
 | `error` | string/null | Sanitized diagnostic |
+| `pid` / `pgid` | integer/null | Local process identity for detached cancellation |
 
 ## Event
 
@@ -76,3 +79,7 @@ interactive approval UI is deferred until the controller loop is stable.
 3. Every task state change has an event, and every artifact is linked to its producing task.
 4. Recovery may move `running` to `uncertain` and then to `ready`/`pending`, but never silently to
    `succeeded`.
+5. A task cannot become `ready` while any dependency is non-terminal; a failed, blocked, or
+   cancelled dependency blocks all downstream tasks.
+6. A result that arrives after cancellation is not attached to the task or counted toward run
+   success.

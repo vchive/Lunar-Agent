@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -42,7 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json(init_parser)
 
     run_parser = subparsers.add_parser("run", help="start and execute a goal")
-    run_parser.add_argument("goal", help="user goal, or '-' to read it from stdin")
+    run_parser.add_argument("goal", nargs="?", help="user goal, or '-' to read it from stdin")
+    run_parser.add_argument("--plan", type=Path, help="JSON plan file containing goal and tasks")
     run_parser.add_argument("--runtime", choices=("mock", "subprocess"), default="mock")
     run_parser.add_argument("--command", dest="runtime_command", help="explicit subprocess command")
     run_parser.add_argument(
@@ -84,9 +86,32 @@ def _controller(args: argparse.Namespace, config: Config) -> LocalController:
     return LocalController(config, runtime)
 
 
-def _detach(config: Config, args: argparse.Namespace, goal: str) -> object:
+def _load_plan(path: Path, goal_override: str | None) -> tuple[str, list[dict[str, object]]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"could not read plan {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"plan is not valid JSON: {exc.msg}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("plan must be a JSON object")
+    plan_goal = goal_override or payload.get("goal")
+    if not isinstance(plan_goal, str) or not plan_goal.strip():
+        raise ValueError("plan requires a non-empty goal (or a positional goal override)")
+    tasks = payload.get("tasks")
+    if not isinstance(tasks, list):
+        raise ValueError("plan requires a tasks array")
+    return plan_goal, tasks
+
+
+def _detach(
+    config: Config,
+    args: argparse.Namespace,
+    goal: str,
+    plan_tasks: list[dict[str, object]] | None = None,
+) -> object:
     controller = _controller(args, config)
-    run = controller.create(goal)
+    run = controller.create(goal, plan_tasks)
     log_path = Path(run.workspace) / "controller.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
@@ -105,7 +130,7 @@ def _detach(config: Config, args: argparse.Namespace, goal: str) -> object:
         command.extend(("--command", args.runtime_command))
     try:
         with log_path.open("a", encoding="utf-8") as log:
-            subprocess.Popen(
+            process = subprocess.Popen(
                 command,
                 cwd=Path.cwd(),
                 stdin=subprocess.DEVNULL,
@@ -114,10 +139,25 @@ def _detach(config: Config, args: argparse.Namespace, goal: str) -> object:
                 start_new_session=True,
                 close_fds=True,
             )
+        pid = getattr(process, "pid", None)
+        if isinstance(pid, int) and pid > 1:
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = pid
+            controller.store.set_runner_process(run.id, pid, pgid)
+            latest = controller.store.get_run(run.id)
+            if latest is not None and latest.status.value in {"succeeded", "failed", "cancelled"}:
+                controller.store.clear_runner_process(run.id)
     except OSError:
         controller.cancel(run.id)
         raise
-    return {"run_id": run.id, "status": "pending", "workspace": str(run.workspace)}
+    return {
+        "run_id": run.id,
+        "status": "pending",
+        "workspace": str(run.workspace),
+        "plan": bool(plan_tasks),
+    }
 
 
 def _print_status(config: Config, run_id: str) -> int:
@@ -130,10 +170,13 @@ def _print_status(config: Config, run_id: str) -> int:
     print(f"status: {run.status.value}")
     print(f"goal: {run.goal}")
     print(f"workspace: {run.workspace}")
+    if run.runner_pid:
+        print(f"runner: pid={run.runner_pid} pgid={run.runner_pgid}")
     for task in store.list_tasks(run.id):
         print(
             f"task: {task.id} state={task.state.value} attempts={task.attempts}"
             + (f" error={task.last_error}" if task.last_error else "")
+            + (f" depends_on={','.join(task.dependencies)}" if task.dependencies else "")
         )
     artifacts = store.list_artifacts(run.id)
     for artifact in artifacts:
@@ -156,6 +199,8 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             "workspace": str(run.workspace),
             "created_at": run.created_at,
             "updated_at": run.updated_at,
+            "runner_pid": run.runner_pid,
+            "runner_pgid": run.runner_pgid,
         },
         "tasks": [
             {
@@ -166,6 +211,8 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
                 "attempts": task.attempts,
                 "result_path": str(task.result_path) if task.result_path else None,
                 "last_error": task.last_error,
+                "dependencies": list(task.dependencies),
+                "acceptance": task.acceptance,
             }
             for task in store.list_tasks(run.id)
         ],
@@ -210,11 +257,19 @@ def main(argv: list[str] | None = None) -> int:
             _emit({"home": str(config.home), "status": "initialized"}, args.json)
             return 0
         if args.command == "run":
-            goal = sys.stdin.read() if args.goal == "-" else args.goal
+            plan_tasks = None
+            if args.plan is not None:
+                goal, plan_tasks = _load_plan(args.plan, args.goal)
+            elif args.goal == "-":
+                goal = sys.stdin.read()
+            elif args.goal:
+                goal = args.goal
+            else:
+                raise ValueError("run requires a goal or --plan PATH")
             if args.detach:
-                _emit(_detach(config, args, goal), args.json)
+                _emit(_detach(config, args, goal, plan_tasks), args.json)
                 return 0
-            run = _controller(args, config).start(goal)
+            run = _controller(args, config).start(goal, plan_tasks)
             _emit(
                 {
                     "run_id": run.id,
