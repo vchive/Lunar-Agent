@@ -10,6 +10,7 @@ from pathlib import Path
 class RunStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
+    AWAITING_INPUT = "awaiting_input"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -53,6 +54,9 @@ class Task:
     updated_at: str
     dependencies: tuple[str, ...] = ()
     acceptance: str | None = None
+    input_question: str | None = None
+    input_options: tuple[str, ...] = ()
+    input_answer_path: Path | None = None
 
 
 @dataclass(frozen=True)

@@ -124,3 +124,12 @@ adapter requires a non-empty text response and applies the same evaluator/retry 
 runtimes. Add `--allow-exec` for bounded no-shell command execution. Add `--memory` to explicitly
 enable the local `recall_memory` and `remember_memory` tools; memory notes are stored in SQLite and
 are never injected into a model request silently.
+
+The model can pause for a decision with `ask_user`. The command returns `awaiting_input`; inspect the
+question with `status --json`, then answer and resume the same run:
+
+```bash
+uv run python -m famou answer <run-id> "json" \
+  --runtime openai-compatible --endpoint "$FAMOU_MODEL_ENDPOINT" \
+  --model "$FAMOU_MODEL" --agent-loop --memory --json
+```

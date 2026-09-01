@@ -25,6 +25,9 @@ class ToolResult:
     output: str
     success: bool = True
     artifacts: tuple[str, ...] = ()
+    awaiting_input: bool = False
+    input_question: str | None = None
+    input_options: tuple[str, ...] = ()
 
 
 class LocalToolRegistry:
@@ -73,6 +76,15 @@ class LocalToolRegistry:
                 "List entries in a task workspace directory.",
                 {"path": {"type": "string"}},
                 [],
+            ),
+            self._schema(
+                "ask_user",
+                "Pause this session and ask the user or parent Agent for a bounded answer.",
+                {
+                    "question": {"type": "string"},
+                    "options": {"type": "array", "items": {"type": "string"}},
+                },
+                ["question"],
             ),
         ]
         if self.memory is not None:
@@ -142,6 +154,8 @@ class LocalToolRegistry:
                 return self._write_file(arguments, workspace)
             if name == "list_dir":
                 return self._list_dir(arguments, workspace)
+            if name == "ask_user":
+                return self._ask_user(arguments)
             if name == "recall_memory":
                 return self._recall_memory(arguments)
             if name == "remember_memory":
@@ -199,6 +213,29 @@ class LocalToolRegistry:
         for entry in sorted(path.iterdir(), key=lambda item: item.name):
             entries.append({"name": entry.name, "type": "directory" if entry.is_dir() else "file"})
         return ToolResult(json.dumps(entries, ensure_ascii=False))
+
+    def _ask_user(self, arguments: dict[str, object]) -> ToolResult:
+        question = arguments.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise ToolError("question must be a non-empty string")
+        question = question.strip()
+        if len(question.encode("utf-8")) > 8_000:
+            raise ToolError("question exceeds 8 KiB")
+        options = arguments.get("options", [])
+        if not isinstance(options, list) or any(
+            not isinstance(option, str) or not option.strip() for option in options
+        ):
+            raise ToolError("options must be a string array")
+        if len(options) > 10 or any(len(option.encode("utf-8")) > 200 for option in options):
+            raise ToolError("options exceed the input limit")
+        normalized_options = [option.strip() for option in options]
+        payload = {"status": "awaiting_input", "question": question, "options": normalized_options}
+        return ToolResult(
+            self._bounded_text(json.dumps(payload, ensure_ascii=False)),
+            awaiting_input=True,
+            input_question=question,
+            input_options=tuple(normalized_options),
+        )
 
     def _recall_memory(self, arguments: dict[str, object]) -> ToolResult:
         if self.memory is None:

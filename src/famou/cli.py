@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from .agent_loop import HermesSessionRuntime
+from .artifacts import ArtifactStore
 from .config import Config
 from .controller import LocalController
 from .memory import MemoryStore
@@ -100,6 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_options(resume_parser)
     _add_home(resume_parser)
     _add_json(resume_parser)
+
+    answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
+    answer_parser.add_argument("run_id")
+    answer_parser.add_argument("answer", nargs="?", help="answer text, or '-' to read stdin")
+    _add_runtime_options(answer_parser)
+    _add_home(answer_parser)
+    _add_json(answer_parser)
 
     for name, help_text in (
         ("status", "inspect a run"),
@@ -254,6 +262,12 @@ def _print_status(config: Config, run_id: str) -> int:
     print(f"workspace: {run.workspace}")
     if run.runner_pid:
         print(f"runner: pid={run.runner_pid} pgid={run.runner_pgid}")
+    pending_input = store.pending_input(run.id)
+    if pending_input:
+        print(f"awaiting_input: task={pending_input['task_id']}")
+        print(f"question: {pending_input['question']}")
+        if pending_input["options"]:
+            print(f"options: {', '.join(pending_input['options'])}")
     for task in store.list_tasks(run.id):
         print(
             f"task: {task.id} state={task.state.value} attempts={task.attempts}"
@@ -299,6 +313,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             for task in store.list_tasks(run.id)
         ],
         "artifacts": store.list_artifacts(run.id),
+        "input_request": store.pending_input(run.id),
     }
 
 
@@ -355,6 +370,42 @@ def _memory_payload(config: Config, query: str | None, scope: str | None, limit:
     ]
 
 
+def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
+    answer = args.answer
+    if answer == "-":
+        answer = sys.stdin.read()
+    if not isinstance(answer, str) or not answer.strip():
+        raise ValueError("answer requires non-empty text or '-' for stdin")
+    if len(answer.encode("utf-8")) > 20_000:
+        raise ValueError("answer exceeds 20 KiB")
+    store = Store(config.database)
+    run = store.get_run(args.run_id)
+    if run is None:
+        raise ValueError(f"unknown run: {args.run_id}")
+    pending = store.pending_input(run.id)
+    if pending is None:
+        raise ValueError(f"run is not awaiting input: {args.run_id}")
+    artifacts = ArtifactStore(run.workspace, store, run.id)
+    answer_path = artifacts.write_text(
+        f"tasks/{pending['task_id']}/input-answer.json",
+        json.dumps({"answer": answer.strip()}, ensure_ascii=False, indent=2) + "\n",
+        pending["task_id"],
+        kind="input",
+    )
+    relative_answer = str(answer_path.relative_to(run.workspace))
+    task_id = store.answer_input(run.id, relative_answer)
+    if task_id is None:
+        raise ValueError("input request was answered concurrently; inspect status")
+    resumed = _controller(args, config).resume(run.id)
+    return {
+        "run_id": resumed.id,
+        "task_id": task_id,
+        "status": resumed.status.value,
+        "workspace": str(resumed.workspace),
+        "answer_path": relative_answer,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -375,27 +426,35 @@ def main(argv: list[str] | None = None) -> int:
             if args.detach:
                 _emit(_detach(config, args, goal, plan_tasks), args.json)
                 return 0
-            run = _controller(args, config).start(goal, plan_tasks)
+            controller = _controller(args, config)
+            run = controller.start(goal, plan_tasks)
             _emit(
                 {
                     "run_id": run.id,
                     "status": run.status.value,
                     "workspace": str(run.workspace),
+                    "input_request": controller.store.pending_input(run.id),
                 },
                 args.json,
             )
             return 0 if run.status.value == "succeeded" else 1
         if args.command == "resume":
-            run = _controller(args, config).resume(args.run_id)
+            controller = _controller(args, config)
+            run = controller.resume(args.run_id)
             _emit(
                 {
                     "run_id": run.id,
                     "status": run.status.value,
                     "workspace": str(run.workspace),
+                    "input_request": controller.store.pending_input(run.id),
                 },
                 args.json,
             )
             return 0 if run.status.value == "succeeded" else 1
+        if args.command == "answer":
+            payload = _answer(config, args)
+            _emit(payload, args.json)
+            return 0 if payload["status"] == "succeeded" else 1
         if args.command == "status":
             if args.json:
                 payload = _status_payload(config, args.run_id)

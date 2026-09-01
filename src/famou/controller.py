@@ -8,6 +8,7 @@ import signal
 from pathlib import Path
 from typing import Any
 
+from .agent_loop import AgentInputRequired
 from .artifacts import ArtifactError, ArtifactStore
 from .config import Config
 from .evaluator import Evaluation, Evaluator, NonEmptyEvaluator, acceptance_evaluator
@@ -136,6 +137,32 @@ class LocalController:
                         self.store.retry_task(task.id, attempt.id, evaluation.reason)
                     else:
                         self.store.finish_task(task.id, attempt.id, False, relative_result, evaluation.reason)
+                except AgentInputRequired as exc:
+                    if not self._task_is_running(task.id):
+                        self._discard_late_result(run_id, task.id, attempt.id)
+                        continue
+                    request_payload = {
+                        "status": "awaiting_input",
+                        "run_id": run_id,
+                        "task_id": task.id,
+                        "attempt_id": attempt.id,
+                        "question": exc.question,
+                        "options": list(exc.options),
+                    }
+                    request_path = artifacts.write_text(
+                        f"tasks/{task.id}/{attempt.id}/input-request.json",
+                        json.dumps(request_payload, ensure_ascii=False, indent=2) + "\n",
+                        task.id,
+                        kind="input",
+                    )
+                    relative_request = str(request_path.relative_to(Path(run.workspace)))
+                    self.store.await_input(
+                        task.id,
+                        attempt.id,
+                        relative_request,
+                        exc.question,
+                        exc.options,
+                    )
                 except Exception as exc:  # noqa: BLE001 - runtime boundary must persist all failures
                     error = self._sanitize_error(exc)
                     if not self._task_is_running(task.id):
@@ -209,9 +236,30 @@ class LocalController:
 
     def _build_task_prompt(self, run: Run, task: Any) -> str:
         dependencies = self.store.dependency_artifacts(task.id)
-        if not dependencies:
+        answer_path = task.input_answer_path
+        answer_content = ""
+        if answer_path:
+            candidate = (Path(run.workspace) / answer_path).resolve(strict=False)
+            try:
+                candidate.relative_to(Path(run.workspace).resolve())
+                if candidate.is_file() and candidate.stat().st_size <= 20_000:
+                    answer_content = candidate.read_text(encoding="utf-8")[:8_000]
+            except (OSError, UnicodeDecodeError, ValueError):
+                answer_content = "<answer artifact could not be read>"
+        if not dependencies and not answer_content:
             return task.prompt
-        sections = [task.prompt, "", "Verified dependency artifacts (run-relative paths):"]
+        sections = [task.prompt]
+        if answer_content:
+            sections.extend(
+                [
+                    "",
+                    "User/parent-Agent answer (from a verified run-relative artifact):",
+                    answer_content,
+                ]
+            )
+        if not dependencies:
+            return "\n".join(sections)
+        sections.extend(["", "Verified dependency artifacts (run-relative paths):"])
         for artifact in dependencies:
             relative = str(artifact["path"])
             sections.append(f"- task {artifact['task_id']}: {relative}")

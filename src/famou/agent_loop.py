@@ -28,6 +28,15 @@ concise, reusable facts or decisions.
 BUILD_SYSTEM_PROMPT = HERMES_SYSTEM_PROMPT
 
 
+class AgentInputRequired(RuntimeExecutionError):
+    """Raised when a session intentionally pauses for a user/parent-Agent answer."""
+
+    def __init__(self, question: str, options: tuple[str, ...] = ()) -> None:
+        super().__init__(question)
+        self.question = question
+        self.options = options
+
+
 class AgentLoopRuntime:
     """Execute one bounded Hermes-style session with optional persistent memory."""
 
@@ -129,8 +138,13 @@ class AgentLoopRuntime:
                         "success": result.success,
                         "artifact_count": len(result.artifacts),
                         "output_bytes": len(result.output.encode("utf-8")),
+                        "awaiting_input": result.awaiting_input,
                     },
                 )
+                if result.awaiting_input:
+                    raise AgentInputRequired(
+                        result.input_question or result.output[:8_000], result.input_options
+                    )
                 messages.append(
                     {
                         "role": "tool",

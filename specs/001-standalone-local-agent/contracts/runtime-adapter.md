@@ -84,6 +84,7 @@ python -m famou run "<goal>" --runtime openai-compatible --endpoint URL --model 
 python -m famou run "<goal>" --runtime openai-compatible --agent-loop [--max-steps N] [--allow-exec] [--memory]
 python -m famou run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
 python -m famou resume <run-id> [--home PATH] [--json]
+python -m famou answer <run-id> [<text>|-] [--runtime ...] [--home PATH] [--json]
 python -m famou status <run-id> [--home PATH] [--json]
 python -m famou events <run-id> [--home PATH] [--json]
 python -m famou cancel <run-id> [--home PATH] [--json]

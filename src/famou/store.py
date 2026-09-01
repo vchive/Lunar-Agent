@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     last_error TEXT,
     dependencies TEXT NOT NULL DEFAULT '[]',
     acceptance TEXT,
+    input_question TEXT,
+    input_options TEXT NOT NULL DEFAULT '[]',
+    input_answer_path TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -117,6 +120,9 @@ class Store:
             self._ensure_column(connection, "runs", "runner_pgid", "INTEGER")
             self._ensure_column(connection, "tasks", "dependencies", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(connection, "tasks", "acceptance", "TEXT")
+            self._ensure_column(connection, "tasks", "input_question", "TEXT")
+            self._ensure_column(connection, "tasks", "input_options", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(connection, "tasks", "input_answer_path", "TEXT")
             self._ensure_column(connection, "attempts", "pid", "INTEGER")
             self._ensure_column(connection, "attempts", "pgid", "INTEGER")
             connection.execute(
@@ -393,10 +399,15 @@ class Store:
             # longer succeed. This is intentionally done in the same transaction as the claim
             # lookup so two local controllers cannot observe stale readiness.
             pending = connection.execute(
-                "SELECT id, dependencies, state FROM tasks WHERE run_id = ? AND state IN (?, ?)",
+                "SELECT id, dependencies, state, input_question FROM tasks "
+                "WHERE run_id = ? AND state IN (?, ?)",
                 (run_id, TaskStatus.PENDING.value, TaskStatus.WAITING.value),
             ).fetchall()
             for row in pending:
+                # WAITING is also used for dependency edges. A task with an input question is
+                # paused by the session and must remain untouched until ``answer`` is called.
+                if row["state"] == TaskStatus.WAITING.value and row["input_question"]:
+                    continue
                 dependencies = json.loads(row["dependencies"] or "[]")
                 if not dependencies:
                     if row["state"] != TaskStatus.READY.value:
@@ -509,6 +520,130 @@ class Store:
             )
             row = connection.execute("SELECT * FROM attempts WHERE id = ?", (attempt_id,)).fetchone()
         return self._attempt_from_row(row)
+
+    def await_input(
+        self,
+        task_id: str,
+        attempt_id: str,
+        request_path: str,
+        question: str,
+        options: list[str] | tuple[str, ...] = (),
+    ) -> bool:
+        """Pause a running task until a user/parent Agent supplies an answer."""
+        if not question.strip() or len(question.encode("utf-8")) > 8_000:
+            raise ValueError("input question must be non-empty and at most 8 KiB")
+        if len(options) > 10 or any(len(str(option).encode("utf-8")) > 200 for option in options):
+            raise ValueError("input options exceed the limit")
+        request = Path(request_path)
+        if request.is_absolute() or ".." in request.parts:
+            raise ValueError("input request path must be run-relative")
+        timestamp = utc_now()
+        normalized_options = [str(option) for option in options]
+        with self._connect() as connection:
+            task = connection.execute(
+                "SELECT run_id FROM tasks WHERE id = ? AND state = ?",
+                (task_id, TaskStatus.RUNNING.value),
+            ).fetchone()
+            if task is None:
+                return False
+            updated = connection.execute(
+                "UPDATE tasks SET state = ?, input_question = ?, input_options = ?, "
+                "input_answer_path = NULL, last_error = NULL, updated_at = ? "
+                "WHERE id = ? AND state = ?",
+                (
+                    TaskStatus.WAITING.value,
+                    question,
+                    json.dumps(normalized_options, ensure_ascii=False),
+                    timestamp,
+                    task_id,
+                    TaskStatus.RUNNING.value,
+                ),
+            ).rowcount
+            if updated != 1:
+                return False
+            connection.execute(
+                "UPDATE attempts SET status = ?, finished_at = ?, heartbeat_at = ?, error = NULL "
+                "WHERE id = ? AND status = ?",
+                ("awaiting_input", timestamp, timestamp, attempt_id, "running"),
+            )
+            connection.execute(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE id = ? AND status != ?",
+                (RunStatus.AWAITING_INPUT.value, timestamp, task["run_id"], RunStatus.CANCELLED.value),
+            )
+            self._append_event(
+                connection,
+                task["run_id"],
+                task_id,
+                "input_required",
+                {
+                    "attempt_id": attempt_id,
+                    "request_path": request_path,
+                    "question_bytes": len(question.encode("utf-8")),
+                    "options_count": len(normalized_options),
+                },
+            )
+        return True
+
+    def pending_input(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, input_question, input_options, input_answer_path FROM tasks "
+                "WHERE run_id = ? AND state = ? ORDER BY created_at, id LIMIT 1",
+                (run_id, TaskStatus.WAITING.value),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "run_id": run_id,
+            "task_id": row["id"],
+            "question": row["input_question"],
+            "options": json.loads(row["input_options"] or "[]"),
+            "request_path": self._input_request_path(run_id, row["id"]),
+            "answer_path": row["input_answer_path"],
+        }
+
+    def answer_input(self, run_id: str, answer_path: str) -> str | None:
+        """Attach an answer artifact and make the waiting task ready again."""
+        path = Path(answer_path)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("input answer path must be run-relative")
+        timestamp = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM tasks WHERE run_id = ? AND state = ? ORDER BY created_at, id LIMIT 1",
+                (run_id, TaskStatus.WAITING.value),
+            ).fetchone()
+            if row is None:
+                return None
+            task_id = row["id"]
+            updated = connection.execute(
+                "UPDATE tasks SET state = ?, input_answer_path = ?, updated_at = ? "
+                "WHERE id = ? AND state = ?",
+                (TaskStatus.READY.value, answer_path, timestamp, task_id, TaskStatus.WAITING.value),
+            ).rowcount
+            if updated != 1:
+                return None
+            connection.execute(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
+                (RunStatus.PENDING.value, timestamp, run_id, RunStatus.AWAITING_INPUT.value),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                task_id,
+                "input_answered",
+                {"answer_path": answer_path},
+            )
+        return task_id
+
+    def _input_request_path(self, run_id: str, task_id: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT path FROM artifacts WHERE run_id = ? AND task_id = ? AND kind = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (run_id, task_id, "input"),
+            ).fetchone()
+        return row["path"] if row else None
 
     def finish_task(
         self,
@@ -631,6 +766,8 @@ class Store:
                 status = RunStatus.FAILED.value
             elif states == {TaskStatus.SUCCEEDED.value}:
                 status = RunStatus.SUCCEEDED.value
+            elif TaskStatus.WAITING.value in states:
+                status = RunStatus.AWAITING_INPUT.value
             elif TaskStatus.CANCELLED.value in states:
                 status = RunStatus.CANCELLED.value
             else:
@@ -813,6 +950,9 @@ class Store:
             updated_at=row["updated_at"],
             dependencies=tuple(json.loads(row["dependencies"] or "[]")),
             acceptance=row["acceptance"],
+            input_question=row["input_question"],
+            input_options=tuple(json.loads(row["input_options"] or "[]")),
+            input_answer_path=Path(row["input_answer_path"]) if row["input_answer_path"] else None,
         )
 
     @staticmethod

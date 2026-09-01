@@ -80,6 +80,18 @@ The controller remains the orchestrator: it validates and schedules optional dep
 retries failed attempts, hands verified artifacts to dependent tasks, and recovers after an
 interruption. It is not a WebAgent stage machine.
 
+If the session needs a decision, it can call `ask_user`. The run then becomes `awaiting_input` and
+returns the question in JSON/status output. Answer the same durable run later; no duplicate task is
+created:
+
+```bash
+lunar-agent answer <run-id> "json" --runtime openai-compatible \
+  --endpoint "$FAMOU_MODEL_ENDPOINT" --model "$FAMOU_MODEL" --agent-loop --memory --json
+```
+
+The answer is written as a bounded run artifact and included in the next task prompt. Use `-` as the
+answer to read it from stdin.
+
 ### Optional durable memory
 
 Memory is explicitly opt-in because recalled local notes may be sent to the configured model
