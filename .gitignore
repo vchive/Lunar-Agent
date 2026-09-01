@@ -1,0 +1,26 @@
+# Local Python environments and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Local controller state and credentials
+.famou/
+.env
+.env.*
+!.env.example
+
+# Never commit machine-local Agent Runtime state or credentials
+.hermes/
+.codex/
+.opencode/
+
+# macOS/editor noise
+.DS_Store
+.idea/
+.vscode/
