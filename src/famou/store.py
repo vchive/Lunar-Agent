@@ -15,7 +15,6 @@ from typing import Any
 
 from .models import Attempt, Run, RunStatus, Task, TaskStatus
 
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -164,8 +163,7 @@ class Store:
             existing_ids = {
                 row["id"]
                 for row in connection.execute(
-                    "SELECT id FROM tasks WHERE id IN (%s)"
-                    % ",".join("?" for _ in normalized),
+                    f"SELECT id FROM tasks WHERE id IN ({','.join('?' for _ in normalized)})",
                     [item["id"] for item in normalized],
                 ).fetchall()
             }
@@ -235,7 +233,7 @@ class Store:
         ids: set[str] = set()
         for index, raw in enumerate(tasks):
             if not isinstance(raw, dict):
-                raise ValueError(f"plan task {index} must be an object")
+                raise TypeError(f"plan task {index} must be an object")
             task_id = str(raw.get("id", "")).strip()
             title = str(raw.get("title", task_id)).strip()
             prompt = str(raw.get("prompt", "")).strip()
@@ -629,9 +627,7 @@ class Store:
             if not rows:
                 return self.get_run(run_id)
             states = {row["state"] for row in rows}
-            if TaskStatus.FAILED.value in states:
-                status = RunStatus.FAILED.value
-            elif TaskStatus.BLOCKED.value in states:
+            if TaskStatus.FAILED.value in states or TaskStatus.BLOCKED.value in states:
                 status = RunStatus.FAILED.value
             elif states == {TaskStatus.SUCCEEDED.value}:
                 status = RunStatus.SUCCEEDED.value

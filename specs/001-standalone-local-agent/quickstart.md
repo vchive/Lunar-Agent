@@ -106,3 +106,19 @@ uv run python -m famou run "Inspect this repository" --runtime subprocess
 
 The command receives the task prompt on stdin and runs with the task workspace as its current working
 directory. The repository does not discover Hermes or import user-global agent state.
+
+## Optional local model server
+
+The repository includes a standard-library OpenAI-compatible adapter. Configure a local Ollama,
+vLLM, or LM Studio endpoint explicitly:
+
+```bash
+export FAMOU_MODEL_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
+export FAMOU_MODEL='your-local-model'
+uv run python -m famou run "Inspect this repository" --runtime openai-compatible --json
+```
+
+`--endpoint` and `--model` are equivalent flags. An API key is optional for local servers and can be
+provided through `FAMOU_API_KEY`; it is never written to the ledger or controller log. The HTTP
+adapter requires a non-empty text response and applies the same evaluator/retry policy as other
+runtimes.

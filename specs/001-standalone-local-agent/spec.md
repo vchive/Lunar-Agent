@@ -88,6 +88,16 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
 2. **Given** no Hermes installation, **When** the user selects the mock runtime, **Then** the run
    remains fully functional and reports no missing external runtime.
 
+### User Story 4 - Call a Configured Model Directly (Priority: P2)
+
+As a local user, I can point Lunar-Agent at an OpenAI-compatible endpoint (including a local model
+server) and execute tasks without installing Hermes, OpenCode, or Codex.
+
+The endpoint and model are explicit configuration. The adapter sends one non-streaming chat request
+per task, parses the candidate text, and never persists the API key in SQLite, events, artifacts, or
+controller logs. A missing endpoint, malformed response, HTTP error, or timeout becomes a structured
+attempt failure subject to the normal retry policy.
+
 ### Edge Cases
 
 - A process may stop after claiming a task but before writing its result; recovery must mark the
@@ -136,6 +146,13 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
   cancelled.
 - **FR-016**: Each evaluator decision MUST be persisted as a structured JSON audit file and an
   event; a rejected decision MUST prevent a successful run settlement.
+- **FR-017**: The repository MUST include an `openai-compatible` Runtime Adapter implemented with
+  the Python standard library. It MUST accept an explicit endpoint and model and support local or
+  remote OpenAI-compatible servers without discovering Hermes state.
+- **FR-018**: API credentials MUST be read only from explicit CLI/environment configuration, sent
+  only as an HTTP authorization header, and redacted from all persisted diagnostics.
+- **FR-019**: The HTTP adapter MUST parse a non-streaming OpenAI chat response and reject malformed,
+  empty, non-2xx, or timed-out responses as `RuntimeExecutionError`.
 
 ### Key Entities
 
@@ -171,6 +188,8 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
   attached.
 - **SC-008**: A valid two-task plan executes in dependency order, and the dependent task can locate
   the predecessor's verified result artifact from its prompt/workspace.
+- **SC-009**: A local test HTTP endpoint can complete a run through `openai-compatible` with no
+  Hermes/OpenCode/Codex installation or third-party runtime library.
 
 ## Assumptions
 

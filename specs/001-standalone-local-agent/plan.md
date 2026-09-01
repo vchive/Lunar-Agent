@@ -119,3 +119,14 @@ and bounded previews, while the task workspace remains the source of truth for l
 
 No constitution violations are expected. A separate evaluator service and distributed queue remain
 out of scope; detached execution uses a local process group and durable PID metadata only.
+
+## Phase 3 model runtime design
+
+The first built-in model adapter is deliberately narrow: a standard-library HTTP client for an
+OpenAI-compatible `POST /chat/completions` endpoint. `FAMOU_MODEL_ENDPOINT` (or `--endpoint`) and
+`FAMOU_MODEL` (or `--model`) are explicit; `FAMOU_API_KEY` (or `--api-key`) is optional for local
+servers. The request is non-streaming and contains only the task prompt. Responses are accepted from
+the normal `choices[0].message.content` shape, with a small compatibility fallback for
+`choices[0].text` and Ollama-style `message.content`. Credentials are never included in exception
+strings, event payloads, or controller logs. This keeps the runtime useful for local Ollama/vLLM/
+LM Studio deployments while preserving a small dependency-free core.

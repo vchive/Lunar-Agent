@@ -98,7 +98,7 @@ def test_invalid_plan_is_rejected_before_run_insert(tmp_path: Path) -> None:
         assert "cycle" in str(exc)
     else:
         raise AssertionError("expected cycle validation error")
-    with store._connect() as connection:  # noqa: SLF001 - verifies transaction rollback
+    with store._connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
 
 

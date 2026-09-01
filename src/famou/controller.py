@@ -72,7 +72,9 @@ class LocalController:
                     set_observer = getattr(self.runtime, "set_process_observer", None)
                     if callable(set_observer):
                         set_observer(
-                            lambda pid, pgid: self.store.set_attempt_process(attempt.id, pid, pgid)
+                            lambda pid, pgid, attempt_id=attempt.id: self.store.set_attempt_process(
+                                attempt_id, pid, pgid
+                            )
                         )
                     result = self.runtime.run(prompt, task_root, self.config.runtime_timeout)
                     if not self._task_is_running(task.id):

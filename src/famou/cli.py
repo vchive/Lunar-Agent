@@ -31,6 +31,22 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--runtime",
+        choices=("mock", "subprocess", "openai-compatible"),
+        default="mock",
+    )
+    parser.add_argument("--command", dest="runtime_command", help="explicit subprocess command")
+    parser.add_argument("--endpoint", help="OpenAI-compatible chat endpoint URL")
+    parser.add_argument("--model", help="model name for the OpenAI-compatible runtime")
+    parser.add_argument(
+        "--api-key",
+        dest="api_key",
+        help="optional model API key (prefer FAMOU_API_KEY to avoid shell history)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="famou",
@@ -45,8 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="start and execute a goal")
     run_parser.add_argument("goal", nargs="?", help="user goal, or '-' to read it from stdin")
     run_parser.add_argument("--plan", type=Path, help="JSON plan file containing goal and tasks")
-    run_parser.add_argument("--runtime", choices=("mock", "subprocess"), default="mock")
-    run_parser.add_argument("--command", dest="runtime_command", help="explicit subprocess command")
+    _add_runtime_options(run_parser)
     run_parser.add_argument(
         "--detach",
         action="store_true",
@@ -57,8 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     resume_parser = subparsers.add_parser("resume", help="recover and continue a run")
     resume_parser.add_argument("run_id")
-    resume_parser.add_argument("--runtime", choices=("mock", "subprocess"), default="mock")
-    resume_parser.add_argument("--command", dest="runtime_command", help="explicit subprocess command")
+    _add_runtime_options(resume_parser)
     _add_home(resume_parser)
     _add_json(resume_parser)
 
@@ -82,7 +96,13 @@ def _config(args: argparse.Namespace) -> Config:
 
 
 def _controller(args: argparse.Namespace, config: Config) -> LocalController:
-    runtime = build_runtime(args.runtime, getattr(args, "runtime_command", None))
+    runtime = build_runtime(
+        args.runtime,
+        getattr(args, "runtime_command", None),
+        getattr(args, "endpoint", None),
+        getattr(args, "model", None),
+        getattr(args, "api_key", None),
+    )
     return LocalController(config, runtime)
 
 
@@ -94,13 +114,13 @@ def _load_plan(path: Path, goal_override: str | None) -> tuple[str, list[dict[st
     except json.JSONDecodeError as exc:
         raise ValueError(f"plan is not valid JSON: {exc.msg}") from exc
     if not isinstance(payload, dict):
-        raise ValueError("plan must be a JSON object")
+        raise TypeError("plan must be a JSON object")
     plan_goal = goal_override or payload.get("goal")
     if not isinstance(plan_goal, str) or not plan_goal.strip():
         raise ValueError("plan requires a non-empty goal (or a positional goal override)")
     tasks = payload.get("tasks")
     if not isinstance(tasks, list):
-        raise ValueError("plan requires a tasks array")
+        raise TypeError("plan requires a tasks array")
     return plan_goal, tasks
 
 
@@ -128,6 +148,14 @@ def _detach(
     ]
     if args.runtime_command:
         command.extend(("--command", args.runtime_command))
+    if args.endpoint:
+        command.extend(("--endpoint", args.endpoint))
+    if args.model:
+        command.extend(("--model", args.model))
+    child_env = None
+    if args.api_key is not None:
+        child_env = os.environ.copy()
+        child_env["FAMOU_API_KEY"] = args.api_key
     try:
         with log_path.open("a", encoding="utf-8") as log:
             process = subprocess.Popen(
@@ -138,6 +166,7 @@ def _detach(
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
                 close_fds=True,
+                env=child_env,
             )
         pid = getattr(process, "pid", None)
         if isinstance(pid, int) and pid > 1:
@@ -317,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             _emit({"run_id": args.run_id, "status": "cancelled"}, args.json)
             return 0
-    except (ValueError, OSError) as exc:
+    except (ValueError, TypeError, OSError) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
         return 2
     return 2

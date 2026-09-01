@@ -35,7 +35,7 @@ class Config:
         self.runs.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def from_env(cls, home: str | Path | None = None) -> "Config":
+    def from_env(cls, home: str | Path | None = None) -> Config:
         configured_home = home if home is not None else os.environ.get("FAMOU_HOME", ".famou")
         max_retries = int(os.environ.get("FAMOU_MAX_RETRIES", "2"))
         timeout = float(os.environ.get("FAMOU_RUNTIME_TIMEOUT", "900"))

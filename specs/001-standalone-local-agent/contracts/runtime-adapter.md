@@ -50,11 +50,29 @@ reads `~/.hermes`.
 - Timeout: process is terminated and the attempt is recorded as failed.
 - Empty stdout: failure unless the evaluator explicitly accepts an empty result.
 
+## OpenAI-compatible HTTP protocol
+
+The built-in `openai-compatible` adapter sends:
+
+```json
+{
+  "model": "configured-model",
+  "messages": [{"role": "user", "content": "task prompt"}],
+  "stream": false
+}
+```
+
+to the explicitly configured endpoint. It accepts `choices[0].message.content`,
+`choices[0].text`, or an Ollama-compatible top-level `message.content`. The endpoint is supplied by
+`--endpoint` or `FAMOU_MODEL_ENDPOINT`; the model by `--model` or `FAMOU_MODEL`; an optional API key
+comes from `--api-key` or `FAMOU_API_KEY`. Keys are never included in persisted errors or logs.
+
 ## CLI contract
 
 ```text
 python -m famou run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json] [--detach]
 python -m famou run [<goal>] --plan PLAN.json [--runtime mock|subprocess] [--home PATH] [--json]
+python -m famou run "<goal>" --runtime openai-compatible --endpoint URL --model MODEL [--json]
 python -m famou run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
 python -m famou resume <run-id> [--home PATH] [--json]
 python -m famou status <run-id> [--home PATH] [--json]

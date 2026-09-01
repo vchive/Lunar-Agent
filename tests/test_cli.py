@@ -1,7 +1,7 @@
 import json
+import sys
 from io import StringIO
 from pathlib import Path
-import sys
 
 from famou.cli import main
 
@@ -87,3 +87,41 @@ def test_cli_accepts_json_plan_and_rejects_malformed_plan(tmp_path: Path, capsys
     )
     assert main(["run", "--plan", str(bad_path), "--json", "--home", str(tmp_path / "bad-home")]) == 2
     assert "depend" in capsys.readouterr().err
+
+
+def test_detached_model_options_propagate_without_api_key_in_argv(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    assert (
+        main(
+            [
+                "run",
+                "model goal",
+                "--runtime",
+                "openai-compatible",
+                "--endpoint",
+                "http://127.0.0.1:1234/v1",
+                "--model",
+                "fixture",
+                "--api-key",
+                "secret-key",
+                "--detach",
+                "--json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    command, kwargs = calls[0]
+    assert "--endpoint" in command and "--model" in command
+    assert "--api-key" not in command
+    assert kwargs["env"]["FAMOU_API_KEY"] == "secret-key"

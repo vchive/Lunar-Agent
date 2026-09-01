@@ -53,6 +53,23 @@ uv run famou run "Inspect this repository" --runtime subprocess
 The command receives the task prompt on stdin and runs inside the task workspace. Lunar-Agent never
 searches for Hermes or imports `~/.hermes`.
 
+## Built-in model runtime
+
+Lunar-Agent also includes a dependency-free OpenAI-compatible HTTP adapter. Point it at a local
+Ollama, vLLM, LM Studio, or other compatible server:
+
+```bash
+export FAMOU_MODEL_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
+export FAMOU_MODEL='your-local-model'
+lunar-agent run "Inspect this repository" --runtime openai-compatible --json
+```
+
+You can pass `--endpoint` and `--model` instead of environment variables. Hosted endpoints may use
+`FAMOU_API_KEY` (or `--api-key`); the key is sent only as an Authorization header and is redacted
+from persisted errors. The adapter accepts the standard OpenAI response shape plus Ollama-style
+responses, and all normal retries, evaluator checks, artifacts, and recovery remain owned by the
+local controller.
+
 ## Multi-step plans
 
 For dependent work, provide a JSON plan. The controller validates the graph before creating a run,

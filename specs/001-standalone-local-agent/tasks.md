@@ -72,6 +72,13 @@ execute a subprocess fixture through the adapter.
 - [x] T026 Add `run --detach` durable-handle launch and coverage in `src/famou/cli.py` and `tests/test_cli.py`
 - [x] T027 Persist detached runner PID/PGID, terminate its process group on cancel, and discard late results in `src/famou/controller.py` and `tests/test_plan.py`
 
+## Phase 7: Built-in model runtime
+
+- [x] T028 [US4] Implement dependency-free OpenAI-compatible HTTP Runtime with credential redaction in `src/famou/runtime.py`
+- [x] T029 [US4] Add explicit endpoint/model/API-key CLI and detached resume propagation in `src/famou/cli.py`
+- [x] T030 [US4] Add local HTTP fixture tests for success, malformed responses, timeout, and HTTP errors in `tests/test_runtime.py`
+- [x] T031 [US4] Document local model server configuration and security policy in README and quickstart
+
 ## Dependencies & Execution Order
 
 - Setup (Phase 1) precedes Foundational (Phase 2).
