@@ -19,6 +19,7 @@ build/
 .hermes/
 .codex/
 .opencode/
+.specify/integrations/.cache/
 
 # macOS/editor noise
 .DS_Store

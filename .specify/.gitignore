@@ -7,6 +7,3 @@ feature.json
 
 # Per-machine extension config overrides.
 extensions/*/local-config.yml
-
-# Catalog metadata fetched by the local spec-kit CLI.
-integrations/.cache/
