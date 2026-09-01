@@ -11,6 +11,7 @@ import pytest
 from famou.artifacts import ArtifactError, ArtifactStore
 from famou.runtime import (
     MockRuntime,
+    ModelTurn,
     OpenAICompatibleRuntime,
     RuntimeExecutionError,
     SubprocessRuntime,
@@ -136,6 +137,26 @@ def test_openai_compatible_runtime_rejects_malformed_and_timed_out_responses(tmp
         RuntimeExecutionError, match="could not reach"
     ):
         OpenAICompatibleRuntime(server.url, "model").run("hello", tmp_path, timeout=0.01)
+
+
+def test_openai_compatible_runtime_parses_structured_tool_calls(tmp_path: Path) -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    ModelHandler.response_body = (
+        b'{"choices":[{"message":{"content":"",'
+        b'"tool_calls":[{"id":"call-1","type":"function",'
+        b'"function":{"name":"read_file","arguments":"{\\"path\\":\\"a.txt\\"}"}}]}}]}'
+    )
+    with ModelServer(ModelHandler) as server:
+        turn = OpenAICompatibleRuntime(server.url, "model").complete(
+            [{"role": "user", "content": "read a.txt"}],
+            tools=({"type": "function", "function": {"name": "read_file"}},),
+            timeout=1,
+        )
+    assert isinstance(turn, ModelTurn)
+    assert turn.text == ""
+    assert turn.tool_calls[0].name == "read_file"
+    assert turn.tool_calls[0].arguments == {"path": "a.txt"}
 
 
 def test_artifact_paths_are_confined_to_run_workspace(tmp_path: Path) -> None:

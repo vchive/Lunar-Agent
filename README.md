@@ -1,13 +1,14 @@
 # Lunar-Agent
 
-Lunar-Agent is a standalone, local-first Famou agent controller. It keeps the durable task ledger
-and artifacts in a run-scoped local directory and delegates one bounded unit of work through an
-explicit Runtime Adapter. It does **not** require a machine-wide Hermes, OpenCode, or Codex
+Lunar-Agent is a standalone, local-first agent inspired by Hermes' continuous sessions, practical
+tools, and long-running memory. It keeps the durable task ledger, artifacts, and optional memory in
+a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). Start with the feature artifacts
-in [`specs/001-standalone-local-agent/`](specs/001-standalone-local-agent/): specification, plan,
-research, data model, runtime contract, quickstart, and tasks.
+The project is being developed with Spec-Driven Development (SDD). The current direction is captured
+in [`specs/003-hermes-inspired-local-agent/`](specs/003-hermes-inspired-local-agent/). The earlier
+WebAgent-style experiment is retained as a superseded draft in
+[`specs/002-webagent-effect-parity/`](specs/002-webagent-effect-parity/).
 
 ## Bootstrap
 
@@ -53,22 +54,47 @@ uv run famou run "Inspect this repository" --runtime subprocess
 The command receives the task prompt on stdin and runs inside the task workspace. Lunar-Agent never
 searches for Hermes or imports `~/.hermes`.
 
-## Built-in model runtime
+## Continuous Hermes-inspired model session
 
-Lunar-Agent also includes a dependency-free OpenAI-compatible HTTP adapter. Point it at a local
-Ollama, vLLM, LM Studio, or other compatible server:
+Lunar-Agent includes a dependency-free OpenAI-compatible HTTP adapter and a bounded continuous
+tool-calling loop. Point it at a local Ollama, vLLM, LM Studio, or other compatible server:
 
 ```bash
 export FAMOU_MODEL_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
 export FAMOU_MODEL='your-local-model'
-lunar-agent run "Inspect this repository" --runtime openai-compatible --json
+lunar-agent run "Inspect this repository" --runtime openai-compatible --agent-loop --json
 ```
 
 You can pass `--endpoint` and `--model` instead of environment variables. Hosted endpoints may use
 `FAMOU_API_KEY` (or `--api-key`); the key is sent only as an Authorization header and is redacted
 from persisted errors. The adapter accepts the standard OpenAI response shape plus Ollama-style
 responses, and all normal retries, evaluator checks, artifacts, and recovery remain owned by the
-local controller.
+local controller. Add `--allow-exec` to expose bounded no-shell command execution:
+
+```bash
+lunar-agent run "Run the tests and fix the failing file" \
+  --runtime openai-compatible --agent-loop --allow-exec --max-steps 40
+```
+
+The controller remains the orchestrator: it validates and schedules optional dependency plans,
+retries failed attempts, hands verified artifacts to dependent tasks, and recovers after an
+interruption. It is not a WebAgent stage machine.
+
+### Optional durable memory
+
+Memory is explicitly opt-in because recalled local notes may be sent to the configured model
+endpoint. Enable it for a session with `--memory`:
+
+```bash
+lunar-agent run "Continue the migration and remember the key decisions" \
+  --runtime openai-compatible --agent-loop --memory --json
+```
+
+The model can call `recall_memory` and `remember_memory`. Entries are bounded and stored in the same
+local SQLite database, with `global` and run-scoped namespaces. Notes are never injected into a
+request silently; the model must explicitly request recall. No embeddings service or vector database
+is required. Inspect notes locally with `lunar-agent memory --json` or search global notes with
+`lunar-agent memory "deployment" --json`.
 
 ## Multi-step plans
 

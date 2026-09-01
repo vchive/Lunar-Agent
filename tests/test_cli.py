@@ -125,3 +125,54 @@ def test_detached_model_options_propagate_without_api_key_in_argv(
     assert "--endpoint" in command and "--model" in command
     assert "--api-key" not in command
     assert kwargs["env"]["FAMOU_API_KEY"] == "secret-key"
+
+
+def test_detached_agent_loop_options_propagate(tmp_path: Path, capsys, monkeypatch) -> None:
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    assert (
+        main(
+            [
+                "run",
+                "long model goal",
+                "--runtime",
+                "openai-compatible",
+                "--endpoint",
+                "http://127.0.0.1:1234/v1",
+                "--model",
+                "fixture",
+                "--agent-loop",
+                "--max-steps",
+                "7",
+                "--allow-exec",
+                "--memory",
+                "--detach",
+                "--json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    command = calls[0][0]
+    assert "--agent-loop" in command
+    assert command[command.index("--max-steps") + 1] == "7"
+    assert "--allow-exec" in command and "--memory" in command
+
+
+def test_cli_memory_inspection_is_json(tmp_path: Path, capsys) -> None:
+    from famou.memory import MemoryStore
+
+    memory = MemoryStore(tmp_path / "state.db")
+    memory.initialize()
+    memory.remember("remembered deployment decision", source="test")
+    assert main(["memory", "deployment", "--json", "--home", str(tmp_path)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload) == 1
+    assert payload[0]["content"] == "remembered deployment decision"

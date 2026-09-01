@@ -1,8 +1,9 @@
 # Runtime Adapter Contract
 
-The controller owns task state. A runtime adapter only executes one bounded task and returns a
-structured result. Adapter implementations MUST be deterministic about success/failure reporting and
-MUST NOT write outside the workspace path supplied by the controller.
+The controller owns task state and scheduling. A runtime adapter executes one bounded task and
+returns a structured result. The Hermes-inspired continuous session is an adapter composition: a
+model-turn transport plus a local tool registry. Adapter implementations MUST be deterministic about
+success/failure reporting and MUST NOT write outside the workspace path supplied by the controller.
 
 ## Python contract
 
@@ -67,17 +68,26 @@ to the explicitly configured endpoint. It accepts `choices[0].message.content`,
 `--endpoint` or `FAMOU_MODEL_ENDPOINT`; the model by `--model` or `FAMOU_MODEL`; an optional API key
 comes from `--api-key` or `FAMOU_API_KEY`. Keys are never included in persisted errors or logs.
 
+When `--agent-loop` is selected, the adapter sends the same endpoint a sequence of chat requests.
+The model may return structured `tool_calls`; the local loop executes them, appends bounded tool
+results, and continues until a final text response or a configured step/time limit. `--allow-exec`
+is required for the no-shell command tool. `--memory` explicitly enables local `recall_memory` and
+`remember_memory` tools. Memory notes are not silently added to requests: the model must request a
+recall, because the resulting note may be sent to the configured endpoint.
+
 ## CLI contract
 
 ```text
 python -m famou run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json] [--detach]
 python -m famou run [<goal>] --plan PLAN.json [--runtime mock|subprocess] [--home PATH] [--json]
 python -m famou run "<goal>" --runtime openai-compatible --endpoint URL --model MODEL [--json]
+python -m famou run "<goal>" --runtime openai-compatible --agent-loop [--max-steps N] [--allow-exec] [--memory]
 python -m famou run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
 python -m famou resume <run-id> [--home PATH] [--json]
 python -m famou status <run-id> [--home PATH] [--json]
 python -m famou events <run-id> [--home PATH] [--json]
 python -m famou cancel <run-id> [--home PATH] [--json]
+python -m famou memory [<query>] [--scope global|run:<run-id>] [--home PATH] [--json]
 ```
 
 Commands return zero only when the requested operation succeeds. Human-readable output is the

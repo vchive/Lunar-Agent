@@ -3,7 +3,8 @@
 ## Decision 1: Keep the controller independent from Hermes
 
 **Decision**: Define a small Python `Runtime` protocol in the repository. Ship a deterministic
-`MockRuntime` and a configured `SubprocessRuntime`; add a Hermes adapter only after the controller
+`MockRuntime` and a configured `SubprocessRuntime`; add Hermes-inspired session behavior in the
+repository itself and keep a direct Hermes adapter optional until the controller
 contract is stable.
 
 **Rationale**: Hermes' process-local lifecycle is useful for execution but cannot be the durable

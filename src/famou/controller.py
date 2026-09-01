@@ -1,4 +1,4 @@
-"""Durable orchestration loop for the standalone local agent."""
+"""Durable local scheduler for Hermes-inspired agent sessions."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any
 from .artifacts import ArtifactError, ArtifactStore
 from .config import Config
 from .evaluator import Evaluation, Evaluator, NonEmptyEvaluator, acceptance_evaluator
+from .memory import MemoryStore
 from .models import Run, RunStatus
 from .runtime import Runtime, RuntimeExecutionError
 from .store import Store
@@ -23,11 +24,14 @@ class LocalController:
         runtime: Runtime,
         evaluator: Evaluator | None = None,
         store: Store | None = None,
+        memory: MemoryStore | None = None,
     ) -> None:
         self.config = config
         self.config.ensure()
         self.store = store or Store(config.database)
         self.store.initialize()
+        self.memory = memory or MemoryStore(config.database)
+        self.memory.initialize()
         self.runtime = runtime
         self.evaluator = evaluator or NonEmptyEvaluator()
 
@@ -69,6 +73,16 @@ class LocalController:
                     kind="prompt",
                 )
                 try:
+                    set_context = getattr(self.runtime, "set_context", None)
+                    if callable(set_context):
+                        set_context(run.id, task.id, run.goal)
+                    set_event_sink = getattr(self.runtime, "set_event_sink", None)
+                    if callable(set_event_sink):
+                        set_event_sink(
+                            lambda event_type, payload, run_id=run.id, task_id=task.id: self.store.append_event(
+                                run_id, event_type, payload, task_id=task_id
+                            )
+                        )
                     set_observer = getattr(self.runtime, "set_process_observer", None)
                     if callable(set_observer):
                         set_observer(
@@ -131,6 +145,8 @@ class LocalController:
                     else:
                         self.store.finish_task(task.id, attempt.id, False, error=error)
                 finally:
+                    if callable(getattr(self.runtime, "set_event_sink", None)):
+                        self.runtime.set_event_sink(None)
                     if callable(getattr(self.runtime, "set_process_observer", None)):
                         self.runtime.set_process_observer(None)
         finally:

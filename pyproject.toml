@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lunar-agent"
 version = "0.1.0"
-description = "A standalone, local-first Famou agent controller"
+description = "A standalone, local-first Hermes-inspired agent"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

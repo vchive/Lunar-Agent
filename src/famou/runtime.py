@@ -27,6 +27,19 @@ class RuntimeResult:
     metadata: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, object]
+
+
+@dataclass(frozen=True)
+class ModelTurn:
+    text: str
+    tool_calls: tuple[ToolCall, ...] = ()
+
+
 class Runtime(Protocol):
     name: str
 
@@ -201,11 +214,35 @@ class OpenAICompatibleRuntime:
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
         workspace.mkdir(parents=True, exist_ok=True)
+        turn = self.complete(
+            [{"role": "user", "content": prompt}],
+            tools=(),
+            timeout=timeout,
+        )
+        if turn.tool_calls:
+            raise RuntimeExecutionError(
+                "model returned tool calls; use --agent-loop for tool execution"
+            )
+        if not turn.text:
+            raise RuntimeExecutionError("model endpoint returned empty content")
+        return RuntimeResult(
+            text=turn.text,
+            metadata={"provider": "openai-compatible", "model": self.model},
+        )
+
+    def complete(
+        self,
+        messages: list[dict[str, object]],
+        tools: tuple[dict[str, object], ...] = (),
+        timeout: float | None = None,
+    ) -> ModelTurn:
+        """Request one model turn, preserving structured tool calls for the agent loop."""
         body = json.dumps(
             {
                 "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "stream": False,
+                **({"tools": list(tools)} if tools else {}),
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -234,13 +271,10 @@ class OpenAICompatibleRuntime:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RuntimeExecutionError("model endpoint returned malformed JSON") from exc
-        text = self._extract_text(payload)
-        if not text:
+        text, tool_calls = self._extract_turn(payload)
+        if not text and not tool_calls:
             raise RuntimeExecutionError("model endpoint returned empty content")
-        return RuntimeResult(
-            text=text,
-            metadata={"provider": "openai-compatible", "model": self.model},
-        )
+        return ModelTurn(text=text, tool_calls=tool_calls)
 
     def cancel(self) -> None:
         # urllib does not expose a portable cancellation handle. Detached cancellation terminates
@@ -267,27 +301,63 @@ class OpenAICompatibleRuntime:
         return detail[-2_000:]
 
     @staticmethod
-    def _extract_text(payload: object) -> str:
+    def _extract_turn(payload: object) -> tuple[str, tuple[ToolCall, ...]]:
         if not isinstance(payload, dict):
-            return ""
+            return "", ()
         choices = payload.get("choices")
         if isinstance(choices, list) and choices:
             choice = choices[0]
             if isinstance(choice, dict):
+                text = ""
                 message = choice.get("message")
                 if isinstance(message, dict):
-                    content = OpenAICompatibleRuntime._content_to_text(message.get("content"))
-                    if content:
-                        return content
-                content = OpenAICompatibleRuntime._content_to_text(choice.get("text"))
-                if content:
-                    return content
+                    text = OpenAICompatibleRuntime._content_to_text(message.get("content"))
+                    return text, OpenAICompatibleRuntime._parse_tool_calls(message.get("tool_calls"))
+                text = OpenAICompatibleRuntime._content_to_text(choice.get("text"))
+                if text:
+                    return text, ()
         message = payload.get("message")
         if isinstance(message, dict):
             content = OpenAICompatibleRuntime._content_to_text(message.get("content"))
             if content:
-                return content
-        return OpenAICompatibleRuntime._content_to_text(payload.get("response"))
+                return content, OpenAICompatibleRuntime._parse_tool_calls(message.get("tool_calls"))
+        return OpenAICompatibleRuntime._content_to_text(payload.get("response")), ()
+
+    @staticmethod
+    def _extract_text(payload: object) -> str:
+        """Compatibility helper for callers of the original one-shot adapter."""
+        return OpenAICompatibleRuntime._extract_turn(payload)[0]
+
+    @staticmethod
+    def _parse_tool_calls(raw: object) -> tuple[ToolCall, ...]:
+        if raw is None:
+            return ()
+        if not isinstance(raw, list):
+            raise RuntimeExecutionError("model returned malformed tool calls")
+        calls: list[ToolCall] = []
+        for index, item in enumerate(raw):
+            if not isinstance(item, dict):
+                raise RuntimeExecutionError("model returned malformed tool call")
+            function = item.get("function")
+            if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+                raise RuntimeExecutionError("model returned a tool call without a function name")
+            raw_arguments = function.get("arguments", {})
+            if isinstance(raw_arguments, str):
+                try:
+                    raw_arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeExecutionError("model returned malformed tool arguments") from exc
+            if not isinstance(raw_arguments, dict):
+                raise RuntimeExecutionError("model tool arguments must be a JSON object")
+            call_id = item.get("id")
+            calls.append(
+                ToolCall(
+                    id=call_id if isinstance(call_id, str) and call_id else f"call-{index + 1}",
+                    name=function["name"],
+                    arguments=raw_arguments,
+                )
+            )
+        return tuple(calls)
 
     @staticmethod
     def _content_to_text(content: object) -> str:

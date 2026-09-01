@@ -9,10 +9,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .agent_loop import HermesSessionRuntime
 from .config import Config
 from .controller import LocalController
-from .runtime import build_runtime
+from .memory import MemoryStore
+from .runtime import OpenAICompatibleRuntime, build_runtime
 from .store import Store
+from .tools import LocalToolRegistry
 
 
 def _add_home(parser: argparse.ArgumentParser) -> None:
@@ -44,6 +47,28 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
         "--api-key",
         dest="api_key",
         help="optional model API key (prefer FAMOU_API_KEY to avoid shell history)",
+    )
+    parser.add_argument(
+        "--agent-loop",
+        "--hermes-session",
+        action="store_true",
+        help="run a continuous Hermes-inspired tool session (requires openai-compatible runtime)",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=40,
+        help="maximum tool calls in an agent loop (default: 40)",
+    )
+    parser.add_argument(
+        "--allow-exec",
+        action="store_true",
+        help="expose the no-shell run_command tool to an agent loop",
+    )
+    parser.add_argument(
+        "--memory",
+        action="store_true",
+        help="opt in to durable memory tools for this model session",
     )
 
 
@@ -85,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("run_id")
         _add_home(command_parser)
         _add_json(command_parser)
+    memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
+    memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
+    memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
+    memory_parser.add_argument("--limit", type=int, default=20)
+    _add_home(memory_parser)
+    _add_json(memory_parser)
     return parser
 
 
@@ -103,6 +134,21 @@ def _controller(args: argparse.Namespace, config: Config) -> LocalController:
         getattr(args, "model", None),
         getattr(args, "api_key", None),
     )
+    if getattr(args, "agent_loop", False):
+        if not isinstance(runtime, OpenAICompatibleRuntime):
+            raise ValueError("--agent-loop requires --runtime openai-compatible")
+        memory = MemoryStore(config.database) if getattr(args, "memory", False) else None
+        tools = LocalToolRegistry(
+            allow_exec=getattr(args, "allow_exec", False),
+            memory=memory,
+            redactions=(runtime.api_key,) if runtime.api_key else (),
+        )
+        runtime = HermesSessionRuntime(
+            runtime,
+            tools=tools,
+            max_steps=getattr(args, "max_steps", 40),
+            memory=memory,
+        )
     return LocalController(config, runtime)
 
 
@@ -152,6 +198,13 @@ def _detach(
         command.extend(("--endpoint", args.endpoint))
     if args.model:
         command.extend(("--model", args.model))
+    if args.agent_loop:
+        command.append("--agent-loop")
+        command.extend(("--max-steps", str(args.max_steps)))
+    if args.allow_exec:
+        command.append("--allow-exec")
+    if args.memory:
+        command.append("--memory")
     child_env = None
     if args.api_key is not None:
         child_env = os.environ.copy()
@@ -278,6 +331,30 @@ def _emit_error(message: str, json_mode: bool) -> None:
         print(f"error: {message}", file=sys.stderr)
 
 
+def _memory_payload(config: Config, query: str | None, scope: str | None, limit: int) -> list[dict[str, object]]:
+    memory = MemoryStore(config.database)
+    memory.initialize()
+    if query:
+        scopes = (scope,) if scope else ("global",)
+        entries = memory.recall(query, scopes=scopes, limit=limit)
+    else:
+        entries = memory.list(scope=scope, limit=limit)
+    return [
+        {
+            "id": entry.id,
+            "scope": entry.scope,
+            "kind": entry.kind,
+            "content": entry.content,
+            "tags": list(entry.tags),
+            "source": entry.source,
+            "created_at": entry.created_at,
+            "updated_at": entry.updated_at,
+            "access_count": entry.access_count,
+        }
+        for entry in entries
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -345,6 +422,14 @@ def main(argv: list[str] | None = None) -> int:
                 _emit_error(f"run not found or already terminal: {args.run_id}", args.json)
                 return 2
             _emit({"run_id": args.run_id, "status": "cancelled"}, args.json)
+            return 0
+        if args.command == "memory":
+            payload = _memory_payload(config, args.query, args.scope, args.limit)
+            if args.json:
+                _emit(payload, True)
+            else:
+                for entry in payload:
+                    print(f"{entry['id']} [{entry['scope']}/{entry['kind']}] {entry['content']}")
             return 0
     except (ValueError, TypeError, OSError) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
