@@ -50,6 +50,27 @@ uv run famou run "Inspect this repository" --runtime subprocess
 The command receives the task prompt on stdin and runs inside the task workspace. Lunar-Agent never
 searches for Hermes or imports `~/.hermes`.
 
+## Called by another Agent
+
+Codex or another local Agent can invoke the CLI as a child process. Use `--json` so stdout contains
+one stable machine-readable value, and use the returned run ID as the durable handle:
+
+```bash
+result=$(uv run famou run "Inspect this repository" --runtime mock --json)
+run_id=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+uv run famou status "$run_id" --json
+```
+
+Long goals can be piped without shell escaping:
+
+```bash
+printf '%s' 'Analyze these three artifacts and produce a report' \
+  | uv run famou run - --runtime mock --json
+```
+
+The TUI, if added later, is for human observation and approvals; the CLI/JSON contract remains the
+automation boundary for Codex, Hermes, OpenClaw, and scripts.
+
 ## Development
 
 ```bash

@@ -104,6 +104,10 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
   structured events and visible through status inspection.
 - **FR-010**: The first release MUST remain local and single-user; public networking, multi-tenancy,
   distributed queues, and remote service deployment are out of scope.
+- **FR-011**: Every operational CLI command MUST support a machine-readable `--json` mode in which
+  stdout contains one JSON value and diagnostics are written to stderr.
+- **FR-012**: The `run` command MUST accept `-` as the goal argument and read the goal from stdin so
+  a parent Agent can invoke Lunar-Agent without shell-escaping long prompts.
 
 ### Key Entities
 
@@ -131,6 +135,9 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
   content hash that can be opened independently of model context.
 - **SC-005**: The P1 workflow can be demonstrated using no network, model credentials, or user-global
   Hermes files.
+- **SC-006**: A parent Agent can start a run and inspect its terminal state by parsing one JSON line
+  from `run --json` and one JSON value from `status --json`, without importing Lunar-Agent Python
+  modules.
 
 ## Assumptions
 

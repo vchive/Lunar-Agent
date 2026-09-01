@@ -38,6 +38,19 @@ uv run python -m famou resume <run-id>
 To exercise recovery, stop a run after its task has been persisted, then run `resume`. The resumed
 run must reach `succeeded` without creating a second terminal result or duplicate artifact.
 
+## Agent-to-agent invocation
+
+Use the JSON mode when Codex or another Agent invokes Lunar-Agent as a child process:
+
+```bash
+uv run python -m famou run "Create a local report" --runtime mock --json
+uv run python -m famou status <run-id> --json
+```
+
+The `run --json` and `status --json` commands are intentionally independent of Python imports or
+Hermes installation. If the parent process times out, it should retain the returned run ID and call
+`resume` or `status` instead of starting a duplicate run.
+
 ## Test
 
 ```bash

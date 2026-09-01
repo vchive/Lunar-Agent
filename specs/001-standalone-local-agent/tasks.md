@@ -67,7 +67,7 @@ execute a subprocess fixture through the adapter.
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 - [ ] T023 [P] Add launchd/systemd user-runner documentation for detached local execution in `docs/background-runner.md`
-- [ ] T024 [P] Add JSON output mode and stable CLI exit-code documentation in `docs/cli.md`
+- [x] T024 [P] Add JSON output mode and stable CLI exit-code documentation in `src/famou/cli.py` and `specs/001-standalone-local-agent/contracts/runtime-adapter.md`
 - [ ] T025 Run the [quickstart](./quickstart.md), recovery suite, and static checks in CI configuration `.github/workflows/test.yml`
 
 ## Dependencies & Execution Order
