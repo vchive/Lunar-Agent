@@ -28,9 +28,14 @@ class LocalController:
         self.evaluator = evaluator or NonEmptyEvaluator()
 
     def start(self, goal: str) -> Run:
+        run = self.create(goal)
+        return self.resume(run.id)
+
+    def create(self, goal: str) -> Run:
+        """Persist a run and its initial task without executing it."""
         run = self.store.create_run(goal)
         Path(run.workspace).mkdir(parents=True, exist_ok=True)
-        return self.resume(run.id)
+        return run
 
     def resume(self, run_id: str) -> Run:
         run = self.store.get_run(run_id)

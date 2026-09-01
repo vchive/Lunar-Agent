@@ -108,6 +108,8 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
   stdout contains one JSON value and diagnostics are written to stderr.
 - **FR-012**: The `run` command MUST accept `-` as the goal argument and read the goal from stdin so
   a parent Agent can invoke Lunar-Agent without shell-escaping long prompts.
+- **FR-013**: The `run --detach --json` command MUST persist the run and return its durable run ID
+  before task execution begins; the child controller MUST write its output under the run workspace.
 
 ### Key Entities
 
@@ -138,6 +140,9 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
 - **SC-006**: A parent Agent can start a run and inspect its terminal state by parsing one JSON line
   from `run --json` and one JSON value from `status --json`, without importing Lunar-Agent Python
   modules.
+- **SC-007**: A parent Agent can start a detached mock run and receive a valid run ID in under one
+  second, then observe the run transition through `status --json` without keeping the parent process
+  attached.
 
 ## Assumptions
 

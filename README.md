@@ -61,6 +61,16 @@ run_id=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys
 uv run famou status "$run_id" --json
 ```
 
+For a long-running goal, return the handle immediately and let a local child process continue:
+
+```bash
+result=$(uv run famou run "Inspect this repository" --runtime subprocess --detach --json)
+run_id=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+uv run famou status "$run_id" --json
+```
+
+The detached controller log is stored at `<run-workspace>/controller.log`.
+
 Long goals can be piped without shell escaping:
 
 ```bash

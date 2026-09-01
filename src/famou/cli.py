@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+from pathlib import Path
 
 from .config import Config
 from .controller import LocalController
@@ -43,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("goal", help="user goal, or '-' to read it from stdin")
     run_parser.add_argument("--runtime", choices=("mock", "subprocess"), default="mock")
     run_parser.add_argument("--command", dest="runtime_command", help="explicit subprocess command")
+    run_parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="return a run ID immediately and execute it in a local background process",
+    )
     _add_home(run_parser)
     _add_json(run_parser)
 
@@ -75,6 +82,42 @@ def _config(args: argparse.Namespace) -> Config:
 def _controller(args: argparse.Namespace, config: Config) -> LocalController:
     runtime = build_runtime(args.runtime, getattr(args, "runtime_command", None))
     return LocalController(config, runtime)
+
+
+def _detach(config: Config, args: argparse.Namespace, goal: str) -> object:
+    controller = _controller(args, config)
+    run = controller.create(goal)
+    log_path = Path(run.workspace) / "controller.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "famou",
+        "resume",
+        run.id,
+        "--runtime",
+        args.runtime,
+        "--home",
+        str(config.home),
+        "--json",
+    ]
+    if args.runtime_command:
+        command.extend(("--command", args.runtime_command))
+    try:
+        with log_path.open("a", encoding="utf-8") as log:
+            subprocess.Popen(
+                command,
+                cwd=Path.cwd(),
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+    except OSError:
+        controller.cancel(run.id)
+        raise
+    return {"run_id": run.id, "status": "pending", "workspace": str(run.workspace)}
 
 
 def _print_status(config: Config, run_id: str) -> int:
@@ -168,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run":
             goal = sys.stdin.read() if args.goal == "-" else args.goal
+            if args.detach:
+                _emit(_detach(config, args, goal), args.json)
+                return 0
             run = _controller(args, config).start(goal)
             _emit(
                 {

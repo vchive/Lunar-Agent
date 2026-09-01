@@ -51,6 +51,15 @@ The `run --json` and `status --json` commands are intentionally independent of P
 Hermes installation. If the parent process times out, it should retain the returned run ID and call
 `resume` or `status` instead of starting a duplicate run.
 
+For a long-running child process, use:
+
+```bash
+uv run python -m famou run "Long analysis" --runtime subprocess --detach --json
+```
+
+This returns before execution completes. Poll `status --json`, inspect `events --json`, or call
+`cancel` with the returned run ID; the detached controller writes its log in the run workspace.
+
 ## Test
 
 ```bash

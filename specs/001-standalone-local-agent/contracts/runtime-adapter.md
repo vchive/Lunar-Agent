@@ -45,7 +45,7 @@ reads `~/.hermes`.
 ## CLI contract
 
 ```text
-python -m famou run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json]
+python -m famou run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json] [--detach]
 python -m famou run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
 python -m famou resume <run-id> [--home PATH] [--json]
 python -m famou status <run-id> [--home PATH] [--json]
@@ -56,5 +56,7 @@ python -m famou cancel <run-id> [--home PATH] [--json]
 Commands return zero only when the requested operation succeeds. Human-readable output is the
 default. With `--json`, stdout contains exactly one JSON value and diagnostics are written to stderr;
 this is the stable interface for Codex, Hermes, OpenClaw, shell scripts, or another Agent invoking
-Lunar-Agent as a child process. A caller must treat the run ID as the durable handle and use `resume`
-or `status` after a timeout or process interruption.
+Lunar-Agent as a child process. `run --detach --json` persists the run, starts a local background
+controller, and returns the run ID before task execution begins; it writes controller output under
+the run workspace. A caller must treat the run ID as the durable handle and use `resume`, `status`,
+or `cancel` after a timeout or process interruption.
