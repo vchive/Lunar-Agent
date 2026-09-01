@@ -123,7 +123,8 @@ provided through `FAMOU_API_KEY`; it is never written to the ledger or controlle
 adapter requires a non-empty text response and applies the same evaluator/retry policy as other
 runtimes. Add `--allow-exec` for bounded no-shell command execution. Add `--memory` to explicitly
 enable the local `recall_memory` and `remember_memory` tools; memory notes are stored in SQLite and
-are never injected into a model request silently.
+are never injected into a model request silently. Add `--session-history` to persist and replay a
+bounded, redacted JSONL transcript across retries or `resume`.
 
 The model can pause for a decision with `ask_user`. The command returns `awaiting_input`; inspect the
 question with `status --json`, then answer and resume the same run:

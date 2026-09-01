@@ -58,7 +58,7 @@ def test_controller_persists_input_and_resumes_same_task(tmp_path: Path) -> None
     model = AskingModel()
     controller = LocalController(
         config,
-        AgentLoopRuntime(model, tools=LocalToolRegistry(), max_steps=3),
+        AgentLoopRuntime(model, tools=LocalToolRegistry(), max_steps=3, session_history=True),
         memory=MemoryStore(config.database),
     )
     run = controller.start("choose a format")
@@ -68,6 +68,7 @@ def test_controller_persists_input_and_resumes_same_task(tmp_path: Path) -> None
     assert pending["question"] == "Which format?"
     assert pending["options"] == ["csv", "json"]
     assert (run.workspace / pending["request_path"]).is_file()
+    assert any(item["kind"] == "session" for item in controller.store.list_artifacts(run.id))
 
     artifacts = ArtifactStore(run.workspace, controller.store, run.id)
     answer_path = artifacts.write_text(

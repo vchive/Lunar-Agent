@@ -77,6 +77,11 @@ class LocalController:
                     set_context = getattr(self.runtime, "set_context", None)
                     if callable(set_context):
                         set_context(run.id, task.id, run.goal)
+                    set_session_path = getattr(self.runtime, "set_session_path", None)
+                    if callable(set_session_path):
+                        set_session_path(
+                            Path(run.workspace) / "sessions" / task.id / "transcript.jsonl"
+                        )
                     set_event_sink = getattr(self.runtime, "set_event_sink", None)
                     if callable(set_event_sink):
                         set_event_sink(
@@ -95,6 +100,7 @@ class LocalController:
                     if not self._task_is_running(task.id):
                         self._discard_late_result(run_id, task.id, attempt.id)
                         continue
+                    self._record_session_artifact(run, task.id)
                     result_path = artifacts.write_text(
                         f"tasks/{task.id}/{attempt.id}/result.txt",
                         result.text,
@@ -141,6 +147,7 @@ class LocalController:
                     if not self._task_is_running(task.id):
                         self._discard_late_result(run_id, task.id, attempt.id)
                         continue
+                    self._record_session_artifact(run, task.id)
                     request_payload = {
                         "status": "awaiting_input",
                         "run_id": run_id,
@@ -165,6 +172,8 @@ class LocalController:
                     )
                 except Exception as exc:  # noqa: BLE001 - runtime boundary must persist all failures
                     error = self._sanitize_error(exc)
+                    if self._task_is_running(task.id):
+                        self._record_session_artifact(run, task.id)
                     if not self._task_is_running(task.id):
                         self._discard_late_result(run_id, task.id, attempt.id, error)
                     elif self._can_retry(task.attempts + 1):
@@ -197,6 +206,24 @@ class LocalController:
     def _task_is_running(self, task_id: str) -> bool:
         task = self.store.get_task(task_id)
         return task is not None and task.state.value == "running"
+
+    def _record_session_artifact(self, run: Run, task_id: str) -> None:
+        get_session_path = getattr(self.runtime, "session_path", None)
+        if not callable(get_session_path):
+            return
+        path = get_session_path()
+        if path is None or not Path(path).is_file():
+            return
+        try:
+            relative = str(Path(path).resolve().relative_to(Path(run.workspace).resolve()))
+        except ValueError:
+            return
+        if any(
+            artifact["path"] == relative and artifact["kind"] == "session"
+            for artifact in self.store.list_artifacts(run.id)
+        ):
+            return
+        ArtifactStore(run.workspace, self.store, run.id).record(path, task_id, kind="session")
 
     def _evaluate(self, task: Any, result: str, workspace: Path) -> Evaluation:
         base = self.evaluator.evaluate(result, workspace)

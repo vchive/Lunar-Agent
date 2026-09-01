@@ -8,6 +8,9 @@
 
 **Input**: Continue the Hermes-inspired local-agent direction with durable long-running sessions.
 
+Feature 005 adds optional transcript replay; the input protocol here remains the durable boundary
+used when a session pauses.
+
 ## Goal
 
 Allow a model session to pause when it needs a human or parent-Agent answer, return a machine-readable

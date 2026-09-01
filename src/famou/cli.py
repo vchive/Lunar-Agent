@@ -71,6 +71,11 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="opt in to durable memory tools for this model session",
     )
+    parser.add_argument(
+        "--session-history",
+        action="store_true",
+        help="persist and replay a bounded local transcript across retries/resume",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -156,6 +161,7 @@ def _controller(args: argparse.Namespace, config: Config) -> LocalController:
             tools=tools,
             max_steps=getattr(args, "max_steps", 40),
             memory=memory,
+            session_history=getattr(args, "session_history", False),
         )
     return LocalController(config, runtime)
 
@@ -213,6 +219,8 @@ def _detach(
         command.append("--allow-exec")
     if args.memory:
         command.append("--memory")
+    if args.session_history:
+        command.append("--session-history")
     child_env = None
     if args.api_key is not None:
         child_env = os.environ.copy()

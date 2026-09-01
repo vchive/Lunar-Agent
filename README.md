@@ -92,6 +92,17 @@ lunar-agent answer <run-id> "json" --runtime openai-compatible \
 The answer is written as a bounded run artifact and included in the next task prompt. Use `-` as the
 answer to read it from stdin.
 
+For retries and `resume` to replay recent model/tool context, add `--session-history`. This writes a
+bounded, redacted JSONL transcript under the run workspace and indexes one stable session artifact:
+
+```bash
+lunar-agent run "Continue the migration" \
+  --runtime openai-compatible --agent-loop --session-history --json
+```
+
+Session history is separate from durable memory. It is opt-in and retains only recent messages; use
+`remember_memory` for concise facts that should outlive a session.
+
 ### Optional durable memory
 
 Memory is explicitly opt-in because recalled local notes may be sent to the configured model

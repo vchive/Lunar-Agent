@@ -14,6 +14,7 @@ from pathlib import Path
 from .memory import MemoryStore
 from .runtime import ModelTurn, OpenAICompatibleRuntime, RuntimeExecutionError, RuntimeResult
 from .tools import LocalToolRegistry
+from .transcript import SessionTranscript
 
 HERMES_SYSTEM_PROMPT = """You are Lunar-Agent, a local-first general-purpose assistant inspired by
 Hermes-style long-running sessions. Continue from the supplied goal and any relevant durable memory.
@@ -49,6 +50,8 @@ class AgentLoopRuntime:
         max_steps: int = 40,
         system_prompt: str = HERMES_SYSTEM_PROMPT,
         memory: MemoryStore | None = None,
+        session_history: bool = False,
+        transcript: SessionTranscript | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
@@ -62,6 +65,8 @@ class AgentLoopRuntime:
             self.tools.redactions = (*self.tools.redactions, api_key)
         self.max_steps = max_steps
         self.system_prompt = system_prompt
+        self.session_history = session_history or transcript is not None
+        self._transcript = transcript
         self._event_sink: Callable[[str, dict[str, object]], None] | None = None
         self._run_id: str | None = None
         self._task_id: str | None = None
@@ -72,6 +77,17 @@ class AgentLoopRuntime:
         self._run_id = run_id
         self._task_id = task_id
         self.tools.set_memory_scope(f"run:{run_id}")
+
+    def set_session_path(self, path: str | Path) -> None:
+        """Attach a stable run/task transcript path when session history is enabled."""
+        if not self.session_history:
+            return
+        api_key = getattr(self.model, "api_key", None)
+        redactions = (api_key,) if isinstance(api_key, str) and api_key else ()
+        self._transcript = SessionTranscript(path, redactions=redactions)
+
+    def session_path(self) -> Path | None:
+        return self._transcript.path if self._transcript is not None else None
 
     def set_event_sink(self, sink: Callable[[str, dict[str, object]], None] | None) -> None:
         self._event_sink = sink
@@ -87,9 +103,7 @@ class AgentLoopRuntime:
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
         workspace.mkdir(parents=True, exist_ok=True)
-        messages: list[dict[str, object]] = [
-            {"role": "system", "content": self.system_prompt},
-        ]
+        messages = self._initial_messages(prompt)
         # Memory is exposed through explicit model tool calls. We do not inject local notes into a
         # request implicitly: sending durable user context to a configured endpoint must remain an
         # intentional, per-run choice.
@@ -114,10 +128,17 @@ class AgentLoopRuntime:
             if not turn.tool_calls:
                 if not turn.text:
                     raise RuntimeExecutionError("agent loop ended without a final text result")
+                final_message = {"role": "assistant", "content": turn.text}
+                self._append_transcript(final_message)
                 return RuntimeResult(
                     text=turn.text,
                     artifacts=tuple(dict.fromkeys(artifacts)),
-                    metadata={"provider": "openai-compatible", "mode": "agent-loop", "turns": str(model_turns)},
+                    metadata={
+                        "provider": "openai-compatible",
+                        "mode": "agent-loop",
+                        "turns": str(model_turns),
+                        "session_history": str(self.session_history).lower(),
+                    },
                 )
             if tool_steps + len(turn.tool_calls) > self.max_steps:
                 self._emit(
@@ -126,6 +147,7 @@ class AgentLoopRuntime:
                 )
                 raise RuntimeExecutionError(f"agent loop exceeded max steps ({self.max_steps})")
             messages.append(self._assistant_message(turn))
+            self._append_transcript(messages[-1])
             for call in turn.tool_calls:
                 result = self.tools.execute(call.name, call.arguments, workspace)
                 tool_steps += 1
@@ -141,10 +163,6 @@ class AgentLoopRuntime:
                         "awaiting_input": result.awaiting_input,
                     },
                 )
-                if result.awaiting_input:
-                    raise AgentInputRequired(
-                        result.input_question or result.output[:8_000], result.input_options
-                    )
                 messages.append(
                     {
                         "role": "tool",
@@ -152,6 +170,11 @@ class AgentLoopRuntime:
                         "content": result.output,
                     }
                 )
+                self._append_transcript(messages[-1])
+                if result.awaiting_input:
+                    raise AgentInputRequired(
+                        result.input_question or result.output[:8_000], result.input_options
+                    )
 
     @staticmethod
     def _remaining_timeout(started: float, timeout: float | None) -> float | None:
@@ -180,6 +203,32 @@ class AgentLoopRuntime:
     def _emit(self, event_type: str, payload: dict[str, object]) -> None:
         if self._event_sink is not None:
             self._event_sink(event_type, payload)
+
+    def _initial_messages(self, prompt: str) -> list[dict[str, object]]:
+        if not self.session_history or self._transcript is None:
+            return [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+        loaded = self._transcript.load()
+        messages = list(loaded)
+        has_system = any(message.get("role") == "system" for message in messages)
+        if not has_system:
+            messages.insert(0, {"role": "system", "content": self.system_prompt})
+            if not loaded:
+                self._append_transcript(messages[0])
+        appended_prompt = not messages or messages[-1].get("content") != prompt or messages[-1].get("role") != "user"
+        if appended_prompt:
+            messages.append({"role": "user", "content": prompt})
+        # Persist only the newly appended continuation prompt; the loader already returned the
+        # previous bounded messages and writing them again would duplicate the transcript.
+        if appended_prompt:
+            self._append_transcript(messages[-1])
+        return messages
+
+    def _append_transcript(self, message: dict[str, object]) -> None:
+        if self.session_history and self._transcript is not None:
+            self._transcript.append(message)
 
 
 class HermesSessionRuntime(AgentLoopRuntime):

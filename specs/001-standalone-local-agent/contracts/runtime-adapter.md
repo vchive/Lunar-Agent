@@ -75,13 +75,18 @@ is required for the no-shell command tool. `--memory` explicitly enables local `
 `remember_memory` tools. Memory notes are not silently added to requests: the model must request a
 recall, because the resulting note may be sent to the configured endpoint.
 
+`--session-history` separately opts into a bounded local JSONL transcript. The controller gives the
+session one stable path per run/task and indexes it as a `session` artifact. A resumed attempt loads
+recent valid messages before appending its continuation prompt. The transcript redacts the configured
+API key, is never written into events, and is disabled by default.
+
 ## CLI contract
 
 ```text
 python -m famou run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json] [--detach]
 python -m famou run [<goal>] --plan PLAN.json [--runtime mock|subprocess] [--home PATH] [--json]
 python -m famou run "<goal>" --runtime openai-compatible --endpoint URL --model MODEL [--json]
-python -m famou run "<goal>" --runtime openai-compatible --agent-loop [--max-steps N] [--allow-exec] [--memory]
+python -m famou run "<goal>" --runtime openai-compatible --agent-loop [--max-steps N] [--allow-exec] [--memory] [--session-history]
 python -m famou run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
 python -m famou resume <run-id> [--home PATH] [--json]
 python -m famou answer <run-id> [<text>|-] [--runtime ...] [--home PATH] [--json]

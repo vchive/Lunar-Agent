@@ -151,6 +151,7 @@ def test_detached_agent_loop_options_propagate(tmp_path: Path, capsys, monkeypat
                 "7",
                 "--allow-exec",
                 "--memory",
+                "--session-history",
                 "--detach",
                 "--json",
                 "--home",
@@ -164,6 +165,7 @@ def test_detached_agent_loop_options_propagate(tmp_path: Path, capsys, monkeypat
     assert "--agent-loop" in command
     assert command[command.index("--max-steps") + 1] == "7"
     assert "--allow-exec" in command and "--memory" in command
+    assert "--session-history" in command
 
 
 def test_cli_memory_inspection_is_json(tmp_path: Path, capsys) -> None:
