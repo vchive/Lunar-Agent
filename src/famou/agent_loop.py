@@ -107,7 +107,6 @@ class AgentLoopRuntime:
         # Memory is exposed through explicit model tool calls. We do not inject local notes into a
         # request implicitly: sending durable user context to a configured endpoint must remain an
         # intentional, per-run choice.
-        messages.append({"role": "user", "content": prompt})
         artifacts: list[str] = []
         started = time.monotonic()
         model_turns = 0

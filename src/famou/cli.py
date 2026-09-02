@@ -384,6 +384,9 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         answer = sys.stdin.read()
     if not isinstance(answer, str) or not answer.strip():
         raise ValueError("answer requires non-empty text or '-' for stdin")
+    api_key = args.api_key or os.environ.get("FAMOU_API_KEY")
+    if api_key:
+        answer = answer.replace(api_key, "[REDACTED]")
     if len(answer.encode("utf-8")) > 20_000:
         raise ValueError("answer exceeds 20 KiB")
     store = Store(config.database)

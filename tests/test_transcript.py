@@ -74,6 +74,7 @@ def test_session_history_replays_recent_messages_without_duplicate_system(tmp_pa
     second.set_session_path(path)
     second.run("continue", tmp_path / "workspace")
 
+    assert sum(message.get("role") == "user" for message in first_model.requests[0]) == 1
     messages = second_model.requests[0]
     assert sum(message.get("role") == "system" for message in messages) == 1
     assert any(message.get("content") == "saved" for message in messages)
