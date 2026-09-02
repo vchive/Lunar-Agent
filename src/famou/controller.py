@@ -220,6 +220,7 @@ class LocalController:
                         "passed": evaluation.passed,
                         "reason": evaluation.reason,
                         "evidence": list(evaluation.evidence),
+                        "details": evaluation.details,
                     }
                     self.store.append_event(
                         run_id,
@@ -349,10 +350,15 @@ class LocalController:
             return base
         acceptance = criterion.evaluate(result, workspace)
         evidence = tuple(base.evidence) + tuple(acceptance.evidence)
+        details = {"base": base.details, "acceptance": acceptance.details}
         if base.passed and acceptance.passed:
-            return Evaluation(True, evidence, f"{base.reason}; {acceptance.reason}")
-        reasons = [reason for passed, reason in ((base.passed, base.reason), (acceptance.passed, acceptance.reason)) if not passed]
-        return Evaluation(False, evidence, "; ".join(reasons))
+            return Evaluation(True, evidence, f"{base.reason}; {acceptance.reason}", details)
+        reasons = [
+            reason
+            for passed, reason in ((base.passed, base.reason), (acceptance.passed, acceptance.reason))
+            if not passed
+        ]
+        return Evaluation(False, evidence, "; ".join(reasons), details)
 
     def _check_budget(self, run_id: str, budget: BudgetSpec, started: float, *, before_claim: bool = False) -> None:
         tasks = self.store.list_tasks(run_id)

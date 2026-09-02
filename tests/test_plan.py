@@ -28,6 +28,21 @@ class RecordingRuntime:
         return None
 
 
+class ArtifactRuntime:
+    name = "artifact"
+
+    def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
+        del prompt, timeout
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "report.json").write_text(
+            json.dumps({"summary": "verified", "sources": []}), encoding="utf-8"
+        )
+        return RuntimeResult(text="report written", artifacts=("report.json",))
+
+    def cancel(self) -> None:
+        return None
+
+
 def _document() -> PlanDocument:
     return PlanDocument(
         goal="prepare and verify a report",
@@ -95,6 +110,89 @@ def test_plan_acceptance_contains_is_applied_after_base_evaluator(tmp_path: Path
     assert run.status.value == "failed"
     task = controller.store.list_tasks(run.id)[0]
     assert task.last_error is not None and "required" in task.last_error
+
+
+def test_artifact_acceptance_is_independently_verified_and_deliverable(tmp_path: Path) -> None:
+    controller = LocalController(Config(tmp_path / ".famou"), ArtifactRuntime())
+    run = controller.start_plan(
+        PlanDocument(
+            goal="write a verified report",
+            plan_id="plan-artifact-report",
+            tasks=(
+                PlanTask(
+                    "report",
+                    "Report",
+                    "write report",
+                    acceptance={
+                        "all": [
+                            {"artifact_exists": "report.json"},
+                            {
+                                "json_has_keys": {
+                                    "path": "report.json",
+                                    "keys": ["summary", "sources"],
+                                }
+                            },
+                        ]
+                    },
+                ),
+            ),
+        )
+    )
+
+    assert run.status.value == "succeeded"
+    event = next(event for event in controller.store.list_events(run.id) if event["type"] == "task_evaluated")
+    assert event["payload"]["details"]["acceptance"]["check"]["passed"] is True
+    physical_task_id = controller.store.list_tasks(run.id)[0].id
+    audit = next(run.workspace.glob(f"tasks/{physical_task_id}/*/evaluation.json"))
+    assert json.loads(audit.read_text(encoding="utf-8"))["details"]["acceptance"]["check"]["rule"] == "all"
+    assert controller.deliver(run.id).action == "deliver"
+
+
+def test_missing_artifact_acceptance_prevents_delivery(tmp_path: Path) -> None:
+    controller = LocalController(Config(tmp_path / ".famou", max_retries=1), MockRuntime())
+    run = controller.start(
+        "checked output",
+        [{"id": "report", "prompt": "write report", "acceptance": {"artifact_exists": "report.json"}}],
+    )
+
+    assert run.status.value == "failed"
+    with pytest.raises(ValueError, match="fully verified"):
+        controller.deliver(run.id)
+
+
+def test_replan_preserves_a_completed_artifact_contract(tmp_path: Path) -> None:
+    controller = LocalController(Config(tmp_path / ".famou"), ArtifactRuntime())
+    acceptance = {"json_has_keys": {"path": "report.json", "keys": ["summary", "sources"]}}
+    original = PlanDocument(
+        goal="write checked report",
+        plan_id="plan-artifact-revision",
+        tasks=(PlanTask("report", "Report", "write report", acceptance=acceptance),),
+    )
+    run = controller.start_plan(original)
+
+    revised = PlanDocument(
+        goal=original.goal,
+        plan_id=original.plan_id,
+        version=2,
+        parent_version=1,
+        tasks=(PlanTask("report", "Report", "write report", acceptance=acceptance),),
+    )
+    result = controller.replan(run.id, revised, "retain verified artifact contract")
+
+    assert result.version == 2
+    current = controller.store.get_current_plan(run.id)
+    assert current is not None and current.tasks[0].acceptance == acceptance
+
+
+def test_unsafe_acceptance_is_rejected_before_a_legacy_run_insert(tmp_path: Path) -> None:
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+
+    with pytest.raises(ValueError, match="workspace"):
+        store.create_run("unsafe", tasks=[{"id": "one", "prompt": "one", "acceptance": {"artifact_exists": "../outside"}}])
+
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
 
 
 def test_invalid_plan_is_rejected_before_run_insert(tmp_path: Path) -> None:

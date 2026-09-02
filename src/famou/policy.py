@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .budget import BudgetSpec
+from .evaluator import validate_acceptance
 
 Action = Literal["answer", "ask_user", "execute_plan", "patch_plan", "replan", "deliver"]
 MAX_TEXT_BYTES = 8_000
@@ -90,6 +91,7 @@ class PlanTask:
                 _text(self.acceptance, "task acceptance")
             else:
                 _json_object(self.acceptance, "task acceptance")
+            validate_acceptance(self.acceptance)
 
     def to_dict(self) -> dict[str, Any]:
         return {

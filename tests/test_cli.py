@@ -26,6 +26,12 @@ def test_cli_json_contract_and_stdin_goal(tmp_path: Path, capsys, monkeypatch) -
     status_payload = json.loads(capsys.readouterr().out)
     assert status_payload["run"]["goal"] == "stdin goal"
     assert status_payload["tasks"][0]["state"] == "succeeded"
+    assert status_payload["tasks"][0]["evaluation"]["details"]["kind"] == "non_empty"
+
+    assert main(["events", run_payload["run_id"], "--json", "--home", str(tmp_path)]) == 0
+    events = json.loads(capsys.readouterr().out)
+    evaluation = next(event for event in events if event["type"] == "task_evaluated")
+    assert evaluation["payload"]["details"]["kind"] == "non_empty"
 
 
 def test_cli_status_json_exposes_route_profiles_and_budget(tmp_path: Path, capsys) -> None:

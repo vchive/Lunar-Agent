@@ -6,8 +6,9 @@ a run-scoped local directory. It does **not** require a machine-wide Hermes, Ope
 installation.
 
 The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/007-domain-routing-solver-evaluator/`](specs/007-domain-routing-solver-evaluator/),
-built on the Hermes-inspired direction in [`specs/003-hermes-inspired-local-agent/`](specs/003-hermes-inspired-local-agent/). The earlier
+captured in [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/),
+built on domain routing, profiles, and budgets in
+[`specs/007-domain-routing-solver-evaluator/`](specs/007-domain-routing-solver-evaluator/). The earlier
 WebAgent-style experiment is retained as a superseded draft in
 [`specs/002-webagent-effect-parity/`](specs/002-webagent-effect-parity/).
 
@@ -185,6 +186,43 @@ Malformed plans (duplicate IDs, unknown dependencies, or cycles) are rejected wi
 partial run in SQLite. A failed or rejected prerequisite blocks downstream tasks and the run settles
 as failed. Each evaluator decision is also written to `evaluation.json` within the attempt
 workspace and emitted as a structured event.
+
+### Artifact acceptance contracts
+
+An acceptance value can now verify observable local output, rather than only asking whether a
+Worker's result text contains a phrase. These rules are evaluated in-process after the selected
+Evaluator Profile passes. They never call a model, shell command, plugin, or network endpoint, and
+they can only inspect regular files in the current task attempt workspace.
+
+```json
+{
+  "id": "report",
+  "title": "Write report",
+  "prompt": "Create report.json and summarize the result",
+  "acceptance": {
+    "all": [
+      {"result_contains": "report written"},
+      {"artifact_exists": "report.json"},
+      {"artifact_text_contains": {"path": "report.json", "contains": "summary"}},
+      {"json_has_keys": {"path": "report.json", "keys": ["summary", "sources"]}}
+    ]
+  }
+}
+```
+
+Supported leaves are `result_contains`, `artifact_exists`, `artifact_text_contains`, `json_parse`,
+and `json_has_keys`; compose them with non-empty `all` or `any` arrays. A plain string and the
+legacy `{ "contains": "..." }` form still mean result-text containment. Paths must be portable,
+relative, and remain below the current attempt directory; rule count/depth, contract text, and
+inspected artifact bytes are bounded. Invalid JSON, missing keys, binary/oversized content, or a
+symlink escape fail closed and leave an auditable failure rather than reading outside the workspace.
+
+The `task_evaluated` event and attempt `evaluation.json` contain a bounded rule-level decision tree.
+`lunar-agent status <run-id> --json` exposes the most recent evaluation summary under each task's
+`evaluation` field, so a parent Agent can decide whether to patch or replan without scraping logs.
+The complete v1 grammar and a runnable local example are in
+[`specs/008-artifact-acceptance-contracts/contracts/acceptance-contract.md`](specs/008-artifact-acceptance-contracts/contracts/acceptance-contract.md)
+and [`quickstart.md`](specs/008-artifact-acceptance-contracts/quickstart.md).
 
 ## Called by another Agent
 

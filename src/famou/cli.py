@@ -335,6 +335,15 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         return None
     tasks = store.list_tasks(run.id)
     current_plan = store.get_current_plan(run.id)
+    latest_evaluations = {
+        event["task_id"]: {
+            "event_id": event["id"],
+            "created_at": event["created_at"],
+            **event["payload"],
+        }
+        for event in store.list_events(run.id)
+        if event["type"] == "task_evaluated" and event["task_id"] is not None
+    }
     return {
         "run": {
             "id": run.id,
@@ -378,6 +387,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
                 "last_error": task.last_error,
                 "dependencies": list(task.dependencies),
                 "acceptance": task.acceptance,
+                "evaluation": latest_evaluations.get(task.id),
             }
             for task in tasks
         ],

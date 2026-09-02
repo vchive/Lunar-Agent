@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .budget import BudgetSpec
+from .evaluator import validate_acceptance
 from .models import Attempt, Run, RunStatus, Task, TaskStatus
 from .policy import (
     PlanDocument,
@@ -540,6 +541,7 @@ class Store:
             acceptance = raw.get("acceptance")
             if acceptance is not None and not isinstance(acceptance, (str, dict)):
                 raise ValueError(f"acceptance for task {task_id} must be a string or object")
+            validate_acceptance(acceptance)
             normalized.append(
                 {
                     "id": task_id,

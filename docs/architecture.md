@@ -19,7 +19,8 @@ flowchart TD
     D --> A[Runtime Adapter\nmock / subprocess / OpenAI-compatible\nHermesSessionRuntime]
     A --> W[Run workspace\nprompts · results · transcripts]
     W --> AS[ArtifactStore\nrun-relative paths + SHA-256]
-    AS --> E[Evaluator Profile\nstructured evidence]
+    AS --> AC[Acceptance Contract\nbounded local artifact checks]
+    AC --> E[Evaluator Profile\nstructured evidence]
     E --> S
     S --> V[PATCH / REPLAN\noptimistic version check]
     V --> D
@@ -40,10 +41,15 @@ flowchart TD
    Evaluator Profiles. The default profiles preserve the existing non-empty result evaluation;
    callers may inject a stronger evaluator without changing a Runtime Adapter.
 4. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
-   dependent nodes receive only verified predecessor artifacts and bounded previews. Runtime
-   adapters never own durable state. A per-run budget bounds task count, attempts, agent tool
-   calls, elapsed controller time, and indexed artifact bytes. Crossing a limit emits
-   `budget_exceeded`, fails closed, and keeps existing artifacts inspectable.
+dependent nodes receive only verified predecessor artifacts and bounded previews. Runtime
+adapters never own durable state. The selected evaluator profile establishes a base decision, then
+an optional declarative acceptance contract independently checks result text and regular artifacts
+only beneath that attempt workspace. Contracts can require file existence, artifact text, JSON
+parsing/top-level keys, and `all`/`any` composition; they never execute commands, invoke a model,
+or inspect an escaping path. Both decisions persist as a bounded structured evidence tree. A
+per-run budget bounds task count, attempts, agent tool calls, elapsed controller time, and indexed
+artifact bytes. Crossing a limit emits `budget_exceeded`, fails closed, and keeps existing artifacts
+inspectable.
 5. A failed or newly-informed run can receive `patch` or `replan` while idle. SQLite checks the
    current `(plan_id, version)` before applying a typed patch. Prior revisions stay immutable;
    not-yet-run tasks removed by a revision become `superseded`, while completed task definitions
@@ -55,11 +61,12 @@ flowchart TD
 
 The WebAgent branches demonstrated that Master routing, explicit clarification, solve/evaluate
 separation, schema-driven artifacts, patch/replan lifecycle, and experience/memory capture improve
-long-running work. They also contain service concerns (HTTP/SSE, queues, cloud sandboxes,
-multi-tenancy, billing) and an OpenCode-specific process model. Lunar-Agent adopts the portable
-behaviors and excludes those deployment assumptions. A parent agent can invoke the JSON CLI as a
-child process, while a local user can run the same binary without a Hermes installation or a
-machine-wide configuration directory.
+long-running work. Lunar-Agent makes the separation concrete with a restricted local acceptance
+contract interpreter instead of accepting a Worker completion claim. The branches also contain
+service concerns (HTTP/SSE, queues, cloud sandboxes, multi-tenancy, billing) and an OpenCode-specific
+process model. Lunar-Agent adopts the portable behaviors and excludes those deployment assumptions.
+A parent agent can invoke the JSON CLI as a child process, while a local user can run the same
+binary without a Hermes installation or a machine-wide configuration directory.
 
 ## Recovery and migration
 
