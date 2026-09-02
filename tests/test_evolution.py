@@ -3,6 +3,8 @@ import stat
 import sys
 from pathlib import Path
 
+import pytest
+
 from famou.algorithm import AlgorithmProblemContract
 from famou.evolution import (
     CandidateArchive,
@@ -95,6 +97,22 @@ def test_public_strategy_and_population_state_contracts_are_json_safe() -> None:
     assert state.to_dict()["active_ids"]["1"] == ["candidate-0002"]
     assert isinstance(LoopStrategy, type)
     assert hasattr(EvolutionStrategy, "run")
+
+
+def test_evolution_config_keeps_optional_adapter_fingerprints_credential_safe() -> None:
+    legacy_payload = EvolutionConfig().to_dict()
+    assert "generator_fingerprint" not in legacy_payload
+    assert "evaluator_fingerprint" not in legacy_payload
+    config = EvolutionConfig(
+        generator_fingerprint="a" * 64,
+        evaluator_fingerprint="b" * 64,
+    )
+    payload = config.to_dict()
+    assert payload["generator_fingerprint"] == "a" * 64
+    assert payload["evaluator_fingerprint"] == "b" * 64
+    assert all("command" not in str(value) for value in payload.values())
+    with pytest.raises(ValueError, match="SHA-256"):
+        EvolutionConfig(generator_fingerprint="/absolute/path/to/solver --api-key secret")
 
 
 def test_loop_invalid_candidate_never_becomes_best(tmp_path: Path) -> None:

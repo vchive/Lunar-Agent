@@ -118,6 +118,11 @@ SQLite run with an evolution task, copies the contract to `evolution/contract.js
 `evolution_finished` events. `--detach` returns the run ID before execution; `--resume --run-id`
 re-enters the same task after a process exit. The strategy itself still owns only the local
 archive/state files, while SQLite owns task lifecycle, cancellation, and the final run status.
+Native command-backed runs add credential-safe generator and evaluator adapter fingerprints to the
+strategy config. Resume compares those fingerprints before task claim, preventing a solver command,
+evaluator command, Agent role, name, or capability change from silently extending an old archive.
+Only canonical SHA-256 values are persisted; raw command arguments and credentials are not copied
+into state.
 
 `loop` and `population` are implemented as library strategies over the same append-only archive.
 Each loop round receives a fresh generation request and returns best-so-far from all valid history;

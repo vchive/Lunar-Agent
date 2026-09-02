@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -619,6 +620,28 @@ def _parse_command(value: str | None, label: str) -> tuple[str, ...]:
     return command
 
 
+def _adapter_fingerprint(
+    command: tuple[str, ...],
+    *,
+    kind: str,
+    name: str,
+    role: str,
+    required_capabilities: tuple[str, ...] = (),
+) -> str | None:
+    """Return a credential-safe identity for one explicit evolution adapter."""
+    if not command:
+        return None
+    payload = {
+        "command": list(command),
+        "kind": kind,
+        "name": name,
+        "required_capabilities": sorted(set(required_capabilities)),
+        "role": role,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Create/execute one ledger-backed local evolution run."""
     try:
@@ -665,6 +688,8 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     evaluator_agent_command = _parse_command(
         args.evaluator_agent_command, "--evaluator-agent-command"
     )
+    generator_fingerprint: str | None = None
+    evaluator_fingerprint: str | None = None
     if strategy_name == "openevolve":
         if agent_command or evaluator_agent_command:
             raise ValueError("Agent solver/evaluator commands are only supported by loop and population")
@@ -676,6 +701,12 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             raise ValueError("--openevolve-command must start with an existing absolute executable path")
         evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
         if evaluator_command:
+            evaluator_fingerprint = _adapter_fingerprint(
+                evaluator_command,
+                kind="evaluator",
+                name="command-evaluator",
+                role="evaluator",
+            )
             evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
         else:
             def evaluator(path, contract):
@@ -696,6 +727,36 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             raise ValueError(
                 "loop and population require --evaluator-command or "
                 "--evaluator-agent-command plus --generator-command or --agent-command"
+            )
+        if agent_command:
+            generator_fingerprint = _adapter_fingerprint(
+                agent_command,
+                kind="generator",
+                name=args.agent_name,
+                role=args.agent_role,
+                required_capabilities=tuple(args.agent_capabilities),
+            )
+        else:
+            generator_fingerprint = _adapter_fingerprint(
+                generator_command,
+                kind="generator",
+                name="command-generator",
+                role="generator",
+            )
+        if evaluator_agent_command:
+            evaluator_fingerprint = _adapter_fingerprint(
+                evaluator_agent_command,
+                kind="evaluator",
+                name=args.evaluator_agent_name,
+                role=args.evaluator_agent_role,
+                required_capabilities=tuple(args.evaluator_agent_capabilities),
+            )
+        else:
+            evaluator_fingerprint = _adapter_fingerprint(
+                evaluator_command,
+                kind="evaluator",
+                name="command-evaluator",
+                role="evaluator",
             )
         if agent_command:
             declared = {*DEFAULT_RUNTIME_CAPABILITIES, *args.agent_capabilities}
@@ -746,6 +807,8 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         rng_seed=args.seed,
         timeout_seconds=args.timeout,
         command=command,
+        generator_fingerprint=generator_fingerprint,
+        evaluator_fingerprint=evaluator_fingerprint,
     )
     if args.resume:
         state_path = workspace / "evolution" / "state.json"

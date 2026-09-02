@@ -31,6 +31,7 @@ MAX_EXTERNAL_RESULT_BYTES = 64 * 1024
 MAX_ERROR_BYTES = 2_000
 MAX_COMMAND_ARGS = 32
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class EvolutionError(RuntimeError):
@@ -110,6 +111,8 @@ class EvolutionConfig:
     rng_seed: int | None = None
     timeout_seconds: float = 900.0
     command: tuple[str, ...] = ()
+    generator_fingerprint: str | None = None
+    evaluator_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if self.strategy not in EVOLUTION_STRATEGIES:
@@ -144,6 +147,14 @@ class EvolutionConfig:
             raise ValueError("command must be a bounded argument tuple")
         if any(not isinstance(arg, str) or not arg for arg in self.command):
             raise ValueError("command arguments must be non-empty strings")
+        for name, fingerprint in (
+            ("generator_fingerprint", self.generator_fingerprint),
+            ("evaluator_fingerprint", self.evaluator_fingerprint),
+        ):
+            if fingerprint is not None and (
+                not isinstance(fingerprint, str) or not _SHA256.fullmatch(fingerprint)
+            ):
+                raise ValueError(f"{name} must be a lowercase SHA-256 hex digest or null")
         if self.strategy == "openevolve" and not self.command:
             raise ValueError("openevolve strategy requires an explicit command")
 
@@ -154,7 +165,7 @@ class EvolutionConfig:
             command_digest = hashlib.sha256(
                 json.dumps(list(self.command), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             ).hexdigest()
-        return {
+        payload = {
             "strategy": self.strategy,
             "max_rounds": self.max_rounds,
             "stagnation_rounds": self.stagnation_rounds,
@@ -167,6 +178,11 @@ class EvolutionConfig:
             "timeout_seconds": self.timeout_seconds,
             "command_sha256": command_digest,
         }
+        if self.generator_fingerprint is not None:
+            payload["generator_fingerprint"] = self.generator_fingerprint
+        if self.evaluator_fingerprint is not None:
+            payload["evaluator_fingerprint"] = self.evaluator_fingerprint
+        return payload
 
 
 @dataclass(frozen=True)
@@ -1192,6 +1208,8 @@ def config_from_contract(
     rng_seed: int | None = None,
     timeout_seconds: float = 900.0,
     command: Sequence[str] = (),
+    generator_fingerprint: str | None = None,
+    evaluator_fingerprint: str | None = None,
 ) -> EvolutionConfig:
     """Map the persisted Feature 012 evolution choice to executable strategy knobs."""
 
@@ -1207,6 +1225,8 @@ def config_from_contract(
         rng_seed=rng_seed,
         timeout_seconds=timeout_seconds,
         command=tuple(command),
+        generator_fingerprint=generator_fingerprint,
+        evaluator_fingerprint=evaluator_fingerprint,
     )
 
 

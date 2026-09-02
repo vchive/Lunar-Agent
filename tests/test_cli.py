@@ -4,7 +4,7 @@ import sys
 from io import StringIO
 from pathlib import Path
 
-from famou.cli import main
+from famou.cli import _adapter_fingerprint, main
 
 
 def _write_evolution_contract(path: Path, *, strategy: str = "loop", max_rounds: int = 2) -> None:
@@ -37,6 +37,34 @@ def _write_evolution_contract(path: Path, *, strategy: str = "loop", max_rounds:
         ),
         encoding="utf-8",
     )
+
+
+def test_adapter_fingerprint_is_canonical_and_profile_sensitive() -> None:
+    command = ("/absolute/solver", "--json")
+    first = _adapter_fingerprint(
+        command,
+        kind="generator",
+        name="solver",
+        role="solver",
+        required_capabilities=("write_artifacts", "read_files"),
+    )
+    reordered = _adapter_fingerprint(
+        command,
+        kind="generator",
+        name="solver",
+        role="solver",
+        required_capabilities=("read_files", "write_artifacts"),
+    )
+    changed_role = _adapter_fingerprint(
+        command,
+        kind="generator",
+        name="solver",
+        role="researcher",
+        required_capabilities=("read_files", "write_artifacts"),
+    )
+    assert first == reordered
+    assert first != changed_role
+    assert first is not None and len(first) == 64
 
 
 def _write_evolution_commands(root: Path) -> tuple[Path, Path]:
@@ -358,6 +386,55 @@ def test_cli_evolve_detach_returns_handle_then_resume_executes_same_run(
     resumed = json.loads(capsys.readouterr().out)
     assert resumed["run_id"] == detached["run_id"]
     assert resumed["run_status"] == "succeeded"
+
+
+def test_cli_evolve_resume_rejects_changed_evaluator_command(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    home = tmp_path / "home"
+    command_args = [
+        "evolve",
+        str(contract_path),
+        "--generator-command",
+        f"{sys.executable} {generator}",
+        "--evaluator-command",
+        f"{sys.executable} {evaluator}",
+        "--json",
+        "--home",
+        str(home),
+    ]
+    assert main(command_args) == 0
+    first = json.loads(capsys.readouterr().out)
+    state = json.loads(
+        (Path(first["workspace"]) / "evolution" / "state.json").read_text(encoding="utf-8")
+    )
+    assert len(state["config"]["generator_fingerprint"]) == 64
+    assert len(state["config"]["evaluator_fingerprint"]) == 64
+    changed_evaluator = tmp_path / "evaluator-changed.py"
+    changed_evaluator.write_text(evaluator.read_text(encoding="utf-8"), encoding="utf-8")
+    changed_evaluator.chmod(evaluator.stat().st_mode)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--resume",
+                "--run-id",
+                first["run_id"],
+                "--generator-command",
+                f"{sys.executable} {generator}",
+                "--evaluator-command",
+                f"{sys.executable} {changed_evaluator}",
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 2
+    )
+    error = json.loads(capsys.readouterr().err)
+    assert "configuration does not match" in error["error"]
 
 
 def test_cli_evolve_openevolve_is_explicit_and_imports_canonical_result(tmp_path: Path, capsys) -> None:

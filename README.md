@@ -6,7 +6,7 @@ a run-scoped local directory. It does **not** require a machine-wide Hermes, Ope
 installation.
 
 The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/017-evolution-result-handoff/`](specs/017-evolution-result-handoff/), built on
+captured in [`specs/018-evolution-adapter-provenance/`](specs/018-evolution-adapter-provenance/), built on
 independent artifact acceptance contracts in
 [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
 routing, profiles, and budgets in
@@ -246,6 +246,11 @@ lunar-agent evolve contract.json --resume --run-id <run-id> \
   --evaluator-command "/absolute/python /absolute/evaluator.py" \
   --json --home .lunar
 ```
+
+Command-backed runs persist credential-safe SHA-256 fingerprints for both the generator/solver and
+evaluator adapter profiles. Resume rejects a changed command, Agent name, role, or required
+capability before claiming the task, so one candidate archive is never silently mixed across
+different execution configurations. Raw command arguments are not written to strategy state.
 
 `status --json` and `events --json` expose the evolution result, iteration events, candidate archive
 events, and indexed `evolution/archive.jsonl`, `evolution/state.json`, and `evolution/result.json`
@@ -497,4 +502,4 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/017-evolution-result-handoff/`](specs/017-evolution-result-handoff/).
+[`specs/018-evolution-adapter-provenance/`](specs/018-evolution-adapter-provenance/).
