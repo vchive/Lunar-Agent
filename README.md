@@ -267,6 +267,17 @@ object. Lunar-Agent archives and evaluates that proposal through the same validi
 command generators; an Agent claim is never treated as evaluation evidence. See
 [`specs/015-agent-backed-evolution/`](specs/015-agent-backed-evolution/) for the SDD contract.
 
+If a separate evaluator Agent is available, use `--evaluator-agent-command` instead of
+`--evaluator-command`; it must return a strict JSON `EvaluationReport` and is validated by the same
+schema before influencing selection:
+
+```bash
+lunar-agent evolve contract.json --strategy population \
+  --agent-command "/absolute/path/to/solver-wrapper --json" \
+  --evaluator-agent-command "/absolute/path/to/evaluator-wrapper --json" \
+  --json --home .lunar
+```
+
 ### Three local invocation modes
 
 Lunar-Agent is the same independent agent in each mode; a parent Agent is optional.

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_evolution import AgentCandidateGenerator
+from famou.agent_evolution import AgentCandidateEvaluator, AgentCandidateGenerator
 from famou.agents import AgentResult
 from famou.algorithm import AlgorithmProblemContract
 from famou.evolution import (
@@ -57,6 +57,37 @@ class FixtureAgent:
             self.name,
             request.role,
             json.dumps({"source": f"def solve():\n    return {len(self.requests)}\n"}),
+        )
+
+    def cancel(self):
+        return None
+
+    def process_info(self):
+        return (None, None)
+
+    def set_process_observer(self, observer):
+        del observer
+
+
+class EvaluatorFixtureAgent:
+    name = "evaluator-fixture"
+    roles = frozenset({"evaluator"})
+    capabilities = frozenset({"read_files"})
+
+    def __init__(self, response: str, *, status: str = "succeeded", error: str | None = None) -> None:
+        self.response = response
+        self.status = status
+        self.error = error
+        self.requests = []
+
+    def run(self, request):
+        self.requests.append(request)
+        return AgentResult(
+            self.name,
+            request.role,
+            self.response,
+            status=self.status,
+            error=self.error,
         )
 
     def cancel(self):
@@ -133,3 +164,31 @@ def test_agent_generator_fails_closed_on_failed_agent(tmp_path: Path) -> None:
                 {"iteration": 1, "parent": None, "inspirations": (), "archive": (), "workspace": tmp_path},
             )()
         )
+
+
+def test_agent_evaluator_parses_strict_report_and_uses_candidate_workspace(tmp_path: Path) -> None:
+    contract = _contract()
+    candidate = tmp_path / "candidates" / "candidate-0001" / "candidate.py"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("def solve():\n    return 1\n", encoding="utf-8")
+    report = json.dumps(_report(candidate, contract))
+    agent = EvaluatorFixtureAgent(report)
+    evaluator = AgentCandidateEvaluator(agent, required_capabilities=("read_files",))
+    parsed = evaluator(candidate, contract)
+    assert parsed.validity == 1
+    assert agent.requests[0].workspace.is_dir()
+    assert str(candidate) in agent.requests[0].prompt
+
+
+def test_agent_evaluator_rejects_malformed_or_failed_reports(tmp_path: Path) -> None:
+    contract = _contract()
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("def solve():\n    return 1\n", encoding="utf-8")
+    malformed = AgentCandidateEvaluator(EvaluatorFixtureAgent("not json"))
+    with pytest.raises(EvolutionError, match="not valid JSON"):
+        malformed(candidate, contract)
+    failed = AgentCandidateEvaluator(
+        EvaluatorFixtureAgent("", status="failed", error="evaluator failed")
+    )
+    with pytest.raises(EvolutionError, match="returned failed"):
+        failed(candidate, contract)

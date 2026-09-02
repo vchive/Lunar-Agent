@@ -1,12 +1,13 @@
-"""Bridge explicit Agent workers into the runtime-neutral evolution generator seam."""
+"""Bridge explicit Agent workers into the runtime-neutral evolution seams."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from pathlib import Path
 
 from .agents import AgentAdapter, AgentError, AgentRegistry, AgentRequest, AgentResult
-from .algorithm import AlgorithmProblemContract
+from .algorithm import AlgorithmProblemContract, EvaluationReport
 from .evolution import CandidateDraft, EvolutionError, GenerationRequest
 
 MAX_GENERATION_PROMPT_BYTES = 60 * 1024
@@ -155,6 +156,100 @@ class AgentCandidateGenerator:
             raise EvolutionError(f"agent candidate is invalid: {_bounded_error(exc)}") from exc
 
 
+class AgentCandidateEvaluator:
+    """Use a distinct explicit Agent to return a strict validity-first evaluation report."""
+
+    def __init__(
+        self,
+        adapter: AgentAdapter,
+        *,
+        role: str = "evaluator",
+        required_capabilities: Sequence[str] = (),
+        timeout: float | None = None,
+    ) -> None:
+        self.adapter = AgentRegistry([adapter]).select(role, tuple(required_capabilities))
+        self.role = role
+        self.required_capabilities = tuple(required_capabilities)
+        self.timeout = timeout
+
+    def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
+        candidate = Path(candidate_path).expanduser().resolve(strict=False)
+        if not candidate.is_file():
+            raise EvolutionError("candidate evaluator Agent received a missing candidate path")
+        workspace = candidate.parent / ".agent-evaluator"
+        workspace.mkdir(parents=True, exist_ok=True)
+        prompt = self._prompt(candidate, contract)
+        request = AgentRequest(
+            run_id=f"evolution-{candidate.parents[3].name if len(candidate.parents) > 3 else candidate.parent.name}",
+            task_id=f"evaluation-{candidate.parent.name}",
+            role=self.role,
+            prompt=prompt,
+            required_capabilities=self.required_capabilities,
+            workspace=workspace,
+            timeout=self.timeout,
+        )
+        try:
+            result = self.adapter.run(request)
+        except AgentError as exc:
+            raise EvolutionError(f"agent candidate evaluation failed: {_bounded_error(exc)}") from exc
+        except Exception as exc:
+            raise EvolutionError(f"agent candidate evaluation failed: {_bounded_error(exc)}") from exc
+        if not isinstance(result, AgentResult):
+            raise EvolutionError("agent candidate evaluation returned an invalid result")
+        if result.status != "succeeded":
+            raise EvolutionError(
+                f"agent candidate evaluation returned {result.status}: "
+                f"{_bounded_error(result.error or 'no error detail')}"
+            )
+        try:
+            payload = json.loads(result.text.strip())
+        except json.JSONDecodeError as exc:
+            raise EvolutionError("agent evaluator response is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise EvolutionError("agent evaluator response must be a JSON object")
+        try:
+            return EvaluationReport.from_dict(payload)
+        except (TypeError, ValueError, EvolutionError) as exc:
+            raise EvolutionError(f"agent evaluator report is invalid: {_bounded_error(exc)}") from exc
+
+    @staticmethod
+    def _prompt(candidate: Path, contract: AlgorithmProblemContract) -> str:
+        contract_payload = contract.to_dict()
+        summary = {
+            key: contract_payload.get(key)
+            for key in (
+                "problem_id",
+                "problem_type",
+                "statement",
+                "inputs",
+                "decision_variables",
+                "objective",
+                "hard_constraints",
+                "soft_constraints",
+                "success_criteria",
+                "deliverables",
+                "assumptions",
+            )
+        }
+        encoded = json.dumps(
+            {"candidate_path": str(candidate), "contract": summary},
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        prompt = (
+            "You are an independent evaluator in a local algorithm-evolution run. Read the "
+            "candidate source at candidate_path and verify hard constraints and objective. Return "
+            "exactly one JSON EvaluationReport object with schema_version, evaluator_id, validity, "
+            "quality, combined_score, detailed_scores, and error_info. Do not return markdown or "
+            "a natural-language verdict.\n\nEvaluation context:\n"
+            f"{encoded}"
+        )
+        if len(prompt.encode("utf-8")) > MAX_GENERATION_PROMPT_BYTES:
+            raise EvolutionError("agent evaluation prompt exceeds the bounded size")
+        return prompt
+
+
 def _candidate_summary(candidate: object) -> dict[str, object] | None:
     if candidate is None:
         return None
@@ -175,4 +270,4 @@ def _bounded_error(error: object) -> str:
     return text[-2_000:] if text else "unknown agent generation error"
 
 
-__all__ = ["AgentCandidateGenerator"]
+__all__ = ["AgentCandidateEvaluator", "AgentCandidateGenerator"]

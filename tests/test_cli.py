@@ -235,6 +235,47 @@ def test_cli_evolve_can_use_explicit_agent_as_candidate_generator(tmp_path: Path
     assert payload["best_score"] == 9.0
 
 
+def test_cli_evolve_can_use_separate_evaluator_agent(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    solver = tmp_path / "solver.py"
+    solver.write_text(
+        "import json, sys\n"
+        "json.loads(sys.stdin.read())\n"
+        "print(json.dumps({'source':'def solve():\\n    return 3\\n'}))\n",
+        encoding="utf-8",
+    )
+    evaluator = tmp_path / "evaluator-agent.py"
+    evaluator.write_text(
+        "import json, sys\n"
+        "json.loads(sys.stdin.read())\n"
+        "report = {'schema_version':'1','evaluator_id':'agent-evaluator','validity':1,'quality':3,'combined_score':3,'detailed_scores':{'quality':{'value':3,'direction':'maximize'}},'error_info':[]}\n"
+        "print(json.dumps({'text': json.dumps(report)}))\n",
+        encoding="utf-8",
+    )
+    solver.chmod(solver.stat().st_mode | 0o100)
+    evaluator.chmod(evaluator.stat().st_mode | 0o100)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-command",
+                f"{sys.executable} {solver}",
+                "--evaluator-agent-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    assert payload["best_score"] == 3.0
+
+
 def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path, strategy="population", max_rounds=1)

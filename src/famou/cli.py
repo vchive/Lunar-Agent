@@ -12,9 +12,14 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from .agent_evolution import AgentCandidateGenerator
+from .agent_evolution import AgentCandidateEvaluator, AgentCandidateGenerator
 from .agent_loop import HermesSessionRuntime
-from .agents import AgentError, AgentRegistry, CommandAgentAdapter
+from .agents import (
+    DEFAULT_RUNTIME_CAPABILITIES,
+    AgentError,
+    AgentRegistry,
+    CommandAgentAdapter,
+)
 from .algorithm import AlgorithmProblemContract
 from .artifacts import ArtifactStore
 from .budget import BudgetSpec
@@ -179,6 +184,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="required Agent capability; may be supplied more than once",
     )
     evolve_parser.add_argument("--evaluator-command", help="explicit evaluator command; receives a candidate path")
+    evolve_parser.add_argument(
+        "--evaluator-agent-command",
+        help="explicit evaluator Agent command returning an EvaluationReport JSON object",
+    )
+    evolve_parser.add_argument("--evaluator-agent-name", default="evolution-evaluator")
+    evolve_parser.add_argument("--evaluator-agent-role", default="evaluator")
+    evolve_parser.add_argument(
+        "--evaluator-agent-capability",
+        dest="evaluator_agent_capabilities",
+        action="append",
+        default=[],
+        help="required evaluator Agent capability; may be supplied more than once",
+    )
     evolve_parser.add_argument("--openevolve-command", help="explicit OpenEvolve command; receives a generated config path")
     evolve_parser.add_argument("--max-rounds", type=int)
     evolve_parser.add_argument("--stagnation-rounds", type=int)
@@ -644,9 +662,12 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     stagnation_rounds = args.stagnation_rounds if args.stagnation_rounds is not None else contract.evolution.stagnation_rounds
     openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")
     agent_command = _parse_command(args.agent_command, "--agent-command")
+    evaluator_agent_command = _parse_command(
+        args.evaluator_agent_command, "--evaluator-agent-command"
+    )
     if strategy_name == "openevolve":
-        if agent_command:
-            raise ValueError("--agent-command is only supported by loop and population")
+        if agent_command or evaluator_agent_command:
+            raise ValueError("Agent solver/evaluator commands are only supported by loop and population")
         command = openevolve_command
         if not command:
             raise ValueError("openevolve strategy requires --openevolve-command")
@@ -669,21 +690,15 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
         if generator_command and agent_command:
             raise ValueError("--agent-command and --generator-command are mutually exclusive")
-        if not evaluator_command:
+        if evaluator_command and evaluator_agent_command:
+            raise ValueError("--evaluator-command and --evaluator-agent-command are mutually exclusive")
+        if not evaluator_command and not evaluator_agent_command:
             raise ValueError(
-                "loop and population require --evaluator-command plus "
-                "--generator-command or --agent-command"
+                "loop and population require --evaluator-command or "
+                "--evaluator-agent-command plus --generator-command or --agent-command"
             )
         if agent_command:
-            declared = {
-                "read_files",
-                "write_files",
-                "run_tests",
-                "write_artifacts",
-                "analyze_data",
-                "gather_sources",
-                *args.agent_capabilities,
-            }
+            declared = {*DEFAULT_RUNTIME_CAPABILITIES, *args.agent_capabilities}
             adapter = CommandAgentAdapter(
                 agent_command,
                 roles=(args.agent_role,),
@@ -701,7 +716,23 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             generator = CommandCandidateGenerator(generator_command, args.timeout)
         else:
             raise ValueError("loop and population require --generator-command or --agent-command")
-        evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
+        if evaluator_agent_command:
+            evaluator_adapter = CommandAgentAdapter(
+                evaluator_agent_command,
+                roles=(args.evaluator_agent_role,),
+                capabilities=tuple(
+                    sorted(set(DEFAULT_RUNTIME_CAPABILITIES) | set(args.evaluator_agent_capabilities))
+                ),
+                name=args.evaluator_agent_name,
+            )
+            evaluator = AgentCandidateEvaluator(
+                evaluator_adapter,
+                role=args.evaluator_agent_role,
+                required_capabilities=tuple(args.evaluator_agent_capabilities),
+                timeout=args.timeout,
+            )
+        else:
+            evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
         command = agent_command
     evolution_config = EvolutionConfig(
         strategy=strategy_name,
@@ -910,6 +941,14 @@ def _detach_evolution(
         command.extend(("--agent-capability", capability))
     if args.evaluator_command:
         command.extend(("--evaluator-command", args.evaluator_command))
+    if args.evaluator_agent_command:
+        command.extend(("--evaluator-agent-command", args.evaluator_agent_command))
+    if args.evaluator_agent_name != "evolution-evaluator":
+        command.extend(("--evaluator-agent-name", args.evaluator_agent_name))
+    if args.evaluator_agent_role != "evaluator":
+        command.extend(("--evaluator-agent-role", args.evaluator_agent_role))
+    for capability in args.evaluator_agent_capabilities:
+        command.extend(("--evaluator-agent-capability", capability))
     if args.openevolve_command:
         command.extend(("--openevolve-command", args.openevolve_command))
     for option, value in (
