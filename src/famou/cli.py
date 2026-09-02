@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .agent_loop import HermesSessionRuntime
 from .artifacts import ArtifactStore
+from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
 from .memory import MemoryStore
@@ -346,7 +347,25 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             "runner_pgid": run.runner_pgid,
             "current_plan_id": run.current_plan_id,
             "current_plan_version": run.current_plan_version,
+            "route_domain": run.route_domain,
+            "route_reason": run.route_reason,
+            "route_confidence": run.route_confidence,
+            "solver_profile": run.solver_profile,
+            "evaluator_profile": run.evaluator_profile,
+            "required_capabilities": list(run.route_required_capabilities),
+            "route_evidence": list(run.route_evidence),
+            "budget": (run.budget or BudgetSpec()).to_dict(),
         },
+        "route": {
+            "domain": run.route_domain,
+            "reason": run.route_reason,
+            "confidence": run.route_confidence,
+            "solver_profile": run.solver_profile,
+            "evaluator_profile": run.evaluator_profile,
+            "required_capabilities": list(run.route_required_capabilities),
+            "evidence": list(run.route_evidence),
+        } if run.route_domain else None,
+        "budget": (run.budget or BudgetSpec()).to_dict(),
         "tasks": [
             {
                 "id": task.id,

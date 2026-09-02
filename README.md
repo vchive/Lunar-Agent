@@ -5,8 +5,9 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current direction is captured
-in [`specs/003-hermes-inspired-local-agent/`](specs/003-hermes-inspired-local-agent/). The earlier
+The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
+captured in [`specs/007-domain-routing-solver-evaluator/`](specs/007-domain-routing-solver-evaluator/),
+built on the Hermes-inspired direction in [`specs/003-hermes-inspired-local-agent/`](specs/003-hermes-inspired-local-agent/). The earlier
 WebAgent-style experiment is retained as a superseded draft in
 [`specs/002-webagent-effect-parity/`](specs/002-webagent-effect-parity/).
 
@@ -102,6 +103,24 @@ rewritten, while failed or superseded work can be reopened and resumed. `deliver
 unless the run passed independent evaluation and has hashed result/runtime artifacts. All command
 outputs support `--json`, making the CLI suitable for Codex, OpenClaw, Hermes, or another local
 parent agent.
+
+### Domain routing, profiles, and execution budgets
+
+Every executable run receives a deterministic local route: `general`, `data`, `research`, or
+`coding`. The selected Solver/Evaluator profile, matching evidence, and execution budget are stored
+with the run and returned by `status --json`; no provider call or machine-wide Agent installation is
+needed to choose them.
+
+```bash
+lunar-agent run "Analyze a CSV and write a report" --runtime mock --json
+lunar-agent status <run-id> --json
+```
+
+Budgets fail closed: they bound scheduler task count, total attempts, session tool calls, controller
+elapsed time, and indexed artifact bytes. A breach writes a `budget_exceeded` ledger event and makes
+the run ineligible for `deliver`, without discarding prior artifacts. `PlanDocument` accepts an
+optional `budget` object with `max_tasks`, `max_attempts`, `max_tool_steps`,
+`max_runtime_seconds`, and `max_artifact_bytes`.
 
 If the session needs a decision, it can call `ask_user`. The run then becomes `awaiting_input` and
 returns the question in JSON/status output. Answer the same durable run later; no duplicate task is

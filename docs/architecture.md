@@ -8,6 +8,9 @@ same controller and ledger contracts.
 ```mermaid
 flowchart TD
     P[Parent agent / user\nCLI, Codex, OpenClaw, Hermes] --> C[LocalController]
+    C --> R[DomainRouter\ngeneral / data / research / coding]
+    R --> PR[ProfileRegistry\nSolver + Evaluator]
+    R --> B[BudgetSpec\ntasks · attempts · tools · time · bytes]
     C --> M[MasterPolicy\nanswer / ask_user / execute_plan]
     M -->|complex goal| PD[PlanDocument vN\nconstraints · evidence · acceptance]
     C --> S[SQLite Store\nrun/task/attempt/event/plan revisions]
@@ -16,7 +19,7 @@ flowchart TD
     D --> A[Runtime Adapter\nmock / subprocess / OpenAI-compatible\nHermesSessionRuntime]
     A --> W[Run workspace\nprompts · results · transcripts]
     W --> AS[ArtifactStore\nrun-relative paths + SHA-256]
-    AS --> E[Evaluator\nstructured evidence]
+    AS --> E[Evaluator Profile\nstructured evidence]
     E --> S
     S --> V[PATCH / REPLAN\noptimistic version check]
     V --> D
@@ -32,14 +35,20 @@ flowchart TD
 2. `plan` atomically writes the run, plan revision, logical task IDs, and policy decision. The
    store maps logical IDs (for example `research`) to run-scoped physical scheduler IDs, so plan
    documents remain readable without changing the legacy task primary key.
-3. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
+3. On creation, the deterministic Domain Router classifies every executable run as `general`,
+   `data`, `research`, or `coding`, records its evidence, and selects runtime-neutral Solver and
+   Evaluator Profiles. The default profiles preserve the existing non-empty result evaluation;
+   callers may inject a stronger evaluator without changing a Runtime Adapter.
+4. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
    dependent nodes receive only verified predecessor artifacts and bounded previews. Runtime
-   adapters never own durable state.
-4. A failed or newly-informed run can receive `patch` or `replan` while idle. SQLite checks the
+   adapters never own durable state. A per-run budget bounds task count, attempts, agent tool
+   calls, elapsed controller time, and indexed artifact bytes. Crossing a limit emits
+   `budget_exceeded`, fails closed, and keeps existing artifacts inspectable.
+5. A failed or newly-informed run can receive `patch` or `replan` while idle. SQLite checks the
    current `(plan_id, version)` before applying a typed patch. Prior revisions stay immutable;
    not-yet-run tasks removed by a revision become `superseded`, while completed task definitions
    cannot be changed.
-5. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
+6. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
    every succeeded task, and at least one indexed result/runtime artifact with a SHA-256 digest.
 
 ## Deliberate boundary versus WebAgent
@@ -57,6 +66,7 @@ machine-wide configuration directory.
 SQLite uses WAL mode. The controller recovers an interrupted `running` task as `uncertain`, then
 replays it through the normal retry/evaluation path. Plan revisions are keyed by `(run_id, version)`
 so the same plan template may be used by multiple runs; an additive migration upgrades the initial
-feature-006 table and retains all documents. The run workspace is the artifact boundary and can be
+feature-006 table and retains all documents. Feature 007 uses additive nullable route/profile
+ columns plus JSON budget/evidence fields, so old runs still load with default limits. The run
+ workspace is the artifact boundary and can be
 inspected after the process exits.
-

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .budget import BudgetSpec
 from .models import Attempt, Run, RunStatus, Task, TaskStatus
 from .policy import (
     PlanDocument,
@@ -22,6 +23,7 @@ from .policy import (
     validate_evidence,
     validate_reason,
 )
+from .routing import RouteDecision
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -38,7 +40,15 @@ CREATE TABLE IF NOT EXISTS runs (
     runner_pid INTEGER,
     runner_pgid INTEGER,
     current_plan_id TEXT,
-    current_plan_version INTEGER
+    current_plan_version INTEGER,
+    route_domain TEXT,
+    route_reason TEXT,
+    route_confidence REAL,
+    solver_profile TEXT,
+    evaluator_profile TEXT,
+    route_required_capabilities TEXT NOT NULL DEFAULT '[]',
+    route_evidence TEXT NOT NULL DEFAULT '[]',
+    budget TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -153,6 +163,14 @@ class Store:
             self._ensure_column(connection, "runs", "runner_pgid", "INTEGER")
             self._ensure_column(connection, "runs", "current_plan_id", "TEXT")
             self._ensure_column(connection, "runs", "current_plan_version", "INTEGER")
+            self._ensure_column(connection, "runs", "route_domain", "TEXT")
+            self._ensure_column(connection, "runs", "route_reason", "TEXT")
+            self._ensure_column(connection, "runs", "route_confidence", "REAL")
+            self._ensure_column(connection, "runs", "solver_profile", "TEXT")
+            self._ensure_column(connection, "runs", "evaluator_profile", "TEXT")
+            self._ensure_column(connection, "runs", "route_required_capabilities", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(connection, "runs", "route_evidence", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(connection, "runs", "budget", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(connection, "tasks", "dependencies", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(connection, "tasks", "acceptance", "TEXT")
             self._ensure_column(connection, "tasks", "input_question", "TEXT")
@@ -176,6 +194,10 @@ class Store:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                 (4, utc_now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (5, utc_now()),
             )
 
     @staticmethod
@@ -220,6 +242,7 @@ class Store:
         goal: str,
         workspace: str | Path | None = None,
         tasks: list[dict[str, Any]] | None = None,
+        route: RouteDecision | None = None,
     ) -> Run:
         goal = goal.strip()
         if not goal:
@@ -233,9 +256,15 @@ class Store:
         )
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO runs(id, goal, status, workspace, created_at, updated_at) "
-                "VALUES(?, ?, ?, ?, ?, ?)",
-                (run_id, goal, RunStatus.PENDING.value, str(workspace_path), timestamp, timestamp),
+                "INSERT INTO runs(id, goal, status, workspace, created_at, updated_at, route_domain, route_reason, route_confidence, solver_profile, evaluator_profile, route_required_capabilities, route_evidence, budget) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_id, goal, RunStatus.PENDING.value, str(workspace_path), timestamp, timestamp,
+                 route.domain if route else None, route.reason if route else None,
+                 route.confidence if route else None, route.solver_profile if route else None,
+                 route.evaluator_profile if route else None,
+                 json.dumps(list(route.required_capabilities) if route else []),
+                 json.dumps(list(route.evidence) if route else []),
+                 json.dumps(route.budget.to_dict() if route else BudgetSpec().to_dict())),
             )
             plan_tasks = tasks if tasks is not None else [
                 {
@@ -296,8 +325,10 @@ class Store:
                 run_id,
                 None,
                 "run_created",
-                {"goal": goal, "task_count": len(normalized)},
+                {"goal": goal, "task_count": len(normalized), **({"route": route.to_dict()} if route else {})},
             )
+            if route is not None:
+                self._append_event(connection, run_id, None, "route_selected", route.to_dict())
             for item in normalized:
                 self._append_event(
                     connection,
@@ -313,7 +344,8 @@ class Store:
         return self.get_run(run_id)  # type: ignore[return-value]
 
     def create_run_with_plan(
-        self, document: PlanDocument, decision: PolicyDecision | None = None, workspace: str | Path | None = None
+        self, document: PlanDocument, decision: PolicyDecision | None = None, workspace: str | Path | None = None,
+        route: RouteDecision | None = None,
     ) -> Run:
         """Create a run, first plan revision, tasks, and decision in one transaction."""
         if document.version != 1 or document.parent_version is not None:
@@ -332,8 +364,12 @@ class Store:
         normalized = [{**item, "id": id_map[item["id"]], "plan_task_id": item["id"], "depends_on": [id_map[dependency] for dependency in item["depends_on"]]} for item in normalized]
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO runs(id, goal, status, workspace, created_at, updated_at, current_plan_id, current_plan_version) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                (run_id, document.goal, RunStatus.PENDING.value, str(workspace_path), timestamp, timestamp, document.plan_id, 1),
+                "INSERT INTO runs(id, goal, status, workspace, created_at, updated_at, current_plan_id, current_plan_version, route_domain, route_reason, route_confidence, solver_profile, evaluator_profile, route_required_capabilities, route_evidence, budget) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_id, document.goal, RunStatus.PENDING.value, str(workspace_path), timestamp, timestamp, document.plan_id, 1,
+                 route.domain if route else None, route.reason if route else None, route.confidence if route else None,
+                 route.solver_profile if route else None, route.evaluator_profile if route else None,
+                 json.dumps(list(route.required_capabilities) if route else []),
+                 json.dumps(list(route.evidence) if route else []), json.dumps(route.budget.to_dict() if route else BudgetSpec().to_dict())),
             )
             for item in normalized:
                 state = TaskStatus.READY.value if not item["depends_on"] else TaskStatus.WAITING.value
@@ -350,8 +386,10 @@ class Store:
                 run_id,
                 None,
                 "run_created",
-                {"goal": document.goal, "task_count": len(normalized), "plan_id": document.plan_id},
+                {"goal": document.goal, "task_count": len(normalized), "plan_id": document.plan_id, **({"route": route.to_dict()} if route else {})},
             )
+            if route is not None:
+                self._append_event(connection, run_id, None, "route_selected", route.to_dict())
             self._append_event(connection, run_id, None, "plan_created", {"plan_id": document.plan_id, "version": 1})
             for item in normalized:
                 self._append_event(connection, run_id, item["id"], "task_created", {"title": item["title"], "dependencies": item["depends_on"], "acceptance": item["acceptance"]})
@@ -448,7 +486,7 @@ class Store:
                     physical_dependencies = [existing[dep]["id"] if dep in existing else f"{run_id[:8]}-{dep}" for dep in task.depends_on]
                     connection.execute("INSERT INTO tasks(id, run_id, title, prompt, state, dependencies, acceptance, plan_task_id, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (physical_id, run_id, task.title, task.prompt, state, json.dumps(physical_dependencies), json.dumps(task.acceptance, ensure_ascii=False) if isinstance(task.acceptance, dict) else task.acceptance, task_id, utc_now(), utc_now()))
             connection.execute("INSERT INTO plan_revisions(plan_id, run_id, version, parent_version, document, created_at) VALUES(?, ?, ?, ?, ?, ?)", (document.plan_id, run_id, document.version, document.parent_version, json.dumps(document.to_dict(), ensure_ascii=False, sort_keys=True), utc_now()))
-            connection.execute("UPDATE runs SET current_plan_id = ?, current_plan_version = ?, updated_at = ? WHERE id = ?", (document.plan_id, document.version, utc_now(), run_id))
+            connection.execute("UPDATE runs SET current_plan_id = ?, current_plan_version = ?, budget = ?, updated_at = ? WHERE id = ?", (document.plan_id, document.version, json.dumps(document.budget.to_dict()), utc_now(), run_id))
             connection.execute("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", (RunStatus.PENDING.value, utc_now(), run_id))
             self._append_event(connection, run_id, None, "plan_revision_created", {"plan_id": document.plan_id, "version": document.version, "parent_version": document.parent_version, "reason": reason, "evidence": list(evidence)})
             self._insert_decision(
@@ -556,6 +594,14 @@ class Store:
             runner_pgid=row["runner_pgid"],
             current_plan_id=row["current_plan_id"],
             current_plan_version=row["current_plan_version"],
+            route_domain=row["route_domain"],
+            route_reason=row["route_reason"],
+            route_confidence=row["route_confidence"],
+            solver_profile=row["solver_profile"],
+            evaluator_profile=row["evaluator_profile"],
+            route_required_capabilities=tuple(json.loads(row["route_required_capabilities"] or "[]")),
+            route_evidence=tuple(json.loads(row["route_evidence"] or "[]")),
+            budget=BudgetSpec.from_dict(json.loads(row["budget"] or "{}")),
         )
 
     def get_task(self, task_id: str) -> Task | None:
@@ -1162,6 +1208,31 @@ class Store:
     ) -> bool:
         with self._connect() as connection:
             return self._append_event(connection, run_id, task_id, event_type, payload, event_id)
+
+    def fail_budget(self, run_id: str, limit: str, actual: float, maximum: float, reason: str) -> bool:
+        """Record a fail-closed budget violation and transition unfinished work to failed."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None or row["status"] in {RunStatus.SUCCEEDED.value, RunStatus.CANCELLED.value}:
+                return False
+            timestamp = utc_now()
+            connection.execute(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE id = ? AND status != ?",
+                (RunStatus.FAILED.value, timestamp, run_id, RunStatus.CANCELLED.value),
+            )
+            connection.execute(
+                "UPDATE tasks SET state = ?, last_error = ?, updated_at = ? WHERE run_id = ? AND state IN (?, ?, ?, ?)",
+                (TaskStatus.BLOCKED.value, reason, timestamp, run_id, TaskStatus.PENDING.value, TaskStatus.READY.value, TaskStatus.WAITING.value, TaskStatus.RUNNING.value),
+            )
+            connection.execute(
+                "UPDATE attempts SET status = ?, finished_at = ?, heartbeat_at = ?, error = ? WHERE task_id IN (SELECT id FROM tasks WHERE run_id = ?) AND status = ?",
+                ("failed", timestamp, timestamp, reason, run_id, "running"),
+            )
+            return self._append_event(
+                connection, run_id, None, "budget_exceeded",
+                {"limit": limit, "actual": actual, "maximum": maximum, "reason": reason},
+                event_id=f"event-budget-{limit}-{run_id}",
+            )
 
     @staticmethod
     def _append_event(

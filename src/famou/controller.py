@@ -5,16 +5,20 @@ from __future__ import annotations
 import json
 import os
 import signal
+import time
 from pathlib import Path
 from typing import Any
 
 from .agent_loop import AgentInputRequired
 from .artifacts import ArtifactError, ArtifactStore
+from .budget import BudgetExceeded, BudgetSpec
 from .config import Config
-from .evaluator import Evaluation, Evaluator, NonEmptyEvaluator, acceptance_evaluator
+from .evaluator import Evaluation, Evaluator, acceptance_evaluator
 from .memory import MemoryStore
 from .models import Run, RunStatus
 from .policy import MasterPolicy, PlanDocument, PlanPatch, PolicyDecision
+from .profiles import ProfileRegistry
+from .routing import DomainRouter, RouteDecision
 from .runtime import Runtime, RuntimeExecutionError
 from .store import Store
 
@@ -27,6 +31,8 @@ class LocalController:
         evaluator: Evaluator | None = None,
         store: Store | None = None,
         memory: MemoryStore | None = None,
+        router: DomainRouter | None = None,
+        profiles: ProfileRegistry | None = None,
     ) -> None:
         self.config = config
         self.config.ensure()
@@ -35,7 +41,9 @@ class LocalController:
         self.memory = memory or MemoryStore(config.database)
         self.memory.initialize()
         self.runtime = runtime
-        self.evaluator = evaluator or NonEmptyEvaluator()
+        self.evaluator = evaluator
+        self.router = router or DomainRouter()
+        self.profiles = profiles or ProfileRegistry()
         self.policy = MasterPolicy()
 
     def decide(self, goal: str) -> PolicyDecision:
@@ -67,7 +75,12 @@ class LocalController:
             )
         elif (decision.plan_id, decision.plan_version) != (document.plan_id, document.version):
             raise ValueError("execute_plan decision does not reference the supplied plan revision")
-        run = self.store.create_run_with_plan(document, decision)
+        route = self.router.route(document.goal)
+        if document.budget != BudgetSpec():
+            route = RouteDecision(route.domain, route.reason, route.confidence, route.required_capabilities,
+                                  route.solver_profile, route.evaluator_profile, document.budget, route.evidence)
+        self._validate_route(route)
+        run = self.store.create_run_with_plan(document, decision, route=route)
         return self.resume(run.id)
 
     def patch_plan(self, run_id: str, patch: PlanPatch) -> PlanDocument:
@@ -79,6 +92,7 @@ class LocalController:
             raise ValueError("run has no current plan")
         if document.plan_id != current.plan_id:
             raise ValueError("replan must retain the current plan id")
+        inherited_budget = current.budget if document.budget == BudgetSpec() else document.budget
         if document.parent_version is None:
             document = PlanDocument(
                 goal=document.goal, tasks=document.tasks, plan_id=document.plan_id,
@@ -87,6 +101,17 @@ class LocalController:
                 soft_constraints=document.soft_constraints, objective=document.objective,
                 evidence=document.evidence, assumptions=document.assumptions,
                 acceptance=document.acceptance, verification=document.verification, delivery=document.delivery,
+                budget=inherited_budget,
+            )
+        elif inherited_budget != document.budget:
+            document = PlanDocument(
+                goal=document.goal, tasks=document.tasks, plan_id=document.plan_id,
+                version=document.version, parent_version=document.parent_version,
+                schema_version=document.schema_version, hard_constraints=document.hard_constraints,
+                soft_constraints=document.soft_constraints, objective=document.objective,
+                evidence=document.evidence, assumptions=document.assumptions,
+                acceptance=document.acceptance, verification=document.verification, delivery=document.delivery,
+                budget=inherited_budget,
             )
         return self.store.commit_plan_revision(run_id, document, reason, evidence, action="replan")
 
@@ -116,7 +141,9 @@ class LocalController:
 
     def create(self, goal: str, plan_tasks: list[dict[str, Any]] | None = None) -> Run:
         """Persist a run and its initial task without executing it."""
-        run = self.store.create_run(goal, tasks=plan_tasks)
+        route = self.router.route(goal)
+        self._validate_route(route)
+        run = self.store.create_run(goal, tasks=plan_tasks, route=route)
         Path(run.workspace).mkdir(parents=True, exist_ok=True)
         return run
 
@@ -130,11 +157,14 @@ class LocalController:
         self.store.recover_running(run_id)
         run = self.store.get_run(run_id)
         assert run is not None
+        started = time.monotonic()
+        budget = run.budget or BudgetSpec()
         try:
             while True:
                 task = self.store.next_task(run_id)
                 if task is None:
                     break
+                self._check_budget(run_id, budget, started, before_claim=True)
                 attempt = self.store.claim_task(task.id, self.runtime.name)
                 if attempt is None:
                     continue
@@ -183,7 +213,8 @@ class LocalController:
                     for relative_path in result.artifacts:
                         runtime_path = self._runtime_artifact_path(task_root, relative_path)
                         artifacts.record(runtime_path, task.id, kind="runtime")
-                    evaluation = self._evaluate(task, result.text, task_root)
+                    self._check_budget(run_id, budget, started)
+                    evaluation = self._evaluate(run, task, result.text, task_root)
                     evaluation_payload = {
                         "attempt_id": attempt.id,
                         "passed": evaluation.passed,
@@ -217,6 +248,8 @@ class LocalController:
                         self.store.retry_task(task.id, attempt.id, evaluation.reason)
                     else:
                         self.store.finish_task(task.id, attempt.id, False, relative_result, evaluation.reason)
+                except BudgetExceeded:
+                    raise
                 except AgentInputRequired as exc:
                     if not self._task_is_running(task.id):
                         self._discard_late_result(run_id, task.id, attempt.id)
@@ -259,6 +292,9 @@ class LocalController:
                         self.runtime.set_event_sink(None)
                     if callable(getattr(self.runtime, "set_process_observer", None)):
                         self.runtime.set_process_observer(None)
+        except BudgetExceeded:
+            # The ledger already contains the structured failure; return the failed run handle.
+            pass
         finally:
             # A synchronous controller has no runner identity; a detached child clears only its
             # own PID so a newer runner cannot be accidentally cleared.
@@ -281,6 +317,12 @@ class LocalController:
         task = self.store.get_task(task_id)
         return task is not None and task.state.value == "running"
 
+    def _validate_route(self, route: RouteDecision) -> None:
+        """Reject missing profile configuration before any durable work is created."""
+        self.profiles.solver(route.solver_profile)
+        if self.evaluator is None:
+            self.profiles.evaluator(route.evaluator_profile)
+
     def _record_session_artifact(self, run: Run, task_id: str) -> None:
         get_session_path = getattr(self.runtime, "session_path", None)
         if not callable(get_session_path):
@@ -299,8 +341,9 @@ class LocalController:
             return
         ArtifactStore(run.workspace, self.store, run.id).record(path, task_id, kind="session")
 
-    def _evaluate(self, task: Any, result: str, workspace: Path) -> Evaluation:
-        base = self.evaluator.evaluate(result, workspace)
+    def _evaluate(self, run: Run, task: Any, result: str, workspace: Path) -> Evaluation:
+        evaluator = self.evaluator or self.profiles.evaluator(run.evaluator_profile or "general")
+        base = evaluator.evaluate(result, workspace)
         criterion = acceptance_evaluator(task.acceptance)
         if criterion is None:
             return base
@@ -310,6 +353,28 @@ class LocalController:
             return Evaluation(True, evidence, f"{base.reason}; {acceptance.reason}")
         reasons = [reason for passed, reason in ((base.passed, base.reason), (acceptance.passed, acceptance.reason)) if not passed]
         return Evaluation(False, evidence, "; ".join(reasons))
+
+    def _check_budget(self, run_id: str, budget: BudgetSpec, started: float, *, before_claim: bool = False) -> None:
+        tasks = self.store.list_tasks(run_id)
+        attempts = sum(task.attempts for task in tasks)
+        if len(tasks) > budget.max_tasks:
+            self._budget_fail(run_id, "max_tasks", len(tasks), budget.max_tasks)
+        if before_claim and attempts >= budget.max_attempts:
+            self._budget_fail(run_id, "max_attempts", attempts, budget.max_attempts)
+        elapsed = time.monotonic() - started
+        if elapsed > budget.max_runtime_seconds:
+            self._budget_fail(run_id, "max_runtime_seconds", elapsed, budget.max_runtime_seconds)
+        tool_steps = sum(1 for event in self.store.list_events(run_id) if event["type"] == "agent_tool_result")
+        if tool_steps > budget.max_tool_steps:
+            self._budget_fail(run_id, "max_tool_steps", tool_steps, budget.max_tool_steps)
+        artifact_bytes = sum(int(item["size"]) for item in self.store.list_artifacts(run_id))
+        if artifact_bytes > budget.max_artifact_bytes:
+            self._budget_fail(run_id, "max_artifact_bytes", artifact_bytes, budget.max_artifact_bytes)
+
+    def _budget_fail(self, run_id: str, limit: str, actual: float, maximum: float) -> None:
+        reason = str(BudgetExceeded(limit, actual, maximum))
+        self.store.fail_budget(run_id, limit, actual, maximum, reason)
+        raise BudgetExceeded(limit, actual, maximum)
 
     def _discard_late_result(
         self, run_id: str, task_id: str, attempt_id: str, error: str | None = None

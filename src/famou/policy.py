@@ -12,6 +12,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from .budget import BudgetSpec
+
 Action = Literal["answer", "ask_user", "execute_plan", "patch_plan", "replan", "deliver"]
 MAX_TEXT_BYTES = 8_000
 MAX_ITEMS = 32
@@ -130,6 +132,7 @@ class PlanDocument:
     acceptance: dict[str, Any] = field(default_factory=dict)
     verification: dict[str, Any] = field(default_factory=dict)
     delivery: dict[str, Any] = field(default_factory=dict)
+    budget: BudgetSpec = field(default_factory=BudgetSpec)
 
     def __post_init__(self) -> None:
         _text(self.goal, "plan goal", required=True)
@@ -178,6 +181,8 @@ class PlanDocument:
         _json_object(self.acceptance, "acceptance")
         _json_object(self.verification, "verification")
         _json_object(self.delivery, "delivery")
+        if not isinstance(self.budget, BudgetSpec):
+            raise TypeError("plan budget must be a BudgetSpec")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -195,6 +200,7 @@ class PlanDocument:
             "acceptance": self.acceptance,
             "verification": self.verification,
             "delivery": self.delivery,
+            "budget": self.budget.to_dict(),
         }
 
     @classmethod
@@ -220,6 +226,7 @@ class PlanDocument:
             acceptance=_json_object(payload.get("acceptance"), "acceptance"),
             verification=_json_object(payload.get("verification"), "verification"),
             delivery=_json_object(payload.get("delivery"), "delivery"),
+            budget=BudgetSpec.from_dict(payload.get("budget")),
         )
 
 
@@ -240,7 +247,7 @@ class PlanPatch:
         for operation in self.operations:
             if not isinstance(operation, dict) or not isinstance(operation.get("op"), str):
                 raise TypeError("patch operation requires an op")
-            if operation["op"] not in {"add_task", "remove_task", "update_task", "add_dependency", "remove_dependency", "update_acceptance", "update_constraints"}:
+            if operation["op"] not in {"add_task", "remove_task", "update_task", "add_dependency", "remove_dependency", "update_acceptance", "update_constraints", "update_budget"}:
                 raise ValueError(f"unsupported patch operation: {operation['op']}")
             _json_object(operation, "patch operation")
 
@@ -384,6 +391,7 @@ def apply_patch(document: PlanDocument, patch: PlanPatch) -> PlanDocument:
     by_id = {task.id: task for task in tasks}
     hard = list(document.hard_constraints)
     soft = list(document.soft_constraints)
+    budget = document.budget
     for operation in patch.operations:
         op = operation["op"]
         task_id = str(operation.get("id", "")).strip()
@@ -441,10 +449,13 @@ def apply_patch(document: PlanDocument, patch: PlanPatch) -> PlanDocument:
                 raise TypeError("update_constraints hard_constraints and soft_constraints must be arrays")
             hard = list(raw_hard)
             soft = list(raw_soft)
+        elif op == "update_budget":
+            budget = BudgetSpec.from_dict(operation.get("budget"))
     return PlanDocument(
         goal=document.goal, tasks=tuple(tasks), plan_id=document.plan_id, version=document.version + 1,
         parent_version=document.version, schema_version=document.schema_version,
         hard_constraints=tuple(hard), soft_constraints=tuple(soft), objective=document.objective,
         evidence=tuple(document.evidence) + patch.evidence, assumptions=document.assumptions,
         acceptance=document.acceptance, verification=document.verification, delivery=document.delivery,
+        budget=budget,
     )

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from .budget import BudgetSpec
+
 
 class RunStatus(StrEnum):
     PENDING = "pending"
@@ -41,6 +43,14 @@ class Run:
     runner_pgid: int | None = None
     current_plan_id: str | None = None
     current_plan_version: int | None = None
+    route_domain: str | None = None
+    route_reason: str | None = None
+    route_confidence: float | None = None
+    solver_profile: str | None = None
+    evaluator_profile: str | None = None
+    route_required_capabilities: tuple[str, ...] = ()
+    route_evidence: tuple[str, ...] = ()
+    budget: BudgetSpec | None = None
 
 
 @dataclass(frozen=True)

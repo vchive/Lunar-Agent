@@ -28,6 +28,16 @@ def test_cli_json_contract_and_stdin_goal(tmp_path: Path, capsys, monkeypatch) -
     assert status_payload["tasks"][0]["state"] == "succeeded"
 
 
+def test_cli_status_json_exposes_route_profiles_and_budget(tmp_path: Path, capsys) -> None:
+    assert main(["run", "analyze this CSV", "--runtime", "mock", "--json", "--home", str(tmp_path)]) == 0
+    run_id = json.loads(capsys.readouterr().out)["run_id"]
+    assert main(["status", run_id, "--json", "--home", str(tmp_path)]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["route"]["domain"] == "data"
+    assert status["run"]["evaluator_profile"] == "data"
+    assert status["budget"]["max_tool_steps"] == 40
+
+
 def test_cli_detach_returns_durable_handle_before_execution(tmp_path: Path, capsys, monkeypatch) -> None:
     calls = []
 
