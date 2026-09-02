@@ -18,6 +18,15 @@ from .artifacts import ArtifactError, ArtifactStore
 from .budget import BudgetExceeded, BudgetSpec
 from .config import Config
 from .evaluator import Evaluation, Evaluator, acceptance_evaluator
+from .evolution import (
+    CandidateEvaluator,
+    CandidateGenerator,
+    EvolutionConfig,
+    EvolutionContext,
+    EvolutionError,
+    StrategyResult,
+    build_strategy,
+)
 from .memory import MemoryStore
 from .models import Run, RunStatus
 from .policy import MasterPolicy, PlanDocument, PlanPatch, PolicyDecision
@@ -103,6 +112,197 @@ class LocalController:
     def decide(self, goal: str) -> PolicyDecision:
         """Return a bounded deterministic Master decision without creating durable work."""
         return self.policy.decide(goal)
+
+    def create_evolution_run(
+        self,
+        contract: AlgorithmProblemContract,
+        *,
+        workspace: str | Path | None = None,
+    ) -> Run:
+        """Create a ledger-backed run for a local evolution strategy.
+
+        Candidate generation/evaluation is intentionally supplied later by ``run_evolution`` so
+        creating a detached handle never needs to instantiate an agent runtime.  The validated
+        contract is copied into the run workspace and becomes the immutable local source of truth.
+        """
+        if not isinstance(contract, AlgorithmProblemContract):
+            raise TypeError("contract must be an AlgorithmProblemContract")
+        run = self.store.create_run(
+            f"Evolve algorithm problem {contract.problem_id}",
+            workspace=workspace,
+            tasks=[
+                {
+                    "id": "evolution",
+                    "title": f"Evolve {contract.problem_id}",
+                    "prompt": contract.statement,
+                    "acceptance": None,
+                }
+            ],
+        )
+        evolution_root = Path(run.workspace) / "evolution"
+        if evolution_root.exists() and evolution_root.is_symlink():
+            raise EvolutionError("evolution directory must not be a symlink")
+        evolution_root.mkdir(parents=True, exist_ok=True)
+        contract_path = evolution_root / "contract.json"
+        if contract_path.exists() and contract_path.is_symlink():
+            raise EvolutionError("evolution contract must not be a symlink")
+        contract_path.write_text(
+            json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        task = self.store.list_tasks(run.id)[0]
+        ArtifactStore(run.workspace, self.store, run.id).record(
+            contract_path, task.id, kind="evolution_contract"
+        )
+        self.store.append_event(
+            run.id,
+            "evolution_configured",
+            {
+                "problem_id": contract.problem_id,
+                "contract_sha256": contract.digest(),
+                "strategy": contract.evolution.strategy,
+                "workspace": "evolution",
+            },
+            task_id=task.id,
+        )
+        return run
+
+    def run_evolution(
+        self,
+        run_id: str,
+        contract: AlgorithmProblemContract,
+        generator: CandidateGenerator,
+        evaluator: CandidateEvaluator,
+        evolution_config: EvolutionConfig,
+        *,
+        resume: bool = False,
+    ) -> tuple[Run, StrategyResult]:
+        """Execute or resume an evolution strategy while retaining SQLite run authority."""
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {run_id}")
+        if not isinstance(contract, AlgorithmProblemContract):
+            raise TypeError("contract must be an AlgorithmProblemContract")
+        contract_path = Path(run.workspace) / "evolution" / "contract.json"
+        if not contract_path.is_file():
+            raise EvolutionError("evolution run is missing its canonical contract")
+        try:
+            stored_contract = AlgorithmProblemContract.from_dict(
+                json.loads(contract_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise EvolutionError("canonical evolution contract is invalid") from exc
+        if stored_contract.digest() != contract.digest():
+            raise EvolutionError("supplied contract does not match the run contract")
+        task = self.store.list_tasks(run.id)
+        if len(task) != 1:
+            raise EvolutionError("evolution run must contain exactly one task")
+        evolution_task = task[0]
+
+        context = EvolutionContext(
+            contract=contract,
+            workspace=Path(run.workspace),
+            generate=generator,
+            evaluate=evaluator,
+            config=evolution_config,
+            cancelled=lambda: (
+                (latest := self.store.get_run(run_id)) is None
+                or latest.status == RunStatus.CANCELLED
+            ),
+            observe=lambda event, payload: self._observe_evolution(run_id, evolution_task.id, event, payload),
+        )
+        strategy = build_strategy(context)
+        if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            return run, strategy.resume()
+        if resume:
+            self.store.recover_running(run.id)
+        attempt = self.store.claim_task(evolution_task.id, f"evolution:{evolution_config.strategy}")
+        if attempt is None:
+            latest = self.store.get_run(run.id)
+            if latest is not None and latest.status == RunStatus.CANCELLED:
+                return latest, strategy.resume()
+            raise EvolutionError("evolution task is already claimed or not runnable")
+        self.store.append_event(
+            run.id,
+            "evolution_started",
+            {
+                "strategy": evolution_config.strategy,
+                "resume": resume,
+                "contract_sha256": contract.digest(),
+            },
+            task_id=evolution_task.id,
+        )
+        try:
+            result = strategy.resume() if resume else strategy.run()
+            result_path = Path(run.workspace) / "evolution" / "result.json"
+            result_path.write_text(
+                json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            artifacts = ArtifactStore(run.workspace, self.store, run.id)
+            for relative, kind in (
+                ("evolution/archive.jsonl", "evolution_archive"),
+                ("evolution/state.json", "evolution_state"),
+                ("evolution/result.json", "result"),
+            ):
+                path = Path(run.workspace) / relative
+                if path.is_file() and not any(
+                    item["path"] == relative and item["kind"] == kind
+                    for item in self.store.list_artifacts(run.id)
+                ):
+                    artifacts.record(path, evolution_task.id, kind=kind)
+            self.store.append_event(
+                run.id,
+                "evolution_finished",
+                result.to_dict(),
+                task_id=evolution_task.id,
+            )
+            if result.status == "failed":
+                self.store.append_event(
+                    run.id,
+                    "evolution_failed",
+                    result.to_dict(),
+                    task_id=evolution_task.id,
+                )
+            success = result.status in {"completed", "stagnated"} and result.best_candidate_id is not None
+            if result.status == "cancelled":
+                # A concurrent ``cancel`` already settled the task; do not overwrite it.
+                self.store.append_event(run.id, "evolution_cancelled", result.to_dict(), task_id=evolution_task.id)
+            else:
+                self.store.finish_task(
+                    evolution_task.id,
+                    attempt.id,
+                    success,
+                    result_path="evolution/result.json",
+                    error=result.error if not success else None,
+                )
+            settled = self.store.settle_run(run.id)
+            return settled or run, result
+        except Exception as exc:
+            error = " ".join(str(exc).split())[-2_000:] or "evolution failed"
+            self.store.append_event(
+                run.id,
+                "evolution_failed",
+                {"error": error, "strategy": evolution_config.strategy},
+                task_id=evolution_task.id,
+            )
+            self.store.finish_task(
+                evolution_task.id,
+                attempt.id,
+                False,
+                result_path=None,
+                error=error,
+            )
+            settled = self.store.settle_run(run.id)
+            raise EvolutionError(error) from exc
+
+    def _observe_evolution(
+        self, run_id: str, task_id: str, event: str, payload: dict[str, object]
+    ) -> None:
+        if event == "candidate":
+            self.store.append_event(run_id, "evolution_candidate_archived", payload, task_id=task_id)
+        elif event == "state" and payload.get("status") == "running":
+            self.store.append_event(run_id, "evolution_iteration", payload, task_id=task_id)
 
     def start_plan(self, document: PlanDocument, decision: PolicyDecision | None = None) -> Run:
         if decision is None:

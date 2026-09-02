@@ -27,7 +27,7 @@ SUPPORTED_PROBLEM_TYPES = frozenset(
 )
 PROVENANCE_VALUES = frozenset({"user_confirmed", "data_observed", "explicit_assumption"})
 VERIFICATION_VALUES = frozenset({"independent", "partial", "solver"})
-EVOLUTION_STRATEGIES = frozenset({"loop", "population"})
+EVOLUTION_STRATEGIES = frozenset({"loop", "population", "openevolve"})
 _SECRET_RE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*\S+)"
 )
@@ -241,13 +241,13 @@ class ConstraintSpec:
 
 @dataclass(frozen=True)
 class EvolutionSpec:
-    strategy: Literal["loop", "population"] = "loop"
+    strategy: Literal["loop", "population", "openevolve"] = "loop"
     max_rounds: int = 5
     stagnation_rounds: int = 3
 
     def __post_init__(self) -> None:
         if self.strategy not in EVOLUTION_STRATEGIES:
-            raise ValueError("evolution strategy must be loop or population")
+            raise ValueError("evolution strategy must be loop, population, or openevolve")
         for name, value, maximum in (("max_rounds", self.max_rounds, 10_000), ("stagnation_rounds", self.stagnation_rounds, 1_000)):
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
                 raise ValueError(f"{name} must be a positive bounded integer")
@@ -471,6 +471,7 @@ def materialize_algorithm_workspace(
         "plan_id": plan_id,
         "plan_version": plan_version,
         "contract_sha256": contract.digest(),
+        "evolution_strategy": contract.evolution.strategy,
         "directories": dict(WORKSPACE_DIRECTORIES),
     }
     manifest = root_path / "algorithm-workspace.json"

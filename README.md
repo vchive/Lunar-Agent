@@ -152,13 +152,72 @@ data/raw/ · data/processed/ · solve/ · evaluate/ · output/ · evolution/
 ```
 
 `algorithm-workspace.json` contains the plan revision and a SHA-256 digest of the canonical
-contract. The directories are a boundary for later Solver/Evaluator roles; Feature 012 does not
-copy input data, execute solver code, or start an evolution loop.
+contract. The directories are a boundary for Solver/Evaluator roles. The local evolution library
+now consumes this contract without starting a remote service or importing a machine-wide Agent.
 
-The contract accepts two future strategy values: `loop` (the default WebAgent-style fresh-context
-serial rounds) and `population` (the OpenEvolve/Workspace-style candidate archive and selection
-mode). Both will share the same contract and frozen validity-first evaluator. The current local
-`--workers` option only parallelizes independent DAG tasks; it is not population search.
+The contract accepts `loop` (the default WebAgent-style fresh-context serial rounds), `population`
+(an explicit local candidate population), and `openevolve` (an optional explicit local subprocess).
+All three share the same contract, append-only candidate archive, and frozen validity-first
+evaluator boundary. The current local `--workers` option only parallelizes independent DAG tasks; it
+is not population search.
+
+### Local evolution strategies
+
+The strategy seam is available as a library so a standalone caller or another Agent can supply its
+own solver/generator and evaluator:
+
+```python
+from famou import CandidateDraft, EvolutionConfig, EvolutionContext, build_strategy
+
+context = EvolutionContext(
+    contract=contract,
+    workspace=run_workspace,
+    generate=lambda request: CandidateDraft("def solve():\\n    return 1\\n"),
+    evaluate=lambda path, contract: report,
+    config=EvolutionConfig(strategy="loop", max_rounds=5),
+)
+result = build_strategy(context).run()
+```
+
+`loop` archives one or more independently generated candidates per round and returns the best valid
+candidate. `population` maintains a bounded active set plus the complete archive and can use local
+islands and ring migration. `openevolve` is opt-in and requires an explicit absolute executable;
+the base installation does not install or discover OpenEvolve. See
+[`specs/013-evolution-strategies/`](specs/013-evolution-strategies/) for the SDD contract and
+quickstart.
+
+The same boundary is available through the standalone CLI.  Native strategies require explicit
+local generator/evaluator commands; their first argument is a run-scoped request or candidate path
+respectively:
+
+```bash
+lunar-agent evolve contract.json \
+  --strategy loop \
+  --generator-command "/absolute/python /absolute/generator.py" \
+  --evaluator-command "/absolute/python /absolute/evaluator.py" \
+  --json --home .lunar
+```
+
+The command creates a normal SQLite-backed run and returns `run_id`, candidate counts, the best
+candidate, and the canonical workspace.  Use `--detach` for a durable child process, then resume
+with the same contract and explicit commands:
+
+```bash
+lunar-agent evolve contract.json \
+  --strategy population --population-size 8 --detach \
+  --generator-command "/absolute/python /absolute/generator.py" \
+  --evaluator-command "/absolute/python /absolute/evaluator.py" \
+  --json --home .lunar
+lunar-agent evolve contract.json --resume --run-id <run-id> \
+  --generator-command "/absolute/python /absolute/generator.py" \
+  --evaluator-command "/absolute/python /absolute/evaluator.py" \
+  --json --home .lunar
+```
+
+`status --json` and `events --json` expose the evolution result, iteration events, candidate archive
+events, and indexed `evolution/archive.jsonl`, `evolution/state.json`, and `evolution/result.json`
+artifacts.  OpenEvolve remains optional and is invoked only when `--openevolve-command` points to an
+existing absolute executable; no global installation is discovered.
 
 ### Three local invocation modes
 
@@ -182,7 +241,7 @@ lunar-agent plan routing-plan.json --runtime mock --home .lunar --json
 # 2. Parent Agent child process (stdin/stdout JSON)
 printf '%s' 'solve this routing problem' | lunar-agent run - --runtime mock --json --home .lunar
 
-# 3. Detached then resumed
+# 3. Detached then resumed (general agent run)
 lunar-agent run "search for a feasible schedule" --runtime mock --detach --json --home .lunar
 lunar-agent resume <run-id> --runtime mock --json --home .lunar
 ```

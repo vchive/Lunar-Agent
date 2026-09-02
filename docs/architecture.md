@@ -10,7 +10,7 @@ flowchart TD
     P[Parent agent / user\nCLI, Codex, OpenClaw, Hermes] --> C[LocalController]
     C --> R[DomainRouter\ngeneral / data / research / coding]
     R --> PR[ProfileRegistry\nSolver + Evaluator]
-    C --> AP[AlgorithmProblemContract\noptional · loop / population]
+    C --> AP[AlgorithmProblemContract\noptional · loop / population / openevolve]
     R --> B[BudgetSpec\ntasks · attempts · tools · time · bytes]
     C --> M[MasterPolicy\nanswer / ask_user / execute_plan]
     M -->|complex goal| PD[PlanDocument vN\nconstraints · evidence · acceptance]
@@ -47,8 +47,9 @@ flowchart TD
    callers may inject a stronger evaluator without changing a Runtime Adapter.
 4. A plan may additionally carry an `algorithm_problem` contract. It is validated before durable
    execution, stored in the immutable plan revision, and materializes six fixed local role
-   directories plus a digest-bearing `algorithm-workspace.json`. The contract records `loop` or
-   `population` as a future strategy choice; Feature 012 does not execute either strategy.
+   directories plus a digest-bearing `algorithm-workspace.json`. The strategy layer consumes this
+   contract through one runtime-neutral seam: `loop` is the default, `population` is a bounded local
+   search, and `openevolve` is an explicitly configured local subprocess.
 5. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
 dependent nodes receive only verified predecessor artifacts and bounded previews. Runtime
 adapters never own durable state. The selected evaluator profile establishes a base decision, then
@@ -93,7 +94,7 @@ The invocation seam and the search-strategy seam are deliberately independent:
 | Seam | Supported forms | Durable authority |
 | --- | --- | --- |
 | Invocation | direct local CLI; parent-Agent child process with `--json`; detached handle followed by `resume` | SQLite run/plan ledger and run workspace |
-| Evolution | `loop` (default); `population` (opt-in, future) | shared problem contract, candidate protocol, and frozen Evaluator |
+| Evolution | `loop` (default); `population` (opt-in); `openevolve` (optional local command) | shared problem contract, candidate archive, and frozen Evaluator |
 
 In direct mode, the owner supplies the goal and observes the result. In child-process mode, a
 parent such as Codex, Hermes, or OpenClaw supplies stdin/arguments and consumes bounded JSON
@@ -101,12 +102,20 @@ stdout; it does not become a required runtime dependency. In detached mode, the 
 run ID before work finishes and can safely terminate; a later process reconstructs the same plan
 revision, contract manifest, retries, and artifacts with `resume`.
 
-`loop` is the first executable evolution path: each round gets a fresh Solver context, one
-candidate is evaluated by the unchanged Evaluator, and best-so-far state is persisted. `population`
-will add an archive and objective-based selection only when a long enough local budget demonstrates
-that diversity offsets its bookkeeping and reduced per-lineage depth. The existing `--workers`
-pool is scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
-population.
+`famou evolve CONTRACT` is the CLI/controller entry point for this seam. It creates one ordinary
+SQLite run with an evolution task, copies the contract to `evolution/contract.json`, and records
+`evolution_started`, `evolution_iteration`, `evolution_candidate_archived`, and
+`evolution_finished` events. `--detach` returns the run ID before execution; `--resume --run-id`
+re-enters the same task after a process exit. The strategy itself still owns only the local
+archive/state files, while SQLite owns task lifecycle, cancellation, and the final run status.
+
+`loop` and `population` are implemented as library strategies over the same append-only archive.
+Each loop round receives a fresh generation request and returns best-so-far from all valid history;
+population maintains bounded active IDs, objective-aware score/novelty selection, optional islands,
+and ring migration while retaining the full archive. `openevolve` is only an adapter: it receives an
+explicit executable and a generated config, then imports a validated result into Lunar-Agent's
+canonical archive. The existing `--workers` pool is scheduler parallelism for independent DAG tasks
+and must not be interpreted as a candidate population.
 
 ## Recovery and migration
 

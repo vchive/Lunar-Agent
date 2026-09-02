@@ -5,16 +5,27 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
+import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from .agent_loop import HermesSessionRuntime
+from .algorithm import AlgorithmProblemContract
 from .artifacts import ArtifactStore
 from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
+from .evolution import (
+    CommandCandidateEvaluator,
+    CommandCandidateGenerator,
+    EvolutionConfig,
+    EvolutionError,
+)
 from .memory import MemoryStore
+from .models import Run
 from .policy import MasterPolicy, PlanDocument, PlanPatch
 from .runtime import OpenAICompatibleRuntime, build_runtime
 from .store import Store
@@ -114,6 +125,28 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_options(resume_parser)
     _add_home(resume_parser)
     _add_json(resume_parser)
+
+    evolve_parser = subparsers.add_parser("evolve", help="run a local algorithm evolution strategy")
+    evolve_parser.add_argument("contract", type=Path, help="algorithm problem contract JSON")
+    evolve_parser.add_argument("--workspace", type=Path, help="run workspace (default: a new local run)")
+    evolve_parser.add_argument("--resume", action="store_true", help="resume an existing strategy run")
+    evolve_parser.add_argument("--run-id", help="existing evolution run ID (required with --resume)")
+    evolve_parser.add_argument("--detach", action="store_true", help="return an evolution run ID and execute in the background")
+    evolve_parser.add_argument("--strategy", choices=("loop", "population", "openevolve"), help="override the contract strategy")
+    evolve_parser.add_argument("--generator-command", help="explicit generator command; receives a request JSON path")
+    evolve_parser.add_argument("--evaluator-command", help="explicit evaluator command; receives a candidate path")
+    evolve_parser.add_argument("--openevolve-command", help="explicit OpenEvolve command; receives a generated config path")
+    evolve_parser.add_argument("--max-rounds", type=int)
+    evolve_parser.add_argument("--stagnation-rounds", type=int)
+    evolve_parser.add_argument("--population-size", type=int, default=8)
+    evolve_parser.add_argument("--offspring-per-iteration", type=int, default=1)
+    evolve_parser.add_argument("--islands", type=int, default=1)
+    evolve_parser.add_argument("--migration-interval", type=int, default=0)
+    evolve_parser.add_argument("--migration-rate", type=float, default=0.1)
+    evolve_parser.add_argument("--seed", type=int)
+    evolve_parser.add_argument("--timeout", type=float, default=900.0)
+    _add_home(evolve_parser)
+    _add_json(evolve_parser)
 
     answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
     answer_parser.add_argument("run_id")
@@ -380,6 +413,32 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             (item for item in reversed(store.list_artifacts(run.id)) if item["kind"] == "algorithm_manifest"),
             None,
         )
+    evolution_finished = next(
+        (
+            event["payload"]
+            for event in reversed(events)
+            if event["type"] == "evolution_finished" and isinstance(event["payload"], dict)
+        ),
+        None,
+    )
+    evolution_configured = next(
+        (
+            event["payload"]
+            for event in reversed(events)
+            if event["type"] == "evolution_configured" and isinstance(event["payload"], dict)
+        ),
+        None,
+    )
+    evolution_iterations = (
+        evolution_finished.get("iterations")
+        if isinstance(evolution_finished, dict) and isinstance(evolution_finished.get("iterations"), int)
+        else sum(1 for event in events if event["type"] == "evolution_iteration")
+    )
+    evolution_candidates = (
+        evolution_finished.get("evaluated_candidates")
+        if isinstance(evolution_finished, dict) and isinstance(evolution_finished.get("evaluated_candidates"), int)
+        else sum(1 for event in events if event["type"] == "evolution_candidate_archived")
+    )
     return {
         "run": {
             "id": run.id,
@@ -433,6 +492,12 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         "plan": current_plan.to_dict() if current_plan else None,
         "algorithm_problem": current_plan.algorithm_problem if current_plan else None,
         "algorithm_workspace": algorithm_manifest,
+        "evolution": {
+            "configured": evolution_configured,
+            "result": evolution_finished,
+            "iterations": evolution_iterations,
+            "candidates": evolution_candidates,
+        } if evolution_configured or evolution_finished else None,
         "decisions": store.list_decisions(run.id),
     }
 
@@ -464,6 +529,215 @@ def _emit_error(message: str, json_mode: bool) -> None:
         print(json.dumps({"error": message}, ensure_ascii=False), file=sys.stderr)
     else:
         print(f"error: {message}", file=sys.stderr)
+
+
+def _parse_command(value: str | None, label: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    try:
+        command = tuple(shlex.split(value))
+    except ValueError as exc:
+        raise ValueError(f"{label} is not valid shell-like argument text: {exc}") from exc
+    if not command:
+        raise ValueError(f"{label} must not be empty")
+    return command
+
+
+def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
+    """Create/execute one ledger-backed local evolution run."""
+    try:
+        payload = json.loads(args.contract.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"could not read contract {args.contract}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"contract is not valid JSON: {exc.msg}") from exc
+    contract = AlgorithmProblemContract.from_dict(payload)
+    if args.strategy and args.strategy != contract.evolution.strategy:
+        contract = replace(contract, evolution=replace(contract.evolution, strategy=args.strategy))
+    controller = LocalController(config, build_runtime("mock", None, None, None, None))
+    existing_run = None
+    if args.resume:
+        if not args.run_id:
+            raise ValueError("--resume requires --run-id")
+        existing_run = controller.store.get_run(args.run_id)
+        if existing_run is None:
+            raise ValueError(f"unknown run: {args.run_id}")
+        if args.workspace is not None and args.workspace.expanduser().resolve() != existing_run.workspace:
+            raise ValueError("--workspace does not match the existing evolution run")
+        canonical_path = existing_run.workspace / "evolution" / "contract.json"
+        try:
+            canonical = AlgorithmProblemContract.from_dict(
+                json.loads(canonical_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ValueError("existing evolution run has an invalid canonical contract") from exc
+        if canonical.digest() != contract.digest():
+            raise ValueError("supplied contract does not match the existing evolution run")
+        contract = canonical
+    strategy_name = args.strategy or contract.evolution.strategy
+    workspace = (existing_run.workspace if existing_run is not None else args.workspace)
+    if workspace is None:
+        if args.resume:
+            raise ValueError("--resume requires an existing run")
+        workspace = config.runs / f"evolution-{uuid.uuid4().hex[:12]}"
+    workspace = workspace.expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
+    max_rounds = args.max_rounds if args.max_rounds is not None else contract.evolution.max_rounds
+    stagnation_rounds = args.stagnation_rounds if args.stagnation_rounds is not None else contract.evolution.stagnation_rounds
+    openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")
+    if strategy_name == "openevolve":
+        command = openevolve_command
+        if not command:
+            raise ValueError("openevolve strategy requires --openevolve-command")
+        executable = Path(command[0])
+        if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ValueError("--openevolve-command must start with an existing absolute executable path")
+        evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
+        if evaluator_command:
+            evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
+        else:
+            def evaluator(path, contract):
+                del path, contract
+                raise EvolutionError("OpenEvolve result must include evaluation or --evaluator-command")
+
+        def generator(request):
+            del request
+            raise EvolutionError("openevolve does not use a native generator")
+    else:
+        generator_command = _parse_command(args.generator_command, "--generator-command")
+        evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
+        if not generator_command or not evaluator_command:
+            raise ValueError("loop and population require --generator-command and --evaluator-command")
+        generator = CommandCandidateGenerator(generator_command, args.timeout)
+        evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
+        command = ()
+    evolution_config = EvolutionConfig(
+        strategy=strategy_name,
+        max_rounds=max_rounds,
+        stagnation_rounds=stagnation_rounds,
+        population_size=args.population_size,
+        offspring_per_iteration=args.offspring_per_iteration,
+        num_islands=args.islands,
+        migration_interval=args.migration_interval,
+        migration_rate=args.migration_rate,
+        rng_seed=args.seed,
+        timeout_seconds=args.timeout,
+        command=command,
+    )
+    if args.resume:
+        state_path = workspace / "evolution" / "state.json"
+        if state_path.is_file():
+            try:
+                state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError("existing evolution state is not valid JSON") from exc
+            if (
+                isinstance(state_payload, dict)
+                and state_payload.get("config") is not None
+                and state_payload.get("config") != evolution_config.to_dict()
+            ):
+                raise ValueError("evolution resume configuration does not match the existing run")
+    if existing_run is None:
+        run = controller.create_evolution_run(contract, workspace=workspace)
+    else:
+        run = existing_run
+    if args.detach and not args.resume:
+        return _detach_evolution(config, args, run, contract)
+    settled, result = controller.run_evolution(
+        run.id,
+        contract,
+        generator,
+        evaluator,
+        evolution_config,
+        resume=args.resume,
+    )
+    return {
+        **result.to_dict(),
+        "run_id": run.id,
+        "status": result.status,
+        "run_status": settled.status.value,
+        "workspace": str(settled.workspace),
+        "contract_sha256": contract.digest(),
+    }
+
+
+def _detach_evolution(
+    config: Config,
+    args: argparse.Namespace,
+    run: Run,
+    contract: AlgorithmProblemContract,
+) -> dict[str, object]:
+    """Spawn a child process that resumes the already-created local evolution run."""
+    run_id = run.id
+    workspace = run.workspace
+    log_path = workspace / "controller.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "famou",
+        "evolve",
+        str(args.contract.expanduser().resolve()),
+        "--resume",
+        "--run-id",
+        run_id,
+        "--home",
+        str(config.home),
+        "--json",
+    ]
+    if args.strategy:
+        command.extend(("--strategy", args.strategy))
+    if args.generator_command:
+        command.extend(("--generator-command", args.generator_command))
+    if args.evaluator_command:
+        command.extend(("--evaluator-command", args.evaluator_command))
+    if args.openevolve_command:
+        command.extend(("--openevolve-command", args.openevolve_command))
+    for option, value in (
+        ("--max-rounds", args.max_rounds),
+        ("--stagnation-rounds", args.stagnation_rounds),
+        ("--population-size", args.population_size),
+        ("--offspring-per-iteration", args.offspring_per_iteration),
+        ("--islands", args.islands),
+        ("--migration-interval", args.migration_interval),
+        ("--migration-rate", args.migration_rate),
+        ("--seed", args.seed),
+        ("--timeout", args.timeout),
+    ):
+        if value is not None:
+            command.extend((option, str(value)))
+    try:
+        with log_path.open("a", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                command,
+                cwd=Path.cwd(),
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+        pid = getattr(process, "pid", None)
+        if isinstance(pid, int) and pid > 1:
+            store = Store(config.database)
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = pid
+            store.set_runner_process(run_id, pid, pgid)
+            latest = store.get_run(run_id)
+            if latest is not None and latest.status.value in {"succeeded", "failed", "cancelled"}:
+                store.clear_runner_process(run_id)
+    except OSError as exc:
+        Store(config.database).cancel_run(run_id)
+        raise EvolutionError(f"could not start detached evolution run: {exc}") from exc
+    return {
+        "run_id": run_id,
+        "status": "pending",
+        "strategy": contract.evolution.strategy,
+        "workspace": str(workspace),
+        "detached": True,
+    }
 
 
 def _memory_payload(config: Config, query: str | None, scope: str | None, limit: int) -> list[dict[str, object]]:
@@ -578,6 +852,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.json,
             )
             return 0 if run.status.value == "succeeded" else 1
+        if args.command == "evolve":
+            payload = _evolve(config, args)
+            _emit(payload, args.json)
+            return 0 if payload.get("status") in {"completed", "stagnated", "pending"} else 1
         if args.command == "answer":
             payload = _answer(config, args)
             _emit(payload, args.json)
@@ -683,7 +961,7 @@ def main(argv: list[str] | None = None) -> int:
             decision = controller.deliver(args.run_id)
             _emit(decision.to_dict(), args.json)
             return 0
-    except (ValueError, TypeError, OSError) as exc:
+    except (ValueError, TypeError, OSError, EvolutionError) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
         return 2
     return 2

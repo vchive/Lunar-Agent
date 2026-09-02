@@ -1,9 +1,62 @@
 import json
+import shlex
 import sys
 from io import StringIO
 from pathlib import Path
 
 from famou.cli import main
+
+
+def _write_evolution_contract(path: Path, *, strategy: str = "loop", max_rounds: int = 2) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "problem_id": "cli-evolution",
+                "problem_type": "routing",
+                "statement": "Find a better route.",
+                "inputs": [{"path": "items.csv", "format": "csv", "fields": {"id": "item id"}}],
+                "decision_variables": ["route order"],
+                "objective": {"name": "quality", "direction": "maximize"},
+                "hard_constraints": [
+                    {
+                        "id": "serve-all",
+                        "description": "Serve all items.",
+                        "source": "user_confirmed",
+                        "verification": "independent",
+                    }
+                ],
+                "success_criteria": ["All items are served."],
+                "deliverables": ["A route program."],
+                "evolution": {
+                    "strategy": strategy,
+                    "max_rounds": max_rounds,
+                    "stagnation_rounds": 10,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_evolution_commands(root: Path) -> tuple[Path, Path]:
+    generator = root / "generator.py"
+    generator.write_text(
+        "import json, pathlib, sys\n"
+        "request = json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
+        "iteration = request['iteration']\n"
+        "print(json.dumps({'source': f'def solve():\\n    return {iteration}\\n'}))\n",
+        encoding="utf-8",
+    )
+    evaluator = root / "evaluator.py"
+    evaluator.write_text(
+        "import json, pathlib, re, sys\n"
+        "source = pathlib.Path(sys.argv[1]).read_text()\n"
+        "score = float(re.search(r'return (\\d+)', source).group(1))\n"
+        "print(json.dumps({'schema_version':'1','evaluator_id':'cli-fixture','validity':1,'quality':score,'combined_score':score,'detailed_scores':{'quality':{'value':score,'direction':'maximize'}},'error_info':[]}))\n",
+        encoding="utf-8",
+    )
+    return generator, evaluator
 
 
 def test_cli_run_and_status_use_repository_runtime(tmp_path: Path, capsys) -> None:
@@ -14,6 +67,164 @@ def test_cli_run_and_status_use_repository_runtime(tmp_path: Path, capsys) -> No
     assert main(["status", run_id, "--home", str(tmp_path)]) == 0
     status_output = capsys.readouterr().out
     assert "status: succeeded" in status_output
+
+
+def test_cli_evolve_loop_uses_sqlite_authority_and_resume_metadata(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    generator_command = f"{shlex.quote(sys.executable)} {shlex.quote(str(generator))}"
+    evaluator_command = f"{shlex.quote(sys.executable)} {shlex.quote(str(evaluator))}"
+
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--generator-command",
+                generator_command,
+                "--evaluator-command",
+                evaluator_command,
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    assert payload["run_status"] == "succeeded"
+    assert payload["evaluated_candidates"] == 2
+    assert payload["best_score"] == 2.0
+    run_id = payload["run_id"]
+
+    assert main(["status", run_id, "--json", "--home", str(tmp_path / "home")]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["run"]["status"] == "succeeded"
+    assert status["evolution"]["candidates"] == 2
+    assert status["evolution"]["iterations"] == 2
+    workspace = Path(payload["workspace"])
+    assert (workspace / "evolution" / "archive.jsonl").is_file()
+    assert (workspace / "evolution" / "state.json").is_file()
+    assert (workspace / "evolution" / "result.json").is_file()
+
+    assert main(["events", run_id, "--json", "--home", str(tmp_path / "home")]) == 0
+    events = json.loads(capsys.readouterr().out)
+    assert any(event["type"] == "evolution_started" for event in events)
+    assert any(event["type"] == "evolution_iteration" for event in events)
+    assert any(event["type"] == "evolution_finished" for event in events)
+
+
+def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, strategy="population", max_rounds=1)
+    assert main(["evolve", str(contract_path), "--json", "--home", str(tmp_path / "home")]) == 2
+    assert "generator-command" in json.loads(capsys.readouterr().err)["error"]
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    command_args = [
+        "evolve",
+        str(contract_path),
+        "--generator-command",
+        f"{sys.executable} {generator}",
+        "--evaluator-command",
+        f"{sys.executable} {evaluator}",
+        "--population-size",
+        "2",
+        "--offspring-per-iteration",
+        "1",
+        "--json",
+        "--home",
+        str(tmp_path / "home"),
+    ]
+    assert main(command_args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["strategy"] == "population"
+    assert payload["run_status"] == "succeeded"
+
+
+def test_cli_evolve_detach_returns_handle_then_resume_executes_same_run(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    command_args = [
+        "evolve",
+        str(contract_path),
+        "--generator-command",
+        f"{sys.executable} {generator}",
+        "--evaluator-command",
+        f"{sys.executable} {evaluator}",
+        "--detach",
+        "--json",
+        "--home",
+        str(tmp_path / "home"),
+    ]
+    assert main(command_args) == 0
+    detached = json.loads(capsys.readouterr().out)
+    assert detached["status"] == "pending" and detached["detached"] is True
+    assert calls and "--resume" in calls[0][0]
+    monkeypatch.undo()
+
+    resume_args = [
+        "evolve",
+        str(contract_path),
+        "--resume",
+        "--run-id",
+        detached["run_id"],
+        "--generator-command",
+        f"{sys.executable} {generator}",
+        "--evaluator-command",
+        f"{sys.executable} {evaluator}",
+        "--json",
+        "--home",
+        str(tmp_path / "home"),
+    ]
+    assert main(resume_args) == 0
+    resumed = json.loads(capsys.readouterr().out)
+    assert resumed["run_id"] == detached["run_id"]
+    assert resumed["run_status"] == "succeeded"
+
+
+def test_cli_evolve_openevolve_is_explicit_and_imports_canonical_result(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, strategy="openevolve", max_rounds=1)
+    external = tmp_path / "openevolve.py"
+    external.write_text(
+        "import json, pathlib, sys\n"
+        "config = json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
+        "root = pathlib.Path.cwd()\n"
+        "(root / 'candidate.py').write_text('def solve():\\n    return 7\\n')\n"
+        "(root / 'result.json').write_text(json.dumps({'candidate_path':'candidate.py','evaluation':{'schema_version':'1','evaluator_id':'external','validity':1,'quality':0.7,'combined_score':0.7,'detailed_scores':{'quality':{'value':0.7,'direction':'maximize'}},'error_info':[]}}))\n",
+        encoding="utf-8",
+    )
+    external.chmod(external.stat().st_mode | 0o100)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--openevolve-command",
+                f"{sys.executable} {external}",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["strategy"] == "openevolve"
+    assert payload["best_score"] == 0.7
+    assert payload["run_status"] == "succeeded"
 
 
 def test_cli_json_contract_and_stdin_goal(tmp_path: Path, capsys, monkeypatch) -> None:
