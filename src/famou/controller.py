@@ -28,6 +28,20 @@ from .store import Store
 
 
 class LocalController:
+    _RETRY_FEEDBACK_RULES = frozenset(
+        {
+            "result_contains",
+            "artifact_exists",
+            "artifact_text_contains",
+            "json_parse",
+            "json_has_keys",
+            "all",
+            "any",
+        }
+    )
+    _MAX_RETRY_FEEDBACK_VALUES = 16
+    _MAX_RETRY_FEEDBACK_BYTES = 8_000
+
     def __init__(
         self,
         config: Config,
@@ -553,30 +567,101 @@ class LocalController:
             except (OSError, UnicodeDecodeError, ValueError):
                 answer_content = "<answer artifact could not be read>"
         if not dependencies and not answer_content:
-            return task.prompt
-        sections = [task.prompt]
-        if answer_content:
-            sections.extend(
-                [
-                    "",
-                    "User/parent-Agent answer (from a verified run-relative artifact):",
-                    answer_content,
-                ]
-            )
-        if not dependencies:
-            return "\n".join(sections)
-        sections.extend(["", "Verified dependency artifacts (run-relative paths):"])
-        for artifact in dependencies:
-            relative = str(artifact["path"])
-            sections.append(f"- task {artifact['task_id']}: {relative}")
-            artifact_path = Path(run.workspace) / relative
-            if artifact_path.is_file() and artifact_path.stat().st_size <= 20_000:
-                try:
-                    content = artifact_path.read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    content = "<binary artifact; read it from the path>"
-                sections.extend(["  preview:", content[:8_000]])
+            sections = [task.prompt]
+        else:
+            sections = [task.prompt]
+            if answer_content:
+                sections.extend(
+                    [
+                        "",
+                        "User/parent-Agent answer (from a verified run-relative artifact):",
+                        answer_content,
+                    ]
+                )
+            if dependencies:
+                sections.extend(["", "Verified dependency artifacts (run-relative paths):"])
+                for artifact in dependencies:
+                    relative = str(artifact["path"])
+                    sections.append(f"- task {artifact['task_id']}: {relative}")
+                    artifact_path = Path(run.workspace) / relative
+                    if artifact_path.is_file() and artifact_path.stat().st_size <= 20_000:
+                        try:
+                            content = artifact_path.read_text(encoding="utf-8")
+                        except UnicodeDecodeError:
+                            content = "<binary artifact; read it from the path>"
+                        sections.extend(["  preview:", content[:8_000]])
+        feedback = self._retry_feedback(run.id, task)
+        if feedback:
+            sections.extend(["", feedback])
         return "\n".join(sections)
+
+    def _retry_feedback(self, run_id: str, task: Any) -> str | None:
+        """Render bounded, task-scoped evidence for an attempt after the first one."""
+        # The scheduler passes the task snapshot captured immediately before the next claim.
+        # Therefore ``attempts == 1`` means the prompt belongs to attempt two and must include
+        # feedback from attempt one.
+        if getattr(task, "attempts", 0) < 1:
+            return None
+        latest: dict[str, Any] | None = None
+        try:
+            events = self.store.list_events(run_id)
+        except Exception:  # noqa: BLE001 - legacy/corrupt evidence must not block retry
+            events = []
+        for event in reversed(events):
+            if event.get("task_id") != task.id or event.get("type") != "task_evaluated":
+                continue
+            payload = event.get("payload")
+            if isinstance(payload, dict) and payload.get("passed") is False:
+                latest = payload
+                break
+        previous_attempt = int(task.attempts)
+        if latest is None:
+            return (
+                f"Retry feedback from the previous attempt (attempt {previous_attempt}):\n"
+                "- source: runtime_failure\n"
+                "- status: failed\n"
+                "- instruction: The previous attempt did not complete successfully. Inspect the "
+                "task workspace, retry the requested work, and return a complete result."
+            )
+        rules = self._failed_acceptance_rules(latest.get("details"))
+        evidence = ["evaluation_failed"]
+        if rules:
+            evidence.append("acceptance_check_failed")
+            evidence.extend(f"acceptance_rule:{rule}" for rule in rules)
+        evidence = list(dict.fromkeys(evidence))[: self._MAX_RETRY_FEEDBACK_VALUES]
+        lines = [
+            f"Retry feedback from the previous verified attempt (attempt {previous_attempt}):",
+            "- source: evaluation",
+            "- status: failed",
+            f"- evidence: {', '.join(evidence)}",
+            (
+                "- instruction: Correct the verified failure and produce a complete result. Do not "
+                "claim success until the required artifacts satisfy the task acceptance checks."
+            ),
+        ]
+        rendered = "\n".join(lines)
+        return rendered[: self._MAX_RETRY_FEEDBACK_BYTES]
+
+    @classmethod
+    def _failed_acceptance_rules(cls, details: object) -> tuple[str, ...]:
+        found: list[str] = []
+
+        def visit(value: object) -> None:
+            if isinstance(value, dict):
+                rule = value.get("rule")
+                if rule in cls._RETRY_FEEDBACK_RULES and value.get("passed") is False:
+                    assert isinstance(rule, str)
+                    if rule not in found:
+                        found.append(rule)
+                for child in value.values():
+                    visit(child)
+            elif isinstance(value, list):
+                for child in value:
+                    visit(child)
+
+        if isinstance(details, dict):
+            visit(details.get("acceptance"))
+        return tuple(found[: cls._MAX_RETRY_FEEDBACK_VALUES])
 
     @staticmethod
     def _runtime_artifact_path(task_root: Path, relative_path: str) -> Path:

@@ -49,6 +49,9 @@ an optional declarative acceptance contract independently checks result text and
 only beneath that attempt workspace. Contracts can require file existence, artifact text, JSON
 parsing/top-level keys, and `all`/`any` composition; they never execute commands, invoke a model,
 or inspect an escaping path. Both decisions persist as a bounded structured evidence tree. A
+retry preserves the task and plan contract and appends a bounded, task-scoped projection of the
+latest failed evaluation (or generic runtime-failure guidance) to the next attempt prompt; raw
+errors and result contents stay in their original ledger/artifact records.
 per-run budget bounds task count, attempts, agent tool calls, elapsed controller time, and indexed
 artifact bytes. Crossing a limit emits `budget_exceeded`, fails closed, and keeps existing artifacts
 inspectable.

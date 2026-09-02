@@ -264,6 +264,14 @@ content. The full contract and runnable fixture are in
 [`specs/009-evidence-guided-recovery/contracts/recovery-proposal.md`](specs/009-evidence-guided-recovery/contracts/recovery-proposal.md)
 and [`quickstart.md`](specs/009-evidence-guided-recovery/quickstart.md).
 
+When a task is retried, the next attempt prompt keeps the immutable task request first and appends a
+bounded feedback projection. A failed acceptance evaluation contributes only controlled rule names;
+a runtime failure contributes generic recovery guidance. Raw provider errors, credentials, result
+text, and artifact contents are never copied into retry prompts. The prompt is written and hashed
+under the new attempt directory, so the correction loop remains inspectable without changing the
+plan or acceptance contract. See
+[`specs/011-verified-retry-feedback/`](specs/011-verified-retry-feedback/) for the contract.
+
 ## Called by another Agent
 
 Codex or another local Agent can invoke the CLI as a child process. Use `--json` so stdout contains
