@@ -138,6 +138,11 @@ imports a validated result into Lunar-Agent's canonical archive. The existing `-
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
 
+For Agent-backed generation, the bridge projects bounded `evaluation_feedback` from prior validated
+reports into the next prompt. This lets a solver address constraint failures and weak metrics while
+keeping candidate source, prompts, logs, and raw adapter errors out of the context. Feedback is
+read-only evidence; it cannot alter evaluator validity or population ranking.
+
 Every strategy result includes `best_candidate_path` when validity-first selection found a regular
 candidate source below the run workspace. The controller writes the same additive field to
 `evolution/result.json`, the `evolution_finished` event, and `status --json`; parent Agents can join

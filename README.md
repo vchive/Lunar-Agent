@@ -6,7 +6,7 @@ a run-scoped local directory. It does **not** require a machine-wide Hermes, Ope
 installation.
 
 The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/018-evolution-adapter-provenance/`](specs/018-evolution-adapter-provenance/), built on
+captured in [`specs/019-verified-evolution-feedback/`](specs/019-verified-evolution-feedback/), built on
 independent artifact acceptance contracts in
 [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
 routing, profiles, and budgets in
@@ -251,6 +251,12 @@ Command-backed runs persist credential-safe SHA-256 fingerprints for both the ge
 evaluator adapter profiles. Resume rejects a changed command, Agent name, role, or required
 capability before claiming the task, so one candidate archive is never silently mixed across
 different execution configurations. Raw command arguments are not written to strategy state.
+
+When an Agent is the solver, later generations also receive a small `evaluation_feedback` projection
+for recent candidates: validity, metric scores, and controlled constraint error codes/messages. It
+is reconstructed from validated archive reports on resume, capped at eight metrics/errors, and
+explicitly labeled as evidence. Candidate source, prompts, logs, and adapter exception text are not
+copied into the solver prompt.
 
 `status --json` and `events --json` expose the evolution result, iteration events, candidate archive
 events, and indexed `evolution/archive.jsonl`, `evolution/state.json`, and `evolution/result.json`
@@ -502,4 +508,4 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/018-evolution-adapter-provenance/`](specs/018-evolution-adapter-provenance/).
+[`specs/019-verified-evolution-feedback/`](specs/019-verified-evolution-feedback/).
