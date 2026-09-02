@@ -78,6 +78,12 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="persist and replay a bounded local transcript across retries/resume",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="maximum local task workers (default: 1)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -167,30 +173,40 @@ def _config(args: argparse.Namespace) -> Config:
 
 
 def _controller(args: argparse.Namespace, config: Config) -> LocalController:
-    runtime = build_runtime(
-        args.runtime,
-        getattr(args, "runtime_command", None),
-        getattr(args, "endpoint", None),
-        getattr(args, "model", None),
-        getattr(args, "api_key", None),
+    def make_runtime():
+        runtime = build_runtime(
+            args.runtime,
+            getattr(args, "runtime_command", None),
+            getattr(args, "endpoint", None),
+            getattr(args, "model", None),
+            getattr(args, "api_key", None),
+        )
+        if getattr(args, "agent_loop", False):
+            if not isinstance(runtime, OpenAICompatibleRuntime):
+                raise ValueError("--agent-loop requires --runtime openai-compatible")
+            memory = MemoryStore(config.database) if getattr(args, "memory", False) else None
+            tools = LocalToolRegistry(
+                allow_exec=getattr(args, "allow_exec", False),
+                memory=memory,
+                redactions=(runtime.api_key,) if runtime.api_key else (),
+            )
+            runtime = HermesSessionRuntime(
+                runtime,
+                tools=tools,
+                max_steps=getattr(args, "max_steps", 40),
+                memory=memory,
+                session_history=getattr(args, "session_history", False),
+            )
+        return runtime
+
+    workers = getattr(args, "workers", 1)
+    runtime = make_runtime()
+    return LocalController(
+        config,
+        runtime,
+        runtime_factory=make_runtime if workers > 1 else None,
+        max_workers=workers,
     )
-    if getattr(args, "agent_loop", False):
-        if not isinstance(runtime, OpenAICompatibleRuntime):
-            raise ValueError("--agent-loop requires --runtime openai-compatible")
-        memory = MemoryStore(config.database) if getattr(args, "memory", False) else None
-        tools = LocalToolRegistry(
-            allow_exec=getattr(args, "allow_exec", False),
-            memory=memory,
-            redactions=(runtime.api_key,) if runtime.api_key else (),
-        )
-        runtime = HermesSessionRuntime(
-            runtime,
-            tools=tools,
-            max_steps=getattr(args, "max_steps", 40),
-            memory=memory,
-            session_history=getattr(args, "session_history", False),
-        )
-    return LocalController(config, runtime)
 
 
 def _load_plan(path: Path, goal_override: str | None) -> tuple[str, list[dict[str, object]]]:
@@ -244,6 +260,8 @@ def _detach(
         "--home",
         str(config.home),
         "--json",
+        "--workers",
+        str(args.workers),
     ]
     if args.runtime_command:
         command.extend(("--command", args.runtime_command))
@@ -294,6 +312,7 @@ def _detach(
         "status": "pending",
         "workspace": str(run.workspace),
         "plan": bool(plan_tasks),
+        "workers": args.workers,
     }
 
 
@@ -492,13 +511,15 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     task_id = store.answer_input(run.id, relative_answer)
     if task_id is None:
         raise ValueError("input request was answered concurrently; inspect status")
-    resumed = _controller(args, config).resume(run.id)
+    controller = _controller(args, config)
+    resumed = controller.resume(run.id)
     return {
         "run_id": resumed.id,
         "task_id": task_id,
         "status": resumed.status.value,
         "workspace": str(resumed.workspace),
         "answer_path": relative_answer,
+        "workers": controller.max_workers,
     }
 
 
@@ -530,6 +551,7 @@ def main(argv: list[str] | None = None) -> int:
                     "status": run.status.value,
                     "workspace": str(run.workspace),
                     "input_request": controller.store.pending_input(run.id),
+                    "workers": controller.max_workers,
                 },
                 args.json,
             )
@@ -543,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
                     "status": run.status.value,
                     "workspace": str(run.workspace),
                     "input_request": controller.store.pending_input(run.id),
+                    "workers": controller.max_workers,
                 },
                 args.json,
             )
@@ -611,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
                 document = _load_plan_document(candidate)
                 controller = _controller(args, config)
                 run = controller.start_plan(document)
-                _emit({"run_id": run.id, "status": run.status.value, "plan_id": document.plan_id, "plan_version": document.version, "workspace": str(run.workspace)}, args.json)
+                _emit({"run_id": run.id, "status": run.status.value, "plan_id": document.plan_id, "plan_version": document.version, "workspace": str(run.workspace), "workers": controller.max_workers}, args.json)
                 return 0 if run.status.value == "succeeded" else 1
             payload = _status_payload(config, args.target)
             if payload is None:

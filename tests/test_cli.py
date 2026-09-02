@@ -91,6 +91,8 @@ def test_cli_detach_returns_durable_handle_before_execution(tmp_path: Path, caps
                 "--runtime",
                 "mock",
                 "--detach",
+                "--workers",
+                "3",
                 "--json",
                 "--home",
                 str(tmp_path),
@@ -100,8 +102,10 @@ def test_cli_detach_returns_durable_handle_before_execution(tmp_path: Path, caps
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "pending"
+    assert payload["workers"] == 3
     assert payload["run_id"]
     assert calls[0][0][:4] == [sys.executable, "-m", "famou", "resume"]
+    assert calls[0][0][calls[0][0].index("--workers") + 1] == "3"
     assert calls[0][1]["start_new_session"] is True
 
     assert main(["status", payload["run_id"], "--json", "--home", str(tmp_path)]) == 0
@@ -134,6 +138,47 @@ def test_cli_accepts_json_plan_and_rejects_malformed_plan(tmp_path: Path, capsys
     )
     assert main(["run", "--plan", str(bad_path), "--json", "--home", str(tmp_path / "bad-home")]) == 2
     assert "depend" in capsys.readouterr().err
+
+
+def test_cli_workers_option_is_additive_and_runs_parallel_plan(tmp_path: Path, capsys) -> None:
+    plan_path = tmp_path / "parallel.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "goal": "parallel cli plan",
+                "tasks": [
+                    {"id": "one", "prompt": "one"},
+                    {"id": "two", "prompt": "two"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        main(
+            [
+                "run",
+                "--plan",
+                str(plan_path),
+                "--runtime",
+                "mock",
+                "--workers",
+                "2",
+                "--json",
+                "--home",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "succeeded"
+    assert payload["workers"] == 2
+
+
+def test_cli_rejects_non_positive_workers_before_execution(tmp_path: Path, capsys) -> None:
+    assert main(["run", "goal", "--workers", "0", "--json", "--home", str(tmp_path)]) == 2
+    assert "max_workers" in capsys.readouterr().err
 
 
 def test_detached_model_options_propagate_without_api_key_in_argv(

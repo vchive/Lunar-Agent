@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import os
 import signal
+import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +37,13 @@ class LocalController:
         memory: MemoryStore | None = None,
         router: DomainRouter | None = None,
         profiles: ProfileRegistry | None = None,
+        runtime_factory: Callable[[], Runtime] | None = None,
+        max_workers: int = 1,
     ) -> None:
+        if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        if max_workers > 1 and runtime_factory is None:
+            raise ValueError("runtime_factory is required when max_workers is greater than 1")
         self.config = config
         self.config.ensure()
         self.store = store or Store(config.database)
@@ -42,6 +51,10 @@ class LocalController:
         self.memory = memory or MemoryStore(config.database)
         self.memory.initialize()
         self.runtime = runtime
+        self.runtime_factory = runtime_factory
+        self.max_workers = max_workers
+        self._active_lock = threading.Lock()
+        self._active_runtimes: dict[str, Runtime] = {}
         self.evaluator = evaluator
         self.router = router or DomainRouter()
         self.profiles = profiles or ProfileRegistry()
@@ -161,144 +174,68 @@ class LocalController:
         assert run is not None
         started = time.monotonic()
         budget = run.budget or BudgetSpec()
+        executor: ThreadPoolExecutor | None = None
+        active_attempt_ids: set[str] = set()
+        if self.max_workers > 1:
+            executor = ThreadPoolExecutor(
+                max_workers=self.max_workers,
+                thread_name_prefix="lunar-worker",
+            )
         try:
             while True:
-                task = self.store.next_task(run_id)
-                if task is None:
+                futures: list[Future[None]] = []
+                claimed = 0
+                while claimed < self.max_workers:
+                    task = self.store.next_task(run_id)
+                    if task is None:
+                        break
+                    self._check_budget(run_id, budget, started, before_claim=True)
+                    try:
+                        runtime = self._new_runtime()
+                    except Exception as exc:  # noqa: BLE001 - factory is a runtime boundary
+                        attempt = self.store.claim_task(task.id, getattr(self.runtime, "name", "runtime"))
+                        if attempt is not None:
+                            claimed += 1
+                            self._record_task_failure(run, task, attempt, self._sanitize_error(exc))
+                        continue
+                    attempt = self.store.claim_task(task.id, getattr(runtime, "name", "runtime"))
+                    if attempt is None:
+                        continue
+                    claimed += 1
+                    active_attempt_ids.add(attempt.id)
+                    with self._active_lock:
+                        self._active_runtimes[attempt.id] = runtime
+                    if executor is None:
+                        self._execute_task(run, task, attempt, runtime, budget, started)
+                    else:
+                        futures.append(
+                            executor.submit(
+                                self._execute_task, run, task, attempt, runtime, budget, started
+                            )
+                        )
+                if not claimed:
                     break
-                self._check_budget(run_id, budget, started, before_claim=True)
-                attempt = self.store.claim_task(task.id, self.runtime.name)
-                if attempt is None:
-                    continue
-                task_root = Path(run.workspace) / "tasks" / task.id / attempt.id
-                artifacts = ArtifactStore(run.workspace, self.store, run_id)
-                prompt = self._build_task_prompt(run, task)
-                artifacts.write_text(
-                    f"tasks/{task.id}/{attempt.id}/prompt.md",
-                    prompt,
-                    task.id,
-                    kind="prompt",
-                )
-                try:
-                    set_context = getattr(self.runtime, "set_context", None)
-                    if callable(set_context):
-                        set_context(run.id, task.id, run.goal)
-                    set_session_path = getattr(self.runtime, "set_session_path", None)
-                    if callable(set_session_path):
-                        set_session_path(
-                            Path(run.workspace) / "sessions" / task.id / "transcript.jsonl"
-                        )
-                    set_event_sink = getattr(self.runtime, "set_event_sink", None)
-                    if callable(set_event_sink):
-                        set_event_sink(
-                            lambda event_type, payload, run_id=run.id, task_id=task.id: self.store.append_event(
-                                run_id, event_type, payload, task_id=task_id
-                            )
-                        )
-                    set_observer = getattr(self.runtime, "set_process_observer", None)
-                    if callable(set_observer):
-                        set_observer(
-                            lambda pid, pgid, attempt_id=attempt.id: self.store.set_attempt_process(
-                                attempt_id, pid, pgid
-                            )
-                        )
-                    result = self.runtime.run(prompt, task_root, self.config.runtime_timeout)
-                    if not self._task_is_running(task.id):
-                        self._discard_late_result(run_id, task.id, attempt.id)
-                        continue
-                    self._record_session_artifact(run, task.id)
-                    result_path = artifacts.write_text(
-                        f"tasks/{task.id}/{attempt.id}/result.txt",
-                        result.text,
-                        task.id,
-                    )
-                    for relative_path in result.artifacts:
-                        runtime_path = self._runtime_artifact_path(task_root, relative_path)
-                        artifacts.record(runtime_path, task.id, kind="runtime")
-                    self._check_budget(run_id, budget, started)
-                    evaluation = self._evaluate(run, task, result.text, task_root)
-                    evaluation_payload = {
-                        "attempt_id": attempt.id,
-                        "passed": evaluation.passed,
-                        "reason": evaluation.reason,
-                        "evidence": list(evaluation.evidence),
-                        "details": evaluation.details,
-                    }
-                    self.store.append_event(
-                        run_id,
-                        "task_evaluated",
-                        evaluation_payload,
-                        task_id=task.id,
-                    )
-                    # Keep the decision as a run-scoped file for auditability. Evaluation files are
-                    # intentionally not counted as user output artifacts so the stable P1 artifact
-                    # contract remains prompt + result (runtime-produced files are still indexed).
-                    evaluation_path = artifacts.safe_path(
-                        f"tasks/{task.id}/{attempt.id}/evaluation.json"
-                    )
-                    evaluation_path.parent.mkdir(parents=True, exist_ok=True)
-                    evaluation_path.write_text(
-                        json.dumps(evaluation_payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-                        encoding="utf-8",
-                    )
-                    if not self._task_is_running(task.id):
-                        self._discard_late_result(run_id, task.id, attempt.id)
-                        continue
-                    relative_result = str(result_path.relative_to(Path(run.workspace)))
-                    if evaluation.passed:
-                        self.store.finish_task(task.id, attempt.id, True, relative_result)
-                    elif self._can_retry(task.attempts + 1):
-                        self.store.retry_task(task.id, attempt.id, evaluation.reason)
-                    else:
-                        self.store.finish_task(task.id, attempt.id, False, relative_result, evaluation.reason)
-                except BudgetExceeded:
-                    raise
-                except AgentInputRequired as exc:
-                    if not self._task_is_running(task.id):
-                        self._discard_late_result(run_id, task.id, attempt.id)
-                        continue
-                    self._record_session_artifact(run, task.id)
-                    request_payload = {
-                        "status": "awaiting_input",
-                        "run_id": run_id,
-                        "task_id": task.id,
-                        "attempt_id": attempt.id,
-                        "question": exc.question,
-                        "options": list(exc.options),
-                    }
-                    request_path = artifacts.write_text(
-                        f"tasks/{task.id}/{attempt.id}/input-request.json",
-                        json.dumps(request_payload, ensure_ascii=False, indent=2) + "\n",
-                        task.id,
-                        kind="input",
-                    )
-                    relative_request = str(request_path.relative_to(Path(run.workspace)))
-                    self.store.await_input(
-                        task.id,
-                        attempt.id,
-                        relative_request,
-                        exc.question,
-                        exc.options,
-                    )
-                except Exception as exc:  # noqa: BLE001 - runtime boundary must persist all failures
-                    error = self._sanitize_error(exc)
-                    if self._task_is_running(task.id):
-                        self._record_session_artifact(run, task.id)
-                    if not self._task_is_running(task.id):
-                        self._discard_late_result(run_id, task.id, attempt.id, error)
-                    elif self._can_retry(task.attempts + 1):
-                        self.store.retry_task(task.id, attempt.id, error)
-                    else:
-                        self.store.finish_task(task.id, attempt.id, False, error=error)
-                finally:
-                    if callable(getattr(self.runtime, "set_event_sink", None)):
-                        self.runtime.set_event_sink(None)
-                    if callable(getattr(self.runtime, "set_process_observer", None)):
-                        self.runtime.set_process_observer(None)
+                budget_error: BudgetExceeded | None = None
+                for future in futures:
+                    try:
+                        future.result()
+                    except BudgetExceeded as exc:
+                        budget_error = budget_error or exc
+                with self._active_lock:
+                    for attempt_id in active_attempt_ids:
+                        self._active_runtimes.pop(attempt_id, None)
+                active_attempt_ids.clear()
+                if budget_error is not None:
+                    raise budget_error
         except BudgetExceeded:
             # The ledger already contains the structured failure; return the failed run handle.
             pass
         finally:
+            if executor is not None:
+                executor.shutdown(wait=True, cancel_futures=True)
+            with self._active_lock:
+                for attempt_id in active_attempt_ids:
+                    self._active_runtimes.pop(attempt_id, None)
             # A synchronous controller has no runner identity; a detached child clears only its
             # own PID so a newer runner cannot be accidentally cleared.
             self.store.clear_runner_process(run_id, os.getpid())
@@ -306,10 +243,166 @@ class LocalController:
         assert settled is not None
         return settled
 
+    def _new_runtime(self) -> Runtime:
+        if self.max_workers > 1:
+            assert self.runtime_factory is not None
+            return self.runtime_factory()
+        return self.runtime
+
+    def _record_task_failure(self, run: Run, task: Any, attempt: Any, error: str) -> None:
+        """Persist a failure for a task that could not enter its runtime worker."""
+        del run
+        if not self._task_is_running(task.id):
+            return
+        if self._can_retry(task.attempts + 1):
+            self.store.retry_task(task.id, attempt.id, error)
+        else:
+            self.store.finish_task(task.id, attempt.id, False, error=error)
+
+    def _execute_task(
+        self,
+        run: Run,
+        task: Any,
+        attempt: Any,
+        runtime: Runtime,
+        budget: BudgetSpec,
+        started: float,
+    ) -> None:
+        """Execute one claimed task using only its private runtime and callback closures."""
+        task_root = Path(run.workspace) / "tasks" / task.id / attempt.id
+        artifacts = ArtifactStore(run.workspace, self.store, run.id)
+        prompt = self._build_task_prompt(run, task)
+        artifacts.write_text(
+            f"tasks/{task.id}/{attempt.id}/prompt.md", prompt, task.id, kind="prompt"
+        )
+        with self._active_lock:
+            self._active_runtimes[attempt.id] = runtime
+        try:
+            try:
+                set_context = getattr(runtime, "set_context", None)
+                if callable(set_context):
+                    set_context(run.id, task.id, run.goal)
+                set_session_path = getattr(runtime, "set_session_path", None)
+                if callable(set_session_path):
+                    set_session_path(Path(run.workspace) / "sessions" / task.id / "transcript.jsonl")
+                set_event_sink = getattr(runtime, "set_event_sink", None)
+                if callable(set_event_sink):
+                    set_event_sink(
+                        lambda event_type, payload, run_id=run.id, task_id=task.id: self.store.append_event(
+                            run_id, event_type, payload, task_id=task_id
+                        )
+                    )
+                set_observer = getattr(runtime, "set_process_observer", None)
+                if callable(set_observer):
+                    set_observer(
+                        lambda pid, pgid, attempt_id=attempt.id: self.store.set_attempt_process(
+                            attempt_id, pid, pgid
+                        )
+                    )
+                if not self._task_is_running(task.id):
+                    self._discard_late_result(run.id, task.id, attempt.id)
+                    return
+                result = runtime.run(prompt, task_root, self.config.runtime_timeout)
+                if not self._task_is_running(task.id):
+                    self._discard_late_result(run.id, task.id, attempt.id)
+                    return
+                self._record_session_artifact(run, task.id, runtime)
+                result_path = artifacts.write_text(
+                    f"tasks/{task.id}/{attempt.id}/result.txt", result.text, task.id
+                )
+                for relative_path in result.artifacts:
+                    runtime_path = self._runtime_artifact_path(task_root, relative_path)
+                    artifacts.record(runtime_path, task.id, kind="runtime")
+                self._check_budget(run.id, budget, started)
+                evaluation = self._evaluate(run, task, result.text, task_root)
+                evaluation_payload = {
+                    "attempt_id": attempt.id,
+                    "passed": evaluation.passed,
+                    "reason": evaluation.reason,
+                    "evidence": list(evaluation.evidence),
+                    "details": evaluation.details,
+                }
+                self.store.append_event(run.id, "task_evaluated", evaluation_payload, task_id=task.id)
+                evaluation_path = artifacts.safe_path(f"tasks/{task.id}/{attempt.id}/evaluation.json")
+                evaluation_path.parent.mkdir(parents=True, exist_ok=True)
+                evaluation_path.write_text(
+                    json.dumps(evaluation_payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                if not self._task_is_running(task.id):
+                    self._discard_late_result(run.id, task.id, attempt.id)
+                    return
+                relative_result = str(result_path.relative_to(Path(run.workspace)))
+                if evaluation.passed:
+                    self.store.finish_task(task.id, attempt.id, True, relative_result)
+                elif self._can_retry(task.attempts + 1):
+                    self.store.retry_task(task.id, attempt.id, evaluation.reason)
+                else:
+                    self.store.finish_task(task.id, attempt.id, False, relative_result, evaluation.reason)
+            except BudgetExceeded:
+                raise
+            except AgentInputRequired as exc:
+                if not self._task_is_running(task.id):
+                    self._discard_late_result(run.id, task.id, attempt.id)
+                    return
+                self._record_session_artifact(run, task.id, runtime)
+                request_payload = {
+                    "status": "awaiting_input",
+                    "run_id": run.id,
+                    "task_id": task.id,
+                    "attempt_id": attempt.id,
+                    "question": exc.question,
+                    "options": list(exc.options),
+                }
+                request_path = artifacts.write_text(
+                    f"tasks/{task.id}/{attempt.id}/input-request.json",
+                    json.dumps(request_payload, ensure_ascii=False, indent=2) + "\n",
+                    task.id,
+                    kind="input",
+                )
+                self.store.await_input(
+                    task.id,
+                    attempt.id,
+                    str(request_path.relative_to(Path(run.workspace))),
+                    exc.question,
+                    exc.options,
+                )
+            except Exception as exc:  # noqa: BLE001 - runtime boundary must persist all failures
+                error = self._sanitize_error(exc)
+                if self._task_is_running(task.id):
+                    self._record_session_artifact(run, task.id, runtime)
+                if not self._task_is_running(task.id):
+                    self._discard_late_result(run.id, task.id, attempt.id, error)
+                elif self._can_retry(task.attempts + 1):
+                    self.store.retry_task(task.id, attempt.id, error)
+                else:
+                    self.store.finish_task(task.id, attempt.id, False, error=error)
+        finally:
+            if callable(getattr(runtime, "set_event_sink", None)):
+                runtime.set_event_sink(None)
+            if callable(getattr(runtime, "set_process_observer", None)):
+                runtime.set_process_observer(None)
+            with self._active_lock:
+                self._active_runtimes.pop(attempt.id, None)
+
     def cancel(self, run_id: str) -> bool:
         cancelled = self.store.cancel_run(run_id)
         if cancelled:
-            self.runtime.cancel()
+            with self._active_lock:
+                runtimes = list(self._active_runtimes.values())
+            if not runtimes:
+                runtimes = [self.runtime]
+            seen: set[int] = set()
+            for runtime in runtimes:
+                identity = id(runtime)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                try:
+                    runtime.cancel()
+                except Exception as exc:  # noqa: BLE001 - cancellation must continue to all workers
+                    # One adapter failing to cancel must not prevent the remaining adapters.
+                    del exc
             run = self.store.get_run(run_id)
             if run is not None:
                 self._terminate_process_group(run.runner_pid, run.runner_pgid)
@@ -364,8 +457,9 @@ class LocalController:
         if self.evaluator is None:
             self.profiles.evaluator(route.evaluator_profile)
 
-    def _record_session_artifact(self, run: Run, task_id: str) -> None:
-        get_session_path = getattr(self.runtime, "session_path", None)
+    def _record_session_artifact(self, run: Run, task_id: str, runtime: Runtime | None = None) -> None:
+        runtime = runtime or self.runtime
+        get_session_path = getattr(runtime, "session_path", None)
         if not callable(get_session_path):
             return
         path = get_session_path()

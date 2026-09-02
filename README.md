@@ -84,6 +84,19 @@ The controller remains the orchestrator: it validates and schedules optional dep
 retries failed attempts, hands verified artifacts to dependent tasks, and recovers after an
 interruption. It is not a WebAgent stage machine.
 
+For plans with independent tasks, local workers can overlap without sharing runtime session state:
+
+```bash
+lunar-agent run --plan plan.json --runtime mock --workers 2 --json
+lunar-agent resume <run-id> --runtime mock --workers 2 --json
+```
+
+The default is one worker, preserving serial behavior. `--workers N` is a local bounded thread
+pool; the CLI creates a fresh repository-owned runtime adapter per task, while SQLite remains the
+claim and dependency-ordering authority. Cancellation fans out to all active adapters, and late
+results are discarded by the same durable rules as serial execution. No Hermes/OpenCode/Codex
+installation or remote queue is required.
+
 ### Master policy and versioned plans
 
 The local Master layer carries over WebAgent's highest-value effect-layer behavior without its
