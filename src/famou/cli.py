@@ -120,6 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", "inspect a run"),
         ("events", "inspect run events"),
         ("cancel", "cancel a run"),
+        ("recover", "propose an evidence-guided recovery action"),
     ):
         command_parser = subparsers.add_parser(name, help=help_text)
         command_parser.add_argument("run_id")
@@ -335,15 +336,25 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         return None
     tasks = store.list_tasks(run.id)
     current_plan = store.get_current_plan(run.id)
+    events = store.list_events(run.id)
     latest_evaluations = {
         event["task_id"]: {
             "event_id": event["id"],
             "created_at": event["created_at"],
             **event["payload"],
         }
-        for event in store.list_events(run.id)
+        for event in events
         if event["type"] == "task_evaluated" and event["task_id"] is not None
     }
+    latest_recovery = next(
+        (
+            event["payload"].get("proposal")
+            for event in reversed(events)
+            if event["type"] == "recovery_proposed"
+            and isinstance(event["payload"].get("proposal"), dict)
+        ),
+        None,
+    )
     return {
         "run": {
             "id": run.id,
@@ -393,6 +404,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         ],
         "artifacts": store.list_artifacts(run.id),
         "input_request": store.pending_input(run.id),
+        "recovery": latest_recovery,
         "plan": current_plan.to_dict() if current_plan else None,
         "decisions": store.list_decisions(run.id),
     }
@@ -565,6 +577,19 @@ def main(argv: list[str] | None = None) -> int:
                 _emit_error(f"run not found or already terminal: {args.run_id}", args.json)
                 return 2
             _emit({"run_id": args.run_id, "status": "cancelled"}, args.json)
+            return 0
+        if args.command == "recover":
+            controller = LocalController(
+                config,
+                build_runtime("mock", None, None, None, None),
+            )
+            proposal = controller.recover(args.run_id)
+            run = controller.store.get_run(args.run_id)
+            assert run is not None
+            _emit(
+                {"run_id": run.id, "status": run.status.value, "proposal": proposal.to_dict()},
+                args.json,
+            )
             return 0
         if args.command == "memory":
             payload = _memory_payload(config, args.query, args.scope, args.limit)

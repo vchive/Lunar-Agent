@@ -24,6 +24,8 @@ flowchart TD
     E --> S
     S --> V[PATCH / REPLAN\noptimistic version check]
     V --> D
+    S --> RP[RecoveryPolicy\nadvisory evidence-guided proposal]
+    RP -->|ask_user / retry / propose_patch / propose_replan| P
     S --> DL[deliver\nonly verified artifacts]
     DL --> P
 ```
@@ -54,7 +56,13 @@ inspectable.
    current `(plan_id, version)` before applying a typed patch. Prior revisions stay immutable;
    not-yet-run tasks removed by a revision become `superseded`, while completed task definitions
    cannot be changed.
-6. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
+6. `recover` is a deterministic, advisory local policy over persisted task/evaluation/input/budget
+   evidence. It returns `retry`, `ask_user`, `propose_patch`, `propose_replan`, `stop`, or `none`,
+   writes each distinct proposal as a hashed audit artifact and idempotent event, and exposes the
+   latest proposal in status JSON. It does not invoke a Runtime Adapter or model, execute a tool,
+   mutate tasks, resume work, relax budgets, or apply a plan revision; a parent/user must choose an
+   existing explicit command after reviewing the evidence.
+7. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
    every succeeded task, and at least one indexed result/runtime artifact with a SHA-256 digest.
 
 ## Deliberate boundary versus WebAgent

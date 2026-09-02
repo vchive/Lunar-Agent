@@ -44,6 +44,37 @@ def test_cli_status_json_exposes_route_profiles_and_budget(tmp_path: Path, capsy
     assert status["budget"]["max_tool_steps"] == 40
 
 
+def test_cli_recover_persists_an_advisory_proposal_in_status(tmp_path: Path, capsys) -> None:
+    plan_path = tmp_path / "recovery-plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "goal": "write a checked report",
+                "plan_id": "cli-recovery-plan",
+                "tasks": [
+                    {
+                        "id": "report",
+                        "title": "Report",
+                        "prompt": "write report.json",
+                        "acceptance": {"artifact_exists": "report.json"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["plan", str(plan_path), "--runtime", "mock", "--json", "--home", str(tmp_path)]) == 1
+    run_id = json.loads(capsys.readouterr().out)["run_id"]
+
+    assert main(["recover", run_id, "--json", "--home", str(tmp_path)]) == 0
+    recovery = json.loads(capsys.readouterr().out)
+    assert recovery["proposal"]["action"] == "propose_patch"
+
+    assert main(["status", run_id, "--json", "--home", str(tmp_path)]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["recovery"] == recovery["proposal"]
+
+
 def test_cli_detach_returns_durable_handle_before_execution(tmp_path: Path, capsys, monkeypatch) -> None:
     calls = []
 

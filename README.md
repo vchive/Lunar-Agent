@@ -6,8 +6,10 @@ a run-scoped local directory. It does **not** require a machine-wide Hermes, Ope
 installation.
 
 The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/),
-built on domain routing, profiles, and budgets in
+captured in [`specs/009-evidence-guided-recovery/`](specs/009-evidence-guided-recovery/), built on
+independent artifact acceptance contracts in
+[`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
+routing, profiles, and budgets in
 [`specs/007-domain-routing-solver-evaluator/`](specs/007-domain-routing-solver-evaluator/). The earlier
 WebAgent-style experiment is retained as a superseded draft in
 [`specs/002-webagent-effect-parity/`](specs/002-webagent-effect-parity/).
@@ -223,6 +225,31 @@ The `task_evaluated` event and attempt `evaluation.json` contain a bounded rule-
 The complete v1 grammar and a runnable local example are in
 [`specs/008-artifact-acceptance-contracts/contracts/acceptance-contract.md`](specs/008-artifact-acceptance-contracts/contracts/acceptance-contract.md)
 and [`quickstart.md`](specs/008-artifact-acceptance-contracts/quickstart.md).
+
+### Evidence-guided recovery proposals
+
+After a failed verifier, exhausted runtime path, budget boundary, interruption, or input pause, ask
+the local controller for an advisory next step:
+
+```bash
+lunar-agent recover <run-id> --json
+lunar-agent status <run-id> --json
+```
+
+The deterministic local `RecoveryPolicy` returns one of `retry`, `ask_user`, `propose_patch`,
+`propose_replan`, `stop`, or `none`. It reads only the durable ledger and does not call a model,
+runtime, tool, shell, or network endpoint. Critically, it never resumes work, weakens acceptance,
+changes a budget, or commits a plan revision itself: a parent Agent deliberately follows with the
+existing `answer`, `resume`, `patch`, or `replan` command.
+
+Each distinct proposal is written as a SHA-256-indexed
+`recovery/proposals/<fingerprint>.json` audit artifact and an idempotent `recovery_proposed` event.
+The latest proposal is available as the additive `recovery` field in `status --json`, alongside the
+existing task evaluation. Proposal evidence uses only controlled IDs, statuses, rule kinds, and
+budget names; it does not duplicate raw runtime errors, prompts, artifacts, answers, or model
+content. The full contract and runnable fixture are in
+[`specs/009-evidence-guided-recovery/contracts/recovery-proposal.md`](specs/009-evidence-guided-recovery/contracts/recovery-proposal.md)
+and [`quickstart.md`](specs/009-evidence-guided-recovery/quickstart.md).
 
 ## Called by another Agent
 

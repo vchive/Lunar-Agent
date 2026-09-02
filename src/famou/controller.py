@@ -18,6 +18,7 @@ from .memory import MemoryStore
 from .models import Run, RunStatus
 from .policy import MasterPolicy, PlanDocument, PlanPatch, PolicyDecision
 from .profiles import ProfileRegistry
+from .recovery import RecoveryPolicy, RecoveryProposal
 from .routing import DomainRouter, RouteDecision
 from .runtime import Runtime, RuntimeExecutionError
 from .store import Store
@@ -45,6 +46,7 @@ class LocalController:
         self.router = router or DomainRouter()
         self.profiles = profiles or ProfileRegistry()
         self.policy = MasterPolicy()
+        self.recovery_policy = RecoveryPolicy()
 
     def decide(self, goal: str) -> PolicyDecision:
         """Return a bounded deterministic Master decision without creating durable work."""
@@ -313,6 +315,44 @@ class LocalController:
                 self._terminate_process_group(run.runner_pid, run.runner_pgid)
                 self.store.clear_runner_process(run_id)
         return cancelled
+
+    def recover(self, run_id: str) -> RecoveryProposal:
+        """Persist an advisory recovery proposal without changing execution state.
+
+        This is deliberately separate from :meth:`resume`: a parent Agent or owner decides whether
+        to apply a patch/replan, answer input, or resume a runtime after inspecting the evidence.
+        """
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {run_id}")
+        tasks = self.store.list_tasks(run.id)
+        proposal = self.recovery_policy.propose(
+            run, tasks, self.store.list_events(run.id), self.store.pending_input(run.id)
+        )
+        target_task_id = proposal.task_id or (tasks[0].id if tasks else None)
+        if target_task_id is None:
+            raise ValueError("run has no task to own the recovery artifact")
+        relative_path = f"recovery/proposals/{proposal.fingerprint}.json"
+        persisted = proposal.with_artifact_path(relative_path)
+        artifacts = ArtifactStore(run.workspace, self.store, run.id)
+        if not any(
+            item["path"] == relative_path and item["kind"] == "recovery"
+            for item in self.store.list_artifacts(run.id)
+        ):
+            artifacts.write_text(
+                relative_path,
+                json.dumps(persisted.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                target_task_id,
+                kind="recovery",
+            )
+        self.store.append_event(
+            run.id,
+            "recovery_proposed",
+            {"proposal": persisted.to_dict()},
+            task_id=proposal.task_id,
+            event_id=proposal.event_id,
+        )
+        return persisted
 
     def _task_is_running(self, task_id: str) -> bool:
         task = self.store.get_task(task_id)
