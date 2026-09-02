@@ -431,7 +431,24 @@ class CommandAgentAdapter:
         raw_status = payload.get("status")
         raw_error = payload.get("error")
         status = raw_status if raw_status is not None else ("failed" if raw_error else "succeeded")
-        text = payload.get("text", payload.get("result", ""))
+        if "text" in payload:
+            text = payload["text"]
+        elif "result" in payload:
+            text = payload["result"]
+        elif "source" in payload:
+            # Preserve optional candidate filename/metadata for AgentCandidateGenerator while
+            # keeping the shared AgentResult text contract unchanged.
+            text = json.dumps(
+                {
+                    "source": payload["source"],
+                    **({"filename": payload["filename"]} if "filename" in payload else {}),
+                    **({"metadata": payload["metadata"]} if "metadata" in payload else {}),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        else:
+            text = ""
         artifacts = payload.get("artifacts", ())
         metadata = payload.get("metadata", {})
         if not isinstance(status, str):

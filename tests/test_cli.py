@@ -191,6 +191,50 @@ def test_cli_evolve_loop_uses_sqlite_authority_and_resume_metadata(tmp_path: Pat
     assert any(event["type"] == "evolution_finished" for event in events)
 
 
+def test_cli_evolve_can_use_explicit_agent_as_candidate_generator(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    evaluator = tmp_path / "evaluator.py"
+    evaluator.write_text(
+        "import pathlib, re, sys, json\n"
+        "source = pathlib.Path(sys.argv[1]).read_text()\n"
+        "score = float(re.search(r'return (\\d+)', source).group(1))\n"
+        "print(json.dumps({'schema_version':'1','evaluator_id':'agent-cli','validity':1,'quality':score,'combined_score':score,'detailed_scores':{'quality':{'value':score,'direction':'maximize'}},'error_info':[]}))\n",
+        encoding="utf-8",
+    )
+    agent = tmp_path / "agent.py"
+    agent.write_text(
+        "import json, sys\n"
+        "request = json.loads(sys.stdin.read())\n"
+        "print(json.dumps({'source':'def solve():\\n    return 9\\n','metadata':{'iteration':request['task_id']}}))\n",
+        encoding="utf-8",
+    )
+    evaluator_command = f"{sys.executable} {evaluator}"
+    agent_command = f"{sys.executable} {agent}"
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-command",
+                agent_command,
+                "--agent-capability",
+                "read_files",
+                "--evaluator-command",
+                evaluator_command,
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    assert payload["run_status"] == "succeeded"
+    assert payload["best_score"] == 9.0
+
+
 def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path, strategy="population", max_rounds=1)

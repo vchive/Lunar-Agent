@@ -102,7 +102,7 @@ The invocation seam and the search-strategy seam are deliberately independent:
 | Seam | Supported forms | Durable authority |
 | --- | --- | --- |
 | Invocation | direct local CLI; `delegate` with an explicit Agent command; parent-Agent child process with `--json`; detached handle followed by `resume` | SQLite run/plan ledger and run workspace |
-| Evolution | `loop` (default); `population` (opt-in); `openevolve` (optional local command) | shared problem contract, candidate archive, and frozen Evaluator |
+| Evolution | `loop` (default); `population` (opt-in); Agent-backed generation; `openevolve` (optional local command) | shared problem contract, candidate archive, and frozen Evaluator |
 
 In direct mode, the owner supplies the goal and observes the result. In child-process mode, a
 parent such as Codex, Hermes, or OpenClaw supplies stdin/arguments and consumes bounded JSON
@@ -120,7 +120,9 @@ archive/state files, while SQLite owns task lifecycle, cancellation, and the fin
 `loop` and `population` are implemented as library strategies over the same append-only archive.
 Each loop round receives a fresh generation request and returns best-so-far from all valid history;
 population maintains bounded active IDs, objective-aware score/novelty selection, optional islands,
-and ring migration while retaining the full archive. `openevolve` is only an adapter: it receives an
+and ring migration while retaining the full archive. `AgentCandidateGenerator` can adapt an
+explicit role-bearing Agent to the same generation seam; it returns a candidate proposal while the
+existing evaluator remains authoritative. `openevolve` is only an adapter: it receives an
 explicit executable and a generated config, then imports a validated result into Lunar-Agent's
 canonical archive. The existing `--workers` pool is scheduler parallelism for independent DAG tasks
 and must not be interpreted as a candidate population.

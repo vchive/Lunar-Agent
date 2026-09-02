@@ -252,6 +252,21 @@ events, and indexed `evolution/archive.jsonl`, `evolution/state.json`, and `evol
 artifacts.  OpenEvolve remains optional and is invoked only when `--openevolve-command` points to an
 existing absolute executable; no global installation is discovered.
 
+An explicit Agent can generate candidates directly while the evaluator remains independent:
+
+```bash
+lunar-agent evolve contract.json --strategy loop \
+  --agent-command "/absolute/path/to/agent-wrapper --json" \
+  --agent-role solver --agent-capability read_files \
+  --evaluator-command "/absolute/path/to/evaluator-wrapper" \
+  --json --home .lunar
+```
+
+The Agent receives a bounded algorithm context and returns source text or a `{\"source\": ...}`
+object. Lunar-Agent archives and evaluates that proposal through the same validity-first path as
+command generators; an Agent claim is never treated as evaluation evidence. See
+[`specs/015-agent-backed-evolution/`](specs/015-agent-backed-evolution/) for the SDD contract.
+
 ### Three local invocation modes
 
 Lunar-Agent is the same independent agent in each mode; a parent Agent is optional.

@@ -12,6 +12,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
+from .agent_evolution import AgentCandidateGenerator
 from .agent_loop import HermesSessionRuntime
 from .agents import AgentError, AgentRegistry, CommandAgentAdapter
 from .algorithm import AlgorithmProblemContract
@@ -167,6 +168,16 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument("--detach", action="store_true", help="return an evolution run ID and execute in the background")
     evolve_parser.add_argument("--strategy", choices=("loop", "population", "openevolve"), help="override the contract strategy")
     evolve_parser.add_argument("--generator-command", help="explicit generator command; receives a request JSON path")
+    evolve_parser.add_argument("--agent-command", help="explicit Agent command used as candidate generator")
+    evolve_parser.add_argument("--agent-name", default="evolution-agent")
+    evolve_parser.add_argument("--agent-role", default="solver")
+    evolve_parser.add_argument(
+        "--agent-capability",
+        dest="agent_capabilities",
+        action="append",
+        default=[],
+        help="required Agent capability; may be supplied more than once",
+    )
     evolve_parser.add_argument("--evaluator-command", help="explicit evaluator command; receives a candidate path")
     evolve_parser.add_argument("--openevolve-command", help="explicit OpenEvolve command; receives a generated config path")
     evolve_parser.add_argument("--max-rounds", type=int)
@@ -632,7 +643,10 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     max_rounds = args.max_rounds if args.max_rounds is not None else contract.evolution.max_rounds
     stagnation_rounds = args.stagnation_rounds if args.stagnation_rounds is not None else contract.evolution.stagnation_rounds
     openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")
+    agent_command = _parse_command(args.agent_command, "--agent-command")
     if strategy_name == "openevolve":
+        if agent_command:
+            raise ValueError("--agent-command is only supported by loop and population")
         command = openevolve_command
         if not command:
             raise ValueError("openevolve strategy requires --openevolve-command")
@@ -653,11 +667,42 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     else:
         generator_command = _parse_command(args.generator_command, "--generator-command")
         evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
-        if not generator_command or not evaluator_command:
-            raise ValueError("loop and population require --generator-command and --evaluator-command")
-        generator = CommandCandidateGenerator(generator_command, args.timeout)
+        if generator_command and agent_command:
+            raise ValueError("--agent-command and --generator-command are mutually exclusive")
+        if not evaluator_command:
+            raise ValueError(
+                "loop and population require --evaluator-command plus "
+                "--generator-command or --agent-command"
+            )
+        if agent_command:
+            declared = {
+                "read_files",
+                "write_files",
+                "run_tests",
+                "write_artifacts",
+                "analyze_data",
+                "gather_sources",
+                *args.agent_capabilities,
+            }
+            adapter = CommandAgentAdapter(
+                agent_command,
+                roles=(args.agent_role,),
+                capabilities=tuple(sorted(declared)),
+                name=args.agent_name,
+            )
+            generator = AgentCandidateGenerator(
+                adapter,
+                contract=contract,
+                role=args.agent_role,
+                required_capabilities=tuple(args.agent_capabilities),
+                timeout=args.timeout,
+            )
+        elif generator_command:
+            generator = CommandCandidateGenerator(generator_command, args.timeout)
+        else:
+            raise ValueError("loop and population require --generator-command or --agent-command")
         evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
-        command = ()
+        command = agent_command
     evolution_config = EvolutionConfig(
         strategy=strategy_name,
         max_rounds=max_rounds,
@@ -855,6 +900,14 @@ def _detach_evolution(
         command.extend(("--strategy", args.strategy))
     if args.generator_command:
         command.extend(("--generator-command", args.generator_command))
+    if args.agent_command:
+        command.extend(("--agent-command", args.agent_command))
+    if args.agent_name != "evolution-agent":
+        command.extend(("--agent-name", args.agent_name))
+    if args.agent_role != "solver":
+        command.extend(("--agent-role", args.agent_role))
+    for capability in args.agent_capabilities:
+        command.extend(("--agent-capability", capability))
     if args.evaluator_command:
         command.extend(("--evaluator-command", args.evaluator_command))
     if args.openevolve_command:
