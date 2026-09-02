@@ -14,6 +14,7 @@ from .artifacts import ArtifactStore
 from .config import Config
 from .controller import LocalController
 from .memory import MemoryStore
+from .policy import MasterPolicy, PlanDocument, PlanPatch
 from .runtime import OpenAICompatibleRuntime, build_runtime
 from .store import Store
 from .tools import LocalToolRegistry
@@ -129,6 +130,30 @@ def build_parser() -> argparse.ArgumentParser:
     memory_parser.add_argument("--limit", type=int, default=20)
     _add_home(memory_parser)
     _add_json(memory_parser)
+
+    decide_parser = subparsers.add_parser("decide", help="classify a goal with Master policy")
+    decide_parser.add_argument("goal", nargs="?", help="goal, or '-' to read stdin")
+    _add_home(decide_parser)
+    _add_json(decide_parser)
+
+    plan_parser = subparsers.add_parser("plan", help="create or inspect a versioned plan")
+    plan_parser.add_argument("target", help="plan JSON path to create, or run ID to inspect")
+    plan_parser.add_argument("plan_file", nargs="?", help="optional plan JSON path")
+    _add_runtime_options(plan_parser)
+    _add_home(plan_parser)
+    _add_json(plan_parser)
+
+    for name, help_text in (("patch", "patch the current plan"), ("replan", "create a new plan revision")):
+        revision_parser = subparsers.add_parser(name, help=help_text)
+        revision_parser.add_argument("run_id")
+        revision_parser.add_argument("plan_file", type=Path)
+        _add_home(revision_parser)
+        _add_json(revision_parser)
+
+    deliver_parser = subparsers.add_parser("deliver", help="return verified run artifacts")
+    deliver_parser.add_argument("run_id")
+    _add_home(deliver_parser)
+    _add_json(deliver_parser)
     return parser
 
 
@@ -182,6 +207,18 @@ def _load_plan(path: Path, goal_override: str | None) -> tuple[str, list[dict[st
     if not isinstance(tasks, list):
         raise TypeError("plan requires a tasks array")
     return plan_goal, tasks
+
+
+def _load_plan_document(path: Path, goal_override: str | None = None) -> PlanDocument:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"could not read plan {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"plan is not valid JSON: {exc.msg}") from exc
+    if goal_override and isinstance(payload, dict):
+        payload = {**payload, "goal": goal_override}
+    return PlanDocument.from_dict(payload)
 
 
 def _detach(
@@ -295,6 +332,8 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
     run = store.get_run(run_id)
     if run is None:
         return None
+    tasks = store.list_tasks(run.id)
+    current_plan = store.get_current_plan(run.id)
     return {
         "run": {
             "id": run.id,
@@ -305,10 +344,13 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             "updated_at": run.updated_at,
             "runner_pid": run.runner_pid,
             "runner_pgid": run.runner_pgid,
+            "current_plan_id": run.current_plan_id,
+            "current_plan_version": run.current_plan_version,
         },
         "tasks": [
             {
                 "id": task.id,
+                "plan_task_id": task.plan_task_id,
                 "run_id": task.run_id,
                 "title": task.title,
                 "state": task.state.value,
@@ -318,10 +360,12 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
                 "dependencies": list(task.dependencies),
                 "acceptance": task.acceptance,
             }
-            for task in store.list_tasks(run.id)
+            for task in tasks
         ],
         "artifacts": store.list_artifacts(run.id),
         "input_request": store.pending_input(run.id),
+        "plan": current_plan.to_dict() if current_plan else None,
+        "decisions": store.list_decisions(run.id),
     }
 
 
@@ -500,6 +544,59 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 for entry in payload:
                     print(f"{entry['id']} [{entry['scope']}/{entry['kind']}] {entry['content']}")
+            return 0
+        if args.command == "decide":
+            goal = sys.stdin.read() if args.goal == "-" else args.goal
+            if not isinstance(goal, str) or not goal.strip():
+                raise ValueError("decide requires a goal or '-' for stdin")
+            _emit(MasterPolicy().decide(goal).to_dict(), args.json)
+            return 0
+        if args.command == "plan":
+            candidate = Path(args.plan_file or args.target)
+            if args.plan_file or candidate.is_file():
+                document = _load_plan_document(candidate)
+                controller = _controller(args, config)
+                run = controller.start_plan(document)
+                _emit({"run_id": run.id, "status": run.status.value, "plan_id": document.plan_id, "plan_version": document.version, "workspace": str(run.workspace)}, args.json)
+                return 0 if run.status.value == "succeeded" else 1
+            payload = _status_payload(config, args.target)
+            if payload is None:
+                _emit_error(f"unknown run: {args.target}", args.json)
+                return 2
+            _emit(payload.get("plan"), args.json)
+            return 0
+        if args.command in {"patch", "replan"}:
+            try:
+                payload = json.loads(args.plan_file.read_text(encoding="utf-8"))
+            except OSError as exc:
+                raise ValueError(f"could not read plan file {args.plan_file}: {exc}") from exc
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"plan is not valid JSON: {exc.msg}") from exc
+            controller = _controller(argparse.Namespace(runtime="mock", runtime_command=None, endpoint=None, model=None, api_key=None, agent_loop=False, memory=False, allow_exec=False, max_steps=40, session_history=False), config)
+            if args.command == "patch":
+                document = controller.patch_plan(args.run_id, PlanPatch.from_dict(payload))
+                reason = "patch applied"
+            else:
+                if args.command == "replan" and "plan_id" not in payload:
+                    current = controller.store.get_current_plan(args.run_id)
+                    if current is None:
+                        raise ValueError("run has no current plan")
+                    payload = {**payload, "plan_id": current.plan_id}
+                incoming = PlanDocument.from_dict(payload)
+                raw_reason = payload.get("reason", "explicit replan")
+                raw_evidence = payload.get("evidence", [])
+                if not isinstance(raw_reason, str):
+                    raise TypeError("replan reason must be a string")
+                if not isinstance(raw_evidence, list) or any(not isinstance(item, str) for item in raw_evidence):
+                    raise TypeError("replan evidence must be a string array")
+                document = controller.replan(args.run_id, incoming, raw_reason, tuple(raw_evidence))
+                reason = "replan applied"
+            _emit({"run_id": args.run_id, "plan_id": document.plan_id, "plan_version": document.version, "parent_version": document.parent_version, "status": reason}, args.json)
+            return 0
+        if args.command == "deliver":
+            controller = _controller(argparse.Namespace(runtime="mock", runtime_command=None, endpoint=None, model=None, api_key=None, agent_loop=False, memory=False, allow_exec=False, max_steps=40, session_history=False), config)
+            decision = controller.deliver(args.run_id)
+            _emit(decision.to_dict(), args.json)
             return 0
     except (ValueError, TypeError, OSError) as exc:
         _emit_error(str(exc), getattr(args, "json", False))

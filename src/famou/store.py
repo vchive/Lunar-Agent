@@ -14,6 +14,14 @@ from pathlib import Path
 from typing import Any
 
 from .models import Attempt, Run, RunStatus, Task, TaskStatus
+from .policy import (
+    PlanDocument,
+    PlanPatch,
+    PolicyDecision,
+    apply_patch,
+    validate_evidence,
+    validate_reason,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -28,7 +36,9 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     runner_pid INTEGER,
-    runner_pgid INTEGER
+    runner_pgid INTEGER,
+    current_plan_id TEXT,
+    current_plan_version INTEGER
 );
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -45,6 +55,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     input_question TEXT,
     input_options TEXT NOT NULL DEFAULT '[]',
     input_answer_path TEXT,
+    plan_task_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -80,6 +91,24 @@ CREATE TABLE IF NOT EXISTS artifacts (
     kind TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS plan_revisions (
+    plan_id TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    version INTEGER NOT NULL,
+    parent_version INTEGER,
+    document TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(run_id, version)
+);
+CREATE INDEX IF NOT EXISTS plan_revisions_run_idx ON plan_revisions(run_id, version);
+CREATE TABLE IF NOT EXISTS policy_decisions (
+    id TEXT PRIMARY KEY,
+    run_id TEXT REFERENCES runs(id),
+    action TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS policy_decisions_run_idx ON policy_decisions(run_id, created_at);
 """
 
 
@@ -114,15 +143,22 @@ class Store:
     def initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            self._migrate_plan_revision_key(connection)
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS plan_revisions_plan_idx ON plan_revisions(plan_id, version)"
+            )
             # Keep upgrades compatible with the P1 database created before plans and detached
             # process metadata existed. SQLite has no IF NOT EXISTS form for ADD COLUMN.
             self._ensure_column(connection, "runs", "runner_pid", "INTEGER")
             self._ensure_column(connection, "runs", "runner_pgid", "INTEGER")
+            self._ensure_column(connection, "runs", "current_plan_id", "TEXT")
+            self._ensure_column(connection, "runs", "current_plan_version", "INTEGER")
             self._ensure_column(connection, "tasks", "dependencies", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(connection, "tasks", "acceptance", "TEXT")
             self._ensure_column(connection, "tasks", "input_question", "TEXT")
             self._ensure_column(connection, "tasks", "input_options", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(connection, "tasks", "input_answer_path", "TEXT")
+            self._ensure_column(connection, "tasks", "plan_task_id", "TEXT")
             self._ensure_column(connection, "attempts", "pid", "INTEGER")
             self._ensure_column(connection, "attempts", "pgid", "INTEGER")
             connection.execute(
@@ -133,6 +169,51 @@ class Store:
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                 (2, utc_now()),
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (3, utc_now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (4, utc_now()),
+            )
+
+    @staticmethod
+    def _migrate_plan_revision_key(connection: sqlite3.Connection) -> None:
+        """Upgrade the first feature-006 table, whose key was plan_id/version.
+
+        Plan IDs are stable within a run but callers may intentionally reuse a plan template in
+        another run.  Keying revisions by run/version prevents unrelated runs from colliding while
+        retaining the plan ID as an indexed lookup/reference field.
+        """
+        indexes = connection.execute("PRAGMA index_list(plan_revisions)").fetchall()
+        primary_columns: list[str] = []
+        for index in indexes:
+            if index[2]:  # unique; the autoindex for a PRIMARY KEY is unique
+                columns = connection.execute(f"PRAGMA index_info({index[1]})").fetchall()
+                primary_columns = [column[2] for column in columns]
+                if primary_columns:
+                    break
+        if primary_columns != ["run_id", "version"]:
+            connection.execute("ALTER TABLE plan_revisions RENAME TO plan_revisions_legacy")
+            connection.execute(
+                """CREATE TABLE plan_revisions (
+                    plan_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL REFERENCES runs(id),
+                    version INTEGER NOT NULL,
+                    parent_version INTEGER,
+                    document TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(run_id, version)
+                )"""
+            )
+            connection.execute(
+                "INSERT INTO plan_revisions(plan_id, run_id, version, parent_version, document, created_at) "
+                "SELECT plan_id, run_id, version, parent_version, document, created_at FROM plan_revisions_legacy"
+            )
+            connection.execute("DROP TABLE plan_revisions_legacy")
+            connection.execute("CREATE INDEX IF NOT EXISTS plan_revisions_run_idx ON plan_revisions(run_id, version)")
+            connection.execute("CREATE INDEX IF NOT EXISTS plan_revisions_plan_idx ON plan_revisions(plan_id, version)")
 
     def create_run(
         self,
@@ -231,6 +312,166 @@ class Store:
                 )
         return self.get_run(run_id)  # type: ignore[return-value]
 
+    def create_run_with_plan(
+        self, document: PlanDocument, decision: PolicyDecision | None = None, workspace: str | Path | None = None
+    ) -> Run:
+        """Create a run, first plan revision, tasks, and decision in one transaction."""
+        if document.version != 1 or document.parent_version is not None:
+            raise ValueError("a new planned run must start at version 1")
+        if decision is not None:
+            if decision.action != "execute_plan":
+                raise ValueError("a planned run requires an execute_plan decision")
+            if (decision.plan_id, decision.plan_version) != (document.plan_id, document.version):
+                raise ValueError("execute_plan decision does not reference the supplied plan revision")
+        timestamp = utc_now()
+        run_id = uuid.uuid4().hex
+        workspace_path = Path(workspace).expanduser().resolve() if workspace is not None else (self.database.parent / "runs" / run_id).resolve()
+        task_items = [task.to_dict() for task in document.tasks]
+        normalized = self._validate_plan_tasks(task_items)
+        id_map = {item["id"]: f"{run_id[:8]}-{item['id']}" for item in normalized}
+        normalized = [{**item, "id": id_map[item["id"]], "plan_task_id": item["id"], "depends_on": [id_map[dependency] for dependency in item["depends_on"]]} for item in normalized]
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO runs(id, goal, status, workspace, created_at, updated_at, current_plan_id, current_plan_version) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_id, document.goal, RunStatus.PENDING.value, str(workspace_path), timestamp, timestamp, document.plan_id, 1),
+            )
+            for item in normalized:
+                state = TaskStatus.READY.value if not item["depends_on"] else TaskStatus.WAITING.value
+                connection.execute(
+                    "INSERT INTO tasks(id, run_id, title, prompt, state, dependencies, acceptance, plan_task_id, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (item["id"], run_id, item["title"], item["prompt"], state, json.dumps(item["depends_on"]), item["acceptance"], item["plan_task_id"], timestamp, timestamp),
+                )
+            connection.execute(
+                "INSERT INTO plan_revisions(plan_id, run_id, version, parent_version, document, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+                (document.plan_id, run_id, document.version, document.parent_version, json.dumps(document.to_dict(), ensure_ascii=False, sort_keys=True), timestamp),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                None,
+                "run_created",
+                {"goal": document.goal, "task_count": len(normalized), "plan_id": document.plan_id},
+            )
+            self._append_event(connection, run_id, None, "plan_created", {"plan_id": document.plan_id, "version": 1})
+            for item in normalized:
+                self._append_event(connection, run_id, item["id"], "task_created", {"title": item["title"], "dependencies": item["depends_on"], "acceptance": item["acceptance"]})
+            if decision is not None:
+                self._insert_decision(connection, run_id, decision)
+        Path(workspace_path).mkdir(parents=True, exist_ok=True)
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def _insert_decision(self, connection: sqlite3.Connection, run_id: str | None, decision: PolicyDecision, decision_id: str | None = None) -> str:
+        decision_id = decision_id or f"decision-{uuid.uuid4().hex}"
+        connection.execute(
+            "INSERT OR IGNORE INTO policy_decisions(id, run_id, action, payload, created_at) VALUES(?, ?, ?, ?, ?)",
+            (decision_id, run_id, decision.action, json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True), utc_now()),
+        )
+        if run_id is not None:
+            self._append_event(connection, run_id, None, "policy_decision", {"decision_id": decision_id, **decision.to_dict()}, event_id=f"event-{decision_id}")
+        return decision_id
+
+    def record_decision(self, decision: PolicyDecision, run_id: str | None = None, decision_id: str | None = None) -> str:
+        with self._connect() as connection:
+            return self._insert_decision(connection, run_id, decision, decision_id)
+
+    def get_current_plan(self, run_id: str) -> PlanDocument | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT current_plan_id, current_plan_version FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None or not row["current_plan_id"] or row["current_plan_version"] is None:
+                return None
+            revision = connection.execute(
+                "SELECT document FROM plan_revisions WHERE run_id = ? AND plan_id = ? AND version = ?",
+                (run_id, row["current_plan_id"], row["current_plan_version"]),
+            ).fetchone()
+        return PlanDocument.from_dict(json.loads(revision["document"])) if revision else None
+
+    def list_plan_revisions(self, run_id: str) -> list[PlanDocument]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT document FROM plan_revisions WHERE run_id = ? ORDER BY version", (run_id,)
+            ).fetchall()
+        return [PlanDocument.from_dict(json.loads(row["document"])) for row in rows]
+
+    def list_decisions(self, run_id: str | None = None) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            if run_id is None:
+                rows = connection.execute("SELECT id, run_id, action, payload, created_at FROM policy_decisions ORDER BY created_at").fetchall()
+            else:
+                rows = connection.execute("SELECT id, run_id, action, payload, created_at FROM policy_decisions WHERE run_id = ? ORDER BY created_at", (run_id,)).fetchall()
+        return [{"id": row["id"], "run_id": row["run_id"], "action": row["action"], "payload": json.loads(row["payload"]), "created_at": row["created_at"]} for row in rows]
+
+    def commit_plan_revision(
+        self,
+        run_id: str,
+        document: PlanDocument,
+        reason: str,
+        evidence: tuple[str, ...] = (),
+        *,
+        action: str = "patch_plan",
+    ) -> PlanDocument:
+        """Commit an already validated revision and synchronize not-yet-run scheduler tasks."""
+        reason = validate_reason(reason)
+        evidence = validate_evidence(list(evidence))
+        with self._connect() as connection:
+            run = connection.execute("SELECT current_plan_id, current_plan_version, status FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise ValueError(f"unknown run: {run_id}")
+            if run["current_plan_id"] != document.plan_id or run["current_plan_version"] != document.parent_version:
+                raise ValueError("plan revision parent does not match current version")
+            if document.parent_version is None or document.version != document.parent_version + 1:
+                raise ValueError("plan revision version must increment the current version by one")
+            if run["status"] in {RunStatus.RUNNING.value, RunStatus.AWAITING_INPUT.value, RunStatus.CANCELLED.value}:
+                raise ValueError("cannot revise a plan while the run is active")
+            existing_rows = connection.execute("SELECT * FROM tasks WHERE run_id = ?", (run_id,)).fetchall()
+            existing = {row["plan_task_id"] or row["id"]: row for row in existing_rows}
+            desired = {task.id: task for task in document.tasks}
+            for task_id, row in existing.items():
+                if task_id not in desired:
+                    if row["state"] == TaskStatus.SUCCEEDED.value:
+                        raise ValueError("completed tasks must remain in a plan revision")
+                    if row["state"] not in {TaskStatus.SUPERSEDED.value, TaskStatus.CANCELLED.value}:
+                        connection.execute("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?", (TaskStatus.SUPERSEDED.value, utc_now(), row["id"]))
+            for task_id, task in desired.items():
+                if task_id in existing:
+                    row = existing[task_id]
+                    physical_dependencies = [existing[dep]["id"] if dep in existing else f"{run_id[:8]}-{dep}" for dep in task.depends_on]
+                    acceptance = json.dumps(task.acceptance, ensure_ascii=False, sort_keys=True) if isinstance(task.acceptance, dict) else task.acceptance
+                    if row["state"] == TaskStatus.SUCCEEDED.value:
+                        if (row["title"], row["prompt"], row["dependencies"], row["acceptance"]) != (task.title, task.prompt, json.dumps(physical_dependencies), acceptance):
+                            raise ValueError("completed task definitions are immutable across revisions")
+                    else:
+                        state = TaskStatus.READY.value if not task.depends_on else TaskStatus.WAITING.value
+                        connection.execute("UPDATE tasks SET title = ?, prompt = ?, state = ?, attempts = 0, result_path = NULL, last_error = NULL, dependencies = ?, acceptance = ?, updated_at = ? WHERE id = ?", (task.title, task.prompt, state, json.dumps(physical_dependencies), acceptance, utc_now(), row["id"]))
+                else:
+                    state = TaskStatus.READY.value if not task.depends_on else TaskStatus.WAITING.value
+                    physical_id = f"{run_id[:8]}-{task_id}"
+                    physical_dependencies = [existing[dep]["id"] if dep in existing else f"{run_id[:8]}-{dep}" for dep in task.depends_on]
+                    connection.execute("INSERT INTO tasks(id, run_id, title, prompt, state, dependencies, acceptance, plan_task_id, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (physical_id, run_id, task.title, task.prompt, state, json.dumps(physical_dependencies), json.dumps(task.acceptance, ensure_ascii=False) if isinstance(task.acceptance, dict) else task.acceptance, task_id, utc_now(), utc_now()))
+            connection.execute("INSERT INTO plan_revisions(plan_id, run_id, version, parent_version, document, created_at) VALUES(?, ?, ?, ?, ?, ?)", (document.plan_id, run_id, document.version, document.parent_version, json.dumps(document.to_dict(), ensure_ascii=False, sort_keys=True), utc_now()))
+            connection.execute("UPDATE runs SET current_plan_id = ?, current_plan_version = ?, updated_at = ? WHERE id = ?", (document.plan_id, document.version, utc_now(), run_id))
+            connection.execute("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", (RunStatus.PENDING.value, utc_now(), run_id))
+            self._append_event(connection, run_id, None, "plan_revision_created", {"plan_id": document.plan_id, "version": document.version, "parent_version": document.parent_version, "reason": reason, "evidence": list(evidence)})
+            self._insert_decision(
+                connection,
+                run_id,
+                PolicyDecision(
+                    action,  # type: ignore[arg-type]
+                    reason,
+                    1.0,
+                    plan_id=document.plan_id,
+                    plan_version=document.version,
+                    evidence=evidence,
+                ),
+            )
+        return document
+
+    def patch_plan(self, run_id: str, patch: PlanPatch) -> PlanDocument:
+        current = self.get_current_plan(run_id)
+        if current is None:
+            raise ValueError("run has no current plan")
+        document = apply_patch(current, patch)
+        return self.commit_plan_revision(run_id, document, patch.reason, patch.evidence, action="patch_plan")
+
     @staticmethod
     def _validate_plan_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not tasks:
@@ -313,6 +554,8 @@ class Store:
             updated_at=row["updated_at"],
             runner_pid=row["runner_pid"],
             runner_pgid=row["runner_pgid"],
+            current_plan_id=row["current_plan_id"],
+            current_plan_version=row["current_plan_version"],
         )
 
     def get_task(self, task_id: str) -> Task | None:
@@ -430,6 +673,7 @@ class Store:
                         TaskStatus.FAILED.value,
                         TaskStatus.BLOCKED.value,
                         TaskStatus.CANCELLED.value,
+                        TaskStatus.SUPERSEDED.value,
                     }
                     for dep in dependencies
                 ):
@@ -764,7 +1008,7 @@ class Store:
             states = {row["state"] for row in rows}
             if TaskStatus.FAILED.value in states or TaskStatus.BLOCKED.value in states:
                 status = RunStatus.FAILED.value
-            elif states == {TaskStatus.SUCCEEDED.value}:
+            elif states and states.issubset({TaskStatus.SUCCEEDED.value, TaskStatus.SUPERSEDED.value}) and TaskStatus.SUCCEEDED.value in states:
                 status = RunStatus.SUCCEEDED.value
             elif TaskStatus.WAITING.value in states:
                 status = RunStatus.AWAITING_INPUT.value
@@ -801,16 +1045,17 @@ class Store:
                 ),
             ).rowcount
             task_rows = connection.execute(
-                "SELECT id FROM tasks WHERE run_id = ? AND state NOT IN (?, ?, ?)",
+                "SELECT id FROM tasks WHERE run_id = ? AND state NOT IN (?, ?, ?, ?)",
                 (
                     run_id,
                     TaskStatus.SUCCEEDED.value,
                     TaskStatus.FAILED.value,
                     TaskStatus.CANCELLED.value,
+                    TaskStatus.SUPERSEDED.value,
                 ),
             ).fetchall()
             changed_tasks = connection.execute(
-                "UPDATE tasks SET state = ?, updated_at = ? WHERE run_id = ? AND state NOT IN (?, ?, ?)",
+                "UPDATE tasks SET state = ?, updated_at = ? WHERE run_id = ? AND state NOT IN (?, ?, ?, ?)",
                 (
                     TaskStatus.CANCELLED.value,
                     timestamp,
@@ -818,6 +1063,7 @@ class Store:
                     TaskStatus.SUCCEEDED.value,
                     TaskStatus.FAILED.value,
                     TaskStatus.CANCELLED.value,
+                    TaskStatus.SUPERSEDED.value,
                 ),
             ).rowcount
             connection.execute(
@@ -953,6 +1199,7 @@ class Store:
             input_question=row["input_question"],
             input_options=tuple(json.loads(row["input_options"] or "[]")),
             input_answer_path=Path(row["input_answer_path"]) if row["input_answer_path"] else None,
+            plan_task_id=row["plan_task_id"],
         )
 
     @staticmethod

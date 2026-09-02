@@ -1,0 +1,19 @@
+{
+  "schema_version": "1",
+  "plan_id": "plan-fixture",
+  "version": 1,
+  "parent_version": null,
+  "goal": "prepare and verify a local report",
+  "hard_constraints": ["keep artifacts local"],
+  "soft_constraints": [],
+  "objective": "produce a checked report",
+  "evidence": [],
+  "assumptions": [],
+  "tasks": [
+    {"id": "research", "title": "Research", "prompt": "Collect source facts"},
+    {"id": "verify", "title": "Verify", "prompt": "Check the report", "depends_on": ["research"]}
+  ],
+  "acceptance": {"required": true},
+  "verification": {"required": true},
+  "delivery": {"artifacts": true}
+}

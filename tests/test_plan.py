@@ -2,9 +2,12 @@ import json
 import threading
 from pathlib import Path
 
+import pytest
+
 from famou.config import Config
 from famou.controller import LocalController
 from famou.evaluator import Evaluation
+from famou.policy import PlanDocument, PlanPatch, PlanTask
 from famou.runtime import MockRuntime, RuntimeResult
 from famou.store import Store
 
@@ -23,6 +26,17 @@ class RecordingRuntime:
 
     def cancel(self) -> None:
         return None
+
+
+def _document() -> PlanDocument:
+    return PlanDocument(
+        goal="prepare and verify a report",
+        plan_id="plan-report",
+        tasks=(
+            PlanTask("research", "Research", "Collect facts"),
+            PlanTask("write", "Write", "Draft report", ("research",)),
+        ),
+    )
 
 
 class RejectingEvaluator:
@@ -100,6 +114,106 @@ def test_invalid_plan_is_rejected_before_run_insert(tmp_path: Path) -> None:
         raise AssertionError("expected cycle validation error")
     with store._connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+
+
+def test_plan_id_can_be_reused_by_independent_runs(tmp_path: Path) -> None:
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+    first = store.create_run_with_plan(_document())
+    second = store.create_run_with_plan(_document())
+
+    first_plan = store.get_current_plan(first.id)
+    second_plan = store.get_current_plan(second.id)
+    assert first_plan is not None and first_plan.plan_id == "plan-report"
+    assert second_plan is not None and second_plan.plan_id == "plan-report"
+    assert len(store.list_plan_revisions(first.id)) == 1
+    assert len(store.list_plan_revisions(second.id)) == 1
+
+
+class FailOnceEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def evaluate(self, result: str, workspace: Path) -> Evaluation:
+        del result, workspace
+        self.calls += 1
+        return Evaluation(self.calls > 1, (), "pass" if self.calls > 1 else "first attempt rejected")
+
+
+def test_failed_task_reopens_after_replan_and_can_resume(tmp_path: Path) -> None:
+    config = Config(tmp_path / ".famou", max_retries=1)
+    evaluator = FailOnceEvaluator()
+    controller = LocalController(config, MockRuntime(), evaluator=evaluator)
+    document = PlanDocument(
+        goal="recover a failed task",
+        plan_id="plan-recover",
+        tasks=(PlanTask("one", "One", "run once"),),
+    )
+    run = controller.start_plan(document)
+    assert run.status.value == "failed"
+    revised = PlanDocument(
+        goal=document.goal,
+        plan_id=document.plan_id,
+        version=2,
+        parent_version=1,
+        tasks=(PlanTask("one", "One", "run again"),),
+    )
+    controller.replan(run.id, revised, "retry after evaluator evidence")
+    assert controller.store.get_run(run.id).status.value == "pending"  # type: ignore[union-attr]
+    resumed = controller.resume(run.id)
+    assert resumed.status.value == "succeeded"
+    task = controller.store.list_tasks(run.id)[0]
+    assert task.attempts == 1 and task.state.value == "succeeded"
+
+
+def test_patch_with_new_dependency_maps_logical_ids_and_resume_executes(tmp_path: Path) -> None:
+    config = Config(tmp_path / ".famou")
+    controller = LocalController(config, MockRuntime())
+    run = controller.start_plan(
+        PlanDocument(
+            goal="one task then expand",
+            plan_id="plan-expand",
+            tasks=(PlanTask("first", "First", "first output"),),
+        )
+    )
+    patch = PlanPatch(
+        plan_id="plan-expand",
+        base_version=1,
+        reason="add dependent verification",
+        operations=(
+            {"op": "add_task", "task": {"id": "check", "title": "Check", "prompt": "check output", "depends_on": ["first"]}},
+            {"op": "add_task", "task": {"id": "summary", "title": "Summary", "prompt": "summarize", "depends_on": ["check"]}},
+        ),
+    )
+    controller.patch_plan(run.id, patch)
+    tasks = {task.plan_task_id: task for task in controller.store.list_tasks(run.id)}
+    assert tasks["summary"].dependencies == (tasks["check"].id,)  # type: ignore[index]
+    resumed = controller.resume(run.id)
+    assert resumed.status.value == "succeeded"
+    assert {task.state.value for task in controller.store.list_tasks(run.id)} == {"succeeded"}
+
+
+def test_succeeded_task_redefinition_is_rejected_atomically(tmp_path: Path) -> None:
+    config = Config(tmp_path / ".famou")
+    controller = LocalController(config, MockRuntime())
+    document = PlanDocument(
+        goal="immutable", plan_id="plan-immutable", tasks=(PlanTask("one", "One", "run one"),)
+    )
+    run = controller.start_plan(document)
+    with pytest.raises(ValueError, match="completed task definitions"):
+        controller.replan(
+            run.id,
+            PlanDocument(
+                goal=document.goal,
+                plan_id=document.plan_id,
+                version=2,
+                parent_version=1,
+                tasks=(PlanTask("one", "One", "run changed"),),
+            ),
+            "new prompt",
+        )
+    current = controller.store.get_current_plan(run.id)
+    assert current is not None and current.version == 1
 
 
 class BlockingRuntime(RecordingRuntime):

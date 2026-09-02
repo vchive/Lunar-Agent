@@ -14,6 +14,7 @@ from .config import Config
 from .evaluator import Evaluation, Evaluator, NonEmptyEvaluator, acceptance_evaluator
 from .memory import MemoryStore
 from .models import Run, RunStatus
+from .policy import MasterPolicy, PlanDocument, PlanPatch, PolicyDecision
 from .runtime import Runtime, RuntimeExecutionError
 from .store import Store
 
@@ -35,6 +36,79 @@ class LocalController:
         self.memory.initialize()
         self.runtime = runtime
         self.evaluator = evaluator or NonEmptyEvaluator()
+        self.policy = MasterPolicy()
+
+    def decide(self, goal: str) -> PolicyDecision:
+        """Return a bounded deterministic Master decision without creating durable work."""
+        return self.policy.decide(goal)
+
+    def start_plan(self, document: PlanDocument, decision: PolicyDecision | None = None) -> Run:
+        if decision is None:
+            decision = PolicyDecision(
+                "execute_plan",
+                "A caller supplied a validated multi-step plan",
+                1.0,
+                plan_id=document.plan_id,
+                plan_version=document.version,
+                evidence=("explicit plan document",),
+            )
+        elif decision.action != "execute_plan":
+            raise ValueError("a planned run requires an execute_plan decision")
+        elif decision.plan_id is None:
+            decision = PolicyDecision(
+                decision.action,
+                decision.rationale,
+                decision.confidence,
+                decision.questions,
+                document.plan_id,
+                document.version,
+                decision.evidence,
+                decision.plan,
+            )
+        elif (decision.plan_id, decision.plan_version) != (document.plan_id, document.version):
+            raise ValueError("execute_plan decision does not reference the supplied plan revision")
+        run = self.store.create_run_with_plan(document, decision)
+        return self.resume(run.id)
+
+    def patch_plan(self, run_id: str, patch: PlanPatch) -> PlanDocument:
+        return self.store.patch_plan(run_id, patch)
+
+    def replan(self, run_id: str, document: PlanDocument, reason: str, evidence: tuple[str, ...] = ()) -> PlanDocument:
+        current = self.store.get_current_plan(run_id)
+        if current is None:
+            raise ValueError("run has no current plan")
+        if document.plan_id != current.plan_id:
+            raise ValueError("replan must retain the current plan id")
+        if document.parent_version is None:
+            document = PlanDocument(
+                goal=document.goal, tasks=document.tasks, plan_id=document.plan_id,
+                version=current.version + 1, parent_version=current.version,
+                schema_version=document.schema_version, hard_constraints=document.hard_constraints,
+                soft_constraints=document.soft_constraints, objective=document.objective,
+                evidence=document.evidence, assumptions=document.assumptions,
+                acceptance=document.acceptance, verification=document.verification, delivery=document.delivery,
+            )
+        return self.store.commit_plan_revision(run_id, document, reason, evidence, action="replan")
+
+    def deliver(self, run_id: str) -> PolicyDecision:
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {run_id}")
+        tasks = self.store.list_tasks(run_id)
+        artifacts = self.store.list_artifacts(run_id)
+        evaluations = [event for event in self.store.list_events(run_id) if event["type"] == "task_evaluated"]
+        passed = bool(tasks) and run.status == RunStatus.SUCCEEDED and all(
+            any(item.get("task_id") == task.id and item["payload"].get("passed") is True for item in evaluations)
+            for task in tasks if task.state.value == "succeeded"
+        )
+        usable = [item for item in artifacts if item["kind"] in {"result", "runtime"}]
+        if not passed or not usable:
+            raise ValueError("run has no fully verified artifacts to deliver")
+        evidence = tuple(item["path"] for item in usable[:16])
+        return PolicyDecision(
+            "deliver", "All tasks passed evaluation and have hashed artifacts", 1.0,
+            plan_id=run.current_plan_id, plan_version=run.current_plan_version, evidence=evidence,
+        )
 
     def start(self, goal: str, plan_tasks: list[dict[str, Any]] | None = None) -> Run:
         run = self.create(goal, plan_tasks)

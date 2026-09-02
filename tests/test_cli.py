@@ -178,3 +178,95 @@ def test_cli_memory_inspection_is_json(tmp_path: Path, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert len(payload) == 1
     assert payload[0]["content"] == "remembered deployment decision"
+
+
+def test_cli_master_decide_and_plan_revision_commands(tmp_path: Path, capsys) -> None:
+    assert main(["decide", "What is SQLite WAL?", "--json", "--home", str(tmp_path)]) == 0
+    decision = json.loads(capsys.readouterr().out)
+    assert decision["action"] == "answer"
+    assert "plan" not in decision
+
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "goal": "create a report and verify it",
+                "plan_id": "plan-cli",
+                "tasks": [{"id": "one", "title": "One", "prompt": "write one"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["plan", str(plan_path), "--runtime", "mock", "--json", "--home", str(tmp_path)]) == 0
+    created = json.loads(capsys.readouterr().out)
+    assert created["plan_version"] == 1
+    run_id = created["run_id"]
+
+    assert main(["plan", run_id, "--json", "--home", str(tmp_path)]) == 0
+    inspected = json.loads(capsys.readouterr().out)
+    assert inspected["plan_id"] == "plan-cli"
+    assert inspected["version"] == 1
+
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text(
+        json.dumps(
+            {
+                "plan_id": "plan-cli",
+                "base_version": 1,
+                "reason": "add verification",
+                "operations": [
+                    {"op": "add_task", "task": {"id": "check", "prompt": "verify output", "depends_on": ["one"]}}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["patch", run_id, str(patch_path), "--json", "--home", str(tmp_path)]) == 0
+    patched = json.loads(capsys.readouterr().out)
+    assert patched["plan_version"] == 2
+
+    assert main(["status", run_id, "--json", "--home", str(tmp_path)]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["run"]["current_plan_version"] == 2
+    assert status["tasks"][0]["plan_task_id"] == "one"
+
+
+def test_cli_replan_inherits_plan_id_and_stale_patch_is_json_error(tmp_path: Path, capsys) -> None:
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"goal": "replan me", "plan_id": "plan-replan", "tasks": [{"id": "one", "prompt": "one"}]}),
+        encoding="utf-8",
+    )
+    assert main(["plan", str(plan_path), "--json", "--home", str(tmp_path)]) == 0
+    run_id = json.loads(capsys.readouterr().out)["run_id"]
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text(
+        json.dumps({"goal": "replan me better", "tasks": [{"id": "one", "prompt": "one"}]}),
+        encoding="utf-8",
+    )
+    assert main(["replan", run_id, str(replacement), "--json", "--home", str(tmp_path)]) == 0
+    replanned = json.loads(capsys.readouterr().out)
+    assert replanned["plan_id"] == "plan-replan" and replanned["plan_version"] == 2
+
+    stale = tmp_path / "stale.json"
+    stale.write_text(
+        json.dumps(
+            {
+                "plan_id": "plan-replan",
+                "base_version": 1,
+                "reason": "stale",
+                "operations": [{"op": "update_task", "id": "one", "prompt": "old"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["patch", run_id, str(stale), "--json", "--home", str(tmp_path)]) == 2
+    error = json.loads(capsys.readouterr().err)
+    assert "does not match" in error["error"]
+
+
+def test_cli_deliver_rejects_failed_run(tmp_path: Path, capsys) -> None:
+    # An unknown/failed handle must return a machine-readable error rather than a deliver decision.
+    assert main(["deliver", "missing-run", "--json", "--home", str(tmp_path)]) == 2
+    error = json.loads(capsys.readouterr().err)
+    assert "unknown run" in error["error"]

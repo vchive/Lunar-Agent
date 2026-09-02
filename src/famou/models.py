@@ -25,6 +25,7 @@ class TaskStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
     UNCERTAIN = "uncertain"
 
 
@@ -38,6 +39,8 @@ class Run:
     updated_at: str
     runner_pid: int | None = None
     runner_pgid: int | None = None
+    current_plan_id: str | None = None
+    current_plan_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,7 @@ class Task:
     input_question: str | None = None
     input_options: tuple[str, ...] = ()
     input_answer_path: Path | None = None
+    plan_task_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,12 @@
+{
+  "plan_id": "plan-fixture",
+  "base_version": 1,
+  "reason": "add a final summary",
+  "evidence": ["reviewer requested summary"],
+  "operations": [
+    {
+      "op": "add_task",
+      "task": {"id": "summary", "title": "Summary", "prompt": "Summarize the verified report", "depends_on": ["verify"]}
+    }
+  ]
+}

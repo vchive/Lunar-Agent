@@ -80,6 +80,29 @@ The controller remains the orchestrator: it validates and schedules optional dep
 retries failed attempts, hands verified artifacts to dependent tasks, and recovers after an
 interruption. It is not a WebAgent stage machine.
 
+### Master policy and versioned plans
+
+The local Master layer carries over WebAgent's highest-value effect-layer behavior without its
+service plane. It chooses the smallest useful action, stores an auditable plan revision, and keeps
+patch/replan and delivery decisions in SQLite:
+
+```bash
+lunar-agent decide "What does SQLite WAL mode provide?" --json
+lunar-agent plan plan.json --runtime mock --json
+lunar-agent plan <run-id> --json                 # inspect current revision
+lunar-agent patch <run-id> patch.json --json
+lunar-agent replan <run-id> replacement.json --json
+lunar-agent resume <run-id> --runtime mock --json # execute newly opened tasks
+lunar-agent deliver <run-id> --json
+```
+
+`plan` creation is atomic with the run and task DAG. Each revision has a parent version and remains
+immutable. A stale patch is rejected before any write; completed task definitions cannot be
+rewritten, while failed or superseded work can be reopened and resumed. `deliver` fails closed
+unless the run passed independent evaluation and has hashed result/runtime artifacts. All command
+outputs support `--json`, making the CLI suitable for Codex, OpenClaw, Hermes, or another local
+parent agent.
+
 If the session needs a decision, it can call `ask_user`. The run then becomes `awaiting_input` and
 returns the question in JSON/status output. Answer the same durable run later; no duplicate task is
 created:
@@ -189,3 +212,7 @@ uv run --extra lint ruff check .
 See the [quickstart](specs/001-standalone-local-agent/quickstart.md) for the recovery scenario and
 the [runtime contract](specs/001-standalone-local-agent/contracts/runtime-adapter.md) before adding
 an adapter.
+
+The effect-layer design and WebAgent branch comparison are documented in
+[`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
+[`specs/006-master-policy-plan-contract/`](specs/006-master-policy-plan-contract/).
