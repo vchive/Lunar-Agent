@@ -1,5 +1,16 @@
 """Standalone local Hermes-inspired agent controller."""
 
+from .agents import (
+    AgentAdapter,
+    AgentError,
+    AgentInvocationError,
+    AgentRegistry,
+    AgentRequest,
+    AgentResult,
+    AgentSelectionError,
+    CommandAgentAdapter,
+    RuntimeAgentAdapter,
+)
 from .evolution import (
     Candidate,
     CandidateArchive,
@@ -24,9 +35,17 @@ from .evolution import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "AgentAdapter",
+    "AgentError",
+    "AgentInvocationError",
+    "AgentRegistry",
+    "AgentRequest",
+    "AgentResult",
+    "AgentSelectionError",
     "Candidate",
     "CandidateArchive",
     "CandidateDraft",
+    "CommandAgentAdapter",
     "CommandCandidateEvaluator",
     "CommandCandidateGenerator",
     "EvolutionConfig",
@@ -39,6 +58,7 @@ __all__ = [
     "PopulationConfig",
     "PopulationState",
     "PopulationStrategy",
+    "RuntimeAgentAdapter",
     "StrategyResult",
     "build_strategy",
     "config_from_contract",

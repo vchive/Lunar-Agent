@@ -4,11 +4,52 @@ from threading import Event, Lock, Thread
 from typing import ClassVar
 
 from famou.agent_loop import AgentLoopRuntime
+from famou.agents import AgentInvocationError, AgentRegistry, AgentResult
 from famou.config import Config
 from famou.controller import LocalController
 from famou.memory import MemoryStore
 from famou.runtime import MockRuntime, ModelTurn, RuntimeResult, ToolCall
 from famou.tools import LocalToolRegistry
+
+
+class DelegatingFixtureAdapter:
+    name = "fixture-agent"
+    roles = frozenset({"solver"})
+    capabilities = frozenset({"read_files", "write_artifacts"})
+
+    def __init__(self, text: str = "delegated result") -> None:
+        self.text = text
+        self.requests = []
+        self.observer = None
+
+    def run(self, request):
+        self.requests.append(request)
+        request.workspace.mkdir(parents=True, exist_ok=True)
+        (request.workspace / "worker.txt").write_text("worker evidence", encoding="utf-8")
+        return AgentResult(
+            adapter_name=self.name,
+            role=request.role,
+            text=self.text,
+            artifacts=("worker.txt",),
+            metadata={"fixture": "yes"},
+        )
+
+    def cancel(self):
+        return None
+
+    def process_info(self):
+        return (None, None)
+
+    def set_process_observer(self, observer):
+        self.observer = observer
+
+
+class FailingDelegatingAdapter(DelegatingFixtureAdapter):
+    name = "failing-agent"
+
+    def run(self, request):
+        del request
+        raise AgentInvocationError("fixture failed")
 
 
 class FixtureModel:
@@ -32,6 +73,58 @@ class FixtureModel:
 
     def set_process_observer(self, observer) -> None:
         del observer
+
+
+def test_controller_delegates_with_durable_agent_events_and_artifacts(tmp_path: Path) -> None:
+    config = Config(tmp_path / ".famou")
+    adapter = DelegatingFixtureAdapter()
+    controller = LocalController(
+        config,
+        MockRuntime(),
+        agent_registry=AgentRegistry([adapter]),
+    )
+    run = controller.create("write a report")
+    settled, result = controller.run_agent(run.id, role="solver")
+
+    assert settled.status.value == "succeeded"
+    assert result.adapter_name == "fixture-agent"
+    assert len(adapter.requests) == 1
+    request = adapter.requests[0]
+    assert request.run_id == run.id
+    assert request.task_id == controller.store.list_tasks(run.id)[0].id
+    assert request.workspace.is_dir()
+    artifacts = controller.store.list_artifacts(run.id)
+    assert any(item["kind"] == "runtime" and item["path"].endswith("worker.txt") for item in artifacts)
+    event_types = [event["type"] for event in controller.store.list_events(run.id)]
+    assert "agent_selected" in event_types
+    assert "agent_started" in event_types
+    assert "agent_finished" in event_types
+    assert "task_evaluated" in event_types
+
+
+def test_controller_default_runtime_is_available_through_agent_boundary(tmp_path: Path) -> None:
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    run = controller.create("answer locally")
+    settled, result = controller.run_agent(run.id)
+    assert settled.status.value == "succeeded"
+    assert result.adapter_name == "mock"
+
+
+def test_controller_fails_closed_when_agent_invocation_fails(tmp_path: Path) -> None:
+    config = Config(tmp_path / ".famou", max_retries=1)
+    adapter = FailingDelegatingAdapter()
+    controller = LocalController(config, MockRuntime(), agent_registry=AgentRegistry([adapter]))
+    run = controller.create("delegate a report")
+    try:
+        controller.run_agent(run.id)
+    except AgentInvocationError as exc:
+        assert "fixture failed" in str(exc)
+    else:  # pragma: no cover - assertion keeps the failure explicit
+        raise AssertionError("expected AgentInvocationError")
+    failed = controller.store.get_run(run.id)
+    assert failed is not None
+    assert failed.status.value == "failed"
+    assert any(event["type"] == "agent_failed" for event in controller.store.list_events(run.id))
 
 
 def test_controller_completes_mock_run_and_is_idempotent(tmp_path: Path) -> None:

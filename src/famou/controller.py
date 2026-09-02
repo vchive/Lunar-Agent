@@ -13,6 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from .agent_loop import AgentInputRequired
+from .agents import (
+    AgentAdapter,
+    AgentInvocationError,
+    AgentRegistry,
+    AgentRequest,
+    AgentResult,
+    AgentSelectionError,
+    RuntimeAgentAdapter,
+)
 from .algorithm import AlgorithmProblemContract, materialize_algorithm_workspace
 from .artifacts import ArtifactError, ArtifactStore
 from .budget import BudgetExceeded, BudgetSpec
@@ -62,6 +71,7 @@ class LocalController:
         router: DomainRouter | None = None,
         profiles: ProfileRegistry | None = None,
         runtime_factory: Callable[[], Runtime] | None = None,
+        agent_registry: AgentRegistry | None = None,
         max_workers: int = 1,
     ) -> None:
         if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers < 1:
@@ -79,11 +89,13 @@ class LocalController:
         self.max_workers = max_workers
         self._active_lock = threading.Lock()
         self._active_runtimes: dict[str, Runtime] = {}
+        self._active_agents: dict[str, AgentAdapter] = {}
         self.evaluator = evaluator
         self.router = router or DomainRouter()
         self.profiles = profiles or ProfileRegistry()
         self.policy = MasterPolicy()
         self.recovery_policy = RecoveryPolicy()
+        self.agent_registry = agent_registry or AgentRegistry([RuntimeAgentAdapter(runtime)])
 
     def _register_algorithm_workspace(self, run: Run, document: PlanDocument) -> None:
         """Materialize the fixed role workspace for a validated algorithm contract."""
@@ -406,6 +418,216 @@ class LocalController:
         Path(run.workspace).mkdir(parents=True, exist_ok=True)
         return run
 
+    def run_agent(
+        self,
+        run_id: str,
+        *,
+        role: str = "solver",
+        prompt: str | None = None,
+        required_capabilities: tuple[str, ...] | list[str] = (),
+        preferred_adapter: str | None = None,
+        task_id: str | None = None,
+        timeout: float | None = None,
+    ) -> tuple[Run, AgentResult]:
+        """Delegate one ready task to an explicitly registered Agent adapter.
+
+        This entry point intentionally mirrors the normal scheduler's durable lifecycle while
+        keeping the worker ignorant of Store handles.  It is synchronous for library callers; a
+        parent process that needs detachment can invoke the JSON ``delegate`` CLI and later use
+        ``status``/``resume``.
+        """
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {run_id}")
+        if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            raise ValueError(f"run is already terminal: {run_id}")
+        if run.status == RunStatus.RUNNING and self._runner_is_stale(run):
+            self.store.recover_running(run_id)
+            run = self.store.get_run(run_id)
+            if run is None:
+                raise ValueError(f"run disappeared while recovering: {run_id}")
+        started = time.monotonic()
+        budget = run.budget or BudgetSpec()
+        task = self.store.get_task(task_id) if task_id else self.store.next_task(run_id)
+        if task is None or task.run_id != run_id:
+            raise ValueError("run has no ready task to delegate")
+        requested = tuple(required_capabilities) or tuple(run.route_required_capabilities)
+        try:
+            adapter = self.agent_registry.select(role, requested, preferred_adapter)
+        except (AgentSelectionError, TypeError, ValueError):
+            self.store.append_event(
+                run_id,
+                "agent_selection_failed",
+                {
+                    "role": role,
+                    "required_capabilities": list(requested)[:64],
+                    "preferred_adapter": preferred_adapter,
+                },
+                task_id=task.id,
+            )
+            raise
+        effective_prompt = prompt if prompt is not None else self._build_task_prompt(run, task)
+        if not effective_prompt.strip() or "\x00" in effective_prompt:
+            raise ValueError("delegation prompt must be non-empty and NUL-free")
+        if len(effective_prompt.encode("utf-8")) > 64 * 1024:
+            raise ValueError("delegation prompt exceeds 65536 bytes")
+        effective_timeout = self.config.runtime_timeout if timeout is None else timeout
+        if (
+            isinstance(effective_timeout, bool)
+            or not isinstance(effective_timeout, (int, float))
+            or effective_timeout <= 0
+            or effective_timeout > 24 * 60 * 60
+        ):
+            raise ValueError("delegation timeout must be between 0 and 86400 seconds")
+        self._check_budget(run.id, budget, started, before_claim=True)
+        attempt = self.store.claim_task(task.id, adapter.name)
+        if attempt is None:
+            raise ValueError("task was claimed or cancelled concurrently; retry after inspecting status")
+        task_root = Path(run.workspace) / "tasks" / task.id / attempt.id
+        artifacts = ArtifactStore(run.workspace, self.store, run.id)
+        try:
+            request = AgentRequest(
+                run_id=run.id,
+                task_id=task.id,
+                role=role,
+                prompt=effective_prompt,
+                required_capabilities=requested,
+                workspace=task_root,
+                timeout=effective_timeout,
+            )
+        except (TypeError, ValueError) as exc:
+            error = self._sanitize_error(exc)
+            self.store.finish_task(task.id, attempt.id, False, error=error)
+            self.store.settle_run(run.id)
+            raise AgentInvocationError(error) from exc
+        self.store.append_event(
+            run.id,
+            "agent_selected",
+            {
+                "attempt_id": attempt.id,
+                "adapter": adapter.name,
+                "role": role,
+                "required_capabilities": list(request.required_capabilities),
+            },
+            task_id=task.id,
+        )
+        self.store.append_event(
+            run.id,
+            "agent_started",
+            {"attempt_id": attempt.id, "adapter": adapter.name, "role": role},
+            task_id=task.id,
+        )
+        artifacts.write_text(
+            f"tasks/{task.id}/{attempt.id}/prompt.md", effective_prompt, task.id, kind="prompt"
+        )
+        with self._active_lock:
+            self._active_agents[attempt.id] = adapter
+        try:
+            adapter.set_process_observer(
+                lambda pid, pgid: self.store.set_attempt_process(attempt.id, pid, pgid)
+            )
+            if not self._task_is_running(task.id):
+                self._discard_late_result(run.id, task.id, attempt.id)
+                raise AgentInvocationError("task was cancelled before agent start")
+            result = adapter.run(request)
+            if not isinstance(result, AgentResult):
+                raise AgentInvocationError("agent returned an invalid result")
+            if result.adapter_name != adapter.name or result.role != request.role:
+                raise AgentInvocationError("agent result identity does not match the selected adapter")
+            if not self._task_is_running(task.id):
+                self._discard_late_result(run.id, task.id, attempt.id)
+                raise AgentInvocationError("agent result discarded because the task was cancelled")
+            result_path = artifacts.write_text(
+                f"tasks/{task.id}/{attempt.id}/result.txt", result.text, task.id, kind="result"
+            )
+            for relative_path in result.artifacts:
+                runtime_path = self._runtime_artifact_path(task_root, relative_path)
+                artifacts.record(runtime_path, task.id, kind="runtime")
+            self._check_budget(run.id, budget, started)
+            result_payload = {
+                "attempt_id": attempt.id,
+                "adapter": result.adapter_name,
+                "role": result.role,
+                "status": result.status,
+                "artifacts": list(result.artifacts),
+                "metadata": result.metadata,
+                "error": result.error,
+            }
+            self.store.append_event(
+                run.id,
+                "agent_finished" if result.status == "succeeded" else "agent_failed",
+                result_payload,
+                task_id=task.id,
+            )
+            evaluation = self._evaluate(run, task, result.text, task_root)
+            evaluation_payload = {
+                "attempt_id": attempt.id,
+                "passed": evaluation.passed,
+                "reason": evaluation.reason,
+                "evidence": list(evaluation.evidence),
+                "details": evaluation.details,
+            }
+            self.store.append_event(run.id, "task_evaluated", evaluation_payload, task_id=task.id)
+            if result.status != "succeeded":
+                error = result.error or f"agent returned {result.status}"
+                self.store.finish_task(task.id, attempt.id, False, str(result_path.relative_to(run.workspace)), error)
+            elif evaluation.passed:
+                self.store.finish_task(task.id, attempt.id, True, str(result_path.relative_to(run.workspace)))
+            elif self._can_retry(task.attempts + 1):
+                self.store.retry_task(task.id, attempt.id, evaluation.reason)
+            else:
+                self.store.finish_task(
+                    task.id,
+                    attempt.id,
+                    False,
+                    str(result_path.relative_to(run.workspace)),
+                    evaluation.reason,
+                )
+            settled = self.store.settle_run(run.id)
+            if settled is None:
+                raise ValueError(f"run disappeared while delegating: {run.id}")
+            return settled, result
+        except BudgetExceeded:
+            self.store.settle_run(run.id)
+            raise
+        except AgentInvocationError as exc:
+            error = self._sanitize_error(exc)
+            self.store.append_event(
+                run.id,
+                "agent_failed",
+                {"attempt_id": attempt.id, "adapter": adapter.name, "role": role, "error": error},
+                task_id=task.id,
+            )
+            if self._task_is_running(task.id):
+                if self._can_retry(task.attempts + 1):
+                    self.store.retry_task(task.id, attempt.id, error)
+                else:
+                    self.store.finish_task(task.id, attempt.id, False, error=error)
+            self.store.settle_run(run.id)
+            raise
+        except Exception as exc:
+            error = self._sanitize_error(exc)
+            self.store.append_event(
+                run.id,
+                "agent_failed",
+                {"attempt_id": attempt.id, "adapter": adapter.name, "role": role, "error": error},
+                task_id=task.id,
+            )
+            if self._task_is_running(task.id):
+                if self._can_retry(task.attempts + 1):
+                    self.store.retry_task(task.id, attempt.id, error)
+                else:
+                    self.store.finish_task(task.id, attempt.id, False, error=error)
+            self.store.settle_run(run.id)
+            raise AgentInvocationError(error) from exc
+        finally:
+            try:
+                adapter.set_process_observer(None)
+            except Exception as cleanup_error:  # noqa: BLE001 - cleanup must not mask result
+                del cleanup_error
+            with self._active_lock:
+                self._active_agents.pop(attempt.id, None)
+
     def resume(self, run_id: str) -> Run:
         run = self.store.get_run(run_id)
         if run is None:
@@ -634,10 +856,12 @@ class LocalController:
         if cancelled:
             with self._active_lock:
                 runtimes = list(self._active_runtimes.values())
-            if not runtimes:
-                runtimes = [self.runtime]
+                agents = list(self._active_agents.values())
             seen: set[int] = set()
-            for runtime in runtimes:
+            cancellables: list[object] = [*runtimes, *agents]
+            if not cancellables:
+                cancellables = [self.runtime]
+            for runtime in cancellables:
                 identity = id(runtime)
                 if identity in seen:
                     continue
@@ -694,6 +918,19 @@ class LocalController:
     def _task_is_running(self, task_id: str) -> bool:
         task = self.store.get_task(task_id)
         return task is not None and task.state.value == "running"
+
+    @staticmethod
+    def _runner_is_stale(run: Run) -> bool:
+        """Return whether it is safe for a delegation caller to recover running tasks."""
+        if run.runner_pid is None:
+            return True
+        if run.runner_pid == os.getpid():
+            return True
+        try:
+            os.kill(run.runner_pid, 0)
+        except (OSError, ProcessLookupError):
+            return True
+        return False
 
     def _validate_route(self, route: RouteDecision) -> None:
         """Reject missing profile configuration before any durable work is created."""

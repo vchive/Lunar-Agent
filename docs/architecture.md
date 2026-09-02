@@ -18,7 +18,10 @@ flowchart TD
     PD --> S
     C --> D[DAG scheduler\nclaim · retry · recover · cancel]
     D --> A[Runtime Adapter\nmock / subprocess / OpenAI-compatible\nHermesSessionRuntime]
+    C --> AR[AgentRegistry\nexplicit role + capability selection]
+    AR --> AA[Agent Adapter\nRuntime wrapper or command JSON adapter]
     A --> W[Run workspace\nprompts · results · transcripts]
+    AA --> W
     AP --> AW[Algorithm workspace\ndata/raw · processed · solve · evaluate · output · evolution]
     AW --> W
     W --> AS[ArtifactStore\nrun-relative paths + SHA-256]
@@ -48,9 +51,14 @@ flowchart TD
 4. A plan may additionally carry an `algorithm_problem` contract. It is validated before durable
    execution, stored in the immutable plan revision, and materializes six fixed local role
    directories plus a digest-bearing `algorithm-workspace.json`. The strategy layer consumes this
-   contract through one runtime-neutral seam: `loop` is the default, `population` is a bounded local
-   search, and `openevolve` is an explicitly configured local subprocess.
-5. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
+ contract through one runtime-neutral seam: `loop` is the default, `population` is a bounded local
+ search, and `openevolve` is an explicitly configured local subprocess.
+5. A caller may use `delegate`/`LocalController.run_agent` for a role-bearing worker. The explicit
+   `AgentRegistry` selects only registered adapters satisfying every requested capability. A
+   `RuntimeAgentAdapter` preserves the existing Runtime contract; `CommandAgentAdapter` invokes an
+   absolute executable with one bounded JSON stdin/stdout exchange. No adapter is discovered from
+   PATH or global Agent state.
+6. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
 dependent nodes receive only verified predecessor artifacts and bounded previews. Runtime
 adapters never own durable state. The selected evaluator profile establishes a base decision, then
 an optional declarative acceptance contract independently checks result text and regular artifacts
@@ -63,17 +71,17 @@ errors and result contents stay in their original ledger/artifact records.
 per-run budget bounds task count, attempts, agent tool calls, elapsed controller time, and indexed
 artifact bytes. Crossing a limit emits `budget_exceeded`, fails closed, and keeps existing artifacts
 inspectable.
-6. A failed or newly-informed run can receive `patch` or `replan` while idle. SQLite checks the
+7. A failed or newly-informed run can receive `patch` or `replan` while idle. SQLite checks the
    current `(plan_id, version)` before applying a typed patch. Prior revisions stay immutable;
    not-yet-run tasks removed by a revision become `superseded`, while completed task definitions
    cannot be changed.
-7. `recover` is a deterministic, advisory local policy over persisted task/evaluation/input/budget
+8. `recover` is a deterministic, advisory local policy over persisted task/evaluation/input/budget
    evidence. It returns `retry`, `ask_user`, `propose_patch`, `propose_replan`, `stop`, or `none`,
    writes each distinct proposal as a hashed audit artifact and idempotent event, and exposes the
    latest proposal in status JSON. It does not invoke a Runtime Adapter or model, execute a tool,
    mutate tasks, resume work, relax budgets, or apply a plan revision; a parent/user must choose an
    existing explicit command after reviewing the evidence.
-8. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
+9. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
    every succeeded task, and at least one indexed result/runtime artifact with a SHA-256 digest.
 
 ## Deliberate boundary versus WebAgent
@@ -93,7 +101,7 @@ The invocation seam and the search-strategy seam are deliberately independent:
 
 | Seam | Supported forms | Durable authority |
 | --- | --- | --- |
-| Invocation | direct local CLI; parent-Agent child process with `--json`; detached handle followed by `resume` | SQLite run/plan ledger and run workspace |
+| Invocation | direct local CLI; `delegate` with an explicit Agent command; parent-Agent child process with `--json`; detached handle followed by `resume` | SQLite run/plan ledger and run workspace |
 | Evolution | `loop` (default); `population` (opt-in); `openevolve` (optional local command) | shared problem contract, candidate archive, and frozen Evaluator |
 
 In direct mode, the owner supplies the goal and observes the result. In child-process mode, a

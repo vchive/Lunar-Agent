@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .agent_loop import HermesSessionRuntime
+from .agents import AgentError, AgentRegistry, CommandAgentAdapter
 from .algorithm import AlgorithmProblemContract
 from .artifacts import ArtifactStore
 from .budget import BudgetSpec
@@ -119,6 +120,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_home(run_parser)
     _add_json(run_parser)
+
+    delegate_parser = subparsers.add_parser(
+        "delegate", help="delegate one durable task to an explicit local Agent command"
+    )
+    delegate_parser.add_argument("prompt", nargs="?", help="task prompt; omit when using --run-id")
+    delegate_parser.add_argument(
+        "--run-id", help="delegate the next ready task in an existing run"
+    )
+    delegate_parser.add_argument("--task-id", help="specific task ID in an existing run")
+    delegate_parser.add_argument(
+        "--agent-command",
+        required=True,
+        help="explicit command (first token must be an absolute executable path)",
+    )
+    delegate_parser.add_argument("--agent-name", default="command")
+    delegate_parser.add_argument("--agent-role", default="solver")
+    delegate_parser.add_argument(
+        "--capability",
+        dest="capabilities",
+        action="append",
+        default=[],
+        help="required worker capability; may be supplied more than once",
+    )
+    delegate_parser.add_argument("--preferred-agent")
+    delegate_parser.add_argument("--timeout", type=float, default=None)
+    delegate_parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="return a run ID immediately and execute delegation in a local child process",
+    )
+    _add_home(delegate_parser)
+    _add_json(delegate_parser)
 
     resume_parser = subparsers.add_parser("resume", help="recover and continue a run")
     resume_parser.add_argument("run_id")
@@ -398,6 +431,15 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         for event in events
         if event["type"] == "task_evaluated" and event["task_id"] is not None
     }
+    latest_agents = {
+        event["task_id"]: {
+            "event_id": event["id"],
+            "created_at": event["created_at"],
+            **event["payload"],
+        }
+        for event in events
+        if event["type"] in {"agent_finished", "agent_failed"} and event["task_id"] is not None
+    }
     latest_recovery = next(
         (
             event["payload"].get("proposal")
@@ -483,6 +525,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
                 "dependencies": list(task.dependencies),
                 "acceptance": task.acceptance,
                 "evaluation": latest_evaluations.get(task.id),
+                "agent": latest_agents.get(task.id),
             }
             for task in tasks
         ],
@@ -499,6 +542,10 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             "candidates": evolution_candidates,
         } if evolution_configured or evolution_finished else None,
         "decisions": store.list_decisions(run.id),
+        "agents": [
+            {"task_id": task_id, **payload}
+            for task_id, payload in latest_agents.items()
+        ],
     }
 
 
@@ -658,6 +705,125 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         "run_status": settled.status.value,
         "workspace": str(settled.workspace),
         "contract_sha256": contract.digest(),
+    }
+
+
+def _delegate(config: Config, args: argparse.Namespace) -> dict[str, object]:
+    """Delegate one task through an explicitly supplied command adapter."""
+    command = _parse_command(args.agent_command, "--agent-command")
+    # The command adapter is the worker; the mock runtime is retained only to satisfy the
+    # controller's backwards-compatible Runtime constructor and is never invoked here.
+    controller = LocalController(
+        config,
+        build_runtime("mock", None, None, None, None),
+    )
+    if args.run_id:
+        run = controller.store.get_run(args.run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {args.run_id}")
+        if args.prompt is not None and not args.prompt.strip():
+            raise ValueError("prompt must not be empty")
+    else:
+        if not isinstance(args.prompt, str) or not args.prompt.strip():
+            raise ValueError("delegate requires a prompt unless --run-id is supplied")
+        run = controller.create(args.prompt.strip())
+    if args.detach:
+        if args.run_id:
+            raise ValueError("--detach is only valid when creating a new delegated run")
+        return _detach_delegate(config, args, run)
+    declared_capabilities = set(args.capabilities) | set(run.route_required_capabilities)
+    adapter = CommandAgentAdapter(
+        command,
+        roles=(args.agent_role,),
+        capabilities=tuple(sorted(declared_capabilities)),
+        name=args.agent_name,
+    )
+    controller.agent_registry = AgentRegistry([adapter])
+    try:
+        settled, result = controller.run_agent(
+            run.id,
+            role=args.agent_role,
+            prompt=args.prompt.strip() if isinstance(args.prompt, str) and args.prompt.strip() else None,
+            required_capabilities=tuple(args.capabilities),
+            preferred_adapter=args.preferred_agent,
+            task_id=args.task_id,
+            timeout=args.timeout,
+        )
+    finally:
+        controller.store.clear_runner_process(run.id, os.getpid())
+    return {
+        "run_id": settled.id,
+        "task_id": args.task_id or controller.store.list_tasks(settled.id)[0].id,
+        "status": result.status,
+        "run_status": settled.status.value,
+        "adapter": result.adapter_name,
+        "role": result.role,
+        "text": result.text,
+        "artifacts": list(result.artifacts),
+        "metadata": result.metadata,
+        "error": result.error,
+        "workspace": str(settled.workspace),
+    }
+
+
+def _detach_delegate(config: Config, args: argparse.Namespace, run: Run) -> dict[str, object]:
+    """Spawn a child that re-enters the same explicit delegation request."""
+    log_path = run.workspace / "controller.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "famou",
+        "delegate",
+        "--run-id",
+        run.id,
+        "--agent-command",
+        args.agent_command,
+        "--agent-name",
+        args.agent_name,
+        "--agent-role",
+        args.agent_role,
+        "--home",
+        str(config.home),
+        "--json",
+    ]
+    for capability in args.capabilities:
+        command.extend(("--capability", capability))
+    if args.preferred_agent:
+        command.extend(("--preferred-agent", args.preferred_agent))
+    if args.timeout is not None:
+        command.extend(("--timeout", str(args.timeout)))
+    try:
+        with log_path.open("a", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                command,
+                cwd=Path.cwd(),
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+        pid = getattr(process, "pid", None)
+        if isinstance(pid, int) and pid > 1:
+            store = Store(config.database)
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = pid
+            store.set_runner_process(run.id, pid, pgid)
+            latest = store.get_run(run.id)
+            if latest is not None and latest.status.value in {"succeeded", "failed", "cancelled"}:
+                store.clear_runner_process(run.id)
+    except OSError as exc:
+        Store(config.database).cancel_run(run.id)
+        raise AgentError(f"could not start detached delegation: {exc}") from exc
+    return {
+        "run_id": run.id,
+        "status": "pending",
+        "run_status": "pending",
+        "workspace": str(run.workspace),
+        "detached": True,
     }
 
 
@@ -838,6 +1004,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.json,
             )
             return 0 if run.status.value == "succeeded" else 1
+        if args.command == "delegate":
+            payload = _delegate(config, args)
+            _emit(payload, args.json)
+            return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
         if args.command == "resume":
             controller = _controller(args, config)
             run = controller.resume(args.run_id)
@@ -961,7 +1131,7 @@ def main(argv: list[str] | None = None) -> int:
             decision = controller.deliver(args.run_id)
             _emit(decision.to_dict(), args.json)
             return 0
-    except (ValueError, TypeError, OSError, EvolutionError) as exc:
+    except (AgentError, ValueError, TypeError, OSError, EvolutionError) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
         return 2
     return 2

@@ -69,6 +69,81 @@ def test_cli_run_and_status_use_repository_runtime(tmp_path: Path, capsys) -> No
     assert "status: succeeded" in status_output
 
 
+def test_cli_delegate_uses_explicit_absolute_command_and_returns_json(tmp_path: Path, capsys) -> None:
+    worker = tmp_path / "worker.py"
+    worker.write_text(
+        "import json, pathlib, sys\n"
+        "request = json.loads(sys.stdin.read())\n"
+        "pathlib.Path(request['workspace'], 'answer.md').write_text('evidence')\n"
+        "print(json.dumps({'status':'succeeded','text':'delegated', 'artifacts':['answer.md'], 'metadata':{'source':'fixture'}}))\n",
+        encoding="utf-8",
+    )
+    worker.chmod(worker.stat().st_mode | 0o100)
+    home = tmp_path / "home"
+    assert (
+        main(
+            [
+                "delegate",
+                "write an answer",
+                "--agent-command",
+                f"{sys.executable} {worker}",
+                "--agent-name",
+                "fixture",
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "succeeded"
+    assert payload["run_status"] == "succeeded"
+    assert payload["adapter"] == "fixture"
+    assert payload["artifacts"] == ["answer.md"]
+    assert Path(payload["workspace"]).exists()
+    assert main(["status", payload["run_id"], "--json", "--home", str(home)]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["tasks"][0]["agent"]["adapter"] == "fixture"
+
+
+def test_cli_delegate_detach_preserves_explicit_worker_request(tmp_path: Path, capsys, monkeypatch) -> None:
+    worker = tmp_path / "worker.py"
+    worker.write_text("print('done')\n", encoding="utf-8")
+    worker.chmod(worker.stat().st_mode | 0o100)
+    calls = []
+
+    class Process:
+        pid = 43210
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return Process()
+
+    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    home = tmp_path / "home"
+    assert (
+        main(
+            [
+                "delegate",
+                "long task",
+                "--agent-command",
+                f"{sys.executable} {worker}",
+                "--detach",
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "pending"
+    assert payload["detached"] is True
+    assert calls and "--run-id" in calls[0][0]
+    assert f"{sys.executable} {worker}" in calls[0][0]
+
+
 def test_cli_evolve_loop_uses_sqlite_authority_and_resume_metadata(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path)

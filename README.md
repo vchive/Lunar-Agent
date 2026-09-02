@@ -6,7 +6,7 @@ a run-scoped local directory. It does **not** require a machine-wide Hermes, Ope
 installation.
 
 The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/009-evidence-guided-recovery/`](specs/009-evidence-guided-recovery/), built on
+captured in [`specs/014-agent-adapter-delegation/`](specs/014-agent-adapter-delegation/), built on
 independent artifact acceptance contracts in
 [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
 routing, profiles, and budgets in
@@ -57,6 +57,39 @@ uv run famou run "Inspect this repository" --runtime subprocess
 
 The command receives the task prompt on stdin and runs inside the task workspace. Lunar-Agent never
 searches for Hermes or imports `~/.hermes`.
+
+## Explicit Agent delegation
+
+Lunar-Agent can also act as a local control plane for another CLI/TUI Agent. The worker is supplied
+explicitly; no Hermes, OpenCode, OpenClaw, or Codex installation is discovered or required:
+
+```bash
+lunar-agent delegate "inspect the repository and write an answer" \
+  --agent-command "/absolute/path/to/agent-wrapper --json" \
+  --agent-name my-worker --agent-role solver \
+  --capability read_files --capability write_artifacts --json
+```
+
+The command receives one JSON request on stdin and returns one JSON object (or bounded plain text)
+on stdout. The request includes the durable `run_id`, `task_id`, role, required capabilities,
+attempt workspace, and timeout. A structured response can declare `text`, run-relative `artifacts`,
+`metadata`, and `status`. Lunar-Agent verifies and SHA-256 hashes those artifacts, evaluates the
+text, and remains the only component allowed to settle the SQLite task/run. Absolute executable
+paths, timeouts, malformed output, non-zero exits, and workspace escapes fail closed.
+
+For a long delegation, add `--detach`; the command returns a durable run ID and a local child keeps
+working. Re-enter it later with the same explicit worker command:
+
+```bash
+lunar-agent delegate --run-id <run-id> \
+  --agent-command "/absolute/path/to/agent-wrapper --json" \
+  --agent-role solver --json
+```
+
+This makes the same project usable in three ways: directly as a standalone Agent, as a child called
+by Codex/Hermes/OpenClaw, or as the controller that delegates a role to one of those tools. The
+library equivalents are `AgentRequest`, `AgentResult`, `AgentRegistry`, `RuntimeAgentAdapter`, and
+`CommandAgentAdapter` from `famou.agents`.
 
 ## Continuous Hermes-inspired model session
 
