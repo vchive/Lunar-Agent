@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from .algorithm import AlgorithmProblemContract
 from .budget import BudgetSpec
 from .evaluator import validate_acceptance
 
@@ -135,6 +136,7 @@ class PlanDocument:
     verification: dict[str, Any] = field(default_factory=dict)
     delivery: dict[str, Any] = field(default_factory=dict)
     budget: BudgetSpec = field(default_factory=BudgetSpec)
+    algorithm_problem: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _text(self.goal, "plan goal", required=True)
@@ -185,6 +187,9 @@ class PlanDocument:
         _json_object(self.delivery, "delivery")
         if not isinstance(self.budget, BudgetSpec):
             raise TypeError("plan budget must be a BudgetSpec")
+        if self.algorithm_problem is not None:
+            contract = AlgorithmProblemContract.from_dict(self.algorithm_problem)
+            object.__setattr__(self, "algorithm_problem", contract.to_dict())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -203,6 +208,7 @@ class PlanDocument:
             "verification": self.verification,
             "delivery": self.delivery,
             "budget": self.budget.to_dict(),
+            **({"algorithm_problem": self.algorithm_problem} if self.algorithm_problem is not None else {}),
         }
 
     @classmethod
@@ -229,6 +235,7 @@ class PlanDocument:
             verification=_json_object(payload.get("verification"), "verification"),
             delivery=_json_object(payload.get("delivery"), "delivery"),
             budget=BudgetSpec.from_dict(payload.get("budget")),
+            algorithm_problem=payload.get("algorithm_problem"),
         )
 
 
@@ -459,5 +466,5 @@ def apply_patch(document: PlanDocument, patch: PlanPatch) -> PlanDocument:
         hard_constraints=tuple(hard), soft_constraints=tuple(soft), objective=document.objective,
         evidence=tuple(document.evidence) + patch.evidence, assumptions=document.assumptions,
         acceptance=document.acceptance, verification=document.verification, delivery=document.delivery,
-        budget=budget,
+        budget=budget, algorithm_problem=document.algorithm_problem,
     )

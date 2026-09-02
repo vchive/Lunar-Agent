@@ -374,6 +374,12 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         ),
         None,
     )
+    algorithm_manifest = None
+    if current_plan is not None and current_plan.algorithm_problem is not None:
+        algorithm_manifest = next(
+            (item for item in reversed(store.list_artifacts(run.id)) if item["kind"] == "algorithm_manifest"),
+            None,
+        )
     return {
         "run": {
             "id": run.id,
@@ -425,6 +431,8 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         "input_request": store.pending_input(run.id),
         "recovery": latest_recovery,
         "plan": current_plan.to_dict() if current_plan else None,
+        "algorithm_problem": current_plan.algorithm_problem if current_plan else None,
+        "algorithm_workspace": algorithm_manifest,
         "decisions": store.list_decisions(run.id),
     }
 

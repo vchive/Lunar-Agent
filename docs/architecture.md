@@ -10,6 +10,7 @@ flowchart TD
     P[Parent agent / user\nCLI, Codex, OpenClaw, Hermes] --> C[LocalController]
     C --> R[DomainRouter\ngeneral / data / research / coding]
     R --> PR[ProfileRegistry\nSolver + Evaluator]
+    C --> AP[AlgorithmProblemContract\noptional · loop / population]
     R --> B[BudgetSpec\ntasks · attempts · tools · time · bytes]
     C --> M[MasterPolicy\nanswer / ask_user / execute_plan]
     M -->|complex goal| PD[PlanDocument vN\nconstraints · evidence · acceptance]
@@ -18,6 +19,8 @@ flowchart TD
     C --> D[DAG scheduler\nclaim · retry · recover · cancel]
     D --> A[Runtime Adapter\nmock / subprocess / OpenAI-compatible\nHermesSessionRuntime]
     A --> W[Run workspace\nprompts · results · transcripts]
+    AP --> AW[Algorithm workspace\ndata/raw · processed · solve · evaluate · output · evolution]
+    AW --> W
     W --> AS[ArtifactStore\nrun-relative paths + SHA-256]
     AS --> AC[Acceptance Contract\nbounded local artifact checks]
     AC --> E[Evaluator Profile\nstructured evidence]
@@ -42,7 +45,11 @@ flowchart TD
    `data`, `research`, or `coding`, records its evidence, and selects runtime-neutral Solver and
    Evaluator Profiles. The default profiles preserve the existing non-empty result evaluation;
    callers may inject a stronger evaluator without changing a Runtime Adapter.
-4. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
+4. A plan may additionally carry an `algorithm_problem` contract. It is validated before durable
+   execution, stored in the immutable plan revision, and materializes six fixed local role
+   directories plus a digest-bearing `algorithm-workspace.json`. The contract records `loop` or
+   `population` as a future strategy choice; Feature 012 does not execute either strategy.
+5. The controller schedules ready DAG nodes. Each attempt writes a prompt and result artifact;
 dependent nodes receive only verified predecessor artifacts and bounded previews. Runtime
 adapters never own durable state. The selected evaluator profile establishes a base decision, then
 an optional declarative acceptance contract independently checks result text and regular artifacts
@@ -55,17 +62,17 @@ errors and result contents stay in their original ledger/artifact records.
 per-run budget bounds task count, attempts, agent tool calls, elapsed controller time, and indexed
 artifact bytes. Crossing a limit emits `budget_exceeded`, fails closed, and keeps existing artifacts
 inspectable.
-5. A failed or newly-informed run can receive `patch` or `replan` while idle. SQLite checks the
+6. A failed or newly-informed run can receive `patch` or `replan` while idle. SQLite checks the
    current `(plan_id, version)` before applying a typed patch. Prior revisions stay immutable;
    not-yet-run tasks removed by a revision become `superseded`, while completed task definitions
    cannot be changed.
-6. `recover` is a deterministic, advisory local policy over persisted task/evaluation/input/budget
+7. `recover` is a deterministic, advisory local policy over persisted task/evaluation/input/budget
    evidence. It returns `retry`, `ask_user`, `propose_patch`, `propose_replan`, `stop`, or `none`,
    writes each distinct proposal as a hashed audit artifact and idempotent event, and exposes the
    latest proposal in status JSON. It does not invoke a Runtime Adapter or model, execute a tool,
    mutate tasks, resume work, relax budgets, or apply a plan revision; a parent/user must choose an
    existing explicit command after reviewing the evidence.
-7. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
+8. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
    every succeeded task, and at least one indexed result/runtime artifact with a SHA-256 digest.
 
 ## Deliberate boundary versus WebAgent
@@ -78,6 +85,28 @@ service concerns (HTTP/SSE, queues, cloud sandboxes, multi-tenancy, billing) and
 process model. Lunar-Agent adopts the portable behaviors and excludes those deployment assumptions.
 A parent agent can invoke the JSON CLI as a child process, while a local user can run the same
 binary without a Hermes installation or a machine-wide configuration directory.
+
+## Invocation and evolution seams
+
+The invocation seam and the search-strategy seam are deliberately independent:
+
+| Seam | Supported forms | Durable authority |
+| --- | --- | --- |
+| Invocation | direct local CLI; parent-Agent child process with `--json`; detached handle followed by `resume` | SQLite run/plan ledger and run workspace |
+| Evolution | `loop` (default); `population` (opt-in, future) | shared problem contract, candidate protocol, and frozen Evaluator |
+
+In direct mode, the owner supplies the goal and observes the result. In child-process mode, a
+parent such as Codex, Hermes, or OpenClaw supplies stdin/arguments and consumes bounded JSON
+stdout; it does not become a required runtime dependency. In detached mode, the caller receives a
+run ID before work finishes and can safely terminate; a later process reconstructs the same plan
+revision, contract manifest, retries, and artifacts with `resume`.
+
+`loop` is the first executable evolution path: each round gets a fresh Solver context, one
+candidate is evaluated by the unchanged Evaluator, and best-so-far state is persisted. `population`
+will add an archive and objective-based selection only when a long enough local budget demonstrates
+that diversity offsets its bookkeeping and reduced per-lineage depth. The existing `--workers`
+pool is scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
+population.
 
 ## Recovery and migration
 

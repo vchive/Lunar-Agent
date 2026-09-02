@@ -138,6 +138,61 @@ the run ineligible for `deliver`, without discarding prior artifacts. `PlanDocum
 optional `budget` object with `max_tasks`, `max_attempts`, `max_tool_steps`,
 `max_runtime_seconds`, and `max_artifact_bytes`.
 
+### Algorithm problem contracts (Feature 012)
+
+For algorithmic work, a plan may carry an `algorithm_problem` contract. It records the problem type,
+input schema, decision variables or prediction target, objective direction, provenance-backed hard
+and soft constraints, success criteria, deliverables, and explicit assumptions. The contract is
+validated before the run starts and is visible in both `plan` and `status --json`.
+
+Contract-bearing runs reserve a local role workspace:
+
+```text
+data/raw/ · data/processed/ · solve/ · evaluate/ · output/ · evolution/
+```
+
+`algorithm-workspace.json` contains the plan revision and a SHA-256 digest of the canonical
+contract. The directories are a boundary for later Solver/Evaluator roles; Feature 012 does not
+copy input data, execute solver code, or start an evolution loop.
+
+The contract accepts two future strategy values: `loop` (the default WebAgent-style fresh-context
+serial rounds) and `population` (the OpenEvolve/Workspace-style candidate archive and selection
+mode). Both will share the same contract and frozen validity-first evaluator. The current local
+`--workers` option only parallelizes independent DAG tasks; it is not population search.
+
+### Three local invocation modes
+
+Lunar-Agent is the same independent agent in each mode; a parent Agent is optional.
+
+1. Run it directly as a standalone local Agent. The repository-owned SQLite ledger and workspace
+   are enough; no Hermes/OpenCode/Codex installation is discovered or imported.
+2. Call it from Codex, Hermes, OpenClaw, or a script as a child process. Use `--json` and pass the
+   goal/plan on arguments or stdin; parse the bounded stdout payload and inspect the returned
+   `run_id`, status, artifacts, and plan metadata.
+3. For a long task, request a durable handle with `--detach`, let the caller exit, then invoke
+   `resume <run-id>` later. The same plan revision, algorithm contract, workspace, and ledger are
+   recovered; the parent does not need to keep a model session alive.
+
+Examples:
+
+```bash
+# 1. Standalone
+lunar-agent plan routing-plan.json --runtime mock --home .lunar --json
+
+# 2. Parent Agent child process (stdin/stdout JSON)
+printf '%s' 'solve this routing problem' | lunar-agent run - --runtime mock --json --home .lunar
+
+# 3. Detached then resumed
+lunar-agent run "search for a feasible schedule" --runtime mock --detach --json --home .lunar
+lunar-agent resume <run-id> --runtime mock --json --home .lunar
+```
+
+These are process/interface choices, not different evolution algorithms. `loop` remains the first
+implementation target because it gives each round a fresh solver context and is easier to compare
+under a fixed budget. `population` becomes worthwhile when a long local budget can pay for archive
+selection and genuine diversity; it will sit behind the same Solver/Evaluator boundary rather than
+being tied to a specific parent Agent.
+
 If the session needs a decision, it can call `ask_user`. The run then becomes `awaiting_input` and
 returns the question in JSON/status output. Answer the same durable run later; no duplicate task is
 created:

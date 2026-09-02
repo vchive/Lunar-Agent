@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_loop import AgentInputRequired
+from .algorithm import AlgorithmProblemContract, materialize_algorithm_workspace
 from .artifacts import ArtifactError, ArtifactStore
 from .budget import BudgetExceeded, BudgetSpec
 from .config import Config
@@ -75,6 +76,30 @@ class LocalController:
         self.policy = MasterPolicy()
         self.recovery_policy = RecoveryPolicy()
 
+    def _register_algorithm_workspace(self, run: Run, document: PlanDocument) -> None:
+        """Materialize the fixed role workspace for a validated algorithm contract."""
+        if document.algorithm_problem is None:
+            return
+        contract = AlgorithmProblemContract.from_dict(document.algorithm_problem)
+        manifest = materialize_algorithm_workspace(run.workspace, contract, document.plan_id, document.version)
+        tasks = self.store.list_tasks(run.id)
+        if tasks:
+            ArtifactStore(run.workspace, self.store, run.id).record(
+                manifest, tasks[0].id, kind="algorithm_manifest"
+            )
+        self.store.append_event(
+            run.id,
+            "algorithm_contract_registered",
+            {
+                "problem_id": contract.problem_id,
+                "plan_id": document.plan_id,
+                "plan_version": document.version,
+                "contract_sha256": contract.digest(),
+                "evolution_strategy": contract.evolution.strategy,
+            },
+            event_id=f"event-algorithm-contract-{document.plan_id}-{document.version}",
+        )
+
     def decide(self, goal: str) -> PolicyDecision:
         """Return a bounded deterministic Master decision without creating durable work."""
         return self.policy.decide(goal)
@@ -110,6 +135,7 @@ class LocalController:
                                   route.solver_profile, route.evaluator_profile, document.budget, route.evidence)
         self._validate_route(route)
         run = self.store.create_run_with_plan(document, decision, route=route)
+        self._register_algorithm_workspace(run, document)
         return self.resume(run.id)
 
     def patch_plan(self, run_id: str, patch: PlanPatch) -> PlanDocument:
@@ -130,7 +156,7 @@ class LocalController:
                 soft_constraints=document.soft_constraints, objective=document.objective,
                 evidence=document.evidence, assumptions=document.assumptions,
                 acceptance=document.acceptance, verification=document.verification, delivery=document.delivery,
-                budget=inherited_budget,
+                budget=inherited_budget, algorithm_problem=document.algorithm_problem,
             )
         elif inherited_budget != document.budget:
             document = PlanDocument(
@@ -140,9 +166,13 @@ class LocalController:
                 soft_constraints=document.soft_constraints, objective=document.objective,
                 evidence=document.evidence, assumptions=document.assumptions,
                 acceptance=document.acceptance, verification=document.verification, delivery=document.delivery,
-                budget=inherited_budget,
+                budget=inherited_budget, algorithm_problem=document.algorithm_problem,
             )
-        return self.store.commit_plan_revision(run_id, document, reason, evidence, action="replan")
+        committed = self.store.commit_plan_revision(run_id, document, reason, evidence, action="replan")
+        run = self.store.get_run(run_id)
+        if run is not None:
+            self._register_algorithm_workspace(run, committed)
+        return committed
 
     def deliver(self, run_id: str) -> PolicyDecision:
         run = self.store.get_run(run_id)

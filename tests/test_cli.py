@@ -44,6 +44,53 @@ def test_cli_status_json_exposes_route_profiles_and_budget(tmp_path: Path, capsy
     assert status["budget"]["max_tool_steps"] == 40
 
 
+def test_cli_status_json_exposes_algorithm_contract_and_manifest(tmp_path: Path, capsys) -> None:
+    plan_path = tmp_path / "algorithm-plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "goal": "solve routing",
+                "plan_id": "algorithm-cli-plan",
+                "tasks": [{"id": "solve", "title": "Solve", "prompt": "write result"}],
+                "algorithm_problem": {
+                    "problem_id": "routing-cli",
+                    "problem_type": "routing",
+                    "statement": "Assign every item to a route.",
+                    "inputs": [
+                        {
+                            "path": "items.csv",
+                            "format": "csv",
+                            "fields": {"item_id": "unique item identifier"},
+                            "key": "item_id",
+                        }
+                    ],
+                    "decision_variables": ["route per item"],
+                    "objective": {"name": "travel time", "direction": "minimize"},
+                    "hard_constraints": [
+                        {
+                            "id": "serve-each",
+                            "description": "Serve every item once.",
+                            "source": "user_confirmed",
+                            "verification": "independent",
+                            "result_fields": ["item_id"],
+                        }
+                    ],
+                    "success_criteria": ["Every item appears."],
+                    "deliverables": ["Route table."],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["plan", str(plan_path), "--runtime", "mock", "--json", "--home", str(tmp_path)]) == 0
+    run_id = json.loads(capsys.readouterr().out)["run_id"]
+    assert main(["status", run_id, "--json", "--home", str(tmp_path)]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["algorithm_problem"]["problem_type"] == "routing"
+    assert status["algorithm_workspace"]["kind"] == "algorithm_manifest"
+    assert (Path(status["run"]["workspace"]) / "algorithm-workspace.json").is_file()
+
+
 def test_cli_recover_persists_an_advisory_proposal_in_status(tmp_path: Path, capsys) -> None:
     plan_path = tmp_path / "recovery-plan.json"
     plan_path.write_text(

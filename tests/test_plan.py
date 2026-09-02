@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from famou.algorithm import AlgorithmProblemContract
 from famou.config import Config
 from famou.controller import LocalController
 from famou.evaluator import Evaluation
@@ -79,6 +80,137 @@ def test_plan_runs_in_dependency_order_and_handoffs_artifact(tmp_path: Path) -> 
     tasks = controller.store.list_tasks(run.id)
     assert [task.state.value for task in tasks] == ["succeeded", "succeeded"]
     assert tasks[1].dependencies == ("first",)
+
+
+def test_algorithm_contract_round_trips_in_revision_and_legacy_plan_stays_generic(tmp_path: Path) -> None:
+    contract = {
+        "problem_id": "assignment-plan",
+        "problem_type": "assignment",
+        "statement": "Assign each worker to one task.",
+        "inputs": [
+            {
+                "path": "workers.csv",
+                "format": "csv",
+                "fields": {"worker_id": "unique worker identifier"},
+                "key": "worker_id",
+            }
+        ],
+        "decision_variables": ["worker-task assignment"],
+        "objective": {"name": "total preference", "direction": "maximize"},
+        "hard_constraints": [
+            {
+                "id": "one-task",
+                "description": "Each worker receives one task.",
+                "source": "user_confirmed",
+                "verification": "independent",
+                "result_fields": ["worker_id", "task_id"],
+            }
+        ],
+        "success_criteria": ["Every worker is assigned."],
+        "deliverables": ["Assignment table."],
+    }
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    document = PlanDocument.from_dict(
+        {
+            "plan_id": "assignment-plan-revision",
+            "goal": "solve assignment",
+            "tasks": [{"id": "solve", "prompt": "write assignment"}],
+            "algorithm_problem": contract,
+        }
+    )
+    run = controller.start_plan(document)
+    current = controller.store.get_current_plan(run.id)
+    assert current is not None and current.algorithm_problem == document.algorithm_problem
+    assert PlanDocument.from_dict(_document().to_dict()).algorithm_problem is None
+
+
+def test_replan_updates_algorithm_contract_manifest_and_keeps_revision_audit(tmp_path: Path) -> None:
+    initial_contract = {
+        "problem_id": "routing-replan",
+        "problem_type": "routing",
+        "statement": "Route each item while minimizing travel time.",
+        "inputs": [
+            {
+                "path": "items.csv",
+                "format": "csv",
+                "fields": {"item_id": "unique item identifier"},
+                "key": "item_id",
+            }
+        ],
+        "decision_variables": ["route per item"],
+        "objective": {"name": "travel time", "direction": "minimize"},
+        "hard_constraints": [
+            {
+                "id": "serve-each",
+                "description": "Serve each item exactly once.",
+                "source": "user_confirmed",
+                "verification": "independent",
+                "result_fields": ["item_id"],
+            }
+        ],
+        "success_criteria": ["Every item is served."],
+        "deliverables": ["Route table."],
+        "evolution": {"strategy": "loop", "max_rounds": 5, "stagnation_rounds": 3},
+    }
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    original = PlanDocument.from_dict(
+        {
+            "plan_id": "plan-algorithm-replan",
+            "goal": "solve routing",
+            "tasks": [{"id": "solve", "title": "Solve", "prompt": "write route"}],
+            "algorithm_problem": initial_contract,
+        }
+    )
+    run = controller.start_plan(original)
+    first_manifest = json.loads((run.workspace / "algorithm-workspace.json").read_text(encoding="utf-8"))
+    first_digest = first_manifest["contract_sha256"]
+    completed_task = controller.store.list_tasks(run.id)[0]
+    assert completed_task.result_path is not None
+    result_path = run.workspace / completed_task.result_path
+    result_before = result_path.read_bytes()
+
+    revised_contract = {
+        **initial_contract,
+        "evolution": {"strategy": "population", "max_rounds": 20, "stagnation_rounds": 4},
+    }
+    revised = PlanDocument.from_dict(
+        {
+            "plan_id": original.plan_id,
+            "version": 2,
+            "parent_version": 1,
+            "goal": original.goal,
+            "tasks": [{"id": "solve", "title": "Solve", "prompt": "write route"}],
+            "algorithm_problem": revised_contract,
+        }
+    )
+    committed = controller.replan(run.id, revised, "enable population for a longer local run")
+
+    manifest = json.loads((run.workspace / "algorithm-workspace.json").read_text(encoding="utf-8"))
+    assert committed.version == 2
+    assert manifest["plan_version"] == 2
+    assert manifest["contract_sha256"] != first_digest
+    current = controller.store.get_current_plan(run.id)
+    assert current is not None and current.algorithm_problem is not None
+    assert current.algorithm_problem["evolution"]["strategy"] == "population"
+    assert manifest["contract_sha256"] == AlgorithmProblemContract.from_dict(
+        current.algorithm_problem
+    ).digest()
+    completed_after = controller.store.list_tasks(run.id)[0]
+    assert completed_after.state.value == "succeeded"
+    assert completed_after.result_path == completed_task.result_path
+    assert result_path.read_bytes() == result_before
+    registered = [
+        event
+        for event in controller.store.list_events(run.id)
+        if event["type"] == "algorithm_contract_registered"
+    ]
+    assert [event["payload"]["plan_version"] for event in registered] == [1, 2]
+    manifest_artifacts = [
+        artifact for artifact in controller.store.list_artifacts(run.id) if artifact["kind"] == "algorithm_manifest"
+    ]
+    assert len(manifest_artifacts) == 2
+    assert len({artifact["sha256"] for artifact in manifest_artifacts}) == 2
+    assert manifest_artifacts[-1]["size"] == (run.workspace / "algorithm-workspace.json").stat().st_size
 
 
 def test_rejected_plan_task_blocks_dependents_and_writes_audit(tmp_path: Path) -> None:
