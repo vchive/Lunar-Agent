@@ -6,7 +6,7 @@ a run-scoped local directory. It does **not** require a machine-wide Hermes, Ope
 installation.
 
 The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/014-agent-adapter-delegation/`](specs/014-agent-adapter-delegation/), built on
+captured in [`specs/017-evolution-result-handoff/`](specs/017-evolution-result-handoff/), built on
 independent artifact acceptance contracts in
 [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
 routing, profiles, and budgets in
@@ -278,6 +278,10 @@ lunar-agent evolve contract.json --strategy population \
   --json --home .lunar
 ```
 
+The JSON result includes `best_candidate_path` when a valid candidate was selected. It is relative
+to the returned `workspace`, so a parent Agent can inspect the source without parsing the internal
+candidate archive. Failed or all-invalid runs return `null` for both the best candidate ID and path.
+
 ### Three local invocation modes
 
 Lunar-Agent is the same independent agent in each mode; a parent Agent is optional.
@@ -493,4 +497,4 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/006-master-policy-plan-contract/`](specs/006-master-policy-plan-contract/).
+[`specs/017-evolution-result-handoff/`](specs/017-evolution-result-handoff/).

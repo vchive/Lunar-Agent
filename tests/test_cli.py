@@ -274,6 +274,12 @@ def test_cli_evolve_can_use_separate_evaluator_agent(tmp_path: Path, capsys) -> 
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "completed"
     assert payload["best_score"] == 3.0
+    assert payload["best_candidate_path"] == "evolution/candidates/candidate-0001/candidate.py"
+    workspace = Path(payload["workspace"])
+    assert (workspace / payload["best_candidate_path"]).is_file()
+    assert main(["status", payload["run_id"], "--json", "--home", str(tmp_path / "home")]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["evolution"]["result"]["best_candidate_path"] == payload["best_candidate_path"]
 
 
 def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:

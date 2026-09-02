@@ -104,7 +104,7 @@ The invocation seam and the search-strategy seam are deliberately independent:
 | Seam | Supported forms | Durable authority |
 | --- | --- | --- |
 | Invocation | direct local CLI; `delegate` with an explicit Agent command; parent-Agent child process with `--json`; detached handle followed by `resume` | SQLite run/plan ledger and run workspace |
-| Evolution | `loop` (default); `population` (opt-in); Agent-backed generation; Agent-backed evaluation; `openevolve` (optional local command) | shared problem contract, candidate archive, and validity-first report |
+| Evolution | `loop` (default); `population` (opt-in); Agent-backed generation; Agent-backed evaluation; `openevolve` (optional local command) | shared problem contract, candidate archive, validity-first report, and relative result handoff |
 
 In direct mode, the owner supplies the goal and observes the result. In child-process mode, a
 parent such as Codex, Hermes, or OpenClaw supplies stdin/arguments and consumes bounded JSON
@@ -132,6 +132,12 @@ and roles, and both remain optional adapters rather than required runtime depend
 imports a validated result into Lunar-Agent's canonical archive. The existing `--workers` pool is
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
+
+Every strategy result includes `best_candidate_path` when validity-first selection found a regular
+candidate source below the run workspace. The controller writes the same additive field to
+`evolution/result.json`, the `evolution_finished` event, and `status --json`; parent Agents can join
+it with the returned workspace path without depending on archive internals. A missing, escaping, or
+symlinked source is treated as unavailable and never handed off as a best artifact.
 
 ## Recovery and migration
 

@@ -276,6 +276,7 @@ class StrategyResult:
     best_score: float | None
     archive_path: str
     error: str | None = None
+    best_candidate_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -286,6 +287,7 @@ class StrategyResult:
             "valid_candidates": self.valid_candidates,
             "best_candidate_id": self.best_candidate_id,
             "best_score": self.best_score,
+            "best_candidate_path": self.best_candidate_path,
             "archive_path": self.archive_path,
             "error": _bounded_error(self.error) if self.error else None,
         }
@@ -617,6 +619,19 @@ class CandidateArchive:
     def result(self, strategy: str, status: str, iterations: int, error: str | None = None) -> StrategyResult:
         records = self.records()
         best = self.best()
+        best_path: str | None = None
+        if best is not None:
+            raw_path = self.workspace / best.code_path
+            try:
+                _reject_symlink_components(raw_path, self.workspace, "best candidate path")
+                resolved = _confined(self.workspace, raw_path, "best candidate path")
+                if not resolved.is_file() or resolved.is_symlink():
+                    raise EvolutionError("best candidate path is not a regular file")
+                best_path = resolved.relative_to(self.workspace).as_posix()
+            except (OSError, ValueError, EvolutionError):
+                # A stale or tampered archive record must never hand an unverified source to a
+                # parent Agent. Treat the selected candidate as unavailable for this result.
+                best = None
         return StrategyResult(
             strategy=strategy,
             status=status,  # type: ignore[arg-type]
@@ -627,6 +642,7 @@ class CandidateArchive:
             best_score=best.evaluation.combined_score if best else None,
             archive_path=self.archive_path.relative_to(self.workspace).as_posix(),
             error=_bounded_error(error) if error else None,
+            best_candidate_path=best_path,
         )
 
 

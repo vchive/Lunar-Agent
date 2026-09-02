@@ -5,6 +5,7 @@ from pathlib import Path
 
 from famou.algorithm import AlgorithmProblemContract
 from famou.evolution import (
+    CandidateArchive,
     CandidateDraft,
     EvolutionConfig,
     EvolutionContext,
@@ -74,6 +75,8 @@ def test_loop_archives_every_round_and_returns_best_so_far(tmp_path: Path) -> No
     assert result.evaluated_candidates == 3
     assert result.best_score == 0.9
     assert result.best_candidate_id == "candidate-0002"
+    assert result.best_candidate_path == "evolution/candidates/candidate-0002/candidate.py"
+    assert (tmp_path / result.best_candidate_path).is_file()
     assert len((tmp_path / "evolution" / "archive.jsonl").read_text().splitlines()) == 3
     assert json.loads((tmp_path / "evolution" / "state.json").read_text())["status"] == "completed"
 
@@ -107,6 +110,7 @@ def test_loop_invalid_candidate_never_becomes_best(tmp_path: Path) -> None:
     ).run()
     assert result.status == "failed"
     assert result.best_candidate_id is None
+    assert result.best_candidate_path is None
     assert result.valid_candidates == 0
 
 
@@ -138,6 +142,22 @@ def test_population_is_bounded_and_deterministic(tmp_path: Path) -> None:
     assert len(active) <= 4
     assert len(active) == len(set(active))
     assert result.best_score == 10.0
+    assert result.best_candidate_path is not None
+    assert (tmp_path / result.best_candidate_path).is_file()
+
+
+def test_result_does_not_handoff_missing_best_source(tmp_path: Path) -> None:
+    def generate(request):
+        return CandidateDraft("def solve():\n    return 1\n")
+
+    result = LoopStrategy(
+        EvolutionContext(_contract(), tmp_path, generate, lambda path, contract: _report(1), EvolutionConfig(max_rounds=1))
+    ).run()
+    assert result.best_candidate_path is not None
+    (tmp_path / result.best_candidate_path).unlink()
+    recovered = CandidateArchive(tmp_path).result("loop", "completed", 1)
+    assert recovered.best_candidate_id is None
+    assert recovered.best_candidate_path is None
 
 
 def test_strategy_selector_accepts_openevolve_only_with_explicit_command(tmp_path: Path) -> None:
@@ -177,6 +197,7 @@ def test_openevolve_adapter_imports_bounded_result(tmp_path: Path) -> None:
     result = OpenEvolveStrategy(context).run()
     assert result.status == "completed"
     assert result.best_score == 0.75
+    assert result.best_candidate_path == "evolution/candidates/candidate-0001/candidate.py"
     assert (tmp_path / "evolution" / "candidates" / "candidate-0001" / "candidate.py").is_file()
 
 
