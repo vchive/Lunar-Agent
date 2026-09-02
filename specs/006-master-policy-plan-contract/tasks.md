@@ -65,8 +65,8 @@
 
 - [x] T022 [P] Update README and feature quickstart/contracts with final command examples
 - [x] T023 [P] Add migration/recovery and WebAgent effect-layer rationale to `docs/architecture.md`
-- [ ] T024 Run Python 3.11/3.12/3.13 tests, Ruff, and feature quickstart; record results in feature docs
-- [ ] T025 Commit with `vchive` identity and push `main` to `origin`
+- [ ] T024 Run Python 3.11/3.12/3.13 tests, Ruff, and feature quickstart; record results in feature docs (3.13 full suite and 3.11 AST parse completed; 3.12 interpreter unavailable)
+- [x] T025 Commit with `vchive` identity and push `main` to `origin`
 
 ## Dependencies & Execution Order
 
