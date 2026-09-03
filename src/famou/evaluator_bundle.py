@@ -41,6 +41,7 @@ MAX_PROBE_FILE_BYTES = 64 * 1024
 MAX_PROBE_BYTES = 512 * 1024
 MAX_EVALUATOR_OUTPUT_BYTES = 64 * 1024
 MAX_IDENTIFIER_BYTES = 128
+MAX_SOLVER_EVALUATOR_EXCERPT_BYTES = 12 * 1024
 BUNDLE_PROTOCOL = "frozen-evaluator-bundle-v2"
 BUNDLE_FILES = frozenset(
     {
@@ -208,6 +209,163 @@ class FrozenEvaluatorBundle:
         if after.fingerprint != self.fingerprint:
             raise EvaluatorBundleError("frozen evaluator bundle changed during evaluation")
         return report
+
+
+@dataclass(frozen=True)
+class SolverScoringContract:
+    """Verified, immutable scoring guidance made visible to a candidate-building Agent."""
+
+    objective: str
+    evaluator_source: str
+    evaluator_sha256: str
+    bundle_sha256: str
+    schema_version: str = "1"
+    authority: str = "frozen_evaluator"
+
+    def __post_init__(self) -> None:
+        objective = _text(
+            self.objective, "solver scoring objective", MAX_OBJECTIVE_BYTES, strip=False
+        )
+        source = _text(
+            self.evaluator_source,
+            "solver scoring evaluator source",
+            MAX_EVALUATOR_BYTES,
+            strip=False,
+        )
+        if self.schema_version != "1" or self.authority != "frozen_evaluator":
+            raise ValueError("solver scoring contract identity is invalid")
+        if not _is_sha256(self.evaluator_sha256) or not _is_sha256(self.bundle_sha256):
+            raise ValueError("solver scoring contract digests are invalid")
+        if hashlib.sha256(source.encode("utf-8")).hexdigest() != self.evaluator_sha256:
+            raise ValueError("solver scoring evaluator digest does not match source")
+        object.__setattr__(self, "objective", objective)
+        object.__setattr__(self, "evaluator_source", source)
+
+    @classmethod
+    def from_bundle(
+        cls,
+        bundle: FrozenEvaluatorBundle,
+        contract: AlgorithmProblemContract,
+    ) -> SolverScoringContract:
+        if not isinstance(bundle, FrozenEvaluatorBundle):
+            raise TypeError("bundle must be a FrozenEvaluatorBundle")
+        verified = load_evaluator_bundle(
+            bundle.root,
+            contract,
+            timeout=bundle.timeout_seconds,
+        )
+        if verified.fingerprint != bundle.fingerprint:
+            raise EvaluatorBundleError("frozen evaluator bundle fingerprint changed")
+        try:
+            objective = (bundle.root / "objective.md").read_text(encoding="utf-8")
+            evaluator_source = (bundle.root / "evaluator.py").read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise EvaluatorBundleError("frozen evaluator scoring guidance is unreadable") from exc
+        return cls(
+            objective=objective,
+            evaluator_source=evaluator_source,
+            evaluator_sha256=hashlib.sha256(evaluator_source.encode("utf-8")).hexdigest(),
+            bundle_sha256=verified.fingerprint,
+        )
+
+    def prompt_dict(
+        self, *, evaluator_excerpt_bytes: int = MAX_SOLVER_EVALUATOR_EXCERPT_BYTES
+    ) -> dict[str, object]:
+        if (
+            isinstance(evaluator_excerpt_bytes, bool)
+            or not isinstance(evaluator_excerpt_bytes, int)
+            or not 0 <= evaluator_excerpt_bytes <= MAX_SOLVER_EVALUATOR_EXCERPT_BYTES
+        ):
+            raise ValueError("solver evaluator excerpt size is invalid")
+        source = self.evaluator_source.encode("utf-8")
+        excerpt = source[:evaluator_excerpt_bytes].decode(
+            "utf-8", errors="ignore"
+        )
+        objective = self.objective.encode("utf-8")
+        return {
+            "schema_version": self.schema_version,
+            "authority": self.authority,
+            "bundle_sha256": self.bundle_sha256,
+            "objective": {
+                "path": "scoring/objective.md",
+                "text": self.objective,
+                "size": len(objective),
+                "sha256": hashlib.sha256(objective).hexdigest(),
+            },
+            "evaluator": {
+                "path": "scoring/evaluator.py",
+                "size": len(source),
+                "sha256": self.evaluator_sha256,
+                "source_excerpt": excerpt,
+                "truncated": len(source) > len(excerpt.encode("utf-8")),
+            },
+        }
+
+    def stage(self, workspace: Path) -> None:
+        root = Path(workspace).expanduser()
+        if root.is_symlink():
+            raise EvaluatorBundleError("solver scoring workspace must not be a symlink")
+        root = root.resolve(strict=False)
+        root.mkdir(parents=True, exist_ok=True)
+        scoring = root / "scoring"
+        if scoring.is_symlink():
+            raise EvaluatorBundleError("solver scoring directory must not be a symlink")
+        scoring.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "schema_version": self.schema_version,
+            "authority": self.authority,
+            "bundle_sha256": self.bundle_sha256,
+            "objective": {
+                "path": "scoring/objective.md",
+                "size": len(self.objective.encode("utf-8")),
+                "sha256": hashlib.sha256(self.objective.encode("utf-8")).hexdigest(),
+            },
+            "evaluator": {
+                "path": "scoring/evaluator.py",
+                "size": len(self.evaluator_source.encode("utf-8")),
+                "sha256": self.evaluator_sha256,
+            },
+        }
+        files = {
+            "objective.md": self.objective.encode("utf-8"),
+            "evaluator.py": self.evaluator_source.encode("utf-8"),
+            "manifest.json": json.dumps(
+                manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+        }
+        existing = tuple(scoring.iterdir())
+        if any(path.name not in files for path in existing):
+            raise EvaluatorBundleError("solver scoring directory contains an unexpected file")
+        for name, content in files.items():
+            target = scoring / name
+            if target.is_symlink() or (target.exists() and not target.is_file()):
+                raise EvaluatorBundleError("solver scoring file is unsafe")
+            if target.exists():
+                if target.read_bytes() != content:
+                    raise EvaluatorBundleError(
+                        "solver scoring file conflicts with frozen guidance"
+                    )
+            else:
+                temporary: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        dir=scoring,
+                        prefix=f".{target.name}.",
+                        suffix=".tmp",
+                        delete=False,
+                    ) as handle:
+                        handle.write(content)
+                        temporary = Path(handle.name)
+                    temporary.chmod(0o444)
+                    temporary.replace(target)
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
+            target.chmod(0o444)
+        scoring.chmod(0o555)
 
 
 def compile_evaluator_bundle(
@@ -1030,6 +1188,10 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
 def _dict_digest(value: dict[str, Any]) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -1060,6 +1222,7 @@ def _remove_tree(path: Path) -> None:
 __all__ = [
     "EvaluatorBundleError",
     "FrozenEvaluatorBundle",
+    "SolverScoringContract",
     "compile_evaluator_bundle",
     "load_evaluator_bundle",
 ]

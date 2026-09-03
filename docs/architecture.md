@@ -258,6 +258,15 @@ canonical bytes and aggregate fingerprint without model calls. This reduces corr
 and self-test omissions; it is not a claim that two calls to one configured model are fully
 independent or that generated Python is an OS sandbox.
 
+After admission, Lunar-Agent projects that scoring authority into native Agent generation without
+delegating trust. The solver prompt preserves the full canonical hard/soft constraints and
+assumptions and adds a bounded `scoring_contract` containing the objective, evaluator digest,
+source excerpt, and bundle fingerprint. Each isolated generation also receives read-only exact
+copies at `scoring/objective.md` and `scoring/evaluator.py`, plus a relative-path manifest. Compiler
+and audit probes and the private profile stay outside generation workspaces. The copies are
+documentation only: candidate execution is still followed by the independently reverified parent
+evaluator, so changing a generation copy cannot alter scoring authority.
+
 The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
 available for mixed configurations. When both seams are already explicit, a runtime option is

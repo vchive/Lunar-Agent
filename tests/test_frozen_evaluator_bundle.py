@@ -9,6 +9,7 @@ from famou.algorithm import AlgorithmProblemContract
 from famou.cli import main
 from famou.evaluator_bundle import (
     EvaluatorBundleError,
+    SolverScoringContract,
     compile_evaluator_bundle,
     load_evaluator_bundle,
 )
@@ -157,9 +158,11 @@ class BundleRuntime:
         self.evaluator_calls = 0
         self.bundle_prompts: list[str] = []
         self.audit_prompts: list[str] = []
+        self.generation_prompts: list[str] = []
+        self.generation_workspaces: list[Path] = []
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
-        del workspace, timeout
+        del timeout
         if "algorithm contract compiler" in prompt:
             return RuntimeResult(
                 json.dumps({"status": "compiled", "contract": _contract().to_dict()})
@@ -183,6 +186,8 @@ class BundleRuntime:
             )
         if "solver in a bounded local algorithm-evolution run" in prompt:
             self.generation_calls += 1
+            self.generation_prompts.append(prompt)
+            self.generation_workspaces.append(workspace)
             cost = 9 if self.generation_calls == 1 else 1
             return RuntimeResult(
                 "from pathlib import Path\n"
@@ -263,6 +268,22 @@ def test_compiler_preflights_freezes_and_loads_bundle(tmp_path: Path) -> None:
     report = bundle(candidate, _contract())
     assert report.validity == 1
     assert report.detailed_scores["cost"]["value"] == 2
+
+
+def test_solver_scoring_contract_requires_unchanged_verified_bundle(tmp_path: Path) -> None:
+    bundle = _compile_bundle(BundleRuntime(), tmp_path)
+    scoring = SolverScoringContract.from_bundle(bundle, _contract())
+    assert scoring.bundle_sha256 == bundle.fingerprint
+    assert scoring.evaluator_sha256 == hashlib.sha256(
+        (bundle.root / "evaluator.py").read_bytes()
+    ).hexdigest()
+
+    evaluator = bundle.root / "evaluator.py"
+    evaluator.chmod(0o644)
+    evaluator.write_text(evaluator.read_text() + "\n# tampered\n", encoding="utf-8")
+    evaluator.chmod(0o444)
+    with pytest.raises(EvaluatorBundleError):
+        SolverScoringContract.from_bundle(bundle, _contract())
 
 
 @pytest.mark.parametrize(
@@ -453,6 +474,27 @@ def test_solve_uses_and_resumes_one_frozen_evaluator_bundle(
     assert runtime.bundle_calls == 1
     assert runtime.audit_calls == 1
     assert runtime.evaluator_calls == 0
+    assert runtime.generation_prompts
+    first_context = json.loads(
+        runtime.generation_prompts[0].split("Generation context:\n", 1)[1]
+    )
+    assert first_context["contract"]["hard_constraints"] == [
+        item.to_dict() for item in _contract().hard_constraints
+    ]
+    assert first_context["scoring_contract"]["bundle_sha256"]
+    assert "1 / (1 + cost)" in first_context["scoring_contract"]["evaluator"][
+        "source_excerpt"
+    ]
+    first_scoring = runtime.generation_workspaces[0] / "scoring"
+    assert {path.name for path in first_scoring.iterdir()} == {
+        "objective.md",
+        "evaluator.py",
+        "manifest.json",
+    }
+    assert not any(
+        marker in runtime.generation_prompts[0]
+        for marker in ("valid-low-cost", "input-profile.json", "real-order-must-not-be-in-bundle")
+    )
     bundle_root = Path(payload["workspace"]) / "evaluator-bundle"
     assert "real-order-must-not-be-in-bundle" not in "".join(
         path.read_text() for path in bundle_root.iterdir()

@@ -45,6 +45,7 @@ from .data_profile import (
 from .evaluator_bundle import (
     EvaluatorBundleError,
     FrozenEvaluatorBundle,
+    SolverScoringContract,
     compile_evaluator_bundle,
     load_evaluator_bundle,
 )
@@ -130,6 +131,7 @@ __all__ = [
     "PopulationStrategy",
     "RuntimeAgentAdapter",
     "RuntimeContractCompiler",
+    "SolverScoringContract",
     "StrategyResult",
     "build_algorithm_plan",
     "build_algorithm_role_plan",

@@ -11,6 +11,7 @@ from statistics import median
 
 from .agents import AgentAdapter, AgentError, AgentRegistry, AgentRequest, AgentResult
 from .algorithm import AlgorithmProblemContract, EvaluationReport
+from .evaluator_bundle import SolverScoringContract
 from .evolution import (
     CandidateDraft,
     CandidateExecution,
@@ -126,6 +127,7 @@ class AgentCandidateGenerator:
         required_capabilities: Sequence[str] = (),
         timeout: float | None = None,
         inputs: Sequence[CandidateInputArtifact] = (),
+        scoring: SolverScoringContract | None = None,
     ) -> None:
         self.adapter = AgentRegistry([adapter]).select(role, tuple(required_capabilities))
         self.contract = contract
@@ -133,6 +135,9 @@ class AgentCandidateGenerator:
         self.required_capabilities = tuple(required_capabilities)
         self.timeout = timeout
         self.inputs = tuple(inputs)
+        if scoring is not None and not isinstance(scoring, SolverScoringContract):
+            raise TypeError("scoring must be a SolverScoringContract or None")
+        self.scoring = scoring
         if any(not isinstance(item, CandidateInputArtifact) for item in self.inputs):
             raise TypeError("inputs must contain CandidateInputArtifact records")
         self._calls = 0
@@ -158,6 +163,8 @@ class AgentCandidateGenerator:
         ).resolve(strict=False)
         generation_workspace.mkdir(parents=True, exist_ok=True)
         stage_candidate_inputs(request.workspace, generation_workspace, self.inputs)
+        if self.scoring is not None:
+            self.scoring.stage(generation_workspace)
         prompt = self._prompt(request)
         agent_request = AgentRequest(
             run_id=f"evolution-{request.workspace.name or 'workspace'}",
@@ -225,6 +232,9 @@ class AgentCandidateGenerator:
                         "statement",
                         "inputs",
                         "objective",
+                        "hard_constraints",
+                        "soft_constraints",
+                        "assumptions",
                         "decision_variables",
                         "prediction_target",
                         "success_criteria",
@@ -258,6 +268,9 @@ class AgentCandidateGenerator:
             "parent": parent_summary,
             "inspirations": inspiration_summaries,
             "archive": archive_summaries,
+            "scoring_contract": (
+                self.scoring.prompt_dict() if self.scoring is not None else None
+            ),
             "workspace": str(request.workspace),
         }
         prefix = (
@@ -278,6 +291,17 @@ class AgentCandidateGenerator:
             return f"{prefix}{encoded}"
 
         prompt = render()
+        scoring_summary = context.get("scoring_contract")
+        if (
+            len(prompt.encode("utf-8")) > MAX_GENERATION_PROMPT_BYTES
+            and isinstance(scoring_summary, dict)
+            and isinstance(scoring_summary.get("evaluator"), dict)
+        ):
+            # The exact evaluator remains available as a read-only workspace file. Prefer full
+            # constraints and objective text when the inline source excerpt competes for context.
+            scoring_summary["evaluator"]["source_excerpt"] = ""
+            scoring_summary["evaluator"]["truncated"] = True
+            prompt = render()
         # Preserve the historical total prompt boundary even when many archive entries contain
         # source excerpts. Prefer the parent and inspirations; older archive evidence degrades to
         # a deterministic category rather than making an otherwise valid generation fail.

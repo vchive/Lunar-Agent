@@ -34,7 +34,7 @@ from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
 from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
-from .evaluator_bundle import compile_evaluator_bundle
+from .evaluator_bundle import SolverScoringContract, compile_evaluator_bundle
 from .evolution import (
     CandidateInputArtifact,
     CommandCandidateEvaluator,
@@ -1577,13 +1577,6 @@ def _solve_evolution(
             roles=("evaluator",),
             capabilities=DEFAULT_RUNTIME_CAPABILITIES,
         )
-        generator = AgentCandidateGenerator(
-            solver_adapter,
-            contract=contract,
-            role="solver",
-            timeout=args.timeout,
-            inputs=candidate_inputs,
-        )
         runtime_fingerprint = _compiler_fingerprint(runtime)
         generator_fingerprint = hashlib.sha256(
             f"{runtime_fingerprint}:solver".encode()
@@ -1597,9 +1590,11 @@ def _solve_evolution(
                 timeout=args.timeout,
             )
             evaluator = bundle
+            scoring = SolverScoringContract.from_bundle(bundle, contract)
             evaluator_fingerprint = bundle.fingerprint
             _index_evaluator_bundle(controller, parent, bundle.root, bundle.fingerprint)
         elif evaluator_command:
+            scoring = None
             evaluator = CommandCandidateEvaluator(
                 evaluator_command,
                 args.timeout,
@@ -1617,12 +1612,21 @@ def _solve_evolution(
                 role="evaluator",
             )
         else:
+            scoring = None
             evaluator = AgentCandidateEvaluator(
                 evaluator_adapter, role="evaluator", timeout=args.timeout
             )
             evaluator_fingerprint = hashlib.sha256(
                 f"{runtime_fingerprint}:evaluator".encode()
             ).hexdigest()
+        generator = AgentCandidateGenerator(
+            solver_adapter,
+            contract=contract,
+            role="solver",
+            timeout=args.timeout,
+            inputs=candidate_inputs,
+            scoring=scoring,
+        )
     runner_fingerprint = (
         None
         if strategy_name == "openevolve"

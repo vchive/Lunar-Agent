@@ -7,9 +7,11 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current adversarial
-evaluator-audit boundary is captured in
-[`specs/042-adversarial-evaluator-audit/`](specs/042-adversarial-evaluator-audit/), building on the
+The project is being developed with Spec-Driven Development (SDD). The current solver-visible
+scoring contract is captured in
+[`specs/043-solver-scoring-contract/`](specs/043-solver-scoring-contract/), building on the
+adversarial evaluator-audit boundary in
+[`specs/042-adversarial-evaluator-audit/`](specs/042-adversarial-evaluator-audit/), the
 private-data profiling boundary in
 [`specs/041-private-data-profiling/`](specs/041-private-data-profiling/) and the frozen evaluator
 bundle in
@@ -182,10 +184,20 @@ and audit digests are part of bundle identity. Resume re-profiles current ledger
 reuses the same bundle without another compiler or auditor call; input, profile, audit, permission,
 or manifest drift fails closed.
 
+Once the bundle passes both gates, native Agent solver generations receive the complete canonical
+hard/soft constraints and assumptions plus a fingerprinted scoring contract. The contract exposes
+the frozen objective and a bounded evaluator excerpt in the prompt; exact read-only
+`scoring/objective.md` and `scoring/evaluator.py` copies are available in the isolated generation
+workspace. This lets the solver align I/O, feasibility, and the actual higher-is-better score before
+its first candidate. The authoritative evaluator stays in the parent bundle, and `probes.json`,
+`audit.json`, `input-profile.json`, raw values, and machine paths are never copied into solver
+workspaces.
+
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
-output. Its source and synthetic probes are kept outside solver generation workspaces; solvers see
-only controlled evaluation/refinement evidence. Use `--evaluator-command` when an owner-reviewed
+output. Its exact source is visible to compiled-evaluator solvers as read-only scoring guidance,
+while compiler/audit probes remain private; the authoritative copy is independently reverified and
+executed outside solver generation workspaces. Use `--evaluator-command` when an owner-reviewed
 domain harness already exists; the two modes are intentionally mutually exclusive.
 
 Provide real local data explicitly with repeatable `--input` options. A source is staged into the
