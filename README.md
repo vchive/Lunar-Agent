@@ -193,6 +193,14 @@ its first candidate. The authoritative evaluator stays in the parent bundle, and
 `audit.json`, `input-profile.json`, raw values, and machine paths are never copied into solver
 workspaces.
 
+Agent solvers may also return one bounded `experiment` beside candidate source: a short hypothesis,
+change tags, and target metric directions. Lunar-Agent treats that declaration as intent, never as
+proof. After independent evaluation it derives seed/improved/unchanged/regressed/invalid experiment
+cards, score delta, and compatible metric deltas from the append-only archive. Later loop and
+population prompts receive up to eight recent cards plus bounded per-tag outcome counts. Resume
+reconstructs the same memory without storing reasoning traces, mutable insight files, embeddings,
+or another model call.
+
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
 output. Its exact source is visible to compiled-evaluator solvers as read-only scoring guidance,

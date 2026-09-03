@@ -267,6 +267,14 @@ and audit probes and the private profile stay outside generation workspaces. The
 documentation only: candidate execution is still followed by the independently reverified parent
 evaluator, so changing a generation copy cannot alter scoring authority.
 
+Cross-round learning is likewise archive-derived. A structured Agent candidate may declare a small
+experiment plan—hypothesis, change tags, and target metric directions—but it cannot declare its own
+outcome. Once the candidate is independently evaluated, prompt construction joins it with its
+persisted parent and derives a verified experiment card from `EvaluationReport` scores and metrics.
+Recent cards and bounded tag outcome counts are shared by loop and population. Because this memory
+is a pure projection of `archive.jsonl`, process recovery needs no transcript replay, second
+knowledge store, reflection model, or mutable `insights.md` file.
+
 The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
 available for mixed configurations. When both seams are already explicit, a runtime option is
