@@ -1469,6 +1469,17 @@ class OpenEvolveStrategy(_BaseStrategy):
             "contract": self.context.contract.to_dict(),
             "workspace": str(external),
             "result_path": "result.json",
+            "budget": {
+                "max_rounds": self.config.max_rounds,
+                "stagnation_rounds": self.config.stagnation_rounds,
+                "population_size": self.config.population_size,
+                "offspring_per_iteration": self.config.offspring_per_iteration,
+                "num_islands": self.config.num_islands,
+                "migration_interval": self.config.migration_interval,
+                "migration_rate": self.config.migration_rate,
+                "rng_seed": self.config.rng_seed,
+                "timeout_seconds": self.config.timeout_seconds,
+            },
         }
         config_path.write_text(json.dumps(config_payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
         try:

@@ -191,10 +191,12 @@ population.
 
 The `benchmark` command is a thin orchestration layer above this seam. It validates one canonical
 contract, creates isolated `strategies/<name>` workspaces, and runs the selected native strategies
-with one common `EvolutionConfig`. A failure in one strategy is captured in that strategy's report
-entry while the remaining comparisons continue. The benchmark does not merge archives, change
-selection rules, or treat elapsed time as a quality score; it exposes both so a human or parent
-Agent can make the tradeoff explicit.
+or the explicit OpenEvolve adapter with one common `EvolutionConfig`. A failure in one strategy is
+captured in that strategy's report entry while the remaining comparisons continue. The benchmark
+does not merge archives, change selection rules, or treat elapsed time as a quality score; it exposes
+both so a human or parent Agent can make the tradeoff explicit. OpenEvolve receives the same budget
+projection in its generated config, but its executable and result envelope remain independently
+validated by `OpenEvolveStrategy`.
 
 An optional `CandidateRunner` executes each archived candidate before a legacy evaluator command is
 invoked. It writes one bounded `execution.json` beside the candidate, and the controller indexes

@@ -632,6 +632,56 @@ def test_cli_benchmark_compares_native_strategies(tmp_path: Path, capsys) -> Non
     assert (workspace / "benchmark.json").is_file()
 
 
+def test_cli_benchmark_includes_explicit_openevolve(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    wrapper = tmp_path / "openevolve-wrapper.py"
+    wrapper.write_text(
+        "import json, pathlib, sys\n"
+        "config_path = pathlib.Path(sys.argv[-1])\n"
+        "config = json.loads(config_path.read_text())\n"
+        "assert config['budget']['max_rounds'] == 1\n"
+        "root = config_path.parent\n"
+        "(root / 'candidate.py').write_text('def solve():\\n    return 7\\n')\n"
+        "(root / 'result.json').write_text(json.dumps({'candidate_path':'candidate.py'}))\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "benchmark-openevolve"
+    assert (
+        main(
+            [
+                "benchmark",
+                str(contract_path),
+                "--strategy",
+                "loop",
+                "--strategy",
+                "openevolve",
+                "--generator-command",
+                f"{sys.executable} {generator}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--openevolve-command",
+                f"{sys.executable} {wrapper}",
+                "--max-rounds",
+                "1",
+                "--population-size",
+                "2",
+                "--json",
+                "--workspace",
+                str(workspace),
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["strategy"] for item in payload["runs"]] == ["loop", "openevolve"]
+    assert all(item["status"] == "completed" for item in payload["runs"])
+    assert "openevolve" in payload["config"]["strategy_commands_sha256"]
+
+
 def test_cli_evolve_runtime_can_fill_one_role_and_rejects_unused_profile(
     tmp_path: Path, capsys
 ) -> None:

@@ -313,15 +313,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy",
         dest="strategies",
         action="append",
-        choices=("loop", "population"),
+        choices=("loop", "population", "openevolve"),
         help="strategy to compare; repeat for order (default: loop and population)",
     )
     benchmark_parser.add_argument("--workspace", type=Path, help="new benchmark workspace")
     benchmark_parser.add_argument(
-        "--generator-command", required=True, help="explicit generator command"
+        "--generator-command", help="explicit generator command for native strategies"
     )
     benchmark_parser.add_argument(
         "--evaluator-command", required=True, help="explicit evaluator command"
+    )
+    benchmark_parser.add_argument(
+        "--openevolve-command", help="explicit OpenEvolve command for the openevolve strategy"
     )
     benchmark_parser.add_argument("--max-rounds", type=int)
     benchmark_parser.add_argument("--stagnation-rounds", type=int)
@@ -1521,8 +1524,15 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     strategies = tuple(args.strategies or ("loop", "population"))
     generator_command = _parse_command(args.generator_command, "--generator-command")
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
-    if not generator_command or not evaluator_command:
-        raise ValueError("benchmark requires non-empty generator and evaluator commands")
+    openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")
+    if any(strategy != "openevolve" for strategy in strategies) and not generator_command:
+        raise ValueError("benchmark requires --generator-command for loop/population")
+    if "openevolve" in strategies and not openevolve_command:
+        raise ValueError("benchmark requires --openevolve-command for openevolve")
+    if openevolve_command and "openevolve" not in strategies:
+        raise ValueError("--openevolve-command requires --strategy openevolve")
+    if not evaluator_command:
+        raise ValueError("benchmark requires a non-empty --evaluator-command")
     max_rounds = args.max_rounds if args.max_rounds is not None else contract.evolution.max_rounds
     stagnation_rounds = (
         args.stagnation_rounds
@@ -1552,6 +1562,7 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
             name="command-evaluator",
             role="evaluator",
         ),
+        strategy_commands={"openevolve": openevolve_command} if openevolve_command else {},
     )
     workspace = args.workspace
     if workspace is None:
@@ -1559,6 +1570,8 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     workspace = workspace.expanduser().resolve()
 
     def generator_factory(_strategy: str) -> CommandCandidateGenerator:
+        if not generator_command:
+            raise ValueError("native strategy has no generator command")
         return CommandCandidateGenerator(generator_command, args.timeout)
 
     def evaluator_factory(_strategy: str) -> CommandCandidateEvaluator:

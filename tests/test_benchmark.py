@@ -1,5 +1,6 @@
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -105,11 +106,75 @@ def test_benchmark_records_one_strategy_failure_and_continues(tmp_path: Path) ->
     assert report.runs[1].best_score is not None
 
 
+def test_benchmark_includes_explicit_openevolve_adapter(tmp_path: Path) -> None:
+    wrapper = tmp_path / "openevolve-wrapper.py"
+    wrapper.write_text(
+        "import json, pathlib, sys\n"
+        "config_path = pathlib.Path(sys.argv[-1])\n"
+        "config = json.loads(config_path.read_text())\n"
+        "assert config['budget']['max_rounds'] == 2\n"
+        "root = config_path.parent\n"
+        "(root / 'candidate.py').write_text('def solve():\\n    return 9\\n')\n"
+        "(root / 'result.json').write_text(json.dumps({'candidate_path':'candidate.py'}))\n",
+        encoding="utf-8",
+    )
+    command = (sys.executable, str(wrapper))
+    report = BenchmarkRunner(
+        _contract(),
+        tmp_path / "benchmark",
+        generator_factory=_generator,
+        evaluator_factory=lambda strategy: _evaluator,
+        config=BenchmarkConfig(
+            strategies=("loop", "population", "openevolve"),
+            max_rounds=2,
+            population_size=2,
+            strategy_commands={"openevolve": command},
+        ),
+    ).run()
+
+    assert [item.status for item in report.runs] == ["completed", "completed", "completed"]
+    assert report.runs[2].best_score == 9.0
+    assert report.config.to_dict()["strategy_commands_sha256"]["openevolve"]
+    config = json.loads(
+        (
+            tmp_path
+            / "benchmark"
+            / "strategies"
+            / "openevolve"
+            / "evolution"
+            / "external"
+            / "openevolve"
+            / "config.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert config["budget"]["population_size"] == 2
+    assert str(wrapper) not in json.dumps(report.to_dict())
+
+
+def test_benchmark_keeps_native_results_when_openevolve_command_fails(tmp_path: Path) -> None:
+    report = BenchmarkRunner(
+        _contract(),
+        tmp_path / "benchmark",
+        generator_factory=_generator,
+        evaluator_factory=lambda strategy: _evaluator,
+        config=BenchmarkConfig(
+            strategies=("loop", "openevolve"),
+            max_rounds=1,
+            population_size=2,
+            strategy_commands={"openevolve": (str(tmp_path / "missing-openevolve"),)},
+        ),
+    ).run()
+
+    assert report.runs[0].status == "completed"
+    assert report.runs[1].status == "failed"
+    assert report.runs[1].best_score is None
+
+
 def test_benchmark_rejects_invalid_selection_and_existing_workspace(tmp_path: Path) -> None:
     with pytest.raises(BenchmarkError, match="at least one"):
         BenchmarkConfig(strategies=())
     with pytest.raises(BenchmarkError, match="unsupported"):
-        BenchmarkConfig(strategies=("openevolve",))
+        BenchmarkConfig(strategies=("invalid",))
     existing = tmp_path / "existing"
     existing.mkdir()
     (existing / "keep.txt").write_text("do not overwrite", encoding="utf-8")

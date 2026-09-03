@@ -5,8 +5,10 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current reproducible
-evolution benchmark is captured in
+The project is being developed with Spec-Driven Development (SDD). The current unified evolution
+benchmark is captured in
+[`specs/028-unified-evolution-benchmark/`](specs/028-unified-evolution-benchmark/), building on the
+reproducible native benchmark in
 [`specs/027-evolution-benchmark/`](specs/027-evolution-benchmark/), building on the evolution Agent
 loop in
 [`specs/026-evolution-agent-loop/`](specs/026-evolution-agent-loop/), building on the built-in
@@ -392,9 +394,11 @@ lunar-agent benchmark contract.json \
 
 The JSON report contains per-strategy status, elapsed time, candidate counts, best score, and
 relative archive paths. Generator/evaluator identities are stored as SHA-256 fingerprints; raw
-commands and model credentials are not included. The first benchmark compares the local `loop`
-and `population` strategies. OpenEvolve remains an explicit adapter until its external result
-envelope is normalized for a fair apples-to-apples run.
+commands and model credentials are not included. The default benchmark compares the local `loop`
+and `population` strategies. Add `--strategy openevolve --openevolve-command
+"/absolute/path/to/wrapper"` to include the explicit OpenEvolve adapter; its wrapper receives a
+generated config and must write the strict candidate result envelope. OpenEvolve remains an opt-in
+subprocess and is never installed or discovered by Lunar-Agent.
 
 Hermes, DeepSeek Harness, Codex, Claude Code, and OpenClaw remain useful optional adapters or parent
 processes. They are execution-plane integrations; Lunar-Agent's local controller, evolution

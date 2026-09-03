@@ -6,12 +6,13 @@ change candidate ranking, evaluator authority, or the durable SQLite controller.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,7 +26,7 @@ from .evolution import (
     build_strategy,
 )
 
-BENCHMARK_STRATEGIES = ("loop", "population")
+BENCHMARK_STRATEGIES = ("loop", "population", "openevolve")
 MAX_BENCHMARK_STRATEGIES = 3
 MAX_REPORT_BYTES = 64 * 1024
 MAX_ERROR_BYTES = 2_000
@@ -55,7 +56,7 @@ class BenchmarkError(ValueError):
 class BenchmarkConfig:
     """Common bounded settings applied to every selected native strategy."""
 
-    strategies: tuple[str, ...] = BENCHMARK_STRATEGIES
+    strategies: tuple[str, ...] = ("loop", "population")
     max_rounds: int = 5
     stagnation_rounds: int = 3
     population_size: int = 8
@@ -67,6 +68,7 @@ class BenchmarkConfig:
     timeout_seconds: float = 900.0
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
+    strategy_commands: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if isinstance(self.strategies, (str, bytes)):
@@ -75,10 +77,29 @@ class BenchmarkConfig:
         if not 1 <= len(normalized) <= MAX_BENCHMARK_STRATEGIES:
             raise BenchmarkError("benchmark requires at least one and at most three strategies")
         if any(strategy not in BENCHMARK_STRATEGIES for strategy in normalized):
-            raise BenchmarkError("benchmark strategy is unsupported; choose loop or population")
+            raise BenchmarkError(
+                "benchmark strategy is unsupported; choose loop, population, or openevolve"
+            )
         if len(set(normalized)) != len(normalized):
             raise BenchmarkError("benchmark strategies must be unique")
         object.__setattr__(self, "strategies", normalized)
+        if not isinstance(self.strategy_commands, dict):
+            raise BenchmarkError("strategy_commands must be an object")
+        normalized_commands: dict[str, tuple[str, ...]] = {}
+        for strategy, command in self.strategy_commands.items():
+            if strategy not in normalized:
+                raise BenchmarkError(f"command configured for unselected strategy {strategy!r}")
+            if isinstance(command, (str, bytes)):
+                raise BenchmarkError("strategy command must be a bounded argument sequence")
+            command_tuple = tuple(command)
+            if not command_tuple or len(command_tuple) > 32 or any(
+                not isinstance(item, str) or not item for item in command_tuple
+            ):
+                raise BenchmarkError("strategy command must be a bounded argument sequence")
+            normalized_commands[strategy] = command_tuple
+        if "openevolve" in normalized and not normalized_commands.get("openevolve"):
+            raise BenchmarkError("openevolve strategy requires an explicit command")
+        object.__setattr__(self, "strategy_commands", normalized_commands)
         for strategy in normalized:
             EvolutionConfig(
                 strategy=strategy,  # type: ignore[arg-type]
@@ -91,6 +112,7 @@ class BenchmarkConfig:
                 migration_rate=self.migration_rate,
                 rng_seed=self.rng_seed,
                 timeout_seconds=self.timeout_seconds,
+                command=normalized_commands.get(strategy, ()),
             )
         for name, fingerprint in (
             ("generator_fingerprint", self.generator_fingerprint),
@@ -117,6 +139,7 @@ class BenchmarkConfig:
             timeout_seconds=self.timeout_seconds,
             generator_fingerprint=self.generator_fingerprint,
             evaluator_fingerprint=self.evaluator_fingerprint,
+            command=self.strategy_commands.get(strategy, ()),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -133,6 +156,14 @@ class BenchmarkConfig:
             "timeout_seconds": self.timeout_seconds,
             "generator_fingerprint": self.generator_fingerprint,
             "evaluator_fingerprint": self.evaluator_fingerprint,
+            "strategy_commands_sha256": {
+                strategy: hashlib.sha256(
+                    json.dumps(list(command), ensure_ascii=False, separators=(",", ":")).encode(
+                        "utf-8"
+                    )
+                ).hexdigest()
+                for strategy, command in self.strategy_commands.items()
+            },
         }
 
 
@@ -140,7 +171,7 @@ class BenchmarkConfig:
 class BenchmarkRun:
     """One strategy's bounded result projection."""
 
-    strategy: Literal["loop", "population"]
+    strategy: Literal["loop", "population", "openevolve"]
     status: Literal["completed", "stagnated", "failed", "cancelled"]
     elapsed_ms: int
     evaluated_candidates: int
