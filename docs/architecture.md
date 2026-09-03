@@ -30,10 +30,11 @@ flowchart TD
     EA --> EE[AgentEvaluatorEnsemble\nunanimous validity · median scores]
     A --> W[Run workspace\nprompts · results · transcripts]
     AA --> W
-    AP --> AW[Algorithm workspace\ndata/raw · processed · solve · evaluate · output · evolution]
+    AP --> OS[OutputSpec\nrequired data files + format/fields]
+    OS --> AW[Algorithm workspace\ndata/raw · processed · solve · evaluate · output · evolution]
     AW --> W
     W --> AS[ArtifactStore\nrun-relative paths + SHA-256]
-    AS --> AC[Acceptance Contract\nbounded local artifact checks]
+    AS --> AC[Acceptance Contract\nbounded local artifact checks + output_valid]
     AC --> E[Evaluator Profile\nstructured evidence]
     E --> S
     S --> V[PATCH / REPLAN\noptimistic version check]
@@ -91,7 +92,9 @@ bounded by tool-step, workspace, timeout, and artifact limits.
    execution, stored in the immutable plan revision, and materializes six fixed local role
    directories plus a digest-bearing `algorithm-workspace.json`. The strategy layer consumes this
  contract through one runtime-neutral seam: `loop` is the default, `population` is a bounded local
- search, and `openevolve` is an explicitly configured local subprocess.
+   search, and `openevolve` is an explicitly configured local subprocess. Optional `OutputSpec`
+   entries make Solver data files explicit and inject independent `output_valid` checks into
+   generated algorithm plans.
 5. A caller may use `delegate`/`LocalController.run_agent` for a role-bearing worker. The explicit
    `AgentRegistry` selects only registered adapters satisfying every requested capability. A
    `RuntimeAgentAdapter` preserves the existing Runtime contract; `CommandAgentAdapter` invokes an
@@ -106,7 +109,11 @@ parsing/top-level keys, and `all`/`any` composition; they never execute commands
 or inspect an escaping path. Both decisions persist as a bounded structured evidence tree. A
 retry preserves the task and plan contract and appends a bounded, task-scoped projection of the
 latest failed evaluation (or generic runtime-failure guidance) to the next attempt prompt; raw
-errors and result contents stay in their original ledger/artifact records.
+   errors and result contents stay in their original ledger/artifact records. Evolution Agent calls
+   additionally forward `agent_model_turn`, `agent_tool_result`, `agent_step_limit_reached`, and
+   `agent_runtime_failure`; declared redacted transcripts are indexed as
+   `evolution_agent_transcript` artifacts. Payloads contain identities, counts, statuses, and byte
+   sizes only.
 per-run budget bounds task count, attempts, agent tool calls, elapsed controller time, and indexed
 artifact bytes. Crossing a limit emits `budget_exceeded`, fails closed, and keeps existing artifacts
 inspectable.
@@ -122,6 +129,9 @@ inspectable.
    existing explicit command after reviewing the evidence.
 9. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
    every succeeded task, and at least one indexed result/runtime artifact with a SHA-256 digest.
+   For an algorithm contract with required outputs, the Solver's attempt-local `output/` files must
+   also pass independent format/field checks, be promoted to the run-level `output/` directory, and
+   appear as `kind=output` artifacts; missing promoted outputs make delivery fail.
 10. `solve` adds a conversational algorithm intake before the normal plan scheduler. The compiler
     returns only a strict `compiled` or `needs_input` envelope; the controller validates the nested
     contract, writes bounded compiler artifacts, and promotes the same run ID to a generated

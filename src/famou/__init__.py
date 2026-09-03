@@ -17,6 +17,7 @@ from .agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
+from .algorithm import OutputSpec
 from .benchmark import (
     BENCHMARK_STRATEGIES,
     BenchmarkConfig,
@@ -102,6 +103,7 @@ __all__ = [
     "GenerationRequest",
     "LoopStrategy",
     "OpenEvolveStrategy",
+    "OutputSpec",
     "PopulationConfig",
     "PopulationState",
     "PopulationStrategy",

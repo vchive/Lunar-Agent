@@ -1365,6 +1365,7 @@ def test_cli_status_json_exposes_algorithm_contract_and_manifest(tmp_path: Path,
     status = json.loads(capsys.readouterr().out)
     assert status["algorithm_problem"]["problem_type"] == "routing"
     assert status["algorithm_workspace"]["kind"] == "algorithm_manifest"
+    assert status["algorithm_outputs"] == []
     assert (Path(status["run"]["workspace"]) / "algorithm-workspace.json").is_file()
 
 

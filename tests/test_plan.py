@@ -44,6 +44,31 @@ class ArtifactRuntime:
         return None
 
 
+class StructuredOutputRuntime:
+    name = "structured-output"
+
+    def __init__(self, *, mode: str = "valid") -> None:
+        self.mode = mode
+
+    def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
+        del prompt, timeout
+        workspace.mkdir(parents=True, exist_ok=True)
+        if self.mode == "valid":
+            output = workspace / "output"
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "routes.csv").write_text(
+                "item_id,route_id\norder-1,route-a\n", encoding="utf-8"
+            )
+        elif self.mode == "invalid":
+            output = workspace / "output"
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "routes.csv").write_text("item_id\norder-1\n", encoding="utf-8")
+        return RuntimeResult("solver completed")
+
+    def cancel(self) -> None:
+        return None
+
+
 def _document() -> PlanDocument:
     return PlanDocument(
         goal="prepare and verify a report",
@@ -80,6 +105,69 @@ def test_plan_runs_in_dependency_order_and_handoffs_artifact(tmp_path: Path) -> 
     tasks = controller.store.list_tasks(run.id)
     assert [task.state.value for task in tasks] == ["succeeded", "succeeded"]
     assert tasks[1].dependencies == ("first",)
+
+
+def _structured_output_contract() -> AlgorithmProblemContract:
+    return AlgorithmProblemContract.from_dict(
+        {
+            "schema_version": "1",
+            "problem_id": "output-demo",
+            "problem_type": "routing",
+            "statement": "Assign every order to a route.",
+            "inputs": [{"path": "orders.csv", "format": "csv", "fields": {"id": "order id"}}],
+            "decision_variables": ["route per order"],
+            "objective": {"name": "distance", "direction": "minimize"},
+            "hard_constraints": [],
+            "soft_constraints": [],
+            "success_criteria": ["Every order is assigned."],
+            "deliverables": ["Route table."],
+            "outputs": [
+                {"path": "output/routes.csv", "format": "csv", "fields": ["item_id", "route_id"]}
+            ],
+        }
+    )
+
+
+def test_algorithm_outputs_are_promoted_hashed_and_delivered(tmp_path: Path) -> None:
+    contract = _structured_output_contract()
+    plan = PlanDocument(
+        goal="solve routes",
+        plan_id="plan-output-demo",
+        tasks=(PlanTask("solver", "Solver", "write the route output"),),
+        algorithm_problem=contract.to_dict(),
+    )
+    controller = LocalController(Config(tmp_path / ".famou"), StructuredOutputRuntime())
+    run = controller.start_plan(plan)
+
+    delivered_path = run.workspace / "output" / "routes.csv"
+    assert run.status.value == "succeeded"
+    assert delivered_path.read_text(encoding="utf-8").startswith("item_id,route_id")
+    output_artifacts = [
+        item for item in controller.store.list_artifacts(run.id) if item["kind"] == "output"
+    ]
+    assert len(output_artifacts) == 1
+    assert output_artifacts[0]["path"] == "output/routes.csv"
+    assert len(output_artifacts[0]["sha256"]) == 64
+    assert "output/routes.csv" in controller.deliver(run.id).evidence
+    assert any(event["type"] == "algorithm_outputs_promoted" for event in controller.store.list_events(run.id))
+
+
+def test_required_algorithm_output_is_not_satisfied_by_prose(tmp_path: Path) -> None:
+    plan = PlanDocument(
+        goal="solve routes",
+        plan_id="plan-missing-output",
+        tasks=(PlanTask("solver", "Solver", "write the route output"),),
+        algorithm_problem=_structured_output_contract().to_dict(),
+    )
+    controller = LocalController(
+        Config(tmp_path / ".famou", max_retries=1), StructuredOutputRuntime(mode="invalid")
+    )
+    run = controller.start_plan(plan)
+
+    assert run.status.value == "failed"
+    assert not (run.workspace / "output" / "routes.csv").exists()
+    with pytest.raises(ValueError, match="verified algorithm outputs"):
+        controller.deliver(run.id)
 
 
 def test_algorithm_contract_round_trips_in_revision_and_legacy_plan_stays_generic(tmp_path: Path) -> None:

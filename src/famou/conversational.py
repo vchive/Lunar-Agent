@@ -232,6 +232,7 @@ def _validate_contract_shape(value: object) -> None:
         "deliverables",
         "assumptions",
         "evolution",
+        "outputs",
     }
     unknown = set(value) - allowed
     if unknown:
@@ -264,12 +265,24 @@ def _validate_contract_shape(value: object) -> None:
     evolution = value.get("evolution")
     if isinstance(evolution, dict) and set(evolution) - {"strategy", "max_rounds", "stagnation_rounds"}:
         raise ContractCompilationError("evolution contains unknown fields")
+    outputs = value.get("outputs")
+    if isinstance(outputs, list):
+        for item in outputs:
+            if not isinstance(item, dict) or set(item) - {
+                "path",
+                "format",
+                "fields",
+                "required",
+                "description",
+            }:
+                raise ContractCompilationError("output contains unknown fields")
 
 
 def build_algorithm_plan(goal: str, contract: AlgorithmProblemContract) -> PlanDocument:
     """Build the conservative baseline DAG used after intake succeeds."""
     problem_id = contract.problem_id
     plan_id = f"plan-{problem_id}-{contract.digest()[:8]}"
+    output_acceptance = _output_acceptance(contract)
     tasks = (
         PlanTask(
             "data_discovery",
@@ -287,6 +300,7 @@ def build_algorithm_plan(goal: str, contract: AlgorithmProblemContract) -> PlanD
             "Implement a candidate algorithm",
             "Implement and test a candidate solution from the formulation. Keep source and reproducible run instructions under solve/ and write the requested deliverables under output/.",
             ("formulate",),
+            output_acceptance,
         ),
         PlanTask(
             "verify",
@@ -319,6 +333,7 @@ def build_algorithm_role_plan(goal: str, contract: AlgorithmProblemContract) -> 
     prompts consumed by any selected runtime.
     """
     plan_id = f"plan-{contract.problem_id}-{contract.digest()[:8]}-roles"
+    output_acceptance = _output_acceptance(contract)
     tasks = (
         PlanTask(
             "data_discovery",
@@ -336,6 +351,7 @@ def build_algorithm_role_plan(goal: str, contract: AlgorithmProblemContract) -> 
             "Solver — implement a reproducible candidate",
             "Role: Solver. Implement and test a reproducible candidate from the validated formulation. Keep source and run instructions under solve/ and requested outputs under output/. Do not claim a score or change contract authority; leave all evidence needed by the independent Evaluator.",
             ("problem_formulator",),
+            output_acceptance,
         ),
         PlanTask(
             "evaluator",
@@ -364,6 +380,24 @@ def build_algorithm_role_plan(goal: str, contract: AlgorithmProblemContract) -> 
         delivery={"artifacts": list(contract.deliverables)},
         algorithm_problem=contract.to_dict(),
     )
+
+
+def _output_acceptance(contract: AlgorithmProblemContract) -> dict[str, object] | None:
+    """Compile required algorithm data outputs into independent artifact checks."""
+    rules = [
+        {
+            "output_valid": {
+                "path": output.path,
+                "format": output.format,
+                "fields": list(output.fields),
+            }
+        }
+        for output in contract.outputs
+        if output.required
+    ]
+    if not rules:
+        return None
+    return rules[0] if len(rules) == 1 else {"all": rules}
 
 
 def _default_contract(goal: str) -> AlgorithmProblemContract:
@@ -463,7 +497,8 @@ class RuntimeContractCompiler:
             "Use status=compiled only when the nested contract is complete and conforms to this schema: "
             "schema_version, problem_id, problem_type (scheduling|routing|packing|assignment|forecasting|network_flow|continuous), "
             "statement, inputs (relative path, format, fields), decision_variables, objective (name,direction), "
-            "hard_constraints and soft_constraints (id,description,source,verification,result_fields), "
+        "hard_constraints and soft_constraints (id,description,source,verification,result_fields), "
+        "outputs (path under output/, format json|jsonl|csv|text, optional fields, required, description), "
             "success_criteria, deliverables, assumptions, and optional evolution. Constraint source must explicitly be "
             "user_confirmed, data_observed, or explicit_assumption. Questions have {question, options}. "
             "The top-level envelope is either {status,contract,evidence} or {status,questions,evidence}.\n\n"

@@ -613,7 +613,7 @@ def _print_status(config: Config, run_id: str) -> int:
     artifacts = store.list_artifacts(run.id)
     for artifact in artifacts:
         print(
-            f"artifact: {artifact['path']} size={artifact['size']} sha256={artifact['sha256']}"
+            f"artifact: {artifact['path']} kind={artifact['kind']} size={artifact['size']} sha256={artifact['sha256']}"
         )
     return 0
 
@@ -686,6 +686,8 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         if isinstance(evolution_finished, dict) and isinstance(evolution_finished.get("evaluated_candidates"), int)
         else sum(1 for event in events if event["type"] == "evolution_candidate_archived")
     )
+    artifacts = store.list_artifacts(run.id)
+    algorithm_outputs = [item for item in artifacts if item["kind"] == "output"]
     return {
         "run": {
             "id": run.id,
@@ -734,7 +736,10 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             }
             for task in tasks
         ],
-        "artifacts": store.list_artifacts(run.id),
+        "artifacts": artifacts,
+        # Keep structured data discoverable without requiring callers to filter the complete
+        # audit ledger.  The rows remain the same hashed, run-relative artifact metadata.
+        "algorithm_outputs": algorithm_outputs,
         "input_request": store.pending_input(run.id),
         "recovery": latest_recovery,
         "plan": current_plan.to_dict() if current_plan else None,

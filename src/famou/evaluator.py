@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 from dataclasses import dataclass, field
@@ -15,6 +17,8 @@ MAX_TEXT_BYTES = 8_000
 MAX_PATH_BYTES = 512
 MAX_JSON_KEYS = 16
 MAX_ARTIFACT_BYTES = 256 * 1024
+MAX_OUTPUT_FIELDS = 32
+OUTPUT_FORMATS = frozenset({"json", "jsonl", "csv", "text"})
 _SECRET_RE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*\S+)"
 )
@@ -164,6 +168,23 @@ def _compile_rule(value: object, depth: int, count: list[int]) -> dict[str, Any]
         if len(set(normalized_keys)) != len(normalized_keys):
             raise ValueError("json_has_keys keys must be unique")
         return {rule: {"path": _safe_relative_path(item["path"]), "keys": normalized_keys}}
+    if rule == "output_valid":
+        item = _object(payload, "output_valid", {"path", "format", "fields"})
+        path = _safe_relative_path(item["path"])
+        if not path.startswith("output/"):
+            raise ValueError("output_valid path must be below the output/ directory")
+        output_format = _bounded_text(item["format"], "output_valid format", limit=32).lower()
+        if output_format not in OUTPUT_FORMATS:
+            raise ValueError("output_valid format must be json, jsonl, csv, or text")
+        fields = item["fields"]
+        if not isinstance(fields, list) or len(fields) > MAX_OUTPUT_FIELDS or any(not isinstance(field, str) for field in fields):
+            raise ValueError("output_valid fields must be a bounded string array")
+        normalized_fields = [_bounded_text(field, "output_valid field", limit=128) for field in fields]
+        if len(set(normalized_fields)) != len(normalized_fields):
+            raise ValueError("output_valid fields must be unique")
+        if output_format == "text" and normalized_fields:
+            raise ValueError("text output_valid rules cannot declare fields")
+        return {rule: {"path": path, "format": output_format, "fields": normalized_fields}}
     if rule in {"all", "any"}:
         if not isinstance(payload, list) or not payload:
             raise ValueError(f"{rule} must be a non-empty rule array")
@@ -198,11 +219,26 @@ def _workspace_path(workspace: Path, relative_path: str) -> Path:
     return candidate
 
 
+def _raw_path_has_symlink(root: Path, path: Path) -> bool:
+    current = path
+    while True:
+        if current.exists() and current.is_symlink():
+            return True
+        if current == root:
+            return False
+        if current.parent == current:
+            return True
+        current = current.parent
+
+
 def _artifact_file(workspace: Path, relative_path: str) -> tuple[Path | None, str | None]:
     try:
         path = _workspace_path(workspace, relative_path)
     except ValueError as exc:
         return None, str(exc)
+    root = workspace.resolve(strict=False)
+    if _raw_path_has_symlink(root, workspace / relative_path):
+        return None, "artifact path contains a symlink"
     if not path.is_file():
         return None, "artifact does not exist as a regular file"
     return path, None
@@ -289,6 +325,90 @@ def _evaluate_rule(
             reason = f"artifact {path!r} JSON has required top-level keys"
         return passed, ((f"artifact JSON has required keys: {path}",) if passed else ()), reason, _detail(
             name, passed, reason, path=path, keys=required, missing=missing
+        )
+    if name == "output_valid":
+        path = payload["path"]
+        output_format = payload["format"]
+        fields = payload["fields"]
+        content, error = _read_artifact(workspace, path)
+        row_count: int | None = None
+        observed_fields: list[str] = []
+        if error is None and output_format == "text":
+            if not (content or "").strip():
+                error = "text output is empty"
+        elif error is None and output_format == "json":
+            try:
+                parsed = json.loads(content or "")
+            except json.JSONDecodeError:
+                error = "JSON output is invalid"
+            else:
+                if isinstance(parsed, dict):
+                    row_count = 1
+                    observed_fields = [str(key) for key in parsed]
+                    missing = [field for field in fields if field not in parsed]
+                    if missing:
+                        error = f"JSON output is missing fields: {', '.join(missing)}"
+                elif isinstance(parsed, list):
+                    row_count = len(parsed)
+                    for index, item in enumerate(parsed):
+                        if not isinstance(item, dict):
+                            error = f"JSON output row {index} is not an object"
+                            break
+                        if index == 0:
+                            observed_fields = [str(key) for key in item]
+                        missing = [field for field in fields if field not in item]
+                        if missing:
+                            error = f"JSON output row {index} is missing fields: {', '.join(missing)}"
+                            break
+                else:
+                    error = "JSON output root must be an object or array"
+        elif error is None and output_format == "jsonl":
+            row_count = 0
+            for index, line in enumerate((content or "").splitlines()):
+                if not line.strip():
+                    continue
+                try:
+                    parsed = json.loads(line)
+                except json.JSONDecodeError:
+                    error = f"JSONL output line {index + 1} is invalid"
+                    break
+                if not isinstance(parsed, dict):
+                    error = f"JSONL output line {index + 1} is not an object"
+                    break
+                row_count += 1
+                if not observed_fields:
+                    observed_fields = [str(key) for key in parsed]
+                missing = [field for field in fields if field not in parsed]
+                if missing:
+                    error = f"JSONL output line {index + 1} is missing fields: {', '.join(missing)}"
+                    break
+            if error is None and row_count == 0:
+                error = "JSONL output contains no records"
+        elif error is None and output_format == "csv":
+            try:
+                reader = csv.DictReader(io.StringIO(content or ""))
+                observed_fields = [field for field in (reader.fieldnames or []) if field is not None]
+                if not observed_fields:
+                    error = "CSV output has no header"
+                else:
+                    missing = [field for field in fields if field not in observed_fields]
+                    if missing:
+                        error = f"CSV output is missing fields: {', '.join(missing)}"
+                    else:
+                        row_count = sum(1 for _ in reader)
+            except (csv.Error, UnicodeError):
+                error = "CSV output is invalid"
+        passed = error is None
+        reason = f"output {path!r} is a valid {output_format} artifact" if passed else f"output {path!r}: {error}"
+        return passed, ((f"output valid: {path}",) if passed else ()), reason, _detail(
+            name,
+            passed,
+            reason,
+            path=path,
+            format=output_format,
+            fields=fields,
+            row_count=row_count,
+            observed_fields=observed_fields[:MAX_OUTPUT_FIELDS],
         )
     children = [_evaluate_rule(child, result, workspace) for child in payload]
     child_passed = [item[0] for item in children]

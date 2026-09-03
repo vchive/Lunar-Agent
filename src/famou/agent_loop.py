@@ -7,6 +7,7 @@ scheduling and recovery; this runtime owns one conversational session, local too
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -27,6 +28,20 @@ concise, reusable facts or decisions.
 
 # Compatibility alias for callers that imported the earlier experimental name.
 BUILD_SYSTEM_PROMPT = HERMES_SYSTEM_PROMPT
+_SECRET_TEXT = re.compile(
+    r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|"
+    r"api[_-]?key\s*[:=]\s*\S+)"
+)
+
+
+def _bounded_runtime_error(error: object, limit: int = 512) -> str:
+    text = _SECRET_TEXT.sub("[REDACTED]", " ".join(str(error).split()))
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    suffix = "\n[truncated]"
+    budget = max(1, limit - len(suffix.encode("utf-8")))
+    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
 
 
 class AgentInputRequired(RuntimeExecutionError):
@@ -113,7 +128,16 @@ class AgentLoopRuntime:
         tool_steps = 0
         while True:
             remaining = self._remaining_timeout(started, timeout)
-            turn = self.model.complete(messages, self.tools.schemas(), remaining)
+            try:
+                turn = self.model.complete(messages, self.tools.schemas(), remaining)
+            except AgentInputRequired:
+                raise
+            except Exception as exc:
+                self._emit(
+                    "agent_runtime_failure",
+                    {"phase": "model_turn", "error": _bounded_runtime_error(exc)},
+                )
+                raise
             model_turns += 1
             self._emit(
                 "agent_model_turn",
@@ -148,7 +172,14 @@ class AgentLoopRuntime:
             messages.append(self._assistant_message(turn))
             self._append_transcript(messages[-1])
             for call in turn.tool_calls:
-                result = self.tools.execute(call.name, call.arguments, workspace)
+                try:
+                    result = self.tools.execute(call.name, call.arguments, workspace)
+                except Exception as exc:
+                    self._emit(
+                        "agent_runtime_failure",
+                        {"phase": "tool", "tool": call.name, "error": _bounded_runtime_error(exc)},
+                    )
+                    raise
                 tool_steps += 1
                 artifacts.extend(result.artifacts)
                 self._emit(

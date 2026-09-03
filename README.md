@@ -1,13 +1,19 @@
 # Lunar-Agent
 
-Lunar-Agent is a standalone, local-first agent inspired by Hermes' continuous sessions, practical
-tools, and long-running memory. It keeps the durable task ledger, artifacts, and optional memory in
-a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
-installation.
+Lunar-Agent is a standalone, local-first agent for conversational problem solving **and concrete
+data production**. It is inspired by Hermes' continuous sessions, practical tools, and long-running
+memory, but keeps the durable task ledger, artifacts, optional memory, and algorithm outputs in a
+run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
+installation. A natural-language answer is only the audit trail; an algorithm mission is complete
+only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
 The project is being developed with Spec-Driven Development (SDD). The current runtime-profile
 benchmark is captured in
 [`specs/029-runtime-profile-benchmark/`](specs/029-runtime-profile-benchmark/), building on the
+evolution Agent evidence work in
+[`specs/030-evolution-agent-evidence/`](specs/030-evolution-agent-evidence/), and the structured
+algorithm output work in
+[`specs/031-structured-algorithm-outputs/`](specs/031-structured-algorithm-outputs/), building on the
 unified evolution benchmark in
 [`specs/028-unified-evolution-benchmark/`](specs/028-unified-evolution-benchmark/), building on the
 reproducible native benchmark in
@@ -72,6 +78,29 @@ lunar-agent solve "根据订单数据设计配送路线" --runtime mock --role-d
 
 This uses `data_discovery → problem_formulator → solver → evaluator → reviewer`. It is still the
 same local SQLite run and artifact handoff; the switch only selects a richer built-in plan factory.
+
+### Conversation versus result data
+
+An algorithm mission has two deliberately separate result channels:
+
+1. `result.txt` and role reports preserve the conversational explanation and evidence trail.
+2. `algorithm_problem.outputs` declares machine-consumable files that the Solver must actually
+   write. Supported formats are JSON, JSONL, CSV, and non-empty UTF-8 text; declared fields are
+   checked independently of the Solver's prose.
+
+The Solver writes logical paths such as `output/routes.csv` in its private attempt workspace. Only
+after independent evaluation passes does Lunar-Agent copy the file to the stable run workspace,
+`<run-workspace>/output/routes.csv`, hash it, and record it as `kind=output`. This means a parent
+Agent can consume data deterministically:
+
+```bash
+lunar-agent status <run-id> --json   # algorithm_outputs + SHA-256 metadata
+lunar-agent deliver <run-id> --json  # fail-closed delivery decision
+```
+
+If a required output is missing or malformed, a convincing chat response cannot make the run
+succeed. Contracts written before the optional `outputs` field remain fully compatible and keep
+the existing result/runtime delivery behavior.
 
 ## Bootstrap
 
@@ -208,7 +237,8 @@ lunar-agent deliver <run-id> --json
 `plan` creation is atomic with the run and task DAG. Each revision has a parent version and remains
 immutable. A stale patch is rejected before any write; completed task definitions cannot be
 rewritten, while failed or superseded work can be reopened and resumed. `deliver` fails closed
-unless the run passed independent evaluation and has hashed result/runtime artifacts. All command
+unless the run passed independent evaluation and has hashed result/runtime artifacts; an
+algorithm-output contract additionally requires every required `kind=output` artifact. All command
 outputs support `--json`, making the CLI suitable for Codex, OpenClaw, Hermes, or another local
 parent agent.
 
@@ -246,6 +276,25 @@ data/raw/ · data/processed/ · solve/ · evaluate/ · output/ · evolution/
 `algorithm-workspace.json` contains the plan revision and a SHA-256 digest of the canonical
 contract. The directories are a boundary for Solver/Evaluator roles. The local evolution library
 now consumes this contract without starting a remote service or importing a machine-wide Agent.
+
+An algorithm mission can declare concrete data outputs instead of relying on prose deliverables
+alone:
+
+```json
+{
+  "outputs": [
+    {"path": "output/routes.csv", "format": "csv", "fields": ["item_id", "route_id"]},
+    {"path": "output/summary.json", "format": "json", "fields": ["total_distance"]}
+  ]
+}
+```
+
+Required outputs are independently checked after the Solver runtime returns. JSON/JSONL records are
+parsed, CSV headers are checked, declared fields must exist, and text outputs must be non-empty.
+Passing only a conversational completion claim is insufficient: after the checks pass, files are
+promoted from the attempt workspace to the run-level `output/` directory, SHA-256-indexed as
+`kind=output`, exposed under `algorithm_outputs` in `status --json`, and included by `deliver`. The
+`outputs` field is optional, so older contracts remain compatible.
 
 The contract accepts `loop` (the default WebAgent-style fresh-context serial rounds), `population`
 (an explicit local candidate population), and `openevolve` (an optional explicit local subprocess).
@@ -447,9 +496,10 @@ explicitly labeled as evidence. Candidate source, prompts, logs, and adapter exc
 copied into the solver prompt.
 
 `status --json` and `events --json` expose the evolution result, iteration events, candidate archive
-events, and indexed `evolution/archive.jsonl`, `evolution/state.json`, and `evolution/result.json`
-artifacts.  OpenEvolve remains optional and is invoked only when `--openevolve-command` points to an
-existing absolute executable; no global installation is discovered.
+events, Agent model/tool lifecycle events, and indexed `evolution/archive.jsonl`,
+`evolution/state.json`, `evolution/result.json`, and redacted solver/evaluator transcript artifacts.
+OpenEvolve remains optional and is invoked only when `--openevolve-command` points to an existing
+absolute executable; no global installation is discovered.
 
 An explicit Agent can generate candidates directly while the evaluator remains independent:
 
@@ -617,11 +667,14 @@ they can only inspect regular files in the current task attempt workspace.
 ```
 
 Supported leaves are `result_contains`, `artifact_exists`, `artifact_text_contains`, `json_parse`,
-and `json_has_keys`; compose them with non-empty `all` or `any` arrays. A plain string and the
+`json_has_keys`, and `output_valid`; compose them with non-empty `all` or `any` arrays. A plain string and the
 legacy `{ "contains": "..." }` form still mean result-text containment. Paths must be portable,
 relative, and remain below the current attempt directory; rule count/depth, contract text, and
 inspected artifact bytes are bounded. Invalid JSON, missing keys, binary/oversized content, or a
 symlink escape fail closed and leave an auditable failure rather than reading outside the workspace.
+
+`output_valid` is the structured-output check used by `AlgorithmProblemContract.outputs`; its
+payload is `{ "path": "output/...", "format": "json|jsonl|csv|text", "fields": [...] }`.
 
 The `task_evaluated` event and attempt `evaluation.json` contain a bounded rule-level decision tree.
 `lunar-agent status <run-id> --json` exposes the most recent evaluation summary under each task's

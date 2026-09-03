@@ -36,6 +36,10 @@ DEFAULT_RUNTIME_CAPABILITIES = (
     "gather_sources",
 )
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
+_SECRET_TEXT = re.compile(
+    r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|"
+    r"api[_-]?key\s*[:=]\s*\S+)"
+)
 
 
 class AgentError(RuntimeError):
@@ -60,6 +64,21 @@ def _bounded_text(value: object, label: str, maximum: int, *, allow_empty: bool 
     if len(value.encode("utf-8")) > maximum:
         raise ValueError(f"{label} exceeds {maximum} bytes")
     return value
+
+
+def _safe_event_text(value: str, maximum: int = 512) -> str:
+    """Bound and redact scalar text before it crosses the durable event boundary."""
+    redacted = _SECRET_TEXT.sub("[REDACTED]", value)
+    encoded = redacted.encode("utf-8")
+    if len(encoded) <= maximum:
+        return redacted
+    suffix = "\n[truncated]"
+    budget = max(1, maximum - len(suffix.encode("utf-8")))
+    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
+
+
+def _safe_event_error(error: object) -> str:
+    return _safe_event_text(" ".join(str(error).split()), 512)
 
 
 def _token(value: object, label: str) -> str:
@@ -252,10 +271,30 @@ class RuntimeAgentAdapter:
         self.name = _token(name or getattr(runtime, "name", "runtime"), "adapter name")
         self.roles = _tokens(roles, "roles")
         self.capabilities = _tokens(capabilities, "capabilities")
+        self._event_sink: Callable[[str, dict[str, object]], None] | None = None
+
+    def set_event_sink(
+        self, sink: Callable[[str, dict[str, object]], None] | None
+    ) -> None:
+        """Forward bounded runtime lifecycle events to an owning evolution observer."""
+        if sink is not None and not callable(sink):
+            raise TypeError("event sink must be callable or None")
+        self._event_sink = sink
 
     def run(self, request: AgentRequest) -> AgentResult:
         if not isinstance(request, AgentRequest):
             raise TypeError("request must be an AgentRequest")
+        set_runtime_event_sink = getattr(self.runtime, "set_event_sink", None)
+        runtime_event_sink: Callable[[str, dict[str, object]], None] | None = None
+        runtime_event_emitted = False
+        if callable(set_runtime_event_sink):
+            def forward_runtime_event(event_type: str, payload: dict[str, object]) -> None:
+                nonlocal runtime_event_emitted
+                runtime_event_emitted = True
+                self._forward_event(request, event_type, payload)
+
+            runtime_event_sink = forward_runtime_event
+            set_runtime_event_sink(runtime_event_sink)
         try:
             set_context = getattr(self.runtime, "set_context", None)
             if callable(set_context):
@@ -265,9 +304,20 @@ class RuntimeAgentAdapter:
                 set_session_path(request.workspace / "session-transcript.jsonl")
             result = self.runtime.run(request.prompt, request.workspace, request.timeout)
         except Exception as exc:
+            if not runtime_event_emitted:
+                self._forward_event(
+                    request,
+                    "agent_runtime_failure",
+                    {"phase": "run", "error": _safe_event_error(exc)},
+                )
             if isinstance(exc, AgentError):
                 raise
             raise AgentInvocationError(_bounded_error(str(exc))) from exc
+        finally:
+            if runtime_event_sink is not None:
+                # A Runtime instance may be reused by a caller; never leave an old evolution
+                # observer attached to a later role or run.
+                set_runtime_event_sink(None)
         if not isinstance(result, RuntimeResult):
             raise AgentInvocationError("runtime returned an invalid result")
         try:
@@ -276,7 +326,10 @@ class RuntimeAgentAdapter:
             if callable(session_path):
                 transcript = session_path()
                 if transcript is not None and Path(transcript).is_file():
-                    resolved = Path(transcript).resolve(strict=False)
+                    raw_transcript = Path(transcript).expanduser()
+                    if raw_transcript.is_symlink():
+                        raise AgentInvocationError("runtime session artifact must not be a symlink")
+                    resolved = raw_transcript.resolve(strict=False)
                     try:
                         relative = resolved.relative_to(request.workspace.resolve())
                     except ValueError as exc:
@@ -292,6 +345,27 @@ class RuntimeAgentAdapter:
             )
         except (TypeError, ValueError) as exc:
             raise AgentInvocationError(_bounded_error(str(exc))) from exc
+
+    def _forward_event(
+        self, request: AgentRequest, event_type: str, payload: Mapping[str, object]
+    ) -> None:
+        if self._event_sink is None:
+            return
+        bounded: dict[str, object] = {
+            "adapter": self.name,
+            "role": request.role,
+            "run_id": request.run_id,
+            "task_id": request.task_id,
+        }
+        if isinstance(payload, Mapping):
+            for key, value in list(payload.items())[:16]:
+                if not isinstance(key, str) or not _TOKEN.fullmatch(key):
+                    continue
+                if isinstance(value, (bool, int, float)) or value is None:
+                    bounded[key] = value
+                elif isinstance(value, str):
+                    bounded[key] = _safe_event_text(value)
+        self._event_sink(event_type, bounded)
 
     def cancel(self) -> None:
         self.runtime.cancel()

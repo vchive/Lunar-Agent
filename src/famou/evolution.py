@@ -995,6 +995,12 @@ class ExecutionAwareCandidateEvaluator:
         self.runner = runner
         self.evaluator = evaluator
 
+    def set_observer(self, observer: Callable[[str, dict[str, Any]], None] | None) -> None:
+        """Forward optional Agent evidence observation through the execution wrapper."""
+        setter = getattr(self.evaluator, "set_observer", None)
+        if callable(setter):
+            setter(observer)
+
     def __call__(
         self, candidate_path: Path, contract: AlgorithmProblemContract
     ) -> EvaluationReport:
@@ -1039,6 +1045,13 @@ class _BaseStrategy:
         self.context = context
         self.archive = CandidateArchive(context.workspace)
         self.config = context.config
+        self._bind_observer(context.generate)
+        self._bind_observer(context.evaluate)
+
+    def _bind_observer(self, target: object) -> None:
+        setter = getattr(target, "set_observer", None)
+        if callable(setter):
+            setter(self.context.observe)
 
     def _cancelled(self) -> bool:
         try:

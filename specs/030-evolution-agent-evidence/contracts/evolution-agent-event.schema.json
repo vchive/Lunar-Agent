@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["role", "adapter", "task_id", "path", "kind", "size"],
+  "properties": {
+    "role": {"type": "string", "minLength": 1, "maxLength": 64},
+    "adapter": {"type": "string", "minLength": 1, "maxLength": 64},
+    "task_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\\\\\u0000]+$"},
+    "kind": {"enum": ["evolution_agent_transcript", "evolution_agent_artifact"]},
+    "size": {"type": "integer", "minimum": 0, "maximum": 1048576}
+  },
+  "additionalProperties": false
+}

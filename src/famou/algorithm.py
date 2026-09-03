@@ -22,12 +22,15 @@ MAX_FIELDS = 128
 MAX_METRICS = 32
 MAX_REPORT_BYTES = 32 * 1024
 MAX_ERROR_INFO = 32
+MAX_OUTPUTS = 32
+MAX_OUTPUT_FIELDS = 32
 SUPPORTED_PROBLEM_TYPES = frozenset(
     {"scheduling", "routing", "packing", "assignment", "forecasting", "network_flow", "continuous"}
 )
 PROVENANCE_VALUES = frozenset({"user_confirmed", "data_observed", "explicit_assumption"})
 VERIFICATION_VALUES = frozenset({"independent", "partial", "solver"})
 EVOLUTION_STRATEGIES = frozenset({"loop", "population", "openevolve"})
+OUTPUT_FORMATS = frozenset({"json", "jsonl", "csv", "text"})
 _SECRET_RE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*\S+)"
 )
@@ -269,6 +272,71 @@ class EvolutionSpec:
 
 
 @dataclass(frozen=True)
+class OutputSpec:
+    """A structured data file the algorithm mission is expected to produce."""
+
+    path: str
+    format: Literal["json", "jsonl", "csv", "text"]
+    fields: tuple[str, ...] = ()
+    required: bool = True
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        path = _relative_path(self.path, "output path")
+        if not path.startswith("output/") or path == "output/":
+            raise ValueError("output path must be below the output/ directory")
+        output_format = _text(self.format, "output format", limit=32).lower()
+        if output_format not in OUTPUT_FORMATS:
+            raise ValueError("output format must be json, jsonl, csv, or text")
+        if isinstance(self.required, bool) is False:
+            raise TypeError("output required must be a boolean")
+        if len(self.fields) > MAX_OUTPUT_FIELDS:
+            raise ValueError("output fields are too many")
+        normalized_fields = tuple(_safe_segment(field, "output field") for field in self.fields)
+        if len(set(normalized_fields)) != len(normalized_fields):
+            raise ValueError("output fields must be unique")
+        if output_format == "text" and normalized_fields:
+            raise ValueError("text outputs cannot declare fields")
+        description = _text(self.description, "output description", required=False, limit=512)
+        object.__setattr__(self, "path", path)
+        object.__setattr__(self, "format", output_format)
+        object.__setattr__(self, "fields", normalized_fields)
+        object.__setattr__(self, "description", description)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "path": self.path,
+            "format": self.format,
+            "fields": list(self.fields),
+            "required": self.required,
+        }
+        if self.description:
+            payload["description"] = self.description
+        return payload
+
+    @classmethod
+    def from_dict(cls, value: object) -> OutputSpec:
+        if not isinstance(value, dict):
+            raise TypeError("output must be an object")
+        unknown = set(value) - {"path", "format", "fields", "required", "description"}
+        if unknown:
+            raise ValueError(f"output contains unknown fields: {', '.join(sorted(unknown))}")
+        fields = value.get("fields", [])
+        if not isinstance(fields, list) or any(not isinstance(item, str) for item in fields):
+            raise TypeError("output fields must be a string array")
+        description = value.get("description", "")
+        if not isinstance(description, str):
+            raise TypeError("output description must be a string")
+        return cls(
+            path=_relative_path(value.get("path"), "output path"),
+            format=value.get("format"),  # type: ignore[arg-type]
+            fields=tuple(fields),
+            required=value.get("required", True),  # type: ignore[arg-type]
+            description=description,
+        )
+
+
+@dataclass(frozen=True)
 class AlgorithmProblemContract:
     schema_version: str
     problem_id: str
@@ -283,6 +351,7 @@ class AlgorithmProblemContract:
     deliverables: tuple[str, ...]
     assumptions: tuple[str, ...] = ()
     evolution: EvolutionSpec = field(default_factory=EvolutionSpec)
+    outputs: tuple[OutputSpec, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.schema_version, "contract schema version", limit=64)
@@ -309,10 +378,15 @@ class AlgorithmProblemContract:
         if not self.success_criteria or not self.deliverables:
             raise ValueError("success_criteria and deliverables must not be empty")
         _strings(list(self.assumptions), "assumptions")
+        if len(self.outputs) > MAX_OUTPUTS or any(not isinstance(item, OutputSpec) for item in self.outputs):
+            raise ValueError("outputs must be a bounded OutputSpec array")
+        output_paths = [item.path for item in self.outputs]
+        if len(output_paths) != len(set(output_paths)):
+            raise ValueError("output paths must be unique")
         _json_size(self.to_dict(), "algorithm problem contract")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "schema_version": self.schema_version,
             "problem_id": self.problem_id,
             "problem_type": self.problem_type,
@@ -327,6 +401,10 @@ class AlgorithmProblemContract:
             "assumptions": list(self.assumptions),
             "evolution": self.evolution.to_dict(),
         }
+        # Omit the optional field when empty so old contract digests remain stable.
+        if self.outputs:
+            payload["outputs"] = [item.to_dict() for item in self.outputs]
+        return payload
 
     def canonical_json(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -343,8 +421,11 @@ class AlgorithmProblemContract:
             raise TypeError("algorithm_problem inputs must be an array")
         raw_hard = value.get("hard_constraints", [])
         raw_soft = value.get("soft_constraints", [])
+        raw_outputs = value.get("outputs", [])
         if not isinstance(raw_hard, list) or not isinstance(raw_soft, list):
             raise TypeError("constraints must be arrays")
+        if not isinstance(raw_outputs, list):
+            raise TypeError("outputs must be an array")
         return cls(
             schema_version=_text(value.get("schema_version", "1"), "contract schema version", limit=64),
             problem_id=_safe_segment(value.get("problem_id"), "problem id"),
@@ -359,6 +440,7 @@ class AlgorithmProblemContract:
             deliverables=_strings(value.get("deliverables"), "deliverables"),
             assumptions=_strings(value.get("assumptions"), "assumptions"),
             evolution=EvolutionSpec.from_dict(value.get("evolution")),
+            outputs=tuple(OutputSpec.from_dict(item) for item in raw_outputs),
         )
 
 

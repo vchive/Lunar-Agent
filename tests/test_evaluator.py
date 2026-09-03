@@ -49,6 +49,43 @@ def test_artifact_contract_checks_text_json_and_composition(tmp_path: Path) -> N
     assert all(child["passed"] for child in check["children"])
 
 
+def test_output_valid_acceptance_checks_structured_data_formats(tmp_path: Path) -> None:
+    workspace = tmp_path / "attempt"
+    (workspace / "output").mkdir(parents=True)
+    (workspace / "output" / "routes.csv").write_text(
+        "item_id,route_id\n1,r1\n2,r2\n", encoding="utf-8"
+    )
+    csv_evaluator = acceptance_evaluator(
+        {"output_valid": {"path": "output/routes.csv", "format": "csv", "fields": ["item_id", "route_id"]}}
+    )
+    assert csv_evaluator is not None
+    csv_result = csv_evaluator.evaluate("route data", workspace)
+    assert csv_result.passed
+    assert csv_result.details["check"]["row_count"] == 2
+
+    (workspace / "output" / "summary.jsonl").write_text(
+        '{"distance": 12, "vehicle": "v1"}\n', encoding="utf-8"
+    )
+    jsonl_evaluator = acceptance_evaluator(
+        {"output_valid": {"path": "output/summary.jsonl", "format": "jsonl", "fields": ["distance"]}}
+    )
+    assert jsonl_evaluator is not None and jsonl_evaluator.evaluate("route data", workspace).passed
+
+    (workspace / "output" / "summary.json").write_text("[1, 2]", encoding="utf-8")
+    invalid = acceptance_evaluator(
+        {"output_valid": {"path": "output/summary.json", "format": "json", "fields": ["distance"]}}
+    )
+    assert invalid is not None
+    assert not invalid.evaluate("route data", workspace).passed
+
+
+def test_output_valid_rejects_non_output_paths_and_invalid_format() -> None:
+    with pytest.raises(ValueError, match="output/"):
+        validate_acceptance({"output_valid": {"path": "report.json", "format": "json", "fields": []}})
+    with pytest.raises(ValueError, match="format"):
+        validate_acceptance({"output_valid": {"path": "output/report.bin", "format": "binary", "fields": []}})
+
+
 def test_any_keeps_evidence_for_every_alternative(tmp_path: Path) -> None:
     workspace = tmp_path / "attempt"
     workspace.mkdir()

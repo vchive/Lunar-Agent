@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lunar-agent.local/contracts/output-spec.schema.json",
+  "title": "Lunar-Agent OutputSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "format"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "pattern": "^output/[^./\\\\]+(?:/[^./\\\\]+)*$",
+      "maxLength": 512
+    },
+    "format": {"type": "string", "enum": ["json", "jsonl", "csv", "text"]},
+    "fields": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[^./\\\\]+$", "maxLength": 512}
+    },
+    "required": {"type": "boolean", "default": true},
+    "description": {"type": "string", "maxLength": 512}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"format": {"const": "text"}}},
+      "then": {"properties": {"fields": {"maxItems": 0}}}
+    }
+  ]
+}

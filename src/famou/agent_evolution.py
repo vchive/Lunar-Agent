@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from statistics import median
 
@@ -15,6 +15,70 @@ MAX_GENERATION_PROMPT_BYTES = 60 * 1024
 MAX_CONTEXT_ITEMS = 8
 MAX_FEEDBACK_ITEMS = 8
 MAX_FEEDBACK_TEXT_BYTES = 512
+MAX_AGENT_ARTIFACTS = 64
+MAX_AGENT_ARTIFACT_BYTES = 1 * 1024 * 1024
+
+AgentEvidenceObserver = Callable[[str, dict[str, object]], None]
+
+
+def _reject_symlink_components(path: Path, root: Path) -> None:
+    """Reject symlink components before an Agent artifact crosses the evidence boundary."""
+    root = root.resolve(strict=False)
+    current = path
+    while True:
+        if current.exists() and current.is_symlink():
+            raise EvolutionError("Agent artifact must not contain a symlink")
+        if current == root:
+            return
+        try:
+            current.relative_to(root)
+        except ValueError as exc:
+            raise EvolutionError("Agent artifact escapes the run workspace") from exc
+        parent = current.parent
+        if parent == current:
+            raise EvolutionError("Agent artifact escapes the run workspace")
+        current = parent
+
+
+def _agent_artifact_records(
+    result: AgentResult,
+    *,
+    agent_workspace: Path,
+    run_workspace: Path,
+    role: str,
+) -> tuple[dict[str, object], ...]:
+    """Validate declared Agent outputs and return bounded run-relative evidence payloads."""
+    if len(result.artifacts) > MAX_AGENT_ARTIFACTS:
+        raise EvolutionError("Agent returned too many artifacts")
+    agent_workspace = agent_workspace.resolve(strict=False)
+    run_workspace = run_workspace.resolve(strict=False)
+    records: list[dict[str, object]] = []
+    for declared in result.artifacts:
+        raw = agent_workspace / declared
+        _reject_symlink_components(raw, agent_workspace)
+        if not raw.is_file() or raw.is_symlink():
+            raise EvolutionError(f"Agent artifact is missing or not a regular file: {declared}")
+        if raw.stat().st_size > MAX_AGENT_ARTIFACT_BYTES:
+            raise EvolutionError("Agent artifact exceeds the bounded evidence size")
+        resolved = raw.resolve(strict=False)
+        try:
+            relative = resolved.relative_to(run_workspace).as_posix()
+        except ValueError as exc:
+            raise EvolutionError("Agent artifact escapes the run workspace") from exc
+        records.append(
+            {
+                "path": relative,
+                "kind": (
+                    "evolution_agent_transcript"
+                    if Path(declared).name == "session-transcript.jsonl"
+                    else "evolution_agent_artifact"
+                ),
+                "size": raw.stat().st_size,
+                "role": role,
+                "adapter": result.adapter_name,
+            }
+        )
+    return tuple(records)
 
 
 class AgentCandidateGenerator:
@@ -40,6 +104,16 @@ class AgentCandidateGenerator:
         self.required_capabilities = tuple(required_capabilities)
         self.timeout = timeout
         self._calls = 0
+        self._observer: AgentEvidenceObserver | None = None
+
+    def set_observer(self, observer: AgentEvidenceObserver | None) -> None:
+        """Attach an optional evolution audit observer without coupling the strategy to Agents."""
+        if observer is not None and not callable(observer):
+            raise TypeError("observer must be callable or None")
+        self._observer = observer
+        set_event_sink = getattr(self.adapter, "set_event_sink", None)
+        if callable(set_event_sink):
+            set_event_sink(observer)
 
     def __call__(self, request: GenerationRequest) -> CandidateDraft:
         self._calls += 1
@@ -74,7 +148,21 @@ class AgentCandidateGenerator:
                 f"agent candidate generation returned {result.status}: "
                 f"{_bounded_error(result.error or 'no error detail')}"
             )
+        self._observe_artifacts(result, generation_workspace, request.workspace, agent_request.task_id)
         return self._draft(result.text)
+
+    def _observe_artifacts(
+        self, result: AgentResult, agent_workspace: Path, run_workspace: Path, task_id: str
+    ) -> None:
+        for payload in _agent_artifact_records(
+            result,
+            agent_workspace=agent_workspace,
+            run_workspace=run_workspace,
+            role=self.role,
+        ):
+            payload = {**payload, "task_id": task_id}
+            if self._observer is not None:
+                self._observer("agent_artifact", payload)
 
     def _prompt(self, request: GenerationRequest) -> str:
         contract = request.workspace / "evolution" / "contract.json"
@@ -197,6 +285,10 @@ class AgentPortfolioGenerator:
         self.adapters = tuple(generator.adapter for generator in self.generators)
         self._calls = 0
 
+    def set_observer(self, observer: AgentEvidenceObserver | None) -> None:
+        for generator in self.generators:
+            generator.set_observer(observer)
+
     def __call__(self, request: GenerationRequest) -> CandidateDraft:
         self._calls += 1
         generator = self.generators[(self._calls - 1) % len(self.generators)]
@@ -233,6 +325,15 @@ class AgentCandidateEvaluator:
         ):
             raise ValueError("workspace_name must be one safe path segment")
         self.workspace_name = workspace_name
+        self._observer: AgentEvidenceObserver | None = None
+
+    def set_observer(self, observer: AgentEvidenceObserver | None) -> None:
+        if observer is not None and not callable(observer):
+            raise TypeError("observer must be callable or None")
+        self._observer = observer
+        set_event_sink = getattr(self.adapter, "set_event_sink", None)
+        if callable(set_event_sink):
+            set_event_sink(observer)
 
     def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
         candidate = Path(candidate_path).expanduser().resolve(strict=False)
@@ -263,6 +364,7 @@ class AgentCandidateEvaluator:
                 f"agent candidate evaluation returned {result.status}: "
                 f"{_bounded_error(result.error or 'no error detail')}"
             )
+        self._observe_artifacts(result, workspace, candidate.parent.parent.parent.parent, request.task_id)
         try:
             payload = json.loads(result.text.strip())
         except json.JSONDecodeError as exc:
@@ -273,6 +375,19 @@ class AgentCandidateEvaluator:
             return EvaluationReport.from_dict(payload)
         except (TypeError, ValueError, EvolutionError) as exc:
             raise EvolutionError(f"agent evaluator report is invalid: {_bounded_error(exc)}") from exc
+
+    def _observe_artifacts(
+        self, result: AgentResult, agent_workspace: Path, run_workspace: Path, task_id: str
+    ) -> None:
+        for payload in _agent_artifact_records(
+            result,
+            agent_workspace=agent_workspace,
+            run_workspace=run_workspace,
+            role=self.role,
+        ):
+            payload = {**payload, "task_id": task_id}
+            if self._observer is not None:
+                self._observer("agent_artifact", payload)
 
     @staticmethod
     def _prompt(candidate: Path, contract: AlgorithmProblemContract) -> str:
@@ -347,6 +462,14 @@ class AgentEvaluatorEnsemble:
         self.role = role
         self.required_capabilities = tuple(required_capabilities)
         self.timeout = timeout
+        self._observer: AgentEvidenceObserver | None = None
+
+    def set_observer(self, observer: AgentEvidenceObserver | None) -> None:
+        if observer is not None and not callable(observer):
+            raise TypeError("observer must be callable or None")
+        self._observer = observer
+        for evaluator in self.evaluators:
+            evaluator.set_observer(observer)
 
     def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
         reports: list[EvaluationReport] = []

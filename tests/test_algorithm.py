@@ -7,6 +7,7 @@ import pytest
 from famou.algorithm import (
     AlgorithmProblemContract,
     EvaluationReport,
+    OutputSpec,
     materialize_algorithm_workspace,
 )
 from famou.config import Config
@@ -69,6 +70,30 @@ def test_problem_contract_defaults_to_loop_and_accepts_population() -> None:
         _contract(evolution={"strategy": "population", "max_rounds": 20, "stagnation_rounds": 4})
     )
     assert population.evolution.strategy == "population"
+
+
+def test_contract_declares_structured_data_outputs() -> None:
+    contract = AlgorithmProblemContract.from_dict(
+        _contract(
+            outputs=[
+                {
+                    "path": "output/routes.csv",
+                    "format": "csv",
+                    "fields": ["item_id", "route_id"],
+                    "description": "One route assignment per item",
+                },
+                {"path": "output/summary.json", "format": "json", "fields": ["distance"]},
+            ]
+        )
+    )
+    assert contract.outputs[0] == OutputSpec(
+        "output/routes.csv", "csv", ("item_id", "route_id"), description="One route assignment per item"
+    )
+    assert AlgorithmProblemContract.from_dict(contract.to_dict()).to_dict() == contract.to_dict()
+    with pytest.raises(ValueError, match="output/"):
+        OutputSpec("solve/routes.csv", "csv")
+    with pytest.raises(ValueError, match="format"):
+        OutputSpec("output/routes.bin", "binary")
 
 
 @pytest.mark.parametrize(

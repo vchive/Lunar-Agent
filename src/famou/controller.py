@@ -23,7 +23,7 @@ from .agents import (
     AgentSelectionError,
     RuntimeAgentAdapter,
 )
-from .algorithm import AlgorithmProblemContract, materialize_algorithm_workspace
+from .algorithm import AlgorithmProblemContract, OutputSpec, materialize_algorithm_workspace
 from .artifacts import ArtifactError, ArtifactStore
 from .budget import BudgetExceeded, BudgetSpec
 from .config import Config
@@ -33,7 +33,7 @@ from .conversational import (
     ContractCompiler,
     build_algorithm_plan,
 )
-from .evaluator import Evaluation, Evaluator, acceptance_evaluator
+from .evaluator import MAX_ARTIFACT_BYTES, Evaluation, Evaluator, acceptance_evaluator
 from .evolution import (
     CandidateEvaluator,
     CandidateExecution,
@@ -62,6 +62,7 @@ class LocalController:
             "artifact_text_contains",
             "json_parse",
             "json_has_keys",
+            "output_valid",
             "all",
             "any",
         }
@@ -370,6 +371,86 @@ class LocalController:
             self.store.append_event(run_id, "evolution_candidate_archived", payload, task_id=task_id)
         elif event == "state" and payload.get("status") == "running":
             self.store.append_event(run_id, "evolution_iteration", payload, task_id=task_id)
+        elif event == "agent_artifact":
+            self._record_evolution_agent_artifact(run_id, task_id, payload)
+        elif event in {
+            "agent_model_turn",
+            "agent_tool_result",
+            "agent_step_limit_reached",
+            "agent_runtime_failure",
+        }:
+            # RuntimeAgentAdapter has already reduced this payload to bounded scalar metadata.
+            # Keep the original event name so status/events consumers can distinguish model,
+            # tool, and failure phases without inspecting a provider-specific trace.
+            self.store.append_event(run_id, event, payload, task_id=task_id)
+
+    def _record_evolution_agent_artifact(
+        self, run_id: str, task_id: str, payload: dict[str, object]
+    ) -> None:
+        path_value = payload.get("path")
+        kind = payload.get("kind")
+        if not isinstance(path_value, str) or not isinstance(kind, str):
+            raise EvolutionError("evolution Agent artifact evidence is malformed")
+        if kind not in {"evolution_agent_transcript", "evolution_agent_artifact"}:
+            raise EvolutionError("evolution Agent artifact kind is unsupported")
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise EvolutionError("evolution Agent artifact references an unknown run")
+        root = Path(run.workspace).expanduser().resolve(strict=False)
+        raw = root / path_value
+        current = raw
+        while True:
+            if current.exists() and current.is_symlink():
+                raise EvolutionError("evolution Agent artifact must not be a symlink")
+            if current == root:
+                break
+            try:
+                current.relative_to(root)
+            except ValueError as exc:
+                raise EvolutionError("evolution Agent artifact escapes the run workspace") from exc
+            parent = current.parent
+            if parent == current:
+                raise EvolutionError("evolution Agent artifact escapes the run workspace")
+            current = parent
+        resolved = raw.resolve(strict=False)
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise EvolutionError("evolution Agent artifact escapes the run workspace") from exc
+        if relative != path_value or not resolved.is_file() or resolved.is_symlink():
+            raise EvolutionError("evolution Agent artifact must be a regular run-relative file")
+        if resolved.stat().st_size > 1 * 1024 * 1024:
+            raise EvolutionError("evolution Agent artifact exceeds the bounded evidence size")
+        artifacts = ArtifactStore(root, self.store, run_id)
+        existing = next(
+            (
+                item
+                for item in self.store.list_artifacts(run_id)
+                if item["path"] == relative and item["kind"] == kind
+            ),
+            None,
+        )
+        artifact_id = existing["id"] if existing is not None else artifacts.record(
+            resolved, task_id, kind=kind
+        )
+        event_id = "event-evolution-agent-artifact-" + hashlib.sha256(
+            f"{relative}\0{kind}".encode()
+        ).hexdigest()
+        self.store.append_event(
+            run_id,
+            "evolution_agent_artifact",
+            {
+                "artifact_id": artifact_id,
+                "path": relative,
+                "kind": kind,
+                "size": resolved.stat().st_size,
+                "role": payload.get("role"),
+                "adapter": payload.get("adapter"),
+                "agent_task_id": payload.get("task_id"),
+            },
+            task_id=task_id,
+            event_id=event_id,
+        )
 
     def start_plan(self, document: PlanDocument, decision: PolicyDecision | None = None) -> Run:
         if decision is None:
@@ -452,12 +533,29 @@ class LocalController:
             any(item.get("task_id") == task.id and item["payload"].get("passed") is True for item in evaluations)
             for task in tasks if task.state.value == "succeeded"
         )
-        usable = [item for item in artifacts if item["kind"] in {"result", "runtime"}]
+        # Algorithm data outputs are promoted to stable run-level paths only after the Solver
+        # attempt passes independent evaluation.  Keep the latest record for each path because a
+        # replan/retry may leave older audit rows in the append-only artifact ledger.
+        output_artifacts = self._latest_artifacts_by_path(
+            [item for item in artifacts if item["kind"] == "output"]
+        )
+        contract = self._algorithm_contract(run)
+        if contract is not None and contract.outputs:
+            missing = [
+                output.path
+                for output in contract.outputs
+                if output.required and output.path not in output_artifacts
+            ]
+            if missing:
+                raise ValueError(
+                    "run is missing verified algorithm outputs: " + ", ".join(missing[:16])
+                )
+        usable = [*output_artifacts.values(), *[item for item in artifacts if item["kind"] in {"result", "runtime"}]]
         if not passed or not usable:
             raise ValueError("run has no fully verified artifacts to deliver")
         evidence = tuple(item["path"] for item in usable[:16])
         return PolicyDecision(
-            "deliver", "All tasks passed evaluation and have hashed artifacts", 1.0,
+            "deliver", "All tasks passed evaluation and have hashed result/runtime/output artifacts", 1.0,
             plan_id=run.current_plan_id, plan_version=run.current_plan_version, evidence=evidence,
         )
 
@@ -939,6 +1037,7 @@ class LocalController:
                 error = result.error or f"agent returned {result.status}"
                 self.store.finish_task(task.id, attempt.id, False, str(result_path.relative_to(run.workspace)), error)
             elif evaluation.passed:
+                self._promote_algorithm_outputs(run, task, task_root)
                 self.store.finish_task(task.id, attempt.id, True, str(result_path.relative_to(run.workspace)))
             elif self._can_retry(task.attempts + 1):
                 self.store.retry_task(task.id, attempt.id, evaluation.reason)
@@ -1167,6 +1266,7 @@ class LocalController:
                     return
                 relative_result = str(result_path.relative_to(Path(run.workspace)))
                 if evaluation.passed:
+                    self._promote_algorithm_outputs(run, task, task_root)
                     self.store.finish_task(task.id, attempt.id, True, relative_result)
                 elif self._can_retry(task.attempts + 1):
                     self.store.retry_task(task.id, attempt.id, evaluation.reason)
@@ -1324,20 +1424,212 @@ class LocalController:
             return
         ArtifactStore(run.workspace, self.store, run.id).record(path, task_id, kind="session")
 
+    @staticmethod
+    def _latest_artifacts_by_path(artifacts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Return the newest ledger row for each path without mutating append-only history."""
+        latest: dict[str, dict[str, Any]] = {}
+        for artifact in artifacts:
+            path = artifact.get("path")
+            if isinstance(path, str):
+                latest[path] = artifact
+        return latest
+
+    def _algorithm_contract(self, run: Run) -> AlgorithmProblemContract | None:
+        plan = self.store.get_current_plan(run.id)
+        if plan is None or plan.algorithm_problem is None:
+            return None
+        return AlgorithmProblemContract.from_dict(plan.algorithm_problem)
+
+    def _task_output_specs(self, run: Run, task: Any) -> tuple[OutputSpec, ...]:
+        """Return declared outputs for the Solver task, if this run has an algorithm contract.
+
+        Output paths are logical paths relative to an attempt workspace.  Only the built-in
+        ``solve``/``solver`` plan roles are allowed to publish them; discovery and verification
+        roles may inspect the resulting run-level files but cannot accidentally overwrite them.
+        """
+        if (task.plan_task_id or task.id) not in {"solve", "solver"}:
+            return ()
+        contract = self._algorithm_contract(run)
+        return contract.outputs if contract is not None else ()
+
+    @staticmethod
+    def _raw_path_has_symlink(root: Path, path: Path) -> bool:
+        """Check every existing component without following a symlink."""
+        current = path
+        while True:
+            if current.exists() and current.is_symlink():
+                return True
+            if current == root:
+                return False
+            if current.parent == current:
+                return True
+            current = current.parent
+
+    def _confined_regular_file(self, root: Path, relative_path: str) -> Path | None:
+        """Resolve a regular, non-symlink file below ``root`` or return ``None``."""
+        root = root.expanduser().resolve(strict=False)
+        if root.is_symlink() or "\x00" in relative_path:
+            return None
+        raw = root / relative_path
+        if self._raw_path_has_symlink(root, raw):
+            return None
+        resolved = raw.resolve(strict=False)
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return None
+        if not resolved.is_file() or resolved.is_symlink():
+            return None
+        return resolved
+
+    def _promote_algorithm_outputs(
+        self, run: Run, task: Any, task_root: Path
+    ) -> tuple[dict[str, Any], ...]:
+        """Copy verified Solver data files to stable run-level output paths and hash them.
+
+        The runtime receives an attempt-local workspace so retries and parallel tasks remain
+        isolated.  Promotion happens only after the complete evaluation passes, which gives
+        callers a stable ``<run>/output/...`` location and prevents unverified files from being
+        delivered.  Optional outputs are promoted when present; required outputs must already
+        have passed the independent output evaluator.
+        """
+        specs = self._task_output_specs(run, task)
+        if not specs:
+            return ()
+        root = Path(run.workspace).expanduser().resolve(strict=False)
+        promoted: list[dict[str, Any]] = []
+        artifacts = ArtifactStore(root, self.store, run.id)
+        for output in specs:
+            source = self._confined_regular_file(task_root, output.path)
+            if source is None:
+                if output.required:
+                    raise ArtifactError(f"required algorithm output is missing: {output.path}")
+                continue
+            # Keep the same bounded inspection/ledger limit used by output_valid.  This prevents
+            # a successful model turn from smuggling an unbounded binary into the run archive.
+            size = source.stat().st_size
+            if size > MAX_ARTIFACT_BYTES:
+                raise ArtifactError(
+                    f"algorithm output exceeds {MAX_ARTIFACT_BYTES} bytes: {output.path}"
+                )
+            target = self._confined_output_target(root, output.path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(f".{target.name}.tmp")
+            temporary.write_bytes(source.read_bytes())
+            temporary.replace(target)
+            artifact_id = artifacts.record(target, task.id, kind="output")
+            promoted.append(
+                {
+                    "artifact_id": artifact_id,
+                    "path": output.path,
+                    "format": output.format,
+                    "fields": list(output.fields),
+                    "required": output.required,
+                    "size": size,
+                }
+            )
+        if promoted:
+            self.store.append_event(
+                run.id,
+                "algorithm_outputs_promoted",
+                {"outputs": promoted},
+                task_id=task.id,
+            )
+        return tuple(promoted)
+
+    def _confined_output_target(self, root: Path, relative_path: str) -> Path:
+        """Resolve a run-level output target while rejecting symlinked directories."""
+        root = root.expanduser().resolve(strict=False)
+        raw = root / relative_path
+        output_root = root / "output"
+        if self._raw_path_has_symlink(root, output_root) or self._raw_path_has_symlink(root, raw):
+            raise ArtifactError(f"algorithm output path is symlinked: {relative_path}")
+        resolved = raw.resolve(strict=False)
+        try:
+            resolved.relative_to(root)
+            resolved.relative_to(output_root.resolve(strict=False))
+        except ValueError as exc:
+            raise ArtifactError(f"algorithm output escapes run workspace: {relative_path}") from exc
+        if resolved == output_root:
+            raise ArtifactError("algorithm output path must name a file")
+        return resolved
+
+    @staticmethod
+    def _acceptance_output_specs(value: object) -> dict[str, tuple[str, tuple[str, ...]]]:
+        specs: dict[str, tuple[str, tuple[str, ...]]] = {}
+        if isinstance(value, dict):
+            if set(value) == {"output_valid"} and isinstance(value["output_valid"], dict):
+                payload = value["output_valid"]
+                path = payload.get("path")
+                output_format = payload.get("format")
+                fields = payload.get("fields")
+                if (
+                    isinstance(path, str)
+                    and isinstance(output_format, str)
+                    and isinstance(fields, list)
+                    and all(isinstance(field, str) for field in fields)
+                ):
+                    specs[path] = (output_format, tuple(fields))
+            for child in value.values():
+                specs.update(LocalController._acceptance_output_specs(child))
+        elif isinstance(value, list):
+            for child in value:
+                specs.update(LocalController._acceptance_output_specs(child))
+        return specs
+
     def _evaluate(self, run: Run, task: Any, result: str, workspace: Path) -> Evaluation:
         evaluator = self.evaluator or self.profiles.evaluator(run.evaluator_profile or "general")
         base = evaluator.evaluate(result, workspace)
         criterion = acceptance_evaluator(task.acceptance)
-        if criterion is None:
+        output_specs = self._task_output_specs(run, task)
+        declared_in_acceptance = self._acceptance_output_specs(task.acceptance)
+        output_specs_to_check = tuple(
+            output
+            for output in output_specs
+            if declared_in_acceptance.get(output.path)
+            != (output.format, tuple(output.fields))
+            and (
+                output.required
+                or self._confined_regular_file(workspace, output.path) is not None
+            )
+        )
+        output_criterion = None
+        if output_specs_to_check:
+            output_rules = [
+                {
+                    "output_valid": {
+                        "path": output.path,
+                        "format": output.format,
+                        "fields": list(output.fields),
+                    }
+                }
+                for output in output_specs_to_check
+            ]
+            output_criterion = acceptance_evaluator(
+                output_rules[0] if len(output_rules) == 1 else {"all": output_rules}
+            )
+        if criterion is None and output_criterion is None:
             return base
-        acceptance = criterion.evaluate(result, workspace)
-        evidence = tuple(base.evidence) + tuple(acceptance.evidence)
-        details = {"base": base.details, "acceptance": acceptance.details}
-        if base.passed and acceptance.passed:
-            return Evaluation(True, evidence, f"{base.reason}; {acceptance.reason}", details)
+        acceptance = criterion.evaluate(result, workspace) if criterion is not None else None
+        outputs = output_criterion.evaluate(result, workspace) if output_criterion is not None else None
+        checks = [item for item in (acceptance, outputs) if item is not None]
+        evidence = tuple(base.evidence) + tuple(
+            evidence_item for item in checks for evidence_item in item.evidence
+        )
+        details: dict[str, object] = {"base": base.details}
+        if acceptance is not None:
+            details["acceptance"] = acceptance.details
+        if outputs is not None:
+            details["outputs"] = outputs.details
+        if base.passed and all(item.passed for item in checks):
+            reasons = "; ".join([base.reason, *(item.reason for item in checks)])
+            return Evaluation(True, evidence, reasons, details)
         reasons = [
             reason
-            for passed, reason in ((base.passed, base.reason), (acceptance.passed, acceptance.reason))
+            for passed, reason in [
+                (base.passed, base.reason),
+                *((item.passed, item.reason) for item in checks),
+            ]
             if not passed
         ]
         return Evaluation(False, evidence, "; ".join(reasons), details)

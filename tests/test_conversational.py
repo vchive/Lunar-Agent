@@ -136,3 +136,21 @@ def test_role_plan_has_five_authority_bound_stages() -> None:
     assert plan.tasks[-1].depends_on == ("evaluator",)
     assert all("Role:" in task.prompt for task in plan.tasks)
     assert plan.algorithm_problem == _contract().to_dict()
+
+
+def test_algorithm_plan_turns_declared_outputs_into_independent_checks() -> None:
+    contract = AlgorithmProblemContract.from_dict(
+        {
+            **_contract().to_dict(),
+            "outputs": [
+                {"path": "output/routes.csv", "format": "csv", "fields": ["order_id", "route_id"]},
+                {"path": "output/summary.json", "format": "json", "fields": ["distance"]},
+            ],
+        }
+    )
+    plan = build_algorithm_plan("route orders", contract)
+    acceptance = plan.tasks[2].acceptance
+    assert isinstance(acceptance, dict)
+    assert "all" in acceptance
+    assert len(acceptance["all"]) == 2
+    assert plan.algorithm_problem["outputs"][0]["path"] == "output/routes.csv"

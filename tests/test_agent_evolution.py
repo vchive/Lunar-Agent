@@ -9,8 +9,11 @@ from famou.agent_evolution import (
     AgentEvaluatorEnsemble,
     AgentPortfolioGenerator,
 )
-from famou.agents import AgentResult
+from famou.agent_loop import AgentLoopRuntime
+from famou.agents import AgentResult, RuntimeAgentAdapter
 from famou.algorithm import AlgorithmProblemContract, EvaluationReport
+from famou.config import Config
+from famou.controller import LocalController
 from famou.evolution import (
     Candidate,
     EvolutionConfig,
@@ -19,6 +22,8 @@ from famou.evolution import (
     LoopStrategy,
     PopulationStrategy,
 )
+from famou.runtime import MockRuntime, ModelTurn, ToolCall
+from famou.tools import LocalToolRegistry
 
 
 def _contract(strategy: str = "loop") -> AlgorithmProblemContract:
@@ -106,6 +111,70 @@ class EvaluatorFixtureAgent:
         del observer
 
 
+class EvidenceFixtureAgent(FixtureAgent):
+    """Agent fixture that emits a redacted transcript/output file."""
+
+    def __init__(self, *, symlink: bool = False, missing: bool = False) -> None:
+        super().__init__()
+        self.symlink = symlink
+        self.missing = missing
+
+    def run(self, request):
+        self.requests.append(request)
+        request.workspace.mkdir(parents=True, exist_ok=True)
+        transcript = request.workspace / "session-transcript.jsonl"
+        if not self.missing:
+            transcript.write_text('{"role":"assistant","content":"[REDACTED]"}\n', encoding="utf-8")
+        if self.symlink:
+            link = request.workspace / "session-transcript.jsonl"
+            link.unlink(missing_ok=True)
+            link.symlink_to(request.workspace.parent / "outside.txt")
+        return AgentResult(
+            self.name,
+            request.role,
+            json.dumps({"source": "def solve():\n    return 1\n"}),
+            artifacts=("session-transcript.jsonl",),
+        )
+
+
+class EvaluatorEvidenceFixtureAgent(EvaluatorFixtureAgent):
+    def run(self, request):
+        self.requests.append(request)
+        request.workspace.mkdir(parents=True, exist_ok=True)
+        (request.workspace / "session-transcript.jsonl").write_text(
+            '{"role":"assistant","content":"evaluation"}\n', encoding="utf-8"
+        )
+        return AgentResult(
+            self.name,
+            request.role,
+            self.response,
+            artifacts=("session-transcript.jsonl",),
+            status=self.status,
+            error=self.error,
+        )
+
+
+class EventModel:
+    name = "event-model"
+    api_key = "api-secret"
+
+    def __init__(self, turns: list[ModelTurn]) -> None:
+        self.turns = list(turns)
+
+    def complete(self, messages, tools=(), timeout=None):
+        del messages, tools, timeout
+        return self.turns.pop(0)
+
+    def cancel(self):
+        return None
+
+    def process_info(self):
+        return (None, None)
+
+    def set_process_observer(self, observer):
+        del observer
+
+
 def _report(path: Path, contract: AlgorithmProblemContract) -> dict[str, object]:
     del contract
     score = float(path.read_text().count("return"))
@@ -134,6 +203,51 @@ def test_agent_generator_injects_bounded_context_and_returns_draft(tmp_path: Pat
     assert "Improve a route" in agent.requests[0].prompt
     assert agent.requests[0].workspace.is_dir()
     assert (root / "evolution" / "candidates" / "candidate-0001" / "candidate.py").is_file()
+
+
+def test_agent_evolution_indexes_declared_transcript_through_observer(tmp_path: Path) -> None:
+    contract = _contract()
+    root = tmp_path / "run"
+    (root / "evolution").mkdir(parents=True)
+    (root / "evolution" / "contract.json").write_text(json.dumps(contract.to_dict()), encoding="utf-8")
+    agent = EvidenceFixtureAgent()
+    generator = AgentCandidateGenerator(agent, contract=contract)
+    observed: list[tuple[str, dict[str, object]]] = []
+    result = LoopStrategy(
+        EvolutionContext(
+            contract,
+            root,
+            generator,
+            _report,
+            EvolutionConfig(max_rounds=1),
+            observe=lambda event, payload: observed.append((event, payload)),
+        )
+    ).run()
+    assert result.best_candidate_id == "candidate-0001"
+    artifacts = [payload for event, payload in observed if event == "agent_artifact"]
+    assert artifacts and artifacts[0]["kind"] == "evolution_agent_transcript"
+    assert artifacts[0]["path"].startswith("evolution/agent/generations/")
+    assert artifacts[0]["size"] > 0
+
+
+@pytest.mark.parametrize("mode", ["missing", "symlink"])
+def test_agent_evolution_rejects_unsafe_declared_artifacts(tmp_path: Path, mode: str) -> None:
+    contract = _contract()
+    root = tmp_path / "run"
+    (root / "evolution").mkdir(parents=True)
+    (root / "evolution" / "contract.json").write_text(json.dumps(contract.to_dict()), encoding="utf-8")
+    if mode == "symlink":
+        (root / "outside.txt").write_text("outside", encoding="utf-8")
+    agent = EvidenceFixtureAgent(**{mode: True})
+    generator = AgentCandidateGenerator(agent, contract=contract)
+    with pytest.raises(EvolutionError, match="artifact"):
+        generator(
+            type(
+                "Request",
+                (),
+                {"iteration": 1, "parent": None, "inspirations": (), "archive": (), "workspace": root},
+            )()
+        )
 
 
 def test_agent_generator_works_with_population_and_rejected_agent_never_becomes_candidate(
@@ -417,6 +531,97 @@ def test_agent_evaluator_parses_strict_report_and_uses_candidate_workspace(tmp_p
     assert parsed.validity == 1
     assert agent.requests[0].workspace.is_dir()
     assert str(candidate) in agent.requests[0].prompt
+
+
+def test_agent_evaluator_indexes_transcript_artifact(tmp_path: Path) -> None:
+    contract = _contract()
+    candidate = tmp_path / "evolution" / "candidates" / "candidate-0001" / "candidate.py"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("def solve():\n    return 1\n", encoding="utf-8")
+    agent = EvaluatorEvidenceFixtureAgent(json.dumps(_report(candidate, contract)))
+    observed: list[tuple[str, dict[str, object]]] = []
+    evaluator = AgentCandidateEvaluator(agent)
+    evaluator.set_observer(lambda event, payload: observed.append((event, payload)))
+    assert evaluator(candidate, contract).validity == 1
+    artifacts = [payload for event, payload in observed if event == "agent_artifact"]
+    assert artifacts and artifacts[0]["kind"] == "evolution_agent_transcript"
+    assert artifacts[0]["path"].endswith(".agent-evaluator/session-transcript.jsonl")
+
+
+def test_controller_indexes_runtime_agent_evidence_and_redacts_transcript(tmp_path: Path) -> None:
+    contract = _contract()
+    config = Config(tmp_path / ".famou")
+    controller = LocalController(config, MockRuntime())
+    run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
+    solver_model = EventModel(
+        [
+            ModelTurn(
+                "",
+                (ToolCall("1", "write_file", {"path": "solver-trace.txt", "content": "api-secret"}),),
+            ),
+            ModelTurn(json.dumps({"source": "def solve():\n    return 1\n"}), ()),
+        ]
+    )
+    evaluator_model = EventModel(
+        [
+            ModelTurn(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "evaluator_id": "runtime-fixture",
+                        "validity": 1,
+                        "quality": 1,
+                        "combined_score": 1,
+                        "detailed_scores": {},
+                        "error_info": [],
+                    }
+                ),
+                (),
+            )
+        ]
+    )
+    generator = AgentCandidateGenerator(
+        RuntimeAgentAdapter(
+            AgentLoopRuntime(
+                solver_model,
+                tools=LocalToolRegistry(),
+                max_steps=3,
+                session_history=True,
+            ),
+            name="solver-loop",
+            roles=("solver",),
+        ),
+        contract=contract,
+    )
+    evaluator = AgentCandidateEvaluator(
+        RuntimeAgentAdapter(
+            AgentLoopRuntime(evaluator_model, session_history=True),
+            name="evaluator-loop",
+            roles=("evaluator",),
+        )
+    )
+    settled, result = controller.run_evolution(
+        run.id,
+        contract,
+        generator,
+        evaluator,
+        EvolutionConfig(max_rounds=1),
+    )
+    assert settled.status.value == "succeeded"
+    assert result.best_candidate_id == "candidate-0001"
+    artifacts = controller.store.list_artifacts(run.id)
+    transcripts = [item for item in artifacts if item["kind"] == "evolution_agent_transcript"]
+    assert len(transcripts) == 2
+    assert all(item["path"].startswith("evolution/") for item in transcripts)
+    event_types = [item["type"] for item in controller.store.list_events(run.id)]
+    assert "evolution_agent_artifact" in event_types
+    assert "agent_model_turn" in event_types
+    assert "agent_tool_result" in event_types
+    transcript_text = "\n".join(
+        (Path(run.workspace) / item["path"]).read_text(encoding="utf-8") for item in transcripts
+    )
+    assert "api-secret" not in transcript_text
+    assert "api-secret" not in str(controller.store.list_events(run.id))
 
 
 def test_agent_evaluator_rejects_malformed_or_failed_reports(tmp_path: Path) -> None:
