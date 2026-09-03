@@ -201,6 +201,13 @@ population prompts receive up to eight recent cards plus bounded per-tag outcome
 reconstructs the same memory without storing reasoning traces, mutable insight files, embeddings,
 or another model call.
 
+That verified memory now drives a deterministic prompt-only `search_directive` for every Agent
+generation. An empty search explores; later parentless seeds diversify or repair the latest invalid
+attempt; valid parents refine; and population parents with inspirations recombine. The directive
+also separates change tags with measured improvements from repeatedly invalid, regressed, or
+unchanged tags. It adds no planner call or scheduler state: candidate selection, budgets, and the
+independent evaluator remain authoritative, and resume rebuilds the same directive from the archive.
+
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
 output. Its exact source is visible to compiled-evaluator solvers as read-only scoring guidance,
@@ -948,4 +955,4 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/023-verified-algorithm-execution/`](specs/023-verified-algorithm-execution/).
+[`specs/045-adaptive-search-orchestration/`](specs/045-adaptive-search-orchestration/).

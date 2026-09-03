@@ -36,6 +36,7 @@ MAX_EXPERIMENT_HYPOTHESIS_BYTES = 1_024
 MAX_EXPERIMENT_ITEMS = 8
 MAX_EXPERIMENT_TOKEN_BYTES = 128
 MAX_EXPERIMENT_TAG_SUMMARIES = 32
+MAX_SEARCH_DIRECTIVE_ITEMS = 8
 _SECRET_EVIDENCE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|"
     r"api[_-]?key\s*[:=]\s*\S+)"
@@ -268,13 +269,15 @@ class AgentCandidateGenerator:
             _candidate_summary(item, request.workspace, declared_output_paths)
             for item in request.archive[-MAX_CONTEXT_ITEMS:]
         ]
+        experiment_memory = _experiment_memory(request.archive)
         context = {
             "iteration": request.iteration,
             "contract": contract_summary,
             "parent": parent_summary,
             "inspirations": inspiration_summaries,
             "archive": archive_summaries,
-            "experiment_memory": _experiment_memory(request.archive),
+            "experiment_memory": experiment_memory,
+            "search_directive": _search_directive(request, experiment_memory),
             "scoring_contract": (
                 self.scoring.prompt_dict() if self.scoring is not None else None
             ),
@@ -293,7 +296,8 @@ class AgentCandidateGenerator:
             "it only to correct the next proposal. Prefer a JSON response with source, optional "
             "filename/metadata, and one experiment containing schema_version='1', a short "
             "hypothesis, change_tags, and target_metrics with increase/decrease directions. Declare "
-            "one attributable change; do not claim its outcome or score delta.\n\nGeneration context:\n"
+            "one attributable change consistent with search_directive, do not simply repeat its "
+            "avoid_change_tags, and do not claim an outcome or score delta.\n\nGeneration context:\n"
         )
 
         def render() -> str:
@@ -837,6 +841,136 @@ def _candidate_summary(
             candidate, workspace, declared_output_paths
         )
     return summary
+
+
+def _search_directive(
+    request: GenerationRequest, experiment_memory: Mapping[str, object]
+) -> dict[str, object]:
+    """Project selected archive evidence into one bounded, deterministic search role."""
+    parent = request.parent
+    parent_valid = _candidate_valid(parent)
+    repair_target: object | None = None
+    if parent is not None and not parent_valid:
+        repair_target = parent
+    elif (
+        parent is None
+        and request.archive
+        and not _candidate_valid(request.archive[-1])
+    ):
+        # Population seed calls are parentless. If the latest seed failed, address that concrete
+        # failure before allocating another diversity experiment, even when an older seed is valid.
+        repair_target = request.archive[-1]
+
+    if repair_target is not None:
+        mode = "repair"
+    elif parent_valid and request.inspirations:
+        mode = "recombine"
+    elif parent_valid:
+        mode = "refine"
+    elif request.archive:
+        mode = "diversify"
+    else:
+        mode = "explore"
+
+    priorities = {
+        "explore": "establish_feasible_baseline",
+        "diversify": "increase_algorithmic_diversity",
+        "repair": "restore_feasibility",
+        "refine": "improve_verified_objective",
+        "recombine": "combine_complementary_evidence",
+    }
+    instructions = {
+        "explore": "Establish a distinct feasible baseline with one attributable experiment.",
+        "diversify": "Use a materially different algorithm or change family from archived attempts.",
+        "repair": "Repair the target's reported failures before optimizing score.",
+        "refine": "Improve the verified objective without losing parent feasibility.",
+        "recombine": "Combine complementary verified structures from the parent and inspirations.",
+    }
+    proven_tags, avoid_tags = _search_tag_policy(experiment_memory)
+    return {
+        "schema_version": "1",
+        "mode": mode,
+        "priority": priorities[mode],
+        "target_candidate_id": _candidate_id(repair_target),
+        # An invalid parent is a repair target, never an optimization baseline.
+        "parent_id": _candidate_id(parent) if parent_valid else None,
+        "inspiration_ids": [
+            candidate_id
+            for candidate in request.inspirations[:MAX_SEARCH_DIRECTIVE_ITEMS]
+            if (candidate_id := _candidate_id(candidate)) is not None
+        ],
+        "error_codes": _candidate_error_codes(repair_target),
+        "proven_change_tags": proven_tags,
+        "avoid_change_tags": avoid_tags,
+        "instruction": instructions[mode],
+    }
+
+
+def _candidate_valid(candidate: object | None) -> bool:
+    return getattr(getattr(candidate, "evaluation", None), "validity", None) == 1
+
+
+def _candidate_id(candidate: object | None) -> str | None:
+    value = getattr(candidate, "candidate_id", None)
+    if not isinstance(value, str) or not _SAFE_EXPERIMENT_TAG.fullmatch(value):
+        return None
+    return value
+
+
+def _candidate_error_codes(candidate: object | None) -> list[str]:
+    evaluation = getattr(candidate, "evaluation", None)
+    raw_errors = getattr(evaluation, "error_info", ())
+    if not isinstance(raw_errors, Sequence):
+        return []
+    codes = {
+        _bounded_evidence_text(code, MAX_EXPERIMENT_TOKEN_BYTES)
+        for item in raw_errors
+        if isinstance(item, Mapping)
+        and isinstance((code := item.get("code")), str)
+        and code
+    }
+    return sorted(codes)[:MAX_SEARCH_DIRECTIVE_ITEMS]
+
+
+def _search_tag_policy(
+    experiment_memory: Mapping[str, object],
+) -> tuple[list[str], list[str]]:
+    raw_outcomes = experiment_memory.get("tag_outcomes", {})
+    if not isinstance(raw_outcomes, Mapping):
+        return [], []
+    summaries: list[tuple[str, int, int, int, int]] = []
+    for tag, outcomes in raw_outcomes.items():
+        if (
+            not isinstance(tag, str)
+            or not _SAFE_EXPERIMENT_TAG.fullmatch(tag)
+            or not isinstance(outcomes, Mapping)
+        ):
+            continue
+        counts = []
+        for outcome in ("improved", "invalid", "regressed", "unchanged"):
+            value = outcomes.get(outcome, 0)
+            counts.append(
+                value
+                if isinstance(value, int)
+                and not isinstance(value, bool)
+                and value > 0
+                else 0
+            )
+        summaries.append((tag, *counts))
+    proven = sorted(
+        (item for item in summaries if item[1] > 0),
+        key=lambda item: (-item[1], item[0]),
+    )
+    # Feasibility failures are more actionable than regressions, which in turn carry more signal
+    # than unchanged attempts. Lexical order makes equal evidence stable across process restarts.
+    avoid = sorted(
+        (item for item in summaries if item[1] == 0 and sum(item[2:]) > 0),
+        key=lambda item: (-item[2], -item[3], -item[4], item[0]),
+    )
+    return (
+        [item[0] for item in proven[:MAX_SEARCH_DIRECTIVE_ITEMS]],
+        [item[0] for item in avoid[:MAX_SEARCH_DIRECTIVE_ITEMS]],
+    )
 
 
 def _experiment_memory(archive: Sequence[object]) -> dict[str, object]:

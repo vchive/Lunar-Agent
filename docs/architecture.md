@@ -275,6 +275,25 @@ Recent cards and bounded tag outcome counts are shared by loop and population. B
 is a pure projection of `archive.jsonl`, process recovery needs no transcript replay, second
 knowledge store, reflection model, or mutable `insights.md` file.
 
+The generation bridge then projects strategy selection plus that verified memory into one
+`search_directive`:
+
+```text
+GenerationRequest + archive-derived experiment memory
+        |
+        +-- empty archive --------------------------> explore
+        +-- parentless, latest candidate invalid ---> repair
+        +-- parentless, valid history --------------> diversify
+        +-- valid parent ----------------------------> refine
+        +-- valid parent + inspirations ------------> recombine
+```
+
+The directive names exact parent/inspiration/repair evidence, bounded evaluator error codes, proven
+change tags, and tags with only measured non-successes. It is prompt guidance, not a new strategy
+authority: population selection, loop budgets, evaluator validity, and archive ranking are
+unchanged. A fresh process derives the same directive from `GenerationRequest` and `archive.jsonl`,
+so adaptive allocation adds neither a model-planner call nor mutable orchestration state.
+
 The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
 available for mixed configurations. When both seams are already explicit, a runtime option is
