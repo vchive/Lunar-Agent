@@ -5,8 +5,10 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current verified candidate
-execution work is captured in
+The project is being developed with Spec-Driven Development (SDD). The current conversational
+algorithm mission work is captured in
+[`specs/024-conversational-algorithm-mission/`](specs/024-conversational-algorithm-mission/), building
+on the verified candidate execution work in
 [`specs/023-verified-algorithm-execution/`](specs/023-verified-algorithm-execution/), building on
 the completed runtime-backed evolution and independent evaluator ensemble in
 [`specs/022-runtime-backed-evolution/`](specs/022-runtime-backed-evolution/) and
@@ -17,6 +19,40 @@ routing, profiles, and budgets in
 [`specs/007-domain-routing-solver-evaluator/`](specs/007-domain-routing-solver-evaluator/). The earlier
 WebAgent-style experiment is retained as a superseded draft in
 [`specs/002-webagent-effect-parity/`](specs/002-webagent-effect-parity/).
+
+## Conversational algorithm missions
+
+You can now start an algorithm task without authoring a contract by hand. `solve` first compiles a
+strict `AlgorithmProblemContract`, then attaches a versioned plan and runs the normal durable DAG:
+
+```bash
+lunar-agent solve "根据订单数据设计配送路线" --runtime mock --json --home .lunar
+```
+
+For a local model, use an explicit repository runtime (no global Hermes/OpenCode/Codex state is
+read):
+
+```bash
+lunar-agent solve "根据订单数据设计配送路线" \
+  --runtime openai-compatible \
+  --endpoint http://127.0.0.1:11434/v1/chat/completions \
+  --model your-local-model --json --home .lunar
+```
+
+The compiler must return a strict JSON envelope. If a material objective, input, constraint, or
+deliverable is unknown it returns `status=awaiting_input`; answer the same run and it will resume
+compilation:
+
+```bash
+lunar-agent answer <run-id> "最小化总行驶时间" \
+  --runtime openai-compatible --endpoint http://127.0.0.1:11434/v1/chat/completions \
+  --model your-local-model --json --home .lunar
+```
+
+The run ID remains stable. Contract, plan, compiler manifest, input answers, and generated task
+artifacts are all local and SHA-256 indexed. The baseline generated DAG is
+`data_discovery → formulate → solve → verify`; candidate evolution remains an explicit opt-in
+stage through `evolve`.
 
 ## Bootstrap
 

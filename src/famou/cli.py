@@ -32,6 +32,7 @@ from .artifacts import ArtifactStore
 from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
+from .conversational import RuntimeContractCompiler
 from .evolution import (
     CommandCandidateEvaluator,
     CommandCandidateGenerator,
@@ -135,6 +136,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_home(run_parser)
     _add_json(run_parser)
+
+    solve_parser = subparsers.add_parser(
+        "solve", help="compile a conversational algorithm mission and execute its plan"
+    )
+    solve_parser.add_argument("goal", nargs="?", help="algorithm objective, or '-' to read stdin")
+    solve_parser.add_argument("--workspace", type=Path, help="run workspace (default: a new local run)")
+    solve_parser.add_argument("--resume", action="store_true", help="resume a conversational run")
+    solve_parser.add_argument("--run-id", help="existing run ID (required with --resume)")
+    solve_parser.add_argument(
+        "--detach", action="store_true", help="return a run ID and compile/execute in the background"
+    )
+    _add_runtime_options(solve_parser)
+    _add_home(solve_parser)
+    _add_json(solve_parser)
 
     delegate_parser = subparsers.add_parser(
         "delegate", help="delegate one durable task to an explicit local Agent command"
@@ -532,6 +547,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             (item for item in reversed(store.list_artifacts(run.id)) if item["kind"] == "algorithm_manifest"),
             None,
         )
+    conversation_manifest = _conversation_manifest(run)
     evolution_finished = next(
         (
             event["payload"]
@@ -612,6 +628,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         "plan": current_plan.to_dict() if current_plan else None,
         "algorithm_problem": current_plan.algorithm_problem if current_plan else None,
         "algorithm_workspace": algorithm_manifest,
+        "conversation": conversation_manifest,
         "evolution": {
             "configured": evolution_configured,
             "result": evolution_finished,
@@ -747,6 +764,176 @@ def _runner_fingerprint(command: tuple[str, ...], timeout: float) -> str | None:
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _compiler_fingerprint(runtime: object) -> str:
+    """Return a credential-safe identity for the solve contract compiler runtime."""
+    payload = {
+        "kind": "contract-compiler",
+        "runtime": getattr(runtime, "name", type(runtime).__name__),
+        "command": list(getattr(runtime, "command", ()) or ()),
+        "endpoint": getattr(runtime, "endpoint", None),
+        "model": getattr(runtime, "model", None),
+        "mode": getattr(runtime, "name", "runtime"),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _conversation_manifest(run: Run) -> dict[str, object] | None:
+    path = Path(run.workspace) / "solve" / "compiler-manifest.json"
+    try:
+        path.resolve(strict=False).relative_to(Path(run.workspace).resolve())
+    except ValueError:
+        return None
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_conversation_goal(args: argparse.Namespace) -> str:
+    if args.goal == "-":
+        goal = sys.stdin.read()
+    elif isinstance(args.goal, str):
+        goal = args.goal
+    else:
+        goal = ""
+    if not goal.strip():
+        raise ValueError("solve requires a goal or --run-id with --resume")
+    if len(goal.encode("utf-8")) > 8_000:
+        raise ValueError("solve goal exceeds 8 KiB")
+    return goal.strip()
+
+
+def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
+    """Compile and execute one conversational algorithm mission."""
+    controller = _controller(args, config)
+    runtime = controller.runtime
+    fingerprint = _compiler_fingerprint(runtime)
+    if args.resume:
+        if not args.run_id:
+            raise ValueError("--resume requires --run-id")
+        run = controller.store.get_run(args.run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {args.run_id}")
+        if args.workspace is not None and args.workspace.expanduser().resolve() != run.workspace:
+            raise ValueError("--workspace does not match the existing conversational run")
+        manifest = _conversation_manifest(run)
+        if manifest is not None and manifest.get("runtime_fingerprint") not in {None, fingerprint}:
+            raise ValueError("solve resume compiler runtime does not match the existing run")
+        goal = run.goal
+        settled = controller.resume_conversational(
+            run.id, RuntimeContractCompiler(runtime), compiler_fingerprint=fingerprint
+        )
+        return _solve_payload(controller, settled)
+    goal = _read_conversation_goal(args)
+    if args.detach:
+        run = controller.create_conversational_run(
+            goal, workspace=args.workspace, compiler_fingerprint=fingerprint
+        )
+        return _detach_solve(config, args, run)
+    settled = controller.start_conversational(
+        goal,
+        RuntimeContractCompiler(runtime),
+        workspace=args.workspace,
+        compiler_fingerprint=fingerprint,
+    )
+    return _solve_payload(controller, settled)
+
+
+def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
+    manifest = _conversation_manifest(run)
+    return {
+        "run_id": run.id,
+        "status": run.status.value,
+        "run_status": run.status.value,
+        "workspace": str(run.workspace),
+        "input_request": controller.store.pending_input(run.id),
+        "compiler": manifest,
+        "plan": (
+            {"plan_id": run.current_plan_id, "version": run.current_plan_version}
+            if run.current_plan_id
+            else None
+        ),
+    }
+
+
+def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[str, object]:
+    """Spawn a child that resumes a conversational mission with identical runtime settings."""
+    log_path = run.workspace / "controller.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "famou",
+        "solve",
+        "--resume",
+        "--run-id",
+        run.id,
+        "--runtime",
+        args.runtime,
+        "--home",
+        str(config.home),
+        "--json",
+    ]
+    if args.workspace:
+        command.extend(("--workspace", str(args.workspace)))
+    if args.runtime_command:
+        command.extend(("--command", args.runtime_command))
+    if args.endpoint:
+        command.extend(("--endpoint", args.endpoint))
+    if args.model:
+        command.extend(("--model", args.model))
+    if args.agent_loop:
+        command.append("--agent-loop")
+        command.extend(("--max-steps", str(args.max_steps)))
+    if args.allow_exec:
+        command.append("--allow-exec")
+    if args.memory:
+        command.append("--memory")
+    if args.session_history:
+        command.append("--session-history")
+    child_env = None
+    if args.api_key is not None:
+        child_env = os.environ.copy()
+        child_env["FAMOU_API_KEY"] = args.api_key
+    try:
+        with log_path.open("a", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                command,
+                cwd=Path.cwd(),
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+                env=child_env,
+            )
+        pid = getattr(process, "pid", None)
+        if isinstance(pid, int) and pid > 1:
+            store = Store(config.database)
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = pid
+            store.set_runner_process(run.id, pid, pgid)
+            latest = store.get_run(run.id)
+            if latest is not None and latest.status.value in {"succeeded", "failed", "cancelled"}:
+                store.clear_runner_process(run.id)
+    except OSError as exc:
+        Store(config.database).cancel_run(run.id)
+        raise ValueError(f"could not start detached solve: {exc}") from exc
+    return {
+        "run_id": run.id,
+        "status": "pending",
+        "run_status": "pending",
+        "workspace": str(run.workspace),
+        "detached": True,
+    }
 
 
 def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
@@ -1431,6 +1618,17 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     pending = store.pending_input(run.id)
     if pending is None:
         raise ValueError(f"run is not awaiting input: {args.run_id}")
+    conversation = any(
+        event["type"] == "conversation_started" for event in store.list_events(run.id)
+    )
+    if conversation:
+        manifest = _conversation_manifest(run)
+        current_fingerprint = _compiler_fingerprint(_controller(args, config).runtime)
+        if manifest is not None and manifest.get("runtime_fingerprint") not in {
+            None,
+            current_fingerprint,
+        }:
+            raise ValueError("answer compiler runtime does not match the existing conversational run")
     artifacts = ArtifactStore(run.workspace, store, run.id)
     answer_path = artifacts.write_text(
         f"tasks/{pending['task_id']}/input-answer.json",
@@ -1443,7 +1641,14 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if task_id is None:
         raise ValueError("input request was answered concurrently; inspect status")
     controller = _controller(args, config)
-    resumed = controller.resume(run.id)
+    if conversation and run.current_plan_id is None:
+        resumed = controller.resume_conversational(
+            run.id,
+            RuntimeContractCompiler(controller.runtime),
+            compiler_fingerprint=_compiler_fingerprint(controller.runtime),
+        )
+    else:
+        resumed = controller.resume(run.id)
     return {
         "run_id": resumed.id,
         "task_id": task_id,
@@ -1461,6 +1666,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "init":
             _emit({"home": str(config.home), "status": "initialized"}, args.json)
             return 0
+        if args.command == "solve":
+            payload = _solve(config, args)
+            _emit(payload, args.json)
+            return 0 if payload["status"] in {"succeeded", "awaiting_input", "pending", "running"} else 1
         if args.command == "run":
             plan_tasks = None
             if args.plan is not None:

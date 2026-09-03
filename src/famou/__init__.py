@@ -17,6 +17,15 @@ from .agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
+from .conversational import (
+    CallableContractCompiler,
+    CompilationQuestion,
+    CompilationResult,
+    ContractCompilationError,
+    ContractCompiler,
+    RuntimeContractCompiler,
+    build_algorithm_plan,
+)
 from .evolution import (
     Candidate,
     CandidateArchive,
@@ -56,6 +65,7 @@ __all__ = [
     "AgentRequest",
     "AgentResult",
     "AgentSelectionError",
+    "CallableContractCompiler",
     "Candidate",
     "CandidateArchive",
     "CandidateDraft",
@@ -65,6 +75,10 @@ __all__ = [
     "CommandCandidateEvaluator",
     "CommandCandidateGenerator",
     "CommandCandidateRunner",
+    "CompilationQuestion",
+    "CompilationResult",
+    "ContractCompilationError",
+    "ContractCompiler",
     "EvolutionConfig",
     "EvolutionContext",
     "EvolutionError",
@@ -77,7 +91,9 @@ __all__ = [
     "PopulationState",
     "PopulationStrategy",
     "RuntimeAgentAdapter",
+    "RuntimeContractCompiler",
     "StrategyResult",
+    "build_algorithm_plan",
     "build_strategy",
     "config_from_contract",
 ]

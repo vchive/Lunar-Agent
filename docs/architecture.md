@@ -42,6 +42,11 @@ flowchart TD
     RP -->|ask_user / retry / propose_patch / propose_replan| P
     S --> DL[deliver\nonly verified artifacts]
     DL --> P
+    P --> CI[solve conversational intake]
+    CI --> CC[Strict ContractCompiler\nmock / subprocess / OpenAI-compatible]
+    CC -->|needs_input| P
+    CC -->|compiled| CP[contract.json + plan.json\ncompiler manifest]
+    CP --> S
 ```
 
 The ordinary task runtime and the evolution runtime share the repository-owned adapter boundary.
@@ -113,6 +118,12 @@ inspectable.
    existing explicit command after reviewing the evidence.
 9. `deliver` is a fail-closed decision. It requires a succeeded run, passing evaluator events for
    every succeeded task, and at least one indexed result/runtime artifact with a SHA-256 digest.
+10. `solve` adds a conversational algorithm intake before the normal plan scheduler. The compiler
+    returns only a strict `compiled` or `needs_input` envelope; the controller validates the nested
+    contract, writes bounded compiler artifacts, and promotes the same run ID to a generated
+    `data_discovery → formulate → solve → verify` DAG. Clarification uses the existing durable
+    `awaiting_input`/`answer` lifecycle, so a parent Agent can poll one handle rather than joining
+    separate intake and execution runs.
 
 ## Deliberate boundary versus WebAgent
 

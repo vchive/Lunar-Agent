@@ -399,6 +399,110 @@ class Store:
         Path(workspace_path).mkdir(parents=True, exist_ok=True)
         return self.get_run(run_id)  # type: ignore[return-value]
 
+    def attach_plan_to_run(
+        self,
+        run_id: str,
+        document: PlanDocument,
+        decision: PolicyDecision | None = None,
+    ) -> bool:
+        """Promote an intake run to a version-one plan without changing its run ID.
+
+        Conversational intake deliberately starts with one durable compiler task so a clarification
+        can pause and resume through the normal input lifecycle.  Once compilation succeeds this
+        additive transaction installs the immutable plan revision and generated DAG alongside the
+        completed intake task.  It does not alter the existing schema or rewrite prior events.
+        """
+        if not isinstance(document, PlanDocument):
+            raise TypeError("document must be a PlanDocument")
+        if document.version != 1 or document.parent_version is not None:
+            raise ValueError("an attached plan must start at version 1")
+        if decision is not None:
+            if decision.action != "execute_plan":
+                raise ValueError("an attached plan requires an execute_plan decision")
+            if (decision.plan_id, decision.plan_version) != (document.plan_id, document.version):
+                raise ValueError("execute_plan decision does not reference the attached plan")
+        timestamp = utc_now()
+        normalized = self._validate_plan_tasks([task.to_dict() for task in document.tasks])
+        with self._connect() as connection:
+            run = connection.execute(
+                "SELECT current_plan_id, current_plan_version, status FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+            if run is None:
+                raise ValueError(f"unknown run: {run_id}")
+            if run["current_plan_id"] is not None:
+                if run["current_plan_id"] == document.plan_id and run["current_plan_version"] == 1:
+                    return False
+                raise ValueError("run already has a plan")
+            existing_ids = {
+                row["id"]
+                for row in connection.execute("SELECT id FROM tasks WHERE run_id = ?", (run_id,)).fetchall()
+            }
+            id_map: dict[str, str] = {}
+            for item in normalized:
+                candidate = f"{run_id[:8]}-{item['id']}"
+                suffix = 1
+                while candidate in existing_ids or candidate in id_map.values():
+                    suffix += 1
+                    candidate = f"{run_id[:8]}-{item['id']}-{suffix}"
+                id_map[item["id"]] = candidate
+            connection.execute(
+                "UPDATE runs SET current_plan_id = ?, current_plan_version = ?, budget = ?, updated_at = ? WHERE id = ?",
+                (document.plan_id, document.version, json.dumps(document.budget.to_dict()), timestamp, run_id),
+            )
+            connection.execute(
+                "INSERT INTO plan_revisions(plan_id, run_id, version, parent_version, document, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+                (
+                    document.plan_id,
+                    run_id,
+                    document.version,
+                    document.parent_version,
+                    json.dumps(document.to_dict(), ensure_ascii=False, sort_keys=True),
+                    timestamp,
+                ),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                None,
+                "plan_created",
+                {"plan_id": document.plan_id, "version": document.version, "source": "conversational_intake"},
+            )
+            for item in normalized:
+                physical_id = id_map[item["id"]]
+                dependencies = [id_map[dependency] for dependency in item["depends_on"]]
+                state = TaskStatus.READY.value if not dependencies else TaskStatus.WAITING.value
+                connection.execute(
+                    "INSERT INTO tasks(id, run_id, title, prompt, state, dependencies, acceptance, plan_task_id, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        physical_id,
+                        run_id,
+                        item["title"],
+                        item["prompt"],
+                        state,
+                        json.dumps(dependencies),
+                        item["acceptance"],
+                        item["id"],
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                self._append_event(
+                    connection,
+                    run_id,
+                    physical_id,
+                    "task_created",
+                    {
+                        "title": item["title"],
+                        "dependencies": dependencies,
+                        "acceptance": item["acceptance"],
+                        "plan_task_id": item["id"],
+                    },
+                )
+            if decision is not None:
+                self._insert_decision(connection, run_id, decision)
+        return True
+
     def _insert_decision(self, connection: sqlite3.Connection, run_id: str | None, decision: PolicyDecision, decision_id: str | None = None) -> str:
         decision_id = decision_id or f"decision-{uuid.uuid4().hex}"
         connection.execute(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -26,6 +27,12 @@ from .algorithm import AlgorithmProblemContract, materialize_algorithm_workspace
 from .artifacts import ArtifactError, ArtifactStore
 from .budget import BudgetExceeded, BudgetSpec
 from .config import Config
+from .conversational import (
+    CompilationResult,
+    ContractCompilationError,
+    ContractCompiler,
+    build_algorithm_plan,
+)
 from .evaluator import Evaluation, Evaluator, acceptance_evaluator
 from .evolution import (
     CandidateEvaluator,
@@ -465,6 +472,299 @@ class LocalController:
         run = self.store.create_run(goal, tasks=plan_tasks, route=route)
         Path(run.workspace).mkdir(parents=True, exist_ok=True)
         return run
+
+    def start_conversational(
+        self,
+        goal: str,
+        compiler: ContractCompiler,
+        *,
+        workspace: str | Path | None = None,
+        compiler_fingerprint: str | None = None,
+        run_id: str | None = None,
+    ) -> Run:
+        """Compile an algorithm mission and promote the same durable run to a plan.
+
+        The first task is an intake task owned by the controller.  A compiler may pause it through
+        ``awaiting_input``; after ``answer_input`` the same method is called again and the task is
+        resumed with the verified answer artifact.  Once a contract is accepted, generated plan
+        tasks are attached to this run and the ordinary scheduler takes over.
+        """
+        if not hasattr(compiler, "compile") or not callable(compiler.compile):
+            raise TypeError("compiler must implement ContractCompiler")
+        if run_id is None:
+            run = self.create_conversational_run(
+                goal, workspace=workspace, compiler_fingerprint=compiler_fingerprint
+            )
+        else:
+            run = self.store.get_run(run_id)
+            if run is None:
+                raise ValueError(f"unknown run: {run_id}")
+            if not any(event["type"] == "conversation_started" for event in self.store.list_events(run_id)):
+                raise ValueError("run is not a conversational algorithm mission")
+            if run.goal != goal.strip():
+                raise ValueError("supplied goal does not match the existing conversational run")
+            if run.current_plan_id is not None:
+                return self.resume(run.id)
+        return self._compile_conversational_run(run, compiler, compiler_fingerprint)
+
+    def create_conversational_run(
+        self,
+        goal: str,
+        *,
+        workspace: str | Path | None = None,
+        compiler_fingerprint: str | None = None,
+    ) -> Run:
+        """Create an intake-only run for a detached or parent-Agent solve invocation."""
+        route = self.router.route(goal)
+        self._validate_route(route)
+        run = self.store.create_run(
+            goal,
+            workspace=workspace,
+            tasks=[
+                {
+                    "id": "contract-intake",
+                    "title": "Compile algorithm contract",
+                    "prompt": goal,
+                    "acceptance": None,
+                }
+            ],
+            route=route,
+        )
+        self.store.append_event(
+            run.id,
+            "conversation_started",
+            {"compiler_fingerprint": compiler_fingerprint},
+        )
+        return run
+
+    def _compile_conversational_run(
+        self, run: Run, compiler: ContractCompiler, compiler_fingerprint: str | None
+    ) -> Run:
+        """Run one intake attempt and either pause for input or install the generated plan."""
+        if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            return run
+        task = next(
+            (item for item in self.store.list_tasks(run.id) if item.plan_task_id is None), None
+        )
+        if task is None:
+            return self.resume(run.id)
+        if task.state.value == "waiting":
+            return run
+        attempt = self.store.claim_task(task.id, "contract-compiler")
+        if attempt is None:
+            latest = self.store.get_run(run.id)
+            return latest or run
+        task_root = Path(run.workspace) / "tasks" / task.id / attempt.id
+        artifacts = ArtifactStore(run.workspace, self.store, run.id)
+        artifacts.write_text(
+            f"tasks/{task.id}/{attempt.id}/prompt.md",
+            "Compile a strict algorithm contract from the user goal.\n\n" + run.goal,
+            task.id,
+            kind="prompt",
+        )
+        answer: str | None = None
+        if task.input_answer_path:
+            answer_path = (Path(run.workspace) / task.input_answer_path).resolve(strict=False)
+            try:
+                answer_path.relative_to(Path(run.workspace).resolve())
+                answer_payload = json.loads(answer_path.read_text(encoding="utf-8"))
+                if isinstance(answer_payload, dict) and isinstance(answer_payload.get("answer"), str):
+                    answer = answer_payload["answer"]
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                answer = None
+            if answer is None:
+                error = "input answer artifact is malformed"
+                self.store.finish_task(task.id, attempt.id, False, error=error)
+                return self.store.settle_run(run.id) or run
+        compiler_runtime = getattr(compiler, "runtime", None)
+        if compiler_runtime is not None:
+            with self._active_lock:
+                self._active_runtimes[attempt.id] = compiler_runtime
+            set_observer = getattr(compiler_runtime, "set_process_observer", None)
+            if callable(set_observer):
+                try:
+                    set_observer(
+                        lambda pid, pgid, attempt_id=attempt.id: self.store.set_attempt_process(
+                            attempt_id, pid, pgid
+                        )
+                    )
+                except Exception as observer_error:  # noqa: BLE001 - observer must not block intake
+                    del observer_error
+        try:
+            result = compiler.compile(
+                run.goal,
+                task_root,
+                answer=answer,
+                timeout=self.config.runtime_timeout,
+            )
+            if not self._task_is_running(task.id):
+                self._discard_late_result(run.id, task.id, attempt.id)
+                return self.store.get_run(run.id) or run
+            if not isinstance(result, CompilationResult):
+                raise ContractCompilationError("compiler returned an invalid result")
+            if result.status == "needs_input":
+                question = result.questions[0]
+                request_payload = {
+                    "status": "awaiting_input",
+                    "run_id": run.id,
+                    "task_id": task.id,
+                    "attempt_id": attempt.id,
+                    "question": question.question,
+                    "options": list(question.options),
+                    "questions": [item.to_dict() for item in result.questions],
+                }
+                request_path = artifacts.write_text(
+                    f"tasks/{task.id}/{attempt.id}/input-request.json",
+                    json.dumps(request_payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                    task.id,
+                    kind="input",
+                )
+                self._write_compiler_manifest(
+                    run,
+                    task.id,
+                    status="needs_input",
+                    compiler_fingerprint=compiler_fingerprint,
+                    evidence=result.evidence,
+                )
+                self.store.await_input(
+                    task.id,
+                    attempt.id,
+                    str(request_path.relative_to(Path(run.workspace))),
+                    question.question,
+                    question.options,
+                )
+                return self.store.get_run(run.id) or run
+            assert result.contract is not None
+            contract = result.contract
+            plan = result.plan or build_algorithm_plan(run.goal, contract)
+            if plan.algorithm_problem is None:
+                raise ContractCompilationError("generated plan is missing algorithm_problem")
+            try:
+                attached_contract = AlgorithmProblemContract.from_dict(plan.algorithm_problem)
+            except (TypeError, ValueError) as exc:
+                raise ContractCompilationError("generated plan contains an invalid algorithm contract") from exc
+            if attached_contract.digest() != contract.digest() or plan.goal != run.goal:
+                raise ContractCompilationError("generated plan does not match the compiled contract or goal")
+            contract_path = artifacts.write_text(
+                "solve/contract.json",
+                json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                task.id,
+                kind="algorithm_contract",
+            )
+            plan_path = artifacts.write_text(
+                "solve/plan.json",
+                json.dumps(plan.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                task.id,
+                kind="algorithm_plan",
+            )
+            decision = PolicyDecision(
+                "execute_plan",
+                "A strict algorithm contract was compiled from the conversational intake",
+                1.0,
+                plan_id=plan.plan_id,
+                plan_version=plan.version,
+                evidence=result.evidence or ("validated contract compiler response",),
+                plan=plan.to_dict(),
+            )
+            self.store.attach_plan_to_run(run.id, plan, decision)
+            self._register_algorithm_workspace(run, plan)
+            self._write_compiler_manifest(
+                run,
+                task.id,
+                status="compiled",
+                compiler_fingerprint=compiler_fingerprint,
+                contract_sha256=contract.digest(),
+                plan=plan,
+                contract_path=str(contract_path.relative_to(Path(run.workspace))),
+                plan_path=str(plan_path.relative_to(Path(run.workspace))),
+                evidence=result.evidence,
+            )
+            self.store.append_event(
+                run.id,
+                "contract_compiled",
+                {
+                    "contract_sha256": contract.digest(),
+                    "plan_id": plan.plan_id,
+                    "plan_version": plan.version,
+                    "evidence": list(result.evidence),
+                },
+                task_id=task.id,
+            )
+            self.store.finish_task(
+                task.id,
+                attempt.id,
+                True,
+                str(contract_path.relative_to(Path(run.workspace))),
+            )
+            self.store.settle_run(run.id)
+            return self.resume(run.id)
+        except ContractCompilationError as exc:
+            error = str(exc)[-2_000:] or "contract compilation failed"
+        except Exception as exc:  # noqa: BLE001 - compiler is an untrusted boundary
+            error = self._sanitize_error(exc)
+        finally:
+            if compiler_runtime is not None:
+                reset_observer = getattr(compiler_runtime, "set_process_observer", None)
+                if callable(reset_observer):
+                    try:
+                        reset_observer(None)
+                    except Exception as observer_error:  # noqa: BLE001 - cleanup must not mask result
+                        del observer_error
+                with self._active_lock:
+                    self._active_runtimes.pop(attempt.id, None)
+        self.store.finish_task(task.id, attempt.id, False, error=error)
+        settled = self.store.settle_run(run.id)
+        return settled or run
+
+    def resume_conversational(
+        self, run_id: str, compiler: ContractCompiler, *, compiler_fingerprint: str | None = None
+    ) -> Run:
+        """Resume intake when pending, otherwise resume generated algorithm tasks."""
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {run_id}")
+        if not any(event["type"] == "conversation_started" for event in self.store.list_events(run_id)):
+            raise ValueError("run is not a conversational algorithm mission")
+        if run.current_plan_id is not None:
+            return self.resume(run_id)
+        return self._compile_conversational_run(run, compiler, compiler_fingerprint)
+
+    def _write_compiler_manifest(
+        self,
+        run: Run,
+        task_id: str,
+        *,
+        status: str,
+        compiler_fingerprint: str | None,
+        evidence: tuple[str, ...] = (),
+        contract_sha256: str | None = None,
+        plan: PlanDocument | None = None,
+        contract_path: str | None = None,
+        plan_path: str | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "schema_version": "1",
+            "status": status,
+            "goal_sha256": hashlib.sha256(run.goal.encode("utf-8")).hexdigest(),
+            "runtime_fingerprint": compiler_fingerprint,
+            "evidence": list(evidence),
+        }
+        if contract_sha256 is not None:
+            payload["contract_sha256"] = contract_sha256
+        if plan is not None:
+            payload.update({"plan_id": plan.plan_id, "plan_version": plan.version})
+        if contract_path is not None:
+            payload["contract_path"] = contract_path
+        if plan_path is not None:
+            payload["plan_path"] = plan_path
+        artifacts = ArtifactStore(run.workspace, self.store, run.id)
+        manifest = artifacts.write_text(
+            "solve/compiler-manifest.json",
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            task_id,
+            kind="compiler_manifest",
+        )
+        del manifest
 
     def run_agent(
         self,
