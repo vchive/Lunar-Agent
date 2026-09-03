@@ -6,7 +6,7 @@ a run-scoped local directory. It does **not** require a machine-wide Hermes, Ope
 installation.
 
 The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/019-verified-evolution-feedback/`](specs/019-verified-evolution-feedback/), built on
+captured in [`specs/021-evaluator-ensemble/`](specs/021-evaluator-ensemble/), built on
 independent artifact acceptance contracts in
 [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
 routing, profiles, and budgets in
@@ -251,6 +251,24 @@ Command-backed runs persist credential-safe SHA-256 fingerprints for both the ge
 evaluator adapter profiles. Resume rejects a changed command, Agent name, role, or required
 capability before claiming the task, so one candidate archive is never silently mixed across
 different execution configurations. Raw command arguments are not written to strategy state.
+
+For higher-assurance algorithm work, configure two or more independent evaluator Agents. Every
+member reads the same candidate in an isolated workspace; validity is accepted only when all
+members agree, while valid scores and common detailed metrics are combined with a median. A member
+failure, malformed report, or validity disagreement is represented as a controlled invalid report
+and cannot become the best candidate:
+
+```bash
+lunar-agent evolve contract.json --strategy population \
+  --agent-command "/absolute/path/to/solver --json" \
+  --evaluator-portfolio-command "/absolute/path/to/evaluator-a --json" \
+  --evaluator-portfolio-command "/absolute/path/to/evaluator-b --json" \
+  --json --home .lunar
+```
+
+The ordered evaluator command list and shared role/capability profile are included in the
+credential-safe resume fingerprint. Use either this ensemble or one `--evaluator-command` /
+`--evaluator-agent-command`; mixing evaluator modes is rejected before a run is created.
 
 When an Agent is the solver, later generations also receive a small `evaluation_feedback` projection
 for recent candidates: validity, metric scores, and controlled constraint error codes/messages. It

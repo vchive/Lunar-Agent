@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from statistics import median
 
 from .agents import AgentAdapter, AgentError, AgentRegistry, AgentRequest, AgentResult
 from .algorithm import AlgorithmProblemContract, EvaluationReport
@@ -216,17 +217,28 @@ class AgentCandidateEvaluator:
         role: str = "evaluator",
         required_capabilities: Sequence[str] = (),
         timeout: float | None = None,
+        workspace_name: str = ".agent-evaluator",
     ) -> None:
         self.adapter = AgentRegistry([adapter]).select(role, tuple(required_capabilities))
         self.role = role
         self.required_capabilities = tuple(required_capabilities)
         self.timeout = timeout
+        if (
+            not isinstance(workspace_name, str)
+            or not workspace_name
+            or workspace_name in {".", ".."}
+            or "/" in workspace_name
+            or "\\" in workspace_name
+            or "\x00" in workspace_name
+        ):
+            raise ValueError("workspace_name must be one safe path segment")
+        self.workspace_name = workspace_name
 
     def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
         candidate = Path(candidate_path).expanduser().resolve(strict=False)
         if not candidate.is_file():
             raise EvolutionError("candidate evaluator Agent received a missing candidate path")
-        workspace = candidate.parent / ".agent-evaluator"
+        workspace = candidate.parent / self.workspace_name
         workspace.mkdir(parents=True, exist_ok=True)
         prompt = self._prompt(candidate, contract)
         request = AgentRequest(
@@ -298,6 +310,128 @@ class AgentCandidateEvaluator:
         if len(prompt.encode("utf-8")) > MAX_GENERATION_PROMPT_BYTES:
             raise EvolutionError("agent evaluation prompt exceeds the bounded size")
         return prompt
+
+
+class AgentEvaluatorEnsemble:
+    """Cross-check candidates with two or more explicit evaluator Agents.
+
+    Each evaluator receives the normal strict ``AgentCandidateEvaluator`` request but writes into
+    a member-specific workspace. The aggregate is deliberately conservative: validity is
+    unanimous, failures are fail-closed, and numeric evidence is combined with a median.
+    """
+
+    def __init__(
+        self,
+        adapters: Sequence[AgentAdapter],
+        *,
+        role: str = "evaluator",
+        required_capabilities: Sequence[str] = (),
+        timeout: float | None = None,
+    ) -> None:
+        if isinstance(adapters, (str, bytes)):
+            raise TypeError("adapters must be a sequence of Agent adapters")
+        normalized = tuple(adapters)
+        if len(normalized) < 2:
+            raise ValueError("Agent evaluator ensemble requires at least two adapters")
+        self.evaluators = tuple(
+            AgentCandidateEvaluator(
+                adapter,
+                role=role,
+                required_capabilities=required_capabilities,
+                timeout=timeout,
+                workspace_name=f".agent-evaluator-{index:02d}",
+            )
+            for index, adapter in enumerate(normalized, start=1)
+        )
+        self.adapters = tuple(evaluator.adapter for evaluator in self.evaluators)
+        self.role = role
+        self.required_capabilities = tuple(required_capabilities)
+        self.timeout = timeout
+
+    def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
+        reports: list[EvaluationReport] = []
+        for evaluator in self.evaluators:
+            try:
+                reports.append(evaluator(candidate_path, contract))
+            except (EvolutionError, OSError, TypeError, ValueError):
+                # Keep adapter/runtime details out of a later solver prompt. The local ledger
+                # still records a controlled invalid result for human diagnosis.
+                return self._invalid(
+                    [
+                        {
+                            "code": "evaluator_failure",
+                            "message": "one or more evaluator Agents failed or returned invalid evidence",
+                        }
+                    ]
+                )
+
+        validities = {report.validity for report in reports}
+        if len(validities) != 1:
+            return self._invalid(
+                [
+                    {
+                        "code": "evaluator_disagreement",
+                        "message": "evaluator Agents disagree on validity",
+                    }
+                ]
+            )
+        if reports[0].validity == 0:
+            errors = [error for report in reports for error in report.error_info][:8]
+            return self._invalid(errors)
+
+        combined_score = float(median(report.combined_score for report in reports))
+        qualities = [report.quality for report in reports if report.quality is not None]
+        quality = float(median(qualities)) if qualities else None
+        detailed_scores: dict[str, dict[str, object]] = {}
+        common_names = set(reports[0].detailed_scores)
+        for report in reports[1:]:
+            common_names.intersection_update(report.detailed_scores)
+        for name in sorted(common_names)[:8]:
+            details = [report.detailed_scores[name] for report in reports]
+            directions = {detail["direction"] for detail in details}
+            if len(directions) != 1:
+                continue
+            detailed_scores[name] = {
+                "value": float(median(detail["value"] for detail in details)),
+                "direction": details[0]["direction"],
+            }
+        return self._report(
+            {
+                "schema_version": "1",
+                "evaluator_id": "ensemble",
+                "validity": 1,
+                "quality": quality,
+                "combined_score": combined_score,
+                "detailed_scores": detailed_scores,
+                "error_info": [],
+            }
+        )
+
+    @staticmethod
+    def _report(payload: dict[str, object]) -> EvaluationReport:
+        return EvaluationReport.from_dict(payload)
+
+    @classmethod
+    def _invalid(cls, errors: Sequence[dict[str, str]]) -> EvaluationReport:
+        bounded = list(errors)[:8]
+        if not bounded:
+            bounded = [
+                {
+                    "code": "evaluator_failure",
+                    "message": "one or more evaluator Agents failed or returned invalid evidence",
+                }
+            ]
+        return cls._report(
+            {
+                "schema_version": "1",
+                "evaluator_id": "ensemble",
+                "validity": 0,
+                "quality": None,
+                "combined_score": 0,
+                "detailed_scores": {},
+                "error_info": bounded,
+            }
+        )
 
 
 def _candidate_summary(candidate: object) -> dict[str, object] | None:

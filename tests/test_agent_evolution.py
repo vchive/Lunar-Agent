@@ -6,6 +6,7 @@ import pytest
 from famou.agent_evolution import (
     AgentCandidateEvaluator,
     AgentCandidateGenerator,
+    AgentEvaluatorEnsemble,
     AgentPortfolioGenerator,
 )
 from famou.agents import AgentResult
@@ -276,6 +277,76 @@ def test_agent_portfolio_member_failure_is_bounded(tmp_path: Path) -> None:
                 },
             )()
         )
+
+
+def test_agent_evaluator_ensemble_requires_consensus_and_uses_median(tmp_path: Path) -> None:
+    contract = _contract()
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("def solve():\n    return 1\n", encoding="utf-8")
+    responses = []
+    for score in (1, 3, 2):
+        responses.append(
+            json.dumps(
+                {
+                    "schema_version": "1",
+                    "evaluator_id": f"fixture-{score}",
+                    "validity": 1,
+                    "quality": score,
+                    "combined_score": score,
+                    "detailed_scores": {
+                        "quality": {"value": score, "direction": "maximize"}
+                    },
+                    "error_info": [],
+                }
+            )
+        )
+    agents = [EvaluatorFixtureAgent(response) for response in responses]
+    evaluator = AgentEvaluatorEnsemble(tuple(agents), required_capabilities=("read_files",))
+    parsed = evaluator(candidate, contract)
+    assert parsed.evaluator_id == "ensemble"
+    assert parsed.validity == 1
+    assert parsed.combined_score == 2.0
+    assert parsed.quality == 2.0
+    assert parsed.detailed_scores["quality"]["value"] == 2.0
+    assert len({str(agent.requests[0].workspace) for agent in agents}) == 3
+
+    disagreement = AgentEvaluatorEnsemble(
+        (
+            EvaluatorFixtureAgent(responses[0]),
+            EvaluatorFixtureAgent(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "evaluator_id": "invalid",
+                        "validity": 0,
+                        "quality": None,
+                        "combined_score": 0,
+                        "detailed_scores": {},
+                        "error_info": [{"code": "constraint", "message": "failed"}],
+                    }
+                )
+            ),
+        )
+    )
+    rejected = disagreement(candidate, contract)
+    assert rejected.validity == 0
+    assert rejected.combined_score == 0
+    assert any(item["code"] == "evaluator_disagreement" for item in rejected.error_info)
+
+
+def test_agent_evaluator_ensemble_fails_closed_on_member_error(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("def solve():\n    return 1\n", encoding="utf-8")
+    evaluator = AgentEvaluatorEnsemble(
+        (
+            EvaluatorFixtureAgent(json.dumps(_report(candidate, _contract()))),
+            EvaluatorFixtureAgent("", status="failed", error="fixture failure"),
+        )
+    )
+    result = evaluator(candidate, _contract())
+    assert result.validity == 0
+    assert result.combined_score == 0
+    assert any(item["code"] == "evaluator_failure" for item in result.error_info)
 
 
 def test_agent_generation_feedback_is_bounded_and_hides_evaluation_errors(tmp_path: Path) -> None:

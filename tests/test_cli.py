@@ -388,6 +388,125 @@ def test_cli_evolve_accepts_solver_portfolio_and_rejects_conflicts(tmp_path: Pat
     assert "mutually exclusive" in json.loads(capsys.readouterr().err)["error"]
 
 
+def test_cli_evolve_accepts_evaluator_portfolio_and_uses_median(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    solver = tmp_path / "solver.py"
+    solver.write_text(
+        "import json, sys\n"
+        "json.loads(sys.stdin.read())\n"
+        "print(json.dumps({'source':'def solve():\\n    return 5\\n'}))\n",
+        encoding="utf-8",
+    )
+    evaluators = []
+    for index, score in enumerate((1, 3), start=1):
+        evaluator = tmp_path / f"evaluator-{index}.py"
+        evaluator.write_text(
+            "import json, sys\n"
+            "json.loads(sys.stdin.read())\n"
+            f"report = {{'schema_version':'1','evaluator_id':'agent-{index}','validity':1,"
+            f"'quality':{score},'combined_score':{score},'detailed_scores':"
+            f"{{'quality':{{'value':{score},'direction':'maximize'}}}},'error_info':[]}}\n"
+            "print(json.dumps({'text': json.dumps(report)}))\n",
+            encoding="utf-8",
+        )
+        solver.chmod(solver.stat().st_mode | 0o100)
+        evaluator.chmod(evaluator.stat().st_mode | 0o100)
+        evaluators.append(evaluator)
+    home = tmp_path / "home"
+    args = [
+        "evolve",
+        str(contract_path),
+        "--agent-command",
+        f"{sys.executable} {solver}",
+        "--evaluator-portfolio-command",
+        f"{sys.executable} {evaluators[0]}",
+        "--evaluator-portfolio-command",
+        f"{sys.executable} {evaluators[1]}",
+        "--json",
+        "--home",
+        str(home),
+    ]
+    assert main(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    assert payload["best_score"] == 2.0
+    state = json.loads(
+        (Path(payload["workspace"]) / "evolution" / "state.json").read_text(encoding="utf-8")
+    )
+    assert len(state["config"]["evaluator_fingerprint"]) == 64
+
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-command",
+                f"{sys.executable} {solver}",
+                "--evaluator-portfolio-command",
+                f"{sys.executable} {evaluators[0]}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluators[0]}",
+                "--json",
+                "--home",
+                str(tmp_path / "conflict-home"),
+            ]
+        )
+        == 2
+    )
+    assert "mutually exclusive" in json.loads(capsys.readouterr().err)["error"]
+
+
+def test_cli_evolve_rejects_single_evaluator_portfolio_and_openevolve_mix(
+    tmp_path: Path, capsys
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    solver, evaluator = _write_evolution_commands(tmp_path)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--generator-command",
+                f"{sys.executable} {solver}",
+                "--evaluator-portfolio-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(tmp_path / "single-home"),
+            ]
+        )
+        == 2
+    )
+    assert "at least two" in json.loads(capsys.readouterr().err)["error"]
+
+    openevolve = tmp_path / "openevolve.py"
+    openevolve.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    openevolve.chmod(openevolve.stat().st_mode | 0o100)
+    openevolve_contract = tmp_path / "openevolve-contract.json"
+    _write_evolution_contract(openevolve_contract, strategy="openevolve", max_rounds=1)
+    assert (
+        main(
+            [
+                "evolve",
+                str(openevolve_contract),
+                "--openevolve-command",
+                str(openevolve),
+                "--evaluator-portfolio-command",
+                f"{sys.executable} {evaluator}",
+                "--evaluator-portfolio-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(tmp_path / "openevolve-home"),
+            ]
+        )
+        == 2
+    )
+    assert "only supported" in json.loads(capsys.readouterr().err)["error"]
+
+
 def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path, strategy="population", max_rounds=1)

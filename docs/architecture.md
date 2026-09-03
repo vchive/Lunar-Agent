@@ -23,6 +23,8 @@ flowchart TD
     AA --> AG[AgentCandidateGenerator\nsolver proposal bridge]
     AA --> PG[AgentPortfolioGenerator\nordered solver portfolio]
     AA --> AE[AgentCandidateEvaluator\nevaluator report bridge]
+    AR --> EA[Explicit evaluator adapters ×2+]
+    EA --> EE[AgentEvaluatorEnsemble\nunanimous validity · median scores]
     A --> W[Run workspace\nprompts · results · transcripts]
     AA --> W
     AP --> AW[Algorithm workspace\ndata/raw · processed · solve · evaluate · output · evolution]
@@ -133,7 +135,11 @@ role-bearing solver Agent to the generation seam, while `AgentCandidateEvaluator
 evaluator Agent that must return one strict JSON `EvaluationReport`. The report is parsed and
 validated by Lunar-Agent before validity-first selection; evaluator prose, status claims, and
 malformed JSON are never accepted as evidence. The solver and evaluator may be different commands
-and roles, and both remain optional adapters rather than required runtime dependencies.
+and roles, and both remain optional adapters rather than required runtime dependencies. For
+higher-assurance runs, `AgentEvaluatorEnsemble` composes two or more explicit evaluator adapters:
+each member receives the same candidate and contract through an isolated workspace, validity must
+be unanimous, and valid numeric evidence is aggregated with a median. A member failure, malformed
+report, or validity disagreement produces an invalid aggregate report.
 `openevolve` is only an adapter: it receives an explicit executable and a generated config, then
 imports a validated result into Lunar-Agent's canonical archive. The existing `--workers` pool is
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
@@ -147,7 +153,9 @@ read-only evidence; it cannot alter evaluator validity or population ranking.
 Population runs may use `AgentPortfolioGenerator`, which rotates two or more explicitly registered
 solver adapters in deterministic round-robin order. The portfolio is a composition over the same
 generation bridge, not a new strategy or service: each member receives a unique run-scoped request
-workspace, and the ordered command/profile digest is checked on resume.
+workspace, and the ordered command/profile digest is checked on resume. Evaluator portfolios use a
+separate `AgentEvaluatorEnsemble`; evaluator workspaces are likewise isolated and the ordered
+evaluator command/profile digest is checked on resume.
 
 Every strategy result includes `best_candidate_path` when validity-first selection found a regular
 candidate source below the run workspace. The controller writes the same additive field to

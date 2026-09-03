@@ -16,6 +16,7 @@ from pathlib import Path
 from .agent_evolution import (
     AgentCandidateEvaluator,
     AgentCandidateGenerator,
+    AgentEvaluatorEnsemble,
     AgentPortfolioGenerator,
 )
 from .agent_loop import HermesSessionRuntime
@@ -199,6 +200,13 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument(
         "--evaluator-agent-command",
         help="explicit evaluator Agent command returning an EvaluationReport JSON object",
+    )
+    evolve_parser.add_argument(
+        "--evaluator-portfolio-command",
+        dest="evaluator_portfolio_commands",
+        action="append",
+        default=[],
+        help="repeatable explicit evaluator Agent command for a consensus portfolio",
     )
     evolve_parser.add_argument("--evaluator-agent-name", default="evolution-evaluator")
     evolve_parser.add_argument("--evaluator-agent-role", default="evaluator")
@@ -656,6 +664,7 @@ def _adapter_fingerprint(
 def _portfolio_fingerprint(
     commands: tuple[tuple[str, ...], ...],
     *,
+    kind: str = "portfolio-generator",
     name: str,
     role: str,
     required_capabilities: tuple[str, ...] = (),
@@ -665,7 +674,7 @@ def _portfolio_fingerprint(
         return None
     payload = {
         "commands": [list(command) for command in commands],
-        "kind": "portfolio-generator",
+        "kind": kind,
         "name": name,
         "required_capabilities": sorted(set(required_capabilities)),
         "role": role,
@@ -724,10 +733,19 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     evaluator_agent_command = _parse_command(
         args.evaluator_agent_command, "--evaluator-agent-command"
     )
+    evaluator_portfolio_commands = tuple(
+        _parse_command(value, "--evaluator-portfolio-command")
+        for value in args.evaluator_portfolio_commands
+    )
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
     if strategy_name == "openevolve":
-        if agent_command or agent_portfolio_commands or evaluator_agent_command:
+        if (
+            agent_command
+            or agent_portfolio_commands
+            or evaluator_agent_command
+            or evaluator_portfolio_commands
+        ):
             raise ValueError("Agent solver/evaluator commands are only supported by loop and population")
         command = openevolve_command
         if not command:
@@ -759,16 +777,22 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             raise ValueError("generator and Agent portfolio commands are mutually exclusive")
         if agent_command and agent_portfolio_commands:
             raise ValueError("--agent-command and --agent-portfolio-command are mutually exclusive")
-        if evaluator_command and evaluator_agent_command:
-            raise ValueError("--evaluator-command and --evaluator-agent-command are mutually exclusive")
-        if not evaluator_command and not evaluator_agent_command:
+        if sum(bool(option) for option in (evaluator_command, evaluator_agent_command, evaluator_portfolio_commands)) > 1:
+            raise ValueError(
+                "--evaluator-command, --evaluator-agent-command, and "
+                "--evaluator-portfolio-command are mutually exclusive"
+            )
+        if not evaluator_command and not evaluator_agent_command and not evaluator_portfolio_commands:
             raise ValueError(
                 "loop and population require --evaluator-command or "
-                "--evaluator-agent-command plus --generator-command, --agent-command, or "
+                "--evaluator-agent-command or --evaluator-portfolio-command plus "
+                "--generator-command, --agent-command, or "
                 "at least two --agent-portfolio-command options"
             )
         if agent_portfolio_commands and len(agent_portfolio_commands) < 2:
             raise ValueError("--agent-portfolio-command requires at least two commands")
+        if evaluator_portfolio_commands and len(evaluator_portfolio_commands) < 2:
+            raise ValueError("--evaluator-portfolio-command requires at least two commands")
         if agent_command:
             generator_fingerprint = _adapter_fingerprint(
                 agent_command,
@@ -795,6 +819,14 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             evaluator_fingerprint = _adapter_fingerprint(
                 evaluator_agent_command,
                 kind="evaluator",
+                name=args.evaluator_agent_name,
+                role=args.evaluator_agent_role,
+                required_capabilities=tuple(args.evaluator_agent_capabilities),
+            )
+        elif evaluator_portfolio_commands:
+            evaluator_fingerprint = _portfolio_fingerprint(
+                evaluator_portfolio_commands,
+                kind="portfolio-evaluator",
                 name=args.evaluator_agent_name,
                 role=args.evaluator_agent_role,
                 required_capabilities=tuple(args.evaluator_agent_capabilities),
@@ -854,6 +886,24 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             )
             evaluator = AgentCandidateEvaluator(
                 evaluator_adapter,
+                role=args.evaluator_agent_role,
+                required_capabilities=tuple(args.evaluator_agent_capabilities),
+                timeout=args.timeout,
+            )
+        elif evaluator_portfolio_commands:
+            evaluator_adapters = tuple(
+                CommandAgentAdapter(
+                    command,
+                    roles=(args.evaluator_agent_role,),
+                    capabilities=tuple(
+                        sorted(set(DEFAULT_RUNTIME_CAPABILITIES) | set(args.evaluator_agent_capabilities))
+                    ),
+                    name=f"{args.evaluator_agent_name}-{index:02d}",
+                )
+                for index, command in enumerate(evaluator_portfolio_commands, start=1)
+            )
+            evaluator = AgentEvaluatorEnsemble(
+                evaluator_adapters,
                 role=args.evaluator_agent_role,
                 required_capabilities=tuple(args.evaluator_agent_capabilities),
                 timeout=args.timeout,
@@ -1074,6 +1124,8 @@ def _detach_evolution(
         command.extend(("--evaluator-command", args.evaluator_command))
     if args.evaluator_agent_command:
         command.extend(("--evaluator-agent-command", args.evaluator_agent_command))
+    for portfolio_command in args.evaluator_portfolio_commands:
+        command.extend(("--evaluator-portfolio-command", portfolio_command))
     if args.evaluator_agent_name != "evolution-evaluator":
         command.extend(("--evaluator-agent-name", args.evaluator_agent_name))
     if args.evaluator_agent_role != "evaluator":

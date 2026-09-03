@@ -3,6 +3,7 @@
 from .agent_evolution import (
     AgentCandidateEvaluator,
     AgentCandidateGenerator,
+    AgentEvaluatorEnsemble,
     AgentPortfolioGenerator,
 )
 from .agents import (
@@ -44,6 +45,7 @@ __all__ = [
     "AgentCandidateEvaluator",
     "AgentCandidateGenerator",
     "AgentError",
+    "AgentEvaluatorEnsemble",
     "AgentInvocationError",
     "AgentPortfolioGenerator",
     "AgentRegistry",
