@@ -7,9 +7,12 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current solver-visible
+The project is being developed with Spec-Driven Development (SDD). The current executable
 effect-measurement boundary is captured in
-[`specs/048-famou-bench-breakthrough/`](specs/048-famou-bench-breakthrough/). It adds a bounded,
+[`specs/049-famou-bench-adapters/`](specs/049-famou-bench-adapters/). It provides a fresh built-in
+Lunar subject, exact private extractor/evaluator harness adapter, and offline FM-Eval per-run
+results converter for the strict protocol in
+[`specs/048-famou-bench-breakthrough/`](specs/048-famou-bench-breakthrough/). That protocol adds a bounded,
 recoverable one/two-case normal-Agent trial against exported `famou-bench 1.10.6` per-run history.
 It deliberately does not call an evolution strategy or claim 20-case parity. This builds on the
 quality-diverse native population in
@@ -238,14 +241,27 @@ a deep-evolution experiment. Its model/tool interactions are turns inside one so
 WebAgent deep evolution is activated separately by `/evolve`; the checked-in source defaults to
 five outer iterations when no numeric budget is supplied.
 
-For an affordable first effect milestone, export one or two exact cases and the matching WebAgent
-per-run receipts, then run Lunar repeatedly in normal mode:
+For an affordable first effect milestone, export one or two exact cases and save the matching
+FM-Eval experiment-results response. Convert those per-run results offline; immutable suite
+identity still comes from the separately exported publication/CaseRevision manifest:
+
+```bash
+lunar-agent effect-baseline results.json suite.json baseline.json \
+  --experiment-id fmexp-... \
+  --requested-model gpt-5.6-sol \
+  --effective-model openai/gpt-5.6-sol \
+  --model-evidence not_observable --json
+```
+
+Then run Lunar repeatedly in normal mode using the built-in adapters:
 
 ```bash
 lunar-agent effect-trial suite.json baseline.json \
   --case-source logistics_vehicle_dispatch_scheduling=/absolute/case/root \
-  --subject-command "/absolute/lunar-famou-subject" \
-  --harness-command "/absolute/famou-harness-adapter" \
+  --subject-command "/absolute/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
+  --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
+  --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL" \
+  --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL \
   --requested-model gpt-5.6-sol \
   --runs-per-case 3 --timeout 3600 \
   --workspace .lunar/effect-trial-001 --json
@@ -261,7 +277,12 @@ breakthrough—not whole-suite parity or statistical superiority. Use `--resume`
 options to preserve completed logical runs after an interruption. Subject/harness separation is a
 bounded request and filesystem-layout contract, not an OS sandbox; use an owner-provided sandbox
 for an untrusted same-user command. Lunar rechecks frozen controls, public sources, and run records
-before writing a successful report.
+before writing a successful report. The built-in subject is a fresh attempt-local Agent loop with
+no memory or transcript reuse. The harness recomputes FM-Eval's canonical CaseRevision content
+digest, matches its public projection, hashes `tests/extractor_agent.py` and
+`tests/evaluator.py`, runs each stage once, and starts the evaluator without inherited
+model/extractor credentials. Lunar does not download the historical `1.10.6` publication or
+authenticate to FM-Eval; those remain explicit owner-controlled local inputs.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

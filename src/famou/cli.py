@@ -34,6 +34,12 @@ from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
 from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
+from .effect_adapters import (
+    EffectAdapterError,
+    convert_fm_eval_baseline,
+    run_harness_adapter,
+    run_subject_adapter,
+)
 from .effect_trial import EffectTrialConfig, EffectTrialError, EffectTrialRunner
 from .evaluator_bundle import SolverScoringContract, compile_evaluator_bundle
 from .evolution import (
@@ -473,6 +479,58 @@ def build_parser() -> argparse.ArgumentParser:
     )
     effect_parser.add_argument("--resume", action="store_true", help="resume the frozen trial")
     _add_json(effect_parser)
+
+    subject_parser = subparsers.add_parser(
+        "effect-subject", help="run Lunar as a fresh normal Famou-Bench subject"
+    )
+    subject_parser.add_argument("request", type=Path, help="generated subject request JSON")
+    subject_parser.add_argument("--endpoint", help="OpenAI-compatible chat endpoint URL")
+    subject_parser.add_argument("--model", help="model name (must match the generated request)")
+    subject_parser.add_argument(
+        "--api-key", help="optional model API key (prefer FAMOU_API_KEY)"
+    )
+    subject_parser.add_argument("--max-steps", type=int, default=100)
+    subject_parser.add_argument("--timeout", type=float)
+    subject_parser.add_argument(
+        "--no-exec", action="store_true", help="disable the no-shell command tool"
+    )
+    _add_json(subject_parser)
+
+    harness_parser = subparsers.add_parser(
+        "effect-harness", help="run an exact frozen Famou extractor/evaluator pair"
+    )
+    harness_parser.add_argument("request", type=Path, help="generated harness request JSON")
+    harness_parser.add_argument("--case-root", type=Path, required=True)
+    harness_parser.add_argument("--python", default=sys.executable, help="extractor Python")
+    harness_parser.add_argument("--timeout", type=float, default=600.0)
+    harness_parser.add_argument(
+        "--extractor-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="pass one explicitly named existing variable to the extractor; repeat as needed",
+    )
+    _add_json(harness_parser)
+
+    baseline_parser = subparsers.add_parser(
+        "effect-baseline", help="convert a local FM-Eval results export to a strict baseline"
+    )
+    baseline_parser.add_argument("results", type=Path)
+    baseline_parser.add_argument("suite", type=Path)
+    baseline_parser.add_argument("output", type=Path)
+    baseline_parser.add_argument("--experiment-id", required=True)
+    baseline_parser.add_argument("--requested-model", required=True)
+    baseline_parser.add_argument("--effective-model", required=True)
+    baseline_parser.add_argument(
+        "--model-evidence",
+        choices=("not_observable", "owner_attested", "runtime_observed", "provider_observed"),
+        required=True,
+    )
+    baseline_parser.add_argument("--authority", default="descriptive")
+    baseline_parser.add_argument(
+        "--conclusion-eligibility", choices=("eligible", "ineligible"), default="ineligible"
+    )
+    _add_json(baseline_parser)
 
     answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
     answer_parser.add_argument("run_id")
@@ -2684,6 +2742,42 @@ def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
     ).run().to_dict()
 
 
+def _effect_subject(args: argparse.Namespace) -> dict[str, object]:
+    return run_subject_adapter(
+        args.request,
+        endpoint=args.endpoint,
+        model=args.model,
+        api_key=args.api_key,
+        max_steps=args.max_steps,
+        allow_exec=not args.no_exec,
+        timeout=args.timeout,
+    )
+
+
+def _effect_harness(args: argparse.Namespace) -> dict[str, object]:
+    return run_harness_adapter(
+        args.request,
+        args.case_root,
+        python_bin=args.python,
+        extractor_environment=_effect_environment(args.extractor_env, "extractor"),
+        timeout=args.timeout,
+    )
+
+
+def _effect_baseline(args: argparse.Namespace) -> dict[str, object]:
+    return convert_fm_eval_baseline(
+        args.results,
+        args.suite,
+        args.output,
+        experiment_id=args.experiment_id,
+        requested_model=args.requested_model,
+        effective_model=args.effective_model,
+        model_evidence=args.model_evidence,
+        authority=args.authority,
+        conclusion_eligibility=args.conclusion_eligibility,
+    )
+
+
 def _delegate(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Delegate one task through an explicitly supplied command adapter."""
     command = _parse_command(args.agent_command, "--agent-command")
@@ -3056,6 +3150,15 @@ def main(argv: list[str] | None = None) -> int:
             payload = _effect_trial(args)
             _emit(payload, args.json)
             return 0
+        if args.command == "effect-subject":
+            _emit(_effect_subject(args), args.json)
+            return 0
+        if args.command == "effect-harness":
+            _emit(_effect_harness(args), args.json)
+            return 0
+        if args.command == "effect-baseline":
+            _emit(_effect_baseline(args), args.json)
+            return 0
         config = _config(args)
         if args.command == "init":
             _emit({"home": str(config.home), "status": "initialized"}, args.json)
@@ -3244,7 +3347,15 @@ def main(argv: list[str] | None = None) -> int:
             decision = controller.deliver(args.run_id)
             _emit(decision.to_dict(), args.json)
             return 0
-    except (AgentError, ValueError, TypeError, OSError, EvolutionError, EffectTrialError) as exc:
+    except (
+        AgentError,
+        ValueError,
+        TypeError,
+        OSError,
+        EvolutionError,
+        EffectTrialError,
+        EffectAdapterError,
+    ) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
         return 2
     return 2

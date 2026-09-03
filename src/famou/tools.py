@@ -41,6 +41,7 @@ class LocalToolRegistry:
         memory: MemoryStore | None = None,
         memory_scope: str = "global",
         redactions: tuple[str, ...] = (),
+        command_environment: dict[str, str] | None = None,
     ) -> None:
         if command_timeout <= 0:
             raise ValueError("command_timeout must be positive")
@@ -52,6 +53,9 @@ class LocalToolRegistry:
         self.memory = memory
         self.memory_scope = memory_scope
         self.redactions = tuple(secret for secret in redactions if secret)
+        self.command_environment = (
+            None if command_environment is None else dict(command_environment)
+        )
 
     def set_memory_scope(self, scope: str) -> None:
         """Set the default scope used by memory tools for the active task."""
@@ -307,6 +311,7 @@ class LocalToolRegistry:
             completed = subprocess.run(
                 command,
                 cwd=workspace,
+                env=self.command_environment,
                 shell=False,
                 text=True,
                 capture_output=True,

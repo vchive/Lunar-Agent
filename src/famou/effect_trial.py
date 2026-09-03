@@ -827,7 +827,9 @@ class EffectTrialRunner:
             raise EffectTrialError("process_nonzero_exit")
 
     @staticmethod
-    def _validate_usage(payload: object) -> dict[str, int]:
+    def _validate_usage(payload: object) -> dict[str, int] | None:
+        if payload is None:
+            return None
         item = _strict_object(payload, {"input_tokens", "output_tokens", "total_tokens"}, "token usage")
         values = {name: _integer(item[name], f"token usage {name}", 0, MAX_TOKENS) for name in item}
         if values["input_tokens"] + values["output_tokens"] != values["total_tokens"]:
@@ -884,6 +886,10 @@ class EffectTrialRunner:
         quality = _number(item["quality_score"], "harness quality score", nullable=True)
         if extraction == "completed" and (validity is None or overall is None):
             raise EffectTrialError("completed harness extraction requires validity and overall score")
+        if extraction != "completed" and (
+            validity not in {None, 0.0} or overall not in {None, 0.0}
+        ):
+            raise EffectTrialError("incomplete harness extraction cannot carry a valid score")
         details = item["detail_metrics"]
         if not isinstance(details, dict) or len(_canonical_bytes(details)) > 16 * 1024:
             raise EffectTrialError("harness detail_metrics is invalid")
@@ -997,7 +1003,9 @@ class EffectTrialRunner:
         validity = [float(value["validity_score"]) for value in ready if value["validity_score"] is not None]
         valid = [
             value for value in ready
-            if value["validity_score"] not in {None, 0.0} and value["overall_score"] is not None
+            if value["extraction_status"] == "completed"
+            and value["validity_score"] not in {None, 0.0}
+            and value["overall_score"] is not None
         ]
         lunar_best = max((float(value["overall_score"]) for value in valid), default=None)
         historical_best = baseline.best()

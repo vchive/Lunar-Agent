@@ -115,3 +115,48 @@ def test_agent_loop_step_limit_is_a_runtime_failure(tmp_path: Path) -> None:
         assert "max steps" in str(exc)
     else:
         raise AssertionError("step limit should fail the runtime")
+
+
+def test_agent_loop_aggregates_complete_provider_telemetry(tmp_path: Path) -> None:
+    model = FixtureModel(
+        [
+            ModelTurn(
+                "",
+                (ToolCall("1", "write_file", {"path": "solution.json", "content": "{}"}),),
+                response_model="provider/model-a",
+                usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            ),
+            ModelTurn(
+                "done",
+                response_model="provider/model-a",
+                usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
+            ),
+        ]
+    )
+
+    result = AgentLoopRuntime(model).run("solve", tmp_path)
+
+    assert result.metadata["turns"] == "2"
+    assert result.metadata["response_model"] == "provider/model-a"
+    assert result.metadata["input_tokens"] == "30"
+    assert result.metadata["output_tokens"] == "5"
+    assert result.metadata["total_tokens"] == "35"
+
+
+def test_agent_loop_does_not_invent_partial_provider_telemetry(tmp_path: Path) -> None:
+    model = FixtureModel(
+        [
+            ModelTurn(
+                "",
+                (ToolCall("1", "list_dir", {"path": "."}),),
+                response_model="provider/model-a",
+                usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            ),
+            ModelTurn("done"),
+        ]
+    )
+
+    result = AgentLoopRuntime(model).run("solve", tmp_path)
+
+    assert "response_model" not in result.metadata
+    assert "total_tokens" not in result.metadata

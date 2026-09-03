@@ -163,6 +163,42 @@ def test_openai_compatible_runtime_parses_structured_tool_calls(tmp_path: Path) 
     assert turn.tool_calls[0].arguments == {"path": "a.txt"}
 
 
+def test_openai_compatible_runtime_preserves_provider_model_and_usage() -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    ModelHandler.response_body = json.dumps(
+        {
+            "model": "provider/fixture-model",
+            "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15},
+            "choices": [{"message": {"content": "measured"}}],
+        }
+    ).encode()
+    with ModelServer(ModelHandler) as server:
+        turn = OpenAICompatibleRuntime(server.url, "fixture-model").complete(
+            [{"role": "user", "content": "measure"}], timeout=1
+        )
+
+    assert turn.response_model == "provider/fixture-model"
+    assert turn.usage == {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}
+
+
+def test_openai_compatible_runtime_rejects_inconsistent_provider_usage() -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    ModelHandler.response_body = json.dumps(
+        {
+            "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 99},
+            "choices": [{"message": {"content": "bad telemetry"}}],
+        }
+    ).encode()
+    with ModelServer(ModelHandler) as server, pytest.raises(
+        RuntimeExecutionError, match="usage"
+    ):
+        OpenAICompatibleRuntime(server.url, "fixture-model").complete(
+            [{"role": "user", "content": "measure"}], timeout=1
+        )
+
+
 def test_openai_compatible_runtime_materializes_one_shot_artifact_envelope(tmp_path: Path) -> None:
     ModelHandler.response_status = 200
     ModelHandler.delay = 0.0

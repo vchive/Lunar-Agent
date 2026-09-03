@@ -47,6 +47,8 @@ class ToolCall:
 class ModelTurn:
     text: str
     tool_calls: tuple[ToolCall, ...] = ()
+    response_model: str | None = None
+    usage: dict[str, int] | None = None
 
 
 class Runtime(Protocol):
@@ -314,12 +316,18 @@ class OpenAICompatibleRuntime:
         if not turn.text:
             raise RuntimeExecutionError("model endpoint returned empty content")
         text, artifacts, envelope_metadata = self._materialize_artifact_envelope(turn.text, workspace)
+        telemetry_metadata: dict[str, str] = {}
+        if turn.response_model:
+            telemetry_metadata["response_model"] = turn.response_model
+        if turn.usage:
+            telemetry_metadata.update({key: str(value) for key, value in turn.usage.items()})
         return RuntimeResult(
             text=text,
             artifacts=artifacts,
             metadata={
                 "provider": "openai-compatible",
                 "model": self.model,
+                **telemetry_metadata,
                 **envelope_metadata,
             },
         )
@@ -474,7 +482,21 @@ class OpenAICompatibleRuntime:
         text, tool_calls = self._extract_turn(payload)
         if not text and not tool_calls:
             raise RuntimeExecutionError("model endpoint returned empty content")
-        return ModelTurn(text=text, tool_calls=tool_calls)
+        response_model = payload.get("model")
+        if response_model is not None and (
+            not isinstance(response_model, str)
+            or not response_model.strip()
+            or len(response_model.encode("utf-8")) > 512
+            or "\x00" in response_model
+        ):
+            raise RuntimeExecutionError("model endpoint returned an invalid model identity")
+        usage = self._parse_usage(payload.get("usage"))
+        return ModelTurn(
+            text=text,
+            tool_calls=tool_calls,
+            response_model=response_model.strip() if isinstance(response_model, str) else None,
+            usage=usage,
+        )
 
     def cancel(self) -> None:
         # urllib does not expose a portable cancellation handle. Detached cancellation terminates
@@ -527,6 +549,27 @@ class OpenAICompatibleRuntime:
     def _extract_text(payload: object) -> str:
         """Compatibility helper for callers of the original one-shot adapter."""
         return OpenAICompatibleRuntime._extract_turn(payload)[0]
+
+    @staticmethod
+    def _parse_usage(raw: object) -> dict[str, int] | None:
+        if raw is None:
+            return None
+        if not isinstance(raw, dict):
+            raise RuntimeExecutionError("model endpoint returned malformed usage")
+        aliases = (
+            ("input_tokens", "prompt_tokens"),
+            ("output_tokens", "completion_tokens"),
+            ("total_tokens", "total_tokens"),
+        )
+        values: dict[str, int] = {}
+        for normalized, source in aliases:
+            value = raw.get(source, raw.get(normalized))
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise RuntimeExecutionError("model endpoint returned malformed usage")
+            values[normalized] = value
+        if values["input_tokens"] + values["output_tokens"] != values["total_tokens"]:
+            raise RuntimeExecutionError("model endpoint returned inconsistent usage")
+        return values
 
     @staticmethod
     def _parse_tool_calls(raw: object) -> tuple[ToolCall, ...]:

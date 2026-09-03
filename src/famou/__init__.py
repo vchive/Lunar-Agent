@@ -42,6 +42,13 @@ from .data_profile import (
     canonical_profile_json,
     profile_sha256,
 )
+from .effect_adapters import (
+    EffectAdapterError,
+    convert_fm_eval_baseline,
+    famou_case_content_digest,
+    run_harness_adapter,
+    run_subject_adapter,
+)
 from .effect_trial import (
     EffectTrialConfig,
     EffectTrialError,
@@ -123,6 +130,7 @@ __all__ = [
     "ContractCompilationError",
     "ContractCompiler",
     "DataProfileError",
+    "EffectAdapterError",
     "EffectTrialConfig",
     "EffectTrialError",
     "EffectTrialReport",
@@ -155,7 +163,11 @@ __all__ = [
     "compile_evaluator_bundle",
     "config_from_contract",
     "contract_candidate_runner_fingerprint",
+    "convert_fm_eval_baseline",
+    "famou_case_content_digest",
     "load_evaluator_bundle",
     "profile_sha256",
+    "run_harness_adapter",
+    "run_subject_adapter",
     "stage_candidate_inputs",
 ]

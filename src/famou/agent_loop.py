@@ -130,6 +130,8 @@ class AgentLoopRuntime:
         started = time.monotonic()
         model_turns = 0
         tool_steps = 0
+        response_models: list[str | None] = []
+        usages: list[dict[str, int] | None] = []
         while True:
             remaining = self._remaining_timeout(started, timeout)
             try:
@@ -143,6 +145,8 @@ class AgentLoopRuntime:
                 )
                 raise
             model_turns += 1
+            response_models.append(turn.response_model)
+            usages.append(turn.usage)
             self._emit(
                 "agent_model_turn",
                 {
@@ -157,15 +161,21 @@ class AgentLoopRuntime:
                     raise RuntimeExecutionError("agent loop ended without a final text result")
                 final_message = {"role": "assistant", "content": turn.text}
                 self._append_transcript(final_message)
+                metadata = {
+                    "provider": "openai-compatible",
+                    "mode": "agent-loop",
+                    "turns": str(model_turns),
+                    "session_history": str(self.session_history).lower(),
+                }
+                if response_models and all(response_models) and len(set(response_models)) == 1:
+                    metadata["response_model"] = str(response_models[0])
+                if usages and all(value is not None for value in usages):
+                    for key in ("input_tokens", "output_tokens", "total_tokens"):
+                        metadata[key] = str(sum(value[key] for value in usages if value is not None))
                 return RuntimeResult(
                     text=turn.text,
                     artifacts=tuple(dict.fromkeys(artifacts)),
-                    metadata={
-                        "provider": "openai-compatible",
-                        "mode": "agent-loop",
-                        "turns": str(model_turns),
-                        "session_history": str(self.session_history).lower(),
-                    },
+                    metadata=metadata,
                 )
             if tool_steps + len(turn.tool_calls) > self.max_steps:
                 self._emit(
