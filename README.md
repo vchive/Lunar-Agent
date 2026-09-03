@@ -208,6 +208,15 @@ also separates change tags with measured improvements from repeatedly invalid, r
 unchanged tags. It adds no planner call or scheduler state: candidate selection, budgets, and the
 independent evaluator remain authoritative, and resume rebuilds the same directive from the archive.
 
+The same bridge adds a compact contract-driven `algorithm_playbook`. Each supported problem type
+has an ordered repository-owned repertoire of self-contained, standard-library-capable algorithm
+families plus domain modeling and result-replay checks. Explore/diversify generations allocate
+untried and then least-attempted families from independently evaluated experiment history;
+repair/refine retain the selected candidate's family when known, while recombine exposes distinct
+parent/inspiration families. The solver is asked to return the selected family tag with its bounded
+experiment declaration, but execution and the evaluator—not that declaration—still determine the
+outcome. No domain package, skill installation, or extra inference turn is required.
+
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
 output. Its exact source is visible to compiled-evaluator solvers as read-only scoring guidance,
@@ -955,4 +964,4 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/045-adaptive-search-orchestration/`](specs/045-adaptive-search-orchestration/).
+[`specs/046-contract-driven-algorithm-playbooks/`](specs/046-contract-driven-algorithm-playbooks/).

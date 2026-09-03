@@ -294,6 +294,28 @@ authority: population selection, loop budgets, evaluator validity, and archive r
 unchanged. A fresh process derives the same directive from `GenerationRequest` and `archive.jsonl`,
 so adaptive allocation adds neither a model-planner call nor mutable orchestration state.
 
+The bridge also maps the canonical `problem_type` to a small `algorithm_playbook`. Unlike
+WebAgent's large OpenCode-specific OR/ML skill surface, this is a fixed repository vocabulary of
+standard-library-capable families and non-executable modeling/validation check labels:
+
+```text
+contract problem type ──> ordered family repertoire + domain checks
+                              |
+verified family attempts ─────+──> untried / least-tried allocation
+selected target/lineage ──────+──> repair/refine family preservation
+selected inspirations ────────+──> recombination alternatives
+                              |
+                              v
+                    algorithm_playbook in solver prompt
+```
+
+This makes population diversity algorithmic rather than merely prompt wording: for example,
+routing seeds can move across insertion, savings, local-search, and large-neighborhood families.
+Exact family tags returned in bounded experiment declarations identify intent; their attempt and
+improvement history is still derived only after independent evaluation. The playbook contains
+constraint IDs but no raw rows, output contents, executable snippets, or third-party dependency
+promise. It is reconstructed on resume and cannot alter evaluator or selection authority.
+
 The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
 available for mixed configurations. When both seams are already explicit, a runtime option is

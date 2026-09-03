@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from statistics import median
 
@@ -37,6 +37,7 @@ MAX_EXPERIMENT_ITEMS = 8
 MAX_EXPERIMENT_TOKEN_BYTES = 128
 MAX_EXPERIMENT_TAG_SUMMARIES = 32
 MAX_SEARCH_DIRECTIVE_ITEMS = 8
+MAX_PLAYBOOK_ALTERNATIVES = 4
 _SECRET_EVIDENCE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|"
     r"api[_-]?key\s*[:=]\s*\S+)"
@@ -53,6 +54,141 @@ _SAFE_EXECUTION_ERRORS = frozenset(
     }
 )
 _SAFE_EXPERIMENT_TAG = re.compile(r"^[\w\u4e00-\u9fff][\w\u4e00-\u9fff.+:-]{0,127}$")
+
+_ALGORITHM_REPERTOIRES: dict[str, tuple[str, ...]] = {
+    "routing": (
+        "nearest_insertion",
+        "savings_merge",
+        "regret_insertion",
+        "two_opt_local_search",
+        "large_neighborhood_search",
+    ),
+    "scheduling": (
+        "priority_dispatch",
+        "insertion_schedule",
+        "interval_local_search",
+        "critical_path_improvement",
+        "large_neighborhood_search",
+    ),
+    "packing": (
+        "first_fit_decreasing",
+        "best_fit_decreasing",
+        "shelf_packing",
+        "local_repacking",
+        "multi_start_constructive",
+    ),
+    "assignment": (
+        "greedy_min_cost",
+        "augmenting_path_assignment",
+        "local_swap_assignment",
+        "min_cost_flow_assignment",
+        "multi_start_assignment",
+    ),
+    "forecasting": (
+        "seasonal_naive",
+        "moving_average",
+        "exponential_smoothing",
+        "linear_trend_regression",
+        "residual_correction_ensemble",
+    ),
+    "network_flow": (
+        "augmenting_path_flow",
+        "successive_shortest_path",
+        "capacity_scaling_flow",
+        "cycle_canceling_flow",
+        "path_decomposition_search",
+    ),
+    "continuous": (
+        "coordinate_descent",
+        "projected_pattern_search",
+        "adaptive_step_search",
+        "nelder_mead_simplex",
+        "multi_start_local_search",
+    ),
+}
+
+_PLAYBOOK_MODELING_CHECKS: dict[str, tuple[str, ...]] = {
+    "routing": (
+        "preserve_atomic_entities",
+        "explicit_depot_and_route_boundaries",
+        "model_capacity_and_time_windows",
+        "keep_distance_units_consistent",
+    ),
+    "scheduling": (
+        "preserve_job_operation_precedence",
+        "model_resource_non_overlap",
+        "keep_time_units_consistent",
+        "include_release_and_due_times",
+    ),
+    "packing": (
+        "preserve_item_integrality",
+        "model_every_capacity_dimension",
+        "keep_orientation_rules_explicit",
+        "prevent_duplicate_or_missing_items",
+    ),
+    "assignment": (
+        "preserve_atomic_entities",
+        "model_eligibility_before_cost",
+        "keep_cardinality_rules_explicit",
+        "represent_unassigned_penalties",
+    ),
+    "forecasting": (
+        "split_time_before_feature_construction",
+        "use_only_prediction_time_features",
+        "fit_preprocessing_on_training_only",
+        "keep_target_units_consistent",
+    ),
+    "network_flow": (
+        "preserve_flow_conservation",
+        "model_source_and_sink_balance",
+        "keep_capacity_and_cost_units_consistent",
+        "represent_lower_bounds_explicitly",
+    ),
+    "continuous": (
+        "respect_variable_domains_and_bounds",
+        "scale_objective_and_constraints",
+        "handle_nonsmooth_regions_explicitly",
+        "separate_feasibility_from_objective",
+    ),
+}
+
+_PLAYBOOK_VALIDATION_CHECKS: dict[str, tuple[str, ...]] = {
+    "routing": (
+        "replay_each_visit_once",
+        "replay_route_capacity_and_time",
+        "recompute_objective_from_export",
+    ),
+    "scheduling": (
+        "replay_precedence_and_non_overlap",
+        "replay_resource_capacity",
+        "recompute_objective_from_export",
+    ),
+    "packing": (
+        "replay_item_coverage_once",
+        "replay_bin_capacities",
+        "recompute_objective_from_export",
+    ),
+    "assignment": (
+        "replay_eligibility_and_cardinality",
+        "replay_resource_capacity",
+        "recompute_objective_from_export",
+    ),
+    "forecasting": (
+        "compare_against_naive_baseline",
+        "replay_temporal_holdout",
+        "check_prediction_range_and_units",
+    ),
+    "network_flow": (
+        "replay_node_flow_balance",
+        "replay_edge_bounds",
+        "recompute_objective_from_export",
+    ),
+    "continuous": (
+        "replay_bounds_and_constraints",
+        "compare_multiple_start_points",
+        "recompute_objective_from_export",
+    ),
+}
 
 AgentEvidenceObserver = Callable[[str, dict[str, object]], None]
 
@@ -213,6 +349,7 @@ class AgentCandidateGenerator:
 
     def _prompt(self, request: GenerationRequest) -> str:
         contract = request.workspace / "evolution" / "contract.json"
+        effective_contract = self.contract
         declared_output_paths = frozenset(
             output.path for output in self.contract.outputs
         ) if self.contract is not None else frozenset()
@@ -224,6 +361,13 @@ class AgentCandidateGenerator:
         try:
             payload = json.loads(contract.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
+                try:
+                    effective_contract = AlgorithmProblemContract.from_dict(payload)
+                except (TypeError, ValueError):
+                    # Keep the validated in-memory contract for standalone library callers when a
+                    # non-canonical workspace file is present. Higher controller layers verify
+                    # persisted contract identity before normal evolution resumes.
+                    pass
                 outputs = payload.get("outputs", [])
                 if not declared_output_paths and isinstance(outputs, list):
                     declared_output_paths = frozenset(
@@ -269,7 +413,16 @@ class AgentCandidateGenerator:
             _candidate_summary(item, request.workspace, declared_output_paths)
             for item in request.archive[-MAX_CONTEXT_ITEMS:]
         ]
-        experiment_memory = _experiment_memory(request.archive)
+        retained_tags = (
+            _ALGORITHM_REPERTOIRES[effective_contract.problem_type]
+            if effective_contract is not None
+            and effective_contract.problem_type in _ALGORITHM_REPERTOIRES
+            else ()
+        )
+        experiment_memory = _experiment_memory(
+            request.archive, retained_tags=retained_tags
+        )
+        search_directive = _search_directive(request, experiment_memory)
         context = {
             "iteration": request.iteration,
             "contract": contract_summary,
@@ -277,7 +430,10 @@ class AgentCandidateGenerator:
             "inspirations": inspiration_summaries,
             "archive": archive_summaries,
             "experiment_memory": experiment_memory,
-            "search_directive": _search_directive(request, experiment_memory),
+            "search_directive": search_directive,
+            "algorithm_playbook": _algorithm_playbook(
+                effective_contract, request, experiment_memory, search_directive
+            ),
             "scoring_contract": (
                 self.scoring.prompt_dict() if self.scoring is not None else None
             ),
@@ -297,7 +453,9 @@ class AgentCandidateGenerator:
             "filename/metadata, and one experiment containing schema_version='1', a short "
             "hypothesis, change_tags, and target_metrics with increase/decrease directions. Declare "
             "one attributable change consistent with search_directive, do not simply repeat its "
-            "avoid_change_tags, and do not claim an outcome or score delta.\n\nGeneration context:\n"
+            "avoid_change_tags, and do not claim an outcome or score delta. When "
+            "algorithm_playbook is present, include its family_tag verbatim in change_tags."
+            "\n\nGeneration context:\n"
         )
 
         def render() -> str:
@@ -973,7 +1131,164 @@ def _search_tag_policy(
     )
 
 
-def _experiment_memory(archive: Sequence[object]) -> dict[str, object]:
+def _algorithm_playbook(
+    contract: AlgorithmProblemContract | None,
+    request: GenerationRequest,
+    experiment_memory: Mapping[str, object],
+    search_directive: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Allocate one domain algorithm family without adding mutable strategy state."""
+    if contract is None or contract.problem_type not in _ALGORITHM_REPERTOIRES:
+        return None
+    repertoire = _ALGORITHM_REPERTOIRES[contract.problem_type]
+    mode = search_directive.get("mode")
+    if not isinstance(mode, str):
+        mode = "explore"
+    counts, improved = _playbook_family_history(repertoire, experiment_memory)
+    target = _playbook_repair_target(request, search_directive)
+    target_family = _candidate_family(target, repertoire)
+    parent_family = _candidate_family(request.parent, repertoire)
+    inspiration_families = _distinct_strings(
+        _candidate_family(candidate, repertoire)
+        for candidate in request.inspirations
+        if _candidate_valid(candidate)
+    )
+    invalid_inspiration_families = set(
+        _distinct_strings(
+            _candidate_family(candidate, repertoire)
+            for candidate in request.inspirations
+            if not _candidate_valid(candidate)
+        )
+    )
+
+    if mode == "repair" and target_family is not None:
+        family = target_family
+        basis = "target_family"
+    elif mode == "refine" and parent_family is not None:
+        family = parent_family
+        basis = "parent_family"
+    elif mode == "refine" and improved:
+        family = min(improved, key=lambda item: (-improved[item], repertoire.index(item)))
+        basis = "verified_improved_family"
+    elif mode == "recombine" and parent_family is not None:
+        family = parent_family
+        basis = "recombination_lineage"
+    elif mode in {"explore", "diversify"}:
+        family = min(repertoire, key=lambda item: (counts[item], repertoire.index(item)))
+        basis = "untried_family" if counts[family] == 0 else "least_tried_family"
+    else:
+        family = repertoire[0]
+        basis = "repertoire_default"
+
+    if mode == "recombine":
+        alternatives = [
+            item for item in inspiration_families if item != family
+        ]
+        alternatives.extend(
+            item
+            for item in repertoire
+            if item != family
+            and item not in alternatives
+            and item not in invalid_inspiration_families
+        )
+    else:
+        alternatives = [item for item in repertoire if item != family]
+    hard_constraint_ids = _distinct_strings(
+        constraint.id for constraint in contract.hard_constraints
+    )
+    return {
+        "schema_version": "1",
+        "problem_type": contract.problem_type,
+        "mode": mode,
+        "objective_direction": contract.objective.direction,
+        "family_tag": family,
+        "alternative_families": alternatives[:MAX_PLAYBOOK_ALTERNATIVES],
+        "selection_basis": basis,
+        "hard_constraint_ids": hard_constraint_ids[:MAX_SEARCH_DIRECTIVE_ITEMS],
+        "modeling_checks": list(
+            _PLAYBOOK_MODELING_CHECKS[contract.problem_type][:MAX_SEARCH_DIRECTIVE_ITEMS]
+        ),
+        "validation_checks": list(
+            _PLAYBOOK_VALIDATION_CHECKS[contract.problem_type][:MAX_SEARCH_DIRECTIVE_ITEMS]
+        ),
+        "instruction": (
+            f"Build one attributable {mode} experiment using family_tag; preserve validity and "
+            "independently replay the listed checks."
+        ),
+    }
+
+
+def _playbook_family_history(
+    repertoire: tuple[str, ...], experiment_memory: Mapping[str, object]
+) -> tuple[dict[str, int], dict[str, int]]:
+    counts = {family: 0 for family in repertoire}
+    improved: dict[str, int] = {}
+    raw_outcomes = experiment_memory.get("tag_outcomes", {})
+    if not isinstance(raw_outcomes, Mapping):
+        return counts, improved
+    for family in repertoire:
+        outcomes = raw_outcomes.get(family)
+        if not isinstance(outcomes, Mapping):
+            continue
+        total = sum(
+            value
+            for value in outcomes.values()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        )
+        counts[family] = total
+        verified_improvements = outcomes.get("improved", 0)
+        if (
+            isinstance(verified_improvements, int)
+            and not isinstance(verified_improvements, bool)
+            and verified_improvements > 0
+        ):
+            improved[family] = verified_improvements
+    return counts, improved
+
+
+def _playbook_repair_target(
+    request: GenerationRequest, search_directive: Mapping[str, object]
+) -> object | None:
+    target_id = search_directive.get("target_candidate_id")
+    if not isinstance(target_id, str):
+        return None
+    if getattr(request.parent, "candidate_id", None) == target_id:
+        return request.parent
+    return next(
+        (
+            candidate
+            for candidate in reversed(request.archive)
+            if getattr(candidate, "candidate_id", None) == target_id
+        ),
+        None,
+    )
+
+
+def _candidate_family(candidate: object | None, repertoire: tuple[str, ...]) -> str | None:
+    metadata = getattr(candidate, "metadata", {})
+    if not isinstance(metadata, Mapping) or "experiment" not in metadata:
+        return None
+    try:
+        experiment = _normalize_experiment(metadata["experiment"])
+    except EvolutionError:
+        return None
+    tags = experiment.get("change_tags", [])
+    if not isinstance(tags, list):
+        return None
+    return next((family for family in repertoire if family in tags), None)
+
+
+def _distinct_strings(values: Iterable[str | None]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value not in result:
+            result.append(value)
+    return result
+
+
+def _experiment_memory(
+    archive: Sequence[object], *, retained_tags: Sequence[str] = ()
+) -> dict[str, object]:
     by_id = {
         candidate_id: item
         for item in archive
@@ -997,12 +1312,21 @@ def _experiment_memory(archive: Sequence[object]) -> dict[str, object]:
             outcomes = tag_outcomes.setdefault(tag, {})
             outcome = card["outcome"]
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
+    retained = [
+        tag for tag in retained_tags if tag in tag_outcomes
+    ][:MAX_EXPERIMENT_TAG_SUMMARIES]
+    remaining = MAX_EXPERIMENT_TAG_SUMMARIES - len(retained)
+    other_tags = [tag for tag in sorted(tag_outcomes) if tag not in retained]
+    selected_tags = [
+        *retained,
+        *(other_tags[-remaining:] if remaining else []),
+    ]
     return {
         "schema_version": "1",
         "recent": cards[-MAX_CONTEXT_ITEMS:],
         "tag_outcomes": {
             tag: {outcome: tag_outcomes[tag][outcome] for outcome in sorted(tag_outcomes[tag])}
-            for tag in sorted(tag_outcomes)[-MAX_EXPERIMENT_TAG_SUMMARIES:]
+            for tag in selected_tags
         },
     }
 
