@@ -336,7 +336,7 @@ def test_agent_generator_receives_verified_evaluation_feedback(tmp_path: Path) -
     assert len(agent.requests) == 2
     assert "constraint_violation" in agent.requests[1].prompt
     assert "serve-all failed" in agent.requests[1].prompt
-    assert "return 1" not in agent.requests[1].prompt
+    assert "return 1" in agent.requests[1].prompt
 
 
 def test_agent_portfolio_rotates_explicit_solvers_deterministically(tmp_path: Path) -> None:

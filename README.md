@@ -595,11 +595,21 @@ The ordered evaluator command list and shared role/capability profile are includ
 credential-safe resume fingerprint. Use either this ensemble or one `--evaluator-command` /
 `--evaluator-agent-command`; mixing evaluator modes is rejected before a run is created.
 
-When an Agent is the solver, later generations also receive a small `evaluation_feedback` projection
-for recent candidates: validity, metric scores, and controlled constraint error codes/messages. It
-is reconstructed from validated archive reports on resume, capped at eight metrics/errors, and
-explicitly labeled as evidence. Candidate source, prompts, logs, and adapter exception text are not
-copied into the solver prompt.
+When an Agent is the solver, later generations receive execution-grounded refinement evidence for
+their parent, population inspirations, and recent archive entries. The shared envelope combines a
+bounded/redacted candidate source excerpt, source digest, controlled process/output-contract status,
+verified output path/size/digest metadata, and the independent `evaluation_feedback` projection.
+This lets native loop and population search repair a real failed attempt instead of merely sampling
+again. It is reconstructed from the candidate archive on resume; no second feedback database or
+in-memory chat dependency is required.
+
+Raw input rows, output contents, candidate stdout/stderr, model credentials, and evaluator adapter
+exceptions are excluded. Unsafe or oversized source/execution/output evidence degrades to a stable
+unavailable category, and the complete generation prompt remains bounded. Direct callback and
+command generators retain their existing `GenerationRequest`; this evidence join is specific to
+the repository Agent bridge. See
+[`specs/039-execution-grounded-refinement/`](specs/039-execution-grounded-refinement/) for the SDD
+contract.
 
 `status --json` and `events --json` expose the evolution result, iteration events, candidate archive
 events, Agent model/tool lifecycle events, and indexed `evolution/archive.jsonl`,
