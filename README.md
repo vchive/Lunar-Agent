@@ -18,6 +18,8 @@ algorithm input staging work in
 [`specs/032-algorithm-input-staging/`](specs/032-algorithm-input-staging/), building on the
 strict role evidence contracts in
 [`specs/033-role-evidence-contracts/`](specs/033-role-evidence-contracts/), building on the
+one-shot runtime artifact envelope in
+[`specs/034-runtime-artifact-envelope/`](specs/034-runtime-artifact-envelope/), building on the
 unified evolution benchmark in
 [`specs/028-unified-evolution-benchmark/`](specs/028-unified-evolution-benchmark/), building on the
 reproducible native benchmark in
@@ -89,6 +91,17 @@ Inputs are recorded as `kind=input_data` with size and SHA-256 metadata. The sou
 never persisted, and resuming with the same bytes is idempotent. Algorithm roles read the verified
 copies from `data/raw/...` in their own attempt workspace, just as they write outputs under their
 private `output/` directory.
+
+When a one-shot OpenAI-compatible model cannot call file tools, a structured task may return a
+bounded JSON artifact envelope instead of writing directly:
+
+```json
+{"text":"Route table generated.","artifacts":[{"path":"output/routes.csv","content":"order_id,route_id\n1,r1\n"}]}
+```
+
+The runtime writes only these relative UTF-8 files into the private attempt workspace. The same
+`OutputSpec`/role acceptance, hashing, retry, and delivery checks still apply; tool calls remain
+available through the explicit `--agent-loop` option.
 
 For a more explicit specialist workflow, add `--role-dag`:
 

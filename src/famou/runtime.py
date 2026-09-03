@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 from collections.abc import Callable, Sequence
@@ -18,6 +19,14 @@ from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
+
+MAX_ENVELOPE_ARTIFACTS = 32
+MAX_ENVELOPE_BYTES = 256 * 1024
+MAX_ENVELOPE_METADATA = 16
+MAX_ENVELOPE_METADATA_BYTES = 2_000
+_SECRET_RE = re.compile(
+    r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*\S+)"
+)
 
 
 @dataclass(frozen=True)
@@ -281,10 +290,122 @@ class OpenAICompatibleRuntime:
             )
         if not turn.text:
             raise RuntimeExecutionError("model endpoint returned empty content")
+        text, artifacts, envelope_metadata = self._materialize_artifact_envelope(turn.text, workspace)
         return RuntimeResult(
-            text=turn.text,
-            metadata={"provider": "openai-compatible", "model": self.model},
+            text=text,
+            artifacts=artifacts,
+            metadata={
+                "provider": "openai-compatible",
+                "model": self.model,
+                **envelope_metadata,
+            },
         )
+
+    def _materialize_artifact_envelope(
+        self, text: str, workspace: Path
+    ) -> tuple[str, tuple[str, ...], dict[str, str]]:
+        """Decode an optional one-shot ``{text, artifacts}`` response and write confined files."""
+        try:
+            payload = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            return text, (), {}
+        if not isinstance(payload, dict) or "artifacts" not in payload:
+            return text, (), {}
+        if set(payload) - {"text", "artifacts", "metadata"}:
+            raise RuntimeExecutionError("artifact envelope contains unknown fields")
+        envelope_text = payload.get("text")
+        if not isinstance(envelope_text, str):
+            raise RuntimeExecutionError("artifact envelope text must be a string")
+        raw_artifacts = payload.get("artifacts")
+        if not isinstance(raw_artifacts, list) or len(raw_artifacts) > MAX_ENVELOPE_ARTIFACTS:
+            raise RuntimeExecutionError(
+                f"artifact envelope must contain at most {MAX_ENVELOPE_ARTIFACTS} files"
+            )
+        root = workspace.expanduser()
+        if root.exists() and root.is_symlink():
+            raise RuntimeExecutionError("artifact envelope workspace must not be a symlink")
+        root = root.resolve(strict=False)
+        root.mkdir(parents=True, exist_ok=True)
+        entries: list[tuple[str, Path, bytes]] = []
+        seen: set[str] = set()
+        total_bytes = 0
+        for item in raw_artifacts:
+            if not isinstance(item, dict) or set(item) != {"path", "content"}:
+                raise RuntimeExecutionError("artifact envelope entries require path and content")
+            relative = item["path"]
+            content = item["content"]
+            if not isinstance(relative, str) or not relative.strip():
+                raise RuntimeExecutionError("artifact envelope path must be non-empty")
+            if (
+                "\\" in relative
+                or "\x00" in relative
+                or Path(relative).is_absolute()
+                or any(part in {"", ".", ".."} for part in relative.split("/"))
+            ):
+                raise RuntimeExecutionError("artifact envelope paths must be portable relative paths")
+            if relative in seen:
+                raise RuntimeExecutionError(f"artifact envelope contains duplicate path: {relative}")
+            seen.add(relative)
+            if not isinstance(content, str):
+                raise RuntimeExecutionError("artifact envelope content must be a string")
+            encoded = content.encode("utf-8")
+            total_bytes += len(encoded)
+            if total_bytes > MAX_ENVELOPE_BYTES:
+                raise RuntimeExecutionError(
+                    f"artifact envelope exceeds {MAX_ENVELOPE_BYTES} bytes"
+                )
+            raw = root / relative
+            if self._path_has_symlink(root, raw):
+                raise RuntimeExecutionError(f"artifact envelope path is symlinked: {relative}")
+            resolved = raw.resolve(strict=False)
+            try:
+                resolved.relative_to(root)
+            except ValueError as exc:
+                raise RuntimeExecutionError(
+                    f"artifact envelope path escapes the workspace: {relative}"
+                ) from exc
+            entries.append((relative, resolved, encoded))
+        raw_metadata = payload.get("metadata", {})
+        if raw_metadata is None:
+            raw_metadata = {}
+        if not isinstance(raw_metadata, dict) or len(raw_metadata) > MAX_ENVELOPE_METADATA:
+            raise RuntimeExecutionError("artifact envelope metadata must be a bounded string object")
+        metadata: dict[str, str] = {}
+        for key, value in raw_metadata.items():
+            if (
+                not isinstance(key, str)
+                or not key.strip()
+                or key in {"provider", "model", "artifact_envelope"}
+                or not isinstance(value, str)
+                or len(value.encode("utf-8")) > MAX_ENVELOPE_METADATA_BYTES
+                or _SECRET_RE.search(value)
+            ):
+                raise RuntimeExecutionError("artifact envelope metadata is invalid")
+            metadata[f"envelope_{key}"] = value
+        for relative, target, encoded in entries:
+            if self._path_has_symlink(root, target):
+                raise RuntimeExecutionError(f"artifact envelope path is symlinked: {relative}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() and target.is_symlink():
+                raise RuntimeExecutionError(f"artifact envelope path is symlinked: {relative}")
+            temporary = target.with_name(f".{target.name}.tmp")
+            temporary.write_bytes(encoded)
+            temporary.replace(target)
+        if entries:
+            metadata["artifact_envelope"] = "true"
+        return envelope_text, tuple(relative for relative, _, _ in entries), metadata
+
+    @staticmethod
+    def _path_has_symlink(root: Path, path: Path) -> bool:
+        current = path
+        while True:
+            if current.exists() and current.is_symlink():
+                return True
+            if current == root:
+                return False
+            if current.parent == current:
+                return True
+            current = current.parent
 
     def complete(
         self,

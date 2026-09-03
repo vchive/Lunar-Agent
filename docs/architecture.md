@@ -19,6 +19,7 @@ flowchart TD
     C --> D[DAG scheduler\nclaim · retry · recover · cancel]
     D --> A[Runtime Adapter\nmock / subprocess / OpenAI-compatible\nHermesSessionRuntime]
     A --> RA[Repository-owned Evolution Runtime\nMockRuntime · SubprocessRuntime\nOpenAICompatibleRuntime]
+    A --> ENV[Optional one-shot artifact envelope\nconfined UTF-8 files]
     C --> AR[AgentRegistry\nexplicit role + capability selection]
     AR --> AA[Agent Adapter\nRuntime wrapper or command JSON adapter]
     AA --> AG[AgentCandidateGenerator\nsolver proposal bridge]
@@ -147,6 +148,11 @@ inspectable.
     and review markdown, and an `EvaluationReport`-validated `evaluate/evaluation.json`. Present
     role files are hashed as `role_evidence` artifacts even when another acceptance rule fails;
     delivery still requires the evidence to belong to the successful attempt.
+12. A one-shot OpenAI-compatible turn may optionally return a strict `{text, artifacts}` envelope.
+    `OpenAICompatibleRuntime` writes only bounded relative UTF-8 files under the private attempt
+    workspace and returns their paths through `RuntimeResult`; the existing role/output acceptance
+    and promotion boundaries remain authoritative. Tool-calling models continue to use the explicit
+    `AgentLoopRuntime` path.
 
 ## Deliberate boundary versus WebAgent
 

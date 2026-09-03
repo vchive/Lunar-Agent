@@ -8,7 +8,11 @@ from typing import ClassVar, Self
 
 import pytest
 
+from famou.algorithm import AlgorithmProblemContract
 from famou.artifacts import ArtifactError, ArtifactStore
+from famou.config import Config
+from famou.controller import LocalController
+from famou.policy import PlanDocument, PlanTask
 from famou.runtime import (
     MockRuntime,
     ModelTurn,
@@ -157,6 +161,150 @@ def test_openai_compatible_runtime_parses_structured_tool_calls(tmp_path: Path) 
     assert turn.text == ""
     assert turn.tool_calls[0].name == "read_file"
     assert turn.tool_calls[0].arguments == {"path": "a.txt"}
+
+
+def test_openai_compatible_runtime_materializes_one_shot_artifact_envelope(tmp_path: Path) -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    ModelHandler.response_body = json.dumps(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "text": "route table generated",
+                                "artifacts": [
+                                    {
+                                        "path": "output/routes.csv",
+                                        "content": "order_id,route_id\n1,r1\n",
+                                    }
+                                ],
+                                "metadata": {"mode": "batch"},
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+    ).encode()
+    with ModelServer(ModelHandler) as server:
+        result = OpenAICompatibleRuntime(server.url, "model").run("write routes", tmp_path, timeout=1)
+
+    assert result.text == "route table generated"
+    assert result.artifacts == ("output/routes.csv",)
+    assert result.metadata["artifact_envelope"] == "true"
+    assert (tmp_path / "output" / "routes.csv").read_text(encoding="utf-8").startswith("order_id")
+
+
+def test_one_shot_envelope_completes_structured_output_promotion(tmp_path: Path) -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    ModelHandler.response_body = json.dumps(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "text": "route table generated",
+                                "artifacts": [
+                                    {
+                                        "path": "output/routes.csv",
+                                        "content": "item_id,route_id\n1,r1\n",
+                                    }
+                                ],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+    ).encode()
+    contract = AlgorithmProblemContract.from_dict(
+        {
+            "schema_version": "1",
+            "problem_id": "envelope-output",
+            "problem_type": "routing",
+            "statement": "Assign every item to a route.",
+            "inputs": [{"path": "items.csv", "format": "csv", "fields": {"id": "item id"}}],
+            "decision_variables": ["route per item"],
+            "objective": {"name": "distance", "direction": "minimize"},
+            "hard_constraints": [],
+            "soft_constraints": [],
+            "success_criteria": ["Every item appears."],
+            "deliverables": ["Route table."],
+            "outputs": [{"path": "output/routes.csv", "format": "csv", "fields": ["item_id", "route_id"]}],
+        }
+    )
+    plan = PlanDocument(
+        goal="solve envelope routes",
+        plan_id="plan-envelope-output",
+        tasks=(PlanTask("solver", "Solver", "write routes"),),
+        algorithm_problem=contract.to_dict(),
+    )
+    with ModelServer(ModelHandler) as server:
+        controller = LocalController(
+            Config(tmp_path / "home"), OpenAICompatibleRuntime(server.url, "model")
+        )
+        run = controller.start_plan(plan)
+
+    assert run.status.value == "succeeded"
+    assert (run.workspace / "output" / "routes.csv").is_file()
+    assert controller.deliver(run.id).action == "deliver"
+
+
+@pytest.mark.parametrize(
+    "artifact, match",
+    [
+        ({"path": "../escape.txt", "content": "bad"}, "relative"),
+        ({"path": "/tmp/escape.txt", "content": "bad"}, "relative"),
+        ({"path": "output/a.txt", "content": "a"}, "duplicate"),
+    ],
+)
+def test_openai_compatible_runtime_rejects_unsafe_artifact_envelopes(
+    tmp_path: Path, artifact: dict[str, str], match: str
+) -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    duplicate = artifact | {"path": "output/a.txt"}
+    envelope = {
+        "text": "done",
+        "artifacts": [artifact, duplicate] if match == "duplicate" else [artifact],
+    }
+    ModelHandler.response_body = json.dumps(
+        {"choices": [{"message": {"content": json.dumps(envelope)}}]}
+    ).encode()
+    with ModelServer(ModelHandler) as server, pytest.raises(RuntimeExecutionError, match=match):
+        OpenAICompatibleRuntime(server.url, "model").run("write", tmp_path, timeout=1)
+    assert not (tmp_path / "escape.txt").exists()
+
+
+def test_openai_compatible_runtime_rejects_oversized_envelope_content(tmp_path: Path) -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    envelope = {"text": "done", "artifacts": [{"path": "large.txt", "content": "x" * (256 * 1024 + 1)}]}
+    ModelHandler.response_body = json.dumps(
+        {"choices": [{"message": {"content": json.dumps(envelope)}}]}
+    ).encode()
+    with ModelServer(ModelHandler) as server, pytest.raises(RuntimeExecutionError, match="bytes"):
+        OpenAICompatibleRuntime(server.url, "model").run("write", tmp_path, timeout=1)
+    assert not (tmp_path / "large.txt").exists()
+
+
+def test_openai_compatible_runtime_rejects_symlinked_envelope_directory(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    ModelHandler.response_status = 200
+    ModelHandler.delay = 0.0
+    envelope = {"text": "done", "artifacts": [{"path": "link/secret.txt", "content": "bad"}]}
+    ModelHandler.response_body = json.dumps(
+        {"choices": [{"message": {"content": json.dumps(envelope)}}]}
+    ).encode()
+    with ModelServer(ModelHandler) as server, pytest.raises(RuntimeExecutionError, match="symlink"):
+        OpenAICompatibleRuntime(server.url, "model").run("write", tmp_path, timeout=1)
+    assert not (outside / "secret.txt").exists()
 
 
 def test_artifact_paths_are_confined_to_run_workspace(tmp_path: Path) -> None:

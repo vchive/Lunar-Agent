@@ -1864,10 +1864,24 @@ class LocalController:
                 )
                 for output in output_specs
             )
+        role_evidence_specs = self._role_evidence_specs(task.acceptance)
+        envelope_instructions: list[str] = []
+        if output_specs or role_evidence_specs:
+            envelope_instructions = [
+                "If this runtime cannot call file tools, you may return one strict JSON artifact envelope instead:",
+                '{"text":"...", "artifacts":[{"path":"relative/path", "content":"UTF-8 text"}]}.',
+                "Use only the declared relative paths; the controller will validate each file before delivery.",
+            ]
+            if role_evidence_specs:
+                envelope_instructions.append(
+                    "Declared role hand-off paths: "
+                    + ", ".join(path for _, path in role_evidence_specs)
+                    + "."
+                )
         if not dependencies and not answer_content:
-            sections = [*input_instructions, *output_instructions, task.prompt]
+            sections = [*input_instructions, *output_instructions, *envelope_instructions, task.prompt]
         else:
-            sections = [*input_instructions, *output_instructions, task.prompt]
+            sections = [*input_instructions, *output_instructions, *envelope_instructions, task.prompt]
             if answer_content:
                 sections.extend(
                     [
