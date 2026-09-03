@@ -36,6 +36,12 @@ from .conversational import (
     build_algorithm_plan,
     build_algorithm_role_plan,
 )
+from .evaluator_bundle import (
+    EvaluatorBundleError,
+    FrozenEvaluatorBundle,
+    compile_evaluator_bundle,
+    load_evaluator_bundle,
+)
 from .evolution import (
     Candidate,
     CandidateArchive,
@@ -101,11 +107,13 @@ __all__ = [
     "ContractCandidateRunner",
     "ContractCompilationError",
     "ContractCompiler",
+    "EvaluatorBundleError",
     "EvolutionConfig",
     "EvolutionContext",
     "EvolutionError",
     "EvolutionStrategy",
     "ExecutionAwareCandidateEvaluator",
+    "FrozenEvaluatorBundle",
     "GenerationRequest",
     "LoopStrategy",
     "OpenEvolveStrategy",
@@ -119,7 +127,9 @@ __all__ = [
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_strategy",
+    "compile_evaluator_bundle",
     "config_from_contract",
     "contract_candidate_runner_fingerprint",
+    "load_evaluator_bundle",
     "stage_candidate_inputs",
 ]

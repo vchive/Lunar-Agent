@@ -41,8 +41,8 @@ reconstructs the same context without new mutable state.
 
 ### User Story 3 — Preserve a safe local boundary (P1)
 
-1. Candidate source, stdout/stderr/error text, paths, and evaluator messages are bounded and secrets
-   are redacted before entering a generation prompt.
+1. Candidate source, controlled error text, paths, and evaluator messages are bounded and secrets
+   are redacted before entering a generation prompt; stdout/stderr enter only as byte counts.
 2. Raw staged inputs, raw generated outputs, unsafe symlinks, oversized/malformed execution files,
    and unhandled adapter exception details are not exposed.
 3. Direct callback and command generators keep their existing `GenerationRequest` behavior; this

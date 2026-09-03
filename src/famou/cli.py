@@ -34,6 +34,7 @@ from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
 from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
+from .evaluator_bundle import compile_evaluator_bundle
 from .evolution import (
     CandidateInputArtifact,
     CommandCandidateEvaluator,
@@ -188,6 +189,11 @@ def build_parser() -> argparse.ArgumentParser:
     solve_parser.add_argument(
         "--evaluator-command",
         help="explicit local objective harness for native --evolve candidates",
+    )
+    solve_parser.add_argument(
+        "--compile-evaluator",
+        action="store_true",
+        help="compile, preflight, and freeze a local evaluator before native evolution",
     )
     solve_parser.add_argument("--max-rounds", type=int)
     solve_parser.add_argument("--stagnation-rounds", type=int)
@@ -437,6 +443,11 @@ def build_parser() -> argparse.ArgumentParser:
     answer_parser.add_argument(
         "--evaluator-command",
         help="explicit local objective harness for a pending native evolution handoff",
+    )
+    answer_parser.add_argument(
+        "--compile-evaluator",
+        action="store_true",
+        help="enable a pending compiled evaluator handoff",
     )
     _add_runtime_options(answer_parser)
     _add_home(answer_parser)
@@ -1212,6 +1223,8 @@ def _stage_input_files(
 
 def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Compile and execute one conversational algorithm mission."""
+    if args.compile_evaluator and not args.evolve:
+        raise ValueError("--compile-evaluator requires --evolve")
     if not args.evolve and any(
         getattr(args, name, None) is not None
         for name in (
@@ -1232,6 +1245,10 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("evolution options require --evolve")
     if args.evolve:
         _validate_evolution_cli_bounds(args)
+        if args.compile_evaluator and args.evaluator_command:
+            raise ValueError("--compile-evaluator and --evaluator-command are mutually exclusive")
+        if args.strategy == "openevolve" and args.compile_evaluator:
+            raise ValueError("--compile-evaluator is supported only by native evolution strategies")
         if args.strategy == "openevolve" and args.evaluator_command:
             raise ValueError("--evaluator-command is supported only by native evolution strategies")
     controller = _controller(args, config)
@@ -1321,6 +1338,7 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
         "timeout": args.timeout if args.timeout is not None else 900.0,
         "openevolve_command_configured": bool(args.openevolve_command),
         "evaluator_command_configured": bool(args.evaluator_command),
+        "compile_evaluator": bool(getattr(args, "compile_evaluator", False)),
     }
 
 
@@ -1392,6 +1410,11 @@ def _validate_evolution_override(args: argparse.Namespace, request: dict[str, ob
         if configured:
             raise EvolutionError("solve evolution requires the configured evaluator command")
         raise EvolutionError("solve evolution did not configure an evaluator command")
+    compiled = request.get("compile_evaluator", False)
+    if not isinstance(compiled, bool):
+        raise EvolutionError("solve evolution compiled evaluator marker is invalid")
+    if getattr(args, "compile_evaluator", False) and not compiled:
+        raise EvolutionError("solve evolution did not configure a compiled evaluator")
 
 
 def _evolution_args(
@@ -1406,6 +1429,7 @@ def _evolution_args(
         "strategy",
         "openevolve_command",
         "evaluator_command",
+        "compile_evaluator",
         "max_rounds",
         "stagnation_rounds",
         "population_size",
@@ -1431,7 +1455,56 @@ def _evolution_args(
     ):
         if name in request and request[name] is not None:
             values[name] = request[name]
+    values["compile_evaluator"] = bool(request.get("compile_evaluator", False))
     return argparse.Namespace(**values)
+
+
+def _index_evaluator_bundle(
+    controller: LocalController,
+    parent: Run,
+    bundle_root: Path,
+    fingerprint: str,
+) -> None:
+    """Index one verified frozen bundle without copying source or probes into events."""
+    tasks = controller.store.list_tasks(parent.id)
+    if not tasks:
+        raise EvolutionError("compiled evaluator parent run has no artifact owner")
+    owner = tasks[0].id
+    artifacts = ArtifactStore(parent.workspace, controller.store, parent.id)
+    existing = {
+        (item["path"], item["sha256"])
+        for item in controller.store.list_artifacts(parent.id)
+        if item["kind"] == "evaluator_bundle"
+    }
+    indexed: list[dict[str, object]] = []
+    for path in sorted(bundle_root.iterdir(), key=lambda item: item.name):
+        relative = path.relative_to(parent.workspace).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if (relative, digest) not in existing:
+            artifact_id = artifacts.record(path, owner, kind="evaluator_bundle")
+        else:
+            artifact_id = next(
+                item["id"]
+                for item in controller.store.list_artifacts(parent.id)
+                if item["kind"] == "evaluator_bundle"
+                and item["path"] == relative
+                and item["sha256"] == digest
+            )
+        indexed.append(
+            {
+                "artifact_id": artifact_id,
+                "path": relative,
+                "size": path.stat().st_size,
+                "sha256": digest,
+            }
+        )
+    controller.store.append_event(
+        parent.id,
+        "evaluator_bundle_frozen",
+        {"bundle_sha256": fingerprint, "artifacts": indexed},
+        task_id=owner,
+        event_id="event-evaluator-bundle-" + fingerprint,
+    )
 
 
 def _solve_evolution(
@@ -1454,6 +1527,7 @@ def _solve_evolution(
     candidate_inputs = _candidate_input_artifacts(controller.store, parent.id)
     strategy_name = args.strategy or contract.evolution.strategy
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
+    compile_evaluator = bool(getattr(args, "compile_evaluator", False))
 
     # Validate all strategy/runtime settings before creating any child workspace or mutating the
     # intake plan. This keeps malformed opt-in requests side-effect free.
@@ -1465,6 +1539,8 @@ def _solve_evolution(
         else contract.evolution.stagnation_rounds
     )
     if strategy_name == "openevolve":
+        if compile_evaluator:
+            raise ValueError("--compile-evaluator is supported only by native evolution strategies")
         if evaluator_command:
             raise ValueError("--evaluator-command is supported only by native evolution strategies")
         if not openevolve_command:
@@ -1486,6 +1562,8 @@ def _solve_evolution(
     else:
         if openevolve_command:
             raise ValueError("--openevolve-command requires --evolve --strategy openevolve")
+        if compile_evaluator and evaluator_command:
+            raise ValueError("--compile-evaluator and --evaluator-command are mutually exclusive")
         runtime = controller.runtime
         solver_adapter = RuntimeAgentAdapter(
             runtime,
@@ -1510,7 +1588,17 @@ def _solve_evolution(
         generator_fingerprint = hashlib.sha256(
             f"{runtime_fingerprint}:solver".encode()
         ).hexdigest()
-        if evaluator_command:
+        if compile_evaluator:
+            bundle = compile_evaluator_bundle(
+                runtime,
+                contract,
+                Path(parent.workspace),
+                timeout=args.timeout,
+            )
+            evaluator = bundle
+            evaluator_fingerprint = bundle.fingerprint
+            _index_evaluator_bundle(controller, parent, bundle.root, bundle.fingerprint)
+        elif evaluator_command:
             evaluator = CommandCandidateEvaluator(
                 evaluator_command,
                 args.timeout,
@@ -1765,6 +1853,8 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
         command.append("--role-dag")
     if args.evolve:
         command.append("--evolve")
+    if getattr(args, "compile_evaluator", False):
+        command.append("--compile-evaluator")
     for option, value in (
         ("--strategy", args.strategy),
         ("--openevolve-command", args.openevolve_command),
@@ -2817,6 +2907,14 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("input request was answered concurrently; inspect status")
     controller = _controller(args, config)
     evolution_request = _latest_evolution_request(store, run.id)
+    if evolution_request is not None:
+        compiled = bool(evolution_request.get("compile_evaluator", False))
+        if getattr(args, "compile_evaluator", False) and not compiled:
+            raise EvolutionError("solve evolution did not configure a compiled evaluator")
+        if getattr(args, "evaluator_command", None) and compiled:
+            raise EvolutionError(
+                "compiled evaluator and evaluator command are mutually exclusive"
+            )
     if conversation and run.current_plan_id is None:
         resumed = controller.resume_conversational(
             run.id,

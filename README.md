@@ -7,8 +7,12 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current execution-grounded
-search boundary is captured in
+The project is being developed with Spec-Driven Development (SDD). The current frozen-evaluator
+boundary is captured in
+[`specs/040-frozen-evaluator-bundle/`](specs/040-frozen-evaluator-bundle/), building on the
+execution-grounded refinement loop in
+[`specs/039-execution-grounded-refinement/`](specs/039-execution-grounded-refinement/) and the
+optional exact scorer in
 [`specs/038-objective-harness-handoff/`](specs/038-objective-harness-handoff/), which adds an
 optional exact local objective scorer to the execution-grounded search in
 [`specs/037-execution-grounded-evolution/`](specs/037-execution-grounded-evolution/), building on
@@ -139,6 +143,31 @@ minimizer can use `1 / (1 + cost)` and retain raw cost with direction `minimize`
 credentials or arbitrary parent variables. Its command is fingerprinted but not persisted; resume
 must supply the same `--evaluator-command` again. Final output still comes from the independent
 clean-room materialization, never directly from search evidence.
+
+If no exact scorer already exists, native search can explicitly compile one before the first
+candidate:
+
+```bash
+lunar-agent solve "minimize route cost and write output/routes.csv" \
+  --input ./orders.csv --runtime openai-compatible \
+  --endpoint http://127.0.0.1:11434/v1 --model local-model \
+  --evolve --compile-evaluator --strategy population \
+  --max-rounds 5 --json --home .lunar
+```
+
+The evaluator compiler is a separate runtime turn. It must return a strict objective, Python
+evaluator, one synthetic rejecting probe per hard constraint, at least two valid probes, and a
+declared better/worse score ordering. Lunar-Agent statically rejects dangerous imports and dynamic
+execution, runs every probe locally, parses every result through `EvaluationReport`, and starts
+search only after constraint validity and score ordering pass. It then hashes and freezes
+`objective.md`, `evaluator.py`, `probes.json`, and `manifest.json` under the intake run. Resume
+verifies and reuses the same bundle instead of asking a model to rewrite the judge.
+
+The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
+runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
+output. Its source and synthetic probes are kept outside solver generation workspaces; solvers see
+only controlled evaluation/refinement evidence. Use `--evaluator-command` when an owner-reviewed
+domain harness already exists; the two modes are intentionally mutually exclusive.
 
 Provide real local data explicitly with repeatable `--input` options. A source is staged into the
 run's `data/raw/` directory and copied into each isolated task attempt; use `SOURCE=DEST` when the
