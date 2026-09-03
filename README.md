@@ -7,8 +7,10 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current evolved-output
-materialization boundary is captured in
+The project is being developed with Spec-Driven Development (SDD). The current execution-grounded
+search boundary is captured in
+[`specs/037-execution-grounded-evolution/`](specs/037-execution-grounded-evolution/), building on
+the evolved-output materialization boundary in
 [`specs/036-evolved-output-materialization/`](specs/036-evolved-output-materialization/), building
 on the conversational evolution handoff in
 [`specs/035-conversational-evolution-handoff/`](specs/035-conversational-evolution-handoff/),
@@ -94,12 +96,19 @@ validated contract and explicitly supersedes its unstarted generated-plan tasks;
 `evolution/archive.jsonl`, `state.json`, and `result.json`. Staged `--input` files are copied into
 the child with the same SHA-256 and size, never with the source-machine path.
 
-When the compiled contract declares `outputs`, Lunar-Agent then runs the selected best `.py`
-candidate once more in an isolated final workspace. It receives copied `data/raw/*`, must write the
-exact declared `output/*` files, and runs with the repository's Python interpreter in isolated mode
-and a minimal non-secret environment. CSV/JSON/JSONL/text format and fields are independently
-validated before bytes are atomically promoted to the intake workspace. The response exposes this
-as `evolution.materialization`; a failed process, timeout, missing/malformed output, symlink,
+For native `loop` and `population`, every generated `.py` candidate now runs in its own archive
+directory before model evaluation. It receives digest-checked `data/raw/*` copies and a minimal
+non-secret environment. Required and present optional outputs must pass the immutable
+CSV/JSON/JSONL/text contract; a process or output failure becomes local validity zero and skips the
+model evaluator entirely. Successful evaluator requests contain a bounded source excerpt,
+execution summary, and output path/schema/size/SHA-256 metadata—not raw input or output contents.
+Source-only contracts receive the same process gate without requiring output files.
+
+When the compiled contract declares `outputs`, Lunar-Agent then runs the selected best candidate
+once more in a separate final workspace. Search-time output is evidence only and is never promoted
+directly. The final candidate must recreate the exact declared files before their bytes are
+atomically promoted to the intake workspace. The response exposes this as
+`evolution.materialization`; a failed process, timeout, missing/malformed output, symlink,
 oversized file, or conflicting destination makes the effective `solve` status fail and prevents
 `deliver`.
 
@@ -448,9 +457,9 @@ lunar-agent evolve contract.json --strategy loop \
 
 The evaluator keeps its existing candidate-path argument and can read the sibling
 `execution.json`. A runner timeout, non-zero exit, oversized output, or path violation becomes an
-invalid report and can never replace the best candidate. The evidence file is indexed and hashed
-by the local ledger. The runner is opt-in, so historical command-only and Agent-backed evolution
-remains compatible.
+invalid report before the evaluator is invoked and can never replace the best candidate. The
+evidence file is indexed and hashed by the local ledger. The runner remains opt-in on this low-level
+command, so historical command-only and Agent-backed evolution remains compatible.
 
 ### Repository-owned runtime evolution
 

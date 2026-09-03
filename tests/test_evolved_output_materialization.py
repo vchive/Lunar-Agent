@@ -253,8 +253,8 @@ def test_solve_reports_composite_failure_when_final_output_is_missing(
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "failed"
     assert payload["run_status"] == "succeeded"
-    assert payload["evolution"]["status"] == "succeeded"
-    assert payload["evolution"]["materialization"]["status"] == "failed"
+    assert payload["evolution"]["status"] == "failed"
+    assert payload["evolution"]["materialization"] is None
     assert payload["algorithm_outputs"] == []
     assert main(["deliver", payload["run_id"], "--json", "--home", str(home)]) == 2
     assert "no successful evolved output materialization" in capsys.readouterr().err

@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from statistics import median
 
 from .agents import AgentAdapter, AgentError, AgentRegistry, AgentRequest, AgentResult
 from .algorithm import AlgorithmProblemContract, EvaluationReport
-from .evolution import CandidateDraft, EvolutionError, GenerationRequest
+from .evolution import (
+    CandidateDraft,
+    CandidateExecution,
+    CandidateInputArtifact,
+    EvolutionError,
+    GenerationRequest,
+    stage_candidate_inputs,
+)
 
 MAX_GENERATION_PROMPT_BYTES = 60 * 1024
 MAX_CONTEXT_ITEMS = 8
@@ -17,6 +26,12 @@ MAX_FEEDBACK_ITEMS = 8
 MAX_FEEDBACK_TEXT_BYTES = 512
 MAX_AGENT_ARTIFACTS = 64
 MAX_AGENT_ARTIFACT_BYTES = 1 * 1024 * 1024
+MAX_EVALUATOR_SOURCE_BYTES = 24 * 1024
+MAX_EXECUTION_EVIDENCE_BYTES = 64 * 1024
+_SECRET_EVIDENCE = re.compile(
+    r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|"
+    r"api[_-]?key\s*[:=]\s*\S+)"
+)
 
 AgentEvidenceObserver = Callable[[str, dict[str, object]], None]
 
@@ -26,7 +41,7 @@ def _reject_symlink_components(path: Path, root: Path) -> None:
     root = root.resolve(strict=False)
     current = path
     while True:
-        if current.exists() and current.is_symlink():
+        if current.is_symlink():
             raise EvolutionError("Agent artifact must not contain a symlink")
         if current == root:
             return
@@ -97,12 +112,16 @@ class AgentCandidateGenerator:
         role: str = "solver",
         required_capabilities: Sequence[str] = (),
         timeout: float | None = None,
+        inputs: Sequence[CandidateInputArtifact] = (),
     ) -> None:
         self.adapter = AgentRegistry([adapter]).select(role, tuple(required_capabilities))
         self.contract = contract
         self.role = role
         self.required_capabilities = tuple(required_capabilities)
         self.timeout = timeout
+        self.inputs = tuple(inputs)
+        if any(not isinstance(item, CandidateInputArtifact) for item in self.inputs):
+            raise TypeError("inputs must contain CandidateInputArtifact records")
         self._calls = 0
         self._observer: AgentEvidenceObserver | None = None
 
@@ -125,6 +144,7 @@ class AgentCandidateGenerator:
             / f"{request.iteration:08d}-{self._calls:04d}"
         ).resolve(strict=False)
         generation_workspace.mkdir(parents=True, exist_ok=True)
+        stage_candidate_inputs(request.workspace, generation_workspace, self.inputs)
         prompt = self._prompt(request)
         agent_request = AgentRequest(
             run_id=f"evolution-{request.workspace.name or 'workspace'}",
@@ -271,6 +291,7 @@ class AgentPortfolioGenerator:
         role: str = "solver",
         required_capabilities: Sequence[str] = (),
         timeout: float | None = None,
+        inputs: Sequence[CandidateInputArtifact] = (),
     ) -> None:
         if isinstance(adapters, (str, bytes)):
             raise TypeError("adapters must be a sequence of Agent adapters")
@@ -284,6 +305,7 @@ class AgentPortfolioGenerator:
                 role=role,
                 required_capabilities=required_capabilities,
                 timeout=timeout,
+                inputs=inputs,
             )
             for adapter in normalized
         )
@@ -414,15 +436,77 @@ class AgentCandidateEvaluator:
                 "outputs",
             )
         }
+        source = candidate.read_bytes()
+        source_excerpt = source[:MAX_EVALUATOR_SOURCE_BYTES].decode("utf-8", errors="replace")
+        source_excerpt = _SECRET_EVIDENCE.sub("[REDACTED]", source_excerpt)
+        execution_path = candidate.parent / "execution.json"
+        execution_summary: dict[str, object] | None = None
+        validated: set[str] = set()
+        if execution_path.exists() or execution_path.is_symlink():
+            if (
+                not execution_path.is_file()
+                or execution_path.is_symlink()
+                or execution_path.stat().st_size > MAX_EXECUTION_EVIDENCE_BYTES
+            ):
+                raise EvolutionError("candidate evaluator execution evidence is unsafe")
+            try:
+                execution = CandidateExecution.from_dict(
+                    json.loads(execution_path.read_text(encoding="utf-8"))
+                )
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise EvolutionError("candidate execution evidence is invalid") from exc
+            execution_summary = {
+                "status": execution.status,
+                "exit_code": execution.exit_code,
+                "duration_ms": execution.duration_ms,
+                "stdout_bytes": execution.stdout_bytes,
+                "stderr_bytes": execution.stderr_bytes,
+                "error": execution.error,
+            }
+            if execution.status == "succeeded":
+                validated = set(execution.artifacts)
+        outputs: list[dict[str, object]] = []
+        for output in contract.outputs:
+            record: dict[str, object] = {
+                "path": output.path,
+                "format": output.format,
+                "fields": list(output.fields),
+                "required": output.required,
+                "present": output.path in validated,
+            }
+            if output.path in validated:
+                raw_output = candidate.parent / output.path
+                _reject_symlink_components(raw_output, candidate.parent)
+                if raw_output.is_symlink() or not raw_output.is_file():
+                    raise EvolutionError("validated candidate output is missing or unsafe")
+                content = raw_output.read_bytes()
+                if len(content) > MAX_AGENT_ARTIFACT_BYTES:
+                    raise EvolutionError("validated candidate output exceeds the evidence limit")
+                record.update(
+                    {
+                        "size": len(content),
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                    }
+                )
+            outputs.append(record)
         encoded = json.dumps(
-            {"candidate_path": str(candidate), "contract": summary},
+            {
+                "candidate_path": str(candidate),
+                "candidate_source": source_excerpt,
+                "candidate_source_sha256": hashlib.sha256(source).hexdigest(),
+                "candidate_source_truncated": len(source) > MAX_EVALUATOR_SOURCE_BYTES,
+                "execution": execution_summary,
+                "outputs": outputs,
+                "contract": summary,
+            },
             ensure_ascii=False,
             sort_keys=True,
             indent=2,
         )
         prompt = (
-            "You are an independent evaluator in a local algorithm-evolution run. Read the "
-            "candidate source at candidate_path and verify hard constraints and objective. Return "
+            "You are an independent evaluator in a local algorithm-evolution run. Use the "
+            "bounded candidate source, process evidence, and verified output metadata to check "
+            "hard constraints and objective. Output metadata never contains the raw output. Return "
             "exactly one JSON EvaluationReport object with schema_version, evaluator_id, validity, "
             "quality, combined_score, detailed_scores, and error_info. Do not return markdown or "
             "a natural-language verdict.\n\nEvaluation context:\n"

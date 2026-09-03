@@ -16,13 +16,22 @@ import random
 import re
 import signal
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from .algorithm import EVOLUTION_STRATEGIES, AlgorithmProblemContract, EvaluationReport
+from .algorithm import (
+    EVOLUTION_STRATEGIES,
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    AlgorithmProblemContract,
+    EvaluationReport,
+    OutputSpec,
+)
+from .evaluator import acceptance_evaluator
 
 MAX_SOURCE_BYTES = 512 * 1024
 MAX_METADATA_BYTES = 8 * 1024
@@ -93,9 +102,143 @@ def _reject_symlink_components(path: Path, stop: Path, field_name: str) -> None:
     current = path
     stop = stop.resolve()
     while current != stop and current != current.parent:
-        if current.exists() and current.is_symlink():
+        if current.is_symlink():
             raise EvolutionError(f"{field_name} must not contain a symlink")
         current = current.parent
+
+
+@dataclass(frozen=True)
+class CandidateInputArtifact:
+    """One immutable, run-relative input admitted to candidate execution."""
+
+    path: str
+    size: int
+    sha256: str
+
+    def __post_init__(self) -> None:
+        relative = _safe_relative_path(self.path, "candidate input path")
+        if not relative.startswith("data/raw/") or relative == "data/raw/":
+            raise ValueError("candidate input path must be below data/raw/")
+        if len(relative.encode("utf-8")) > 1_024:
+            raise ValueError("candidate input path exceeds the bounded path limit")
+        if (
+            isinstance(self.size, bool)
+            or not isinstance(self.size, int)
+            or not 0 <= self.size <= MAX_INPUT_FILE_BYTES
+        ):
+            raise ValueError("candidate input size is invalid")
+        if not isinstance(self.sha256, str) or not _SHA256.fullmatch(self.sha256):
+            raise ValueError("candidate input sha256 must be a lowercase SHA-256 digest")
+        object.__setattr__(self, "path", relative)
+
+
+def stage_candidate_inputs(
+    source_workspace: Path,
+    destination_workspace: Path,
+    inputs: Sequence[CandidateInputArtifact],
+) -> tuple[str, ...]:
+    """Digest-check and atomically copy immutable inputs between private workspaces."""
+    raw_source_root = Path(source_workspace).expanduser()
+    raw_destination_root = Path(destination_workspace).expanduser()
+    if raw_source_root.is_symlink() or raw_destination_root.is_symlink():
+        raise EvolutionError("candidate input workspace must not be a symlink")
+    source_root = raw_source_root.resolve(strict=False)
+    destination_root = raw_destination_root.resolve(strict=False)
+    if not source_root.is_dir():
+        raise EvolutionError("candidate input source workspace is missing")
+    destination_root.mkdir(parents=True, exist_ok=True)
+    if len(inputs) > MAX_INPUT_FILES:
+        raise EvolutionError("candidate input list exceeds the bounded file limit")
+
+    copied: list[str] = []
+    for descriptor in inputs:
+        if not isinstance(descriptor, CandidateInputArtifact):
+            raise TypeError("candidate inputs must contain CandidateInputArtifact records")
+        raw_source = source_root / descriptor.path
+        _reject_symlink_components(raw_source, source_root, "candidate input source path")
+        source = _confined(source_root, raw_source, "candidate input source path")
+        if raw_source.is_symlink() or not source.is_file():
+            raise EvolutionError(f"candidate input source is missing or unsafe: {descriptor.path}")
+        content = source.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        if len(content) != descriptor.size or digest != descriptor.sha256:
+            raise EvolutionError(f"candidate input digest does not match: {descriptor.path}")
+
+        raw_target = destination_root / descriptor.path
+        _reject_symlink_components(raw_target, destination_root, "candidate input target path")
+        target = _confined(destination_root, raw_target, "candidate input target path")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _reject_symlink_components(raw_target, destination_root, "candidate input target path")
+        if raw_target.is_symlink():
+            raise EvolutionError(f"candidate input target is unsafe: {descriptor.path}")
+        if target.exists():
+            if not target.is_file():
+                raise EvolutionError(f"candidate input target is unsafe: {descriptor.path}")
+            existing = target.read_bytes()
+            if len(existing) != descriptor.size or hashlib.sha256(existing).hexdigest() != digest:
+                raise EvolutionError(
+                    f"candidate input target already contains different data: {descriptor.path}"
+                )
+        else:
+            temporary = target.with_name(f".{target.name}.input.tmp")
+            if temporary.is_symlink():
+                raise EvolutionError(f"candidate input temporary path is unsafe: {descriptor.path}")
+            if temporary.exists():
+                stale = temporary.read_bytes() if temporary.is_file() else b""
+                if len(stale) != descriptor.size or hashlib.sha256(stale).hexdigest() != digest:
+                    raise EvolutionError(
+                        f"candidate input temporary path contains different data: {descriptor.path}"
+                    )
+            else:
+                with temporary.open("xb") as stream:
+                    stream.write(content)
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                concurrent = target.read_bytes() if target.is_file() else b""
+                if (
+                    len(concurrent) != descriptor.size
+                    or hashlib.sha256(concurrent).hexdigest() != digest
+                ):
+                    raise EvolutionError(
+                        f"candidate input target already contains different data: {descriptor.path}"
+                    )
+            else:
+                temporary.unlink()
+        if target.stat().st_size != descriptor.size or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            raise EvolutionError(f"candidate input copy digest does not match: {descriptor.path}")
+        copied.append(descriptor.path)
+    return tuple(copied)
+
+
+def contract_candidate_runner_fingerprint(
+    contract: AlgorithmProblemContract,
+    inputs: Sequence[CandidateInputArtifact],
+) -> str:
+    """Return a path- and credential-free identity for the built-in search protocol."""
+    if not isinstance(contract, AlgorithmProblemContract):
+        raise TypeError("contract must be an AlgorithmProblemContract")
+    normalized = tuple(inputs)
+    if len(normalized) > MAX_INPUT_FILES:
+        raise ValueError("candidate input list exceeds the bounded file limit")
+    if any(not isinstance(item, CandidateInputArtifact) for item in normalized):
+        raise TypeError("inputs must contain CandidateInputArtifact records")
+    if len({item.path for item in normalized}) != len(normalized):
+        raise ValueError("candidate input paths must be unique")
+    payload = {
+        "protocol": "contract-candidate-runner-v1",
+        "python": {
+            "implementation": sys.implementation.name,
+            "version": [sys.version_info.major, sys.version_info.minor, sys.version_info.micro],
+        },
+        "contract_sha256": contract.digest(),
+        "inputs": [
+            {"path": item.path, "size": item.size, "sha256": item.sha256}
+            for item in sorted(normalized, key=lambda item: item.path)
+        ],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -408,6 +551,129 @@ class CommandCandidateRunner:
         )
         _write_execution_evidence(workspace, execution)
         return execution
+
+
+class ContractCandidateRunner:
+    """Run Python candidates against copied inputs and an immutable output contract."""
+
+    def __init__(
+        self,
+        source_workspace: Path,
+        inputs: Sequence[CandidateInputArtifact],
+        outputs: Sequence[OutputSpec],
+        timeout_seconds: float = 900.0,
+    ) -> None:
+        raw_source = Path(source_workspace).expanduser()
+        if raw_source.is_symlink():
+            raise EvolutionError("candidate input source workspace must not be a symlink")
+        normalized_inputs = tuple(inputs)
+        normalized_outputs = tuple(outputs)
+        if len(normalized_inputs) > MAX_INPUT_FILES:
+            raise ValueError("candidate input list exceeds the bounded file limit")
+        if any(not isinstance(item, CandidateInputArtifact) for item in normalized_inputs):
+            raise TypeError("inputs must contain CandidateInputArtifact records")
+        if len({item.path for item in normalized_inputs}) != len(normalized_inputs):
+            raise ValueError("candidate input paths must be unique")
+        if len(normalized_outputs) > MAX_EXECUTION_ARTIFACTS:
+            raise ValueError("candidate output list exceeds the bounded file limit")
+        if any(not isinstance(item, OutputSpec) for item in normalized_outputs):
+            raise TypeError("outputs must contain OutputSpec records")
+        if len({item.path for item in normalized_outputs}) != len(normalized_outputs):
+            raise ValueError("candidate output paths must be unique")
+        self.source_workspace = raw_source.resolve(strict=False)
+        self.inputs = normalized_inputs
+        self.outputs = normalized_outputs
+        self.timeout_seconds = timeout_seconds
+        self.process_runner = CommandCandidateRunner(
+            (sys.executable, "-I"),
+            timeout_seconds=timeout_seconds,
+            environment={
+                "PYTHONHASHSEED": "0",
+                "PYTHONIOENCODING": "utf-8",
+            },
+        )
+
+    def stage_inputs(self, destination_workspace: Path) -> tuple[str, ...]:
+        """Expose the same verified copy boundary to Agent generation workspaces."""
+        return stage_candidate_inputs(
+            self.source_workspace,
+            destination_workspace,
+            self.inputs,
+        )
+
+    def run(
+        self, candidate_path: Path, workspace: Path, timeout: float | None = None
+    ) -> CandidateExecution:
+        raw_candidate = Path(candidate_path).expanduser()
+        if raw_candidate.suffix.lower() != ".py":
+            raise EvolutionError("contract candidate runner requires a .py candidate")
+        self.stage_inputs(workspace)
+        execution = self.process_runner.run(raw_candidate, workspace, timeout)
+        if execution.status != "succeeded":
+            normalized = CandidateExecution(
+                status=execution.status,
+                exit_code=execution.exit_code,
+                duration_ms=execution.duration_ms,
+                stdout=execution.stdout,
+                stderr=execution.stderr,
+                error=execution.error,
+                artifacts=(),
+            )
+            _write_execution_evidence(workspace, normalized)
+            return normalized
+
+        rules = [
+            {
+                "output_valid": {
+                    "path": output.path,
+                    "format": output.format,
+                    "fields": list(output.fields),
+                }
+            }
+            for output in self.outputs
+            if output.required
+            or (Path(workspace) / output.path).exists()
+            or (Path(workspace) / output.path).is_symlink()
+        ]
+        if rules:
+            evaluator = acceptance_evaluator(
+                rules[0] if len(rules) == 1 else {"all": rules}
+            )
+            if evaluator is None:  # pragma: no cover - rules are canonical OutputSpec values
+                raise EvolutionError("could not construct candidate output evaluator")
+            validation = evaluator.evaluate("", Path(workspace))
+            if not validation.passed:
+                stderr = "\n".join(
+                    value for value in (execution.stderr, validation.reason) if value
+                )
+                failed = CandidateExecution(
+                    status="failed",
+                    exit_code=execution.exit_code,
+                    duration_ms=execution.duration_ms,
+                    stdout=execution.stdout,
+                    stderr=_bounded_output(stderr, MAX_EXECUTION_OUTPUT_BYTES),
+                    error="output_contract_invalid",
+                    artifacts=(),
+                )
+                _write_execution_evidence(workspace, failed)
+                return failed
+
+        artifacts = tuple(
+            output.path
+            for output in self.outputs
+            if (Path(workspace) / output.path).is_file()
+            and not (Path(workspace) / output.path).is_symlink()
+        )
+        succeeded = CandidateExecution(
+            status="succeeded",
+            exit_code=execution.exit_code,
+            duration_ms=execution.duration_ms,
+            stdout=execution.stdout,
+            stderr=execution.stderr,
+            artifacts=artifacts,
+        )
+        _write_execution_evidence(workspace, succeeded)
+        return succeeded
 
 
 @dataclass(frozen=True)
@@ -1039,13 +1305,13 @@ class ExecutionAwareCandidateEvaluator:
                 stderr=_bounded_output(str(exc), MAX_EXECUTION_OUTPUT_BYTES),
             )
             _write_execution_evidence(workspace, execution)
+        if execution.status != "succeeded":
+            detail = execution.error or f"execution_{execution.status}"
+            return _invalid_report(detail)
         try:
             report = _report(self.evaluator(candidate, contract))
         except Exception as exc:  # noqa: BLE001 - evaluator failures are invalid evidence
             return _invalid_report(exc)
-        if execution.status != "succeeded":
-            detail = execution.error or f"execution_{execution.status}"
-            return _invalid_report(detail)
         return report
 
 
@@ -1619,13 +1885,18 @@ __all__ = [
     "CandidateArchive",
     "CandidateDraft",
     "CandidateEvaluator",
+    "CandidateExecution",
     "CandidateGenerator",
+    "CandidateInputArtifact",
+    "CandidateRunner",
     "CommandCandidateEvaluator",
     "CommandCandidateGenerator",
+    "ContractCandidateRunner",
     "EvolutionConfig",
     "EvolutionContext",
     "EvolutionError",
     "EvolutionStrategy",
+    "ExecutionAwareCandidateEvaluator",
     "GenerationRequest",
     "LoopStrategy",
     "OpenEvolveStrategy",
@@ -1635,4 +1906,6 @@ __all__ = [
     "StrategyResult",
     "build_strategy",
     "config_from_contract",
+    "contract_candidate_runner_fingerprint",
+    "stage_candidate_inputs",
 ]

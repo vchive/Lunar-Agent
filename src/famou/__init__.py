@@ -41,10 +41,12 @@ from .evolution import (
     CandidateArchive,
     CandidateDraft,
     CandidateExecution,
+    CandidateInputArtifact,
     CandidateRunner,
     CommandCandidateEvaluator,
     CommandCandidateGenerator,
     CommandCandidateRunner,
+    ContractCandidateRunner,
     EvolutionConfig,
     EvolutionContext,
     EvolutionError,
@@ -59,6 +61,8 @@ from .evolution import (
     StrategyResult,
     build_strategy,
     config_from_contract,
+    contract_candidate_runner_fingerprint,
+    stage_candidate_inputs,
 )
 
 __version__ = "0.1.0"
@@ -86,6 +90,7 @@ __all__ = [
     "CandidateArchive",
     "CandidateDraft",
     "CandidateExecution",
+    "CandidateInputArtifact",
     "CandidateRunner",
     "CommandAgentAdapter",
     "CommandCandidateEvaluator",
@@ -93,6 +98,7 @@ __all__ = [
     "CommandCandidateRunner",
     "CompilationQuestion",
     "CompilationResult",
+    "ContractCandidateRunner",
     "ContractCompilationError",
     "ContractCompiler",
     "EvolutionConfig",
@@ -114,4 +120,6 @@ __all__ = [
     "build_algorithm_role_plan",
     "build_strategy",
     "config_from_contract",
+    "contract_candidate_runner_fingerprint",
+    "stage_candidate_inputs",
 ]

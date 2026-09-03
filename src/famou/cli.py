@@ -35,12 +35,15 @@ from .config import Config
 from .controller import LocalController
 from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
 from .evolution import (
+    CandidateInputArtifact,
     CommandCandidateEvaluator,
     CommandCandidateGenerator,
     CommandCandidateRunner,
+    ContractCandidateRunner,
     EvolutionConfig,
     EvolutionError,
     ExecutionAwareCandidateEvaluator,
+    contract_candidate_runner_fingerprint,
 )
 from .memory import MemoryStore
 from .models import Run
@@ -1018,6 +1021,29 @@ def _runner_fingerprint(command: tuple[str, ...], timeout: float) -> str | None:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _candidate_input_artifacts(store: Store, run_id: str) -> tuple[CandidateInputArtifact, ...]:
+    """Project the durable input ledger into path-free execution descriptors."""
+    by_path: dict[str, CandidateInputArtifact] = {}
+    for item in store.list_artifacts(run_id):
+        if item.get("kind") != "input_data":
+            continue
+        try:
+            descriptor = CandidateInputArtifact(
+                path=item.get("path"),  # type: ignore[arg-type]
+                size=item.get("size"),  # type: ignore[arg-type]
+                sha256=item.get("sha256"),  # type: ignore[arg-type]
+            )
+        except (TypeError, ValueError) as exc:
+            raise EvolutionError("run input artifact metadata is malformed") from exc
+        existing = by_path.get(descriptor.path)
+        if existing is not None and existing != descriptor:
+            raise EvolutionError(
+                f"run input ledger contains conflicting evidence: {descriptor.path}"
+            )
+        by_path[descriptor.path] = descriptor
+    return tuple(by_path[path] for path in sorted(by_path))
+
+
 def _compiler_fingerprint(runtime: object) -> str:
     """Return a credential-safe identity for the solve contract compiler runtime."""
     payload = {
@@ -1394,6 +1420,7 @@ def _solve_evolution(
     if contract_payload is None or contract_payload.algorithm_problem is None:
         raise ValueError("solve --evolve requires a compiled algorithm contract")
     contract = AlgorithmProblemContract.from_dict(contract_payload.algorithm_problem)
+    candidate_inputs = _candidate_input_artifacts(controller.store, parent.id)
     strategy_name = args.strategy or contract.evolution.strategy
 
     # Validate all strategy/runtime settings before creating any child workspace or mutating the
@@ -1439,7 +1466,11 @@ def _solve_evolution(
             capabilities=DEFAULT_RUNTIME_CAPABILITIES,
         )
         generator = AgentCandidateGenerator(
-            solver_adapter, contract=contract, role="solver", timeout=args.timeout
+            solver_adapter,
+            contract=contract,
+            role="solver",
+            timeout=args.timeout,
+            inputs=candidate_inputs,
         )
         evaluator = AgentCandidateEvaluator(
             evaluator_adapter, role="evaluator", timeout=args.timeout
@@ -1451,6 +1482,11 @@ def _solve_evolution(
         evaluator_fingerprint = hashlib.sha256(
             f"{runtime_fingerprint}:evaluator".encode()
         ).hexdigest()
+    runner_fingerprint = (
+        None
+        if strategy_name == "openevolve"
+        else contract_candidate_runner_fingerprint(contract, candidate_inputs)
+    )
     evolution_config = EvolutionConfig(
         strategy=strategy_name,
         max_rounds=max_rounds,
@@ -1465,7 +1501,20 @@ def _solve_evolution(
         command=openevolve_command,
         generator_fingerprint=generator_fingerprint,
         evaluator_fingerprint=evaluator_fingerprint,
+        runner_fingerprint=runner_fingerprint,
     )
+
+    def execution_grounded_evaluator(child: Run):
+        if strategy_name == "openevolve":
+            return evaluator
+        runner = ContractCandidateRunner(
+            child.workspace,
+            candidate_inputs,
+            contract.outputs,
+            timeout_seconds=args.timeout,
+        )
+        return ExecutionAwareCandidateEvaluator(runner, evaluator)
+
     if linked is not None:
         linked_contract = linked.get("contract_sha256")
         if not isinstance(linked_contract, str) or linked_contract != contract.digest():
@@ -1490,11 +1539,12 @@ def _solve_evolution(
                 and state_payload.get("config") != evolution_config.to_dict()
             ):
                 raise EvolutionError("solve evolution settings do not match the existing handoff")
+        controller.copy_staged_inputs(parent.id, child.id)
         child, result = controller.run_evolution(
             child.id,
             contract,
             generator,
-            evaluator,
+            execution_grounded_evaluator(child),
             evolution_config,
             resume=child.status.value not in {"succeeded", "failed", "cancelled"},
         )
@@ -1549,7 +1599,7 @@ def _solve_evolution(
         child.id,
         contract,
         generator,
-        evaluator,
+        execution_grounded_evaluator(child),
         evolution_config,
     )
     if contract.outputs and child.status.value == "succeeded":
@@ -1611,7 +1661,13 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
         }
         break
     effective_status = run.status.value
-    if isinstance(materialization, dict) and materialization.get("status") == "failed":
+    if (
+        isinstance(materialization, dict)
+        and materialization.get("status") == "failed"
+    ) or (
+        isinstance(evolution_payload, dict)
+        and evolution_payload.get("status") == "failed"
+    ):
         effective_status = "failed"
     payload = {
         "run_id": run.id,
