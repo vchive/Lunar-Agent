@@ -14,6 +14,7 @@ import math
 import os
 import random
 import re
+import signal
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -30,8 +31,15 @@ MAX_STATE_BYTES = 64 * 1024
 MAX_EXTERNAL_RESULT_BYTES = 64 * 1024
 MAX_ERROR_BYTES = 2_000
 MAX_COMMAND_ARGS = 32
+MAX_EXECUTION_OUTPUT_BYTES = 16 * 1024
+MAX_EXECUTION_ERROR_BYTES = 512
+MAX_EXECUTION_ARTIFACTS = 32
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_SECRET_OUTPUT = re.compile(
+    r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|"
+    r"api[_-]?key\s*[:=]\s*\S+)"
+)
 
 
 class EvolutionError(RuntimeError):
@@ -41,6 +49,19 @@ class EvolutionError(RuntimeError):
 def _bounded_error(error: object) -> str:
     text = " ".join(str(error).split())
     return text[-MAX_ERROR_BYTES:] if text else "unknown evolution error"
+
+
+def _bounded_output(value: object, limit: int = MAX_EXECUTION_OUTPUT_BYTES) -> str:
+    """Redact and cap process output before it crosses the execution evidence boundary."""
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = str(value) if value is not None else ""
+    text = _SECRET_OUTPUT.sub("[REDACTED]", text)
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit].decode("utf-8", errors="ignore")
 
 
 def _safe_id(value: object, field_name: str) -> str:
@@ -97,6 +118,277 @@ class CandidateDraft:
 
 
 @dataclass(frozen=True)
+class CandidateExecution:
+    """Bounded evidence from one candidate process invocation."""
+
+    status: Literal["succeeded", "failed", "timed_out"]
+    exit_code: int | None
+    duration_ms: int
+    stdout: str = ""
+    stderr: str = ""
+    error: str | None = None
+    artifacts: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.status not in {"succeeded", "failed", "timed_out"}:
+            raise ValueError("execution status must be succeeded, failed, or timed_out")
+        if self.exit_code is not None and (
+            isinstance(self.exit_code, bool) or not isinstance(self.exit_code, int)
+        ):
+            raise ValueError("execution exit_code must be an integer or null")
+        if (
+            isinstance(self.duration_ms, bool)
+            or not isinstance(self.duration_ms, int)
+            or self.duration_ms < 0
+            or self.duration_ms > 86_400_000
+        ):
+            raise ValueError("execution duration_ms must be a bounded non-negative integer")
+        if not isinstance(self.stdout, str) or not isinstance(self.stderr, str):
+            raise TypeError("execution stdout and stderr must be text")
+        normalized_stdout = _bounded_output(self.stdout)
+        normalized_stderr = _bounded_output(self.stderr)
+        object.__setattr__(self, "stdout", normalized_stdout)
+        object.__setattr__(self, "stderr", normalized_stderr)
+        if self.error is not None and not isinstance(self.error, str):
+            raise TypeError("execution error must be text or null")
+        if self.error is not None:
+            object.__setattr__(self, "error", _bounded_output(self.error, MAX_EXECUTION_ERROR_BYTES).strip())
+        for name, value in (("stdout", normalized_stdout), ("stderr", normalized_stderr)):
+            if len(value.encode("utf-8")) > MAX_EXECUTION_OUTPUT_BYTES:
+                raise ValueError(f"execution {name} exceeds the bounded output limit")
+        if self.error is not None and len(self.error.encode("utf-8")) > MAX_EXECUTION_ERROR_BYTES:
+            raise ValueError("execution error must be bounded text")
+        if len(self.artifacts) > MAX_EXECUTION_ARTIFACTS:
+            raise ValueError("execution has too many artifacts")
+        if len(set(self.artifacts)) != len(self.artifacts):
+            raise ValueError("execution artifact paths must be unique")
+        for relative in self.artifacts:
+            _safe_relative_path(relative, "execution artifact path")
+
+    @property
+    def stdout_bytes(self) -> int:
+        return len(self.stdout.encode("utf-8"))
+
+    @property
+    def stderr_bytes(self) -> int:
+        return len(self.stderr.encode("utf-8"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "1",
+            "status": self.status,
+            "exit_code": self.exit_code,
+            "duration_ms": self.duration_ms,
+            "stdout_bytes": self.stdout_bytes,
+            "stderr_bytes": self.stderr_bytes,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "error": self.error,
+            "artifacts": list(self.artifacts),
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> CandidateExecution:
+        if not isinstance(value, dict):
+            raise TypeError("candidate execution must be an object")
+        artifacts = value.get("artifacts", [])
+        if not isinstance(artifacts, list) or any(not isinstance(item, str) for item in artifacts):
+            raise TypeError("execution artifacts must be a string array")
+        return cls(
+            status=value.get("status"),  # type: ignore[arg-type]
+            exit_code=value.get("exit_code"),  # type: ignore[arg-type]
+            duration_ms=value.get("duration_ms"),  # type: ignore[arg-type]
+            stdout=value.get("stdout", ""),  # type: ignore[arg-type]
+            stderr=value.get("stderr", ""),  # type: ignore[arg-type]
+            error=value.get("error"),  # type: ignore[arg-type]
+            artifacts=tuple(artifacts),
+        )
+
+
+class CandidateRunner(Protocol):
+    """Execute a candidate in a bounded, run-scoped workspace."""
+
+    def run(
+        self, candidate_path: Path, workspace: Path, timeout: float | None = None
+    ) -> CandidateExecution:
+        ...
+
+
+def _write_execution_evidence(workspace: Path, execution: CandidateExecution) -> Path:
+    raw_workspace = Path(workspace).expanduser()
+    if raw_workspace.is_symlink():
+        raise EvolutionError("candidate execution workspace must not be a symlink")
+    workspace = raw_workspace.resolve(strict=False)
+    workspace.mkdir(parents=True, exist_ok=True)
+    evidence = workspace / "execution.json"
+    if evidence.exists() and evidence.is_symlink():
+        raise EvolutionError("candidate execution evidence must not be a symlink")
+    temporary = workspace / ".execution.json.tmp"
+    if temporary.exists() and temporary.is_symlink():
+        raise EvolutionError("candidate execution temporary evidence must not be a symlink")
+    temporary.write_text(
+        json.dumps(execution.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(evidence)
+    return evidence
+
+
+def _collect_declared_artifacts(workspace: Path) -> tuple[str, ...]:
+    """Validate the optional execution-artifacts.json manifest emitted by a runner."""
+    manifest = workspace / "execution-artifacts.json"
+    if not manifest.exists():
+        return ()
+    if manifest.is_symlink():
+        raise EvolutionError("candidate execution artifact manifest must not be a symlink")
+    if manifest.stat().st_size > MAX_EXECUTION_OUTPUT_BYTES:
+        raise EvolutionError("candidate execution artifact manifest exceeds the bounded size")
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EvolutionError("candidate execution artifact manifest is invalid") from exc
+    if not isinstance(payload, list) or len(payload) > MAX_EXECUTION_ARTIFACTS:
+        raise EvolutionError("candidate execution artifact manifest must be a bounded array")
+    output: list[str] = []
+    for value in payload:
+        relative = _safe_relative_path(value, "execution artifact path")
+        if relative in output:
+            raise EvolutionError("execution artifact paths must be unique")
+        path = (workspace / relative).resolve(strict=False)
+        _confined(workspace, path, "execution artifact path")
+        if (workspace / relative).is_symlink() or not path.is_file():
+            raise EvolutionError("execution artifact must be a regular file")
+        output.append(relative)
+    return tuple(output)
+
+
+class CommandCandidateRunner:
+    """Run a candidate through an explicit local command without a shell."""
+
+    def __init__(
+        self,
+        command: Sequence[str],
+        timeout_seconds: float = 900.0,
+        max_output_bytes: int = MAX_EXECUTION_OUTPUT_BYTES,
+    ) -> None:
+        command = tuple(command)
+        if not command or len(command) > MAX_COMMAND_ARGS:
+            raise ValueError("candidate runner command must be a non-empty bounded argument sequence")
+        executable = Path(command[0]).expanduser()
+        if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ValueError("candidate runner command must start with an existing absolute executable path")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(float(timeout_seconds))
+            or timeout_seconds <= 0
+        ):
+            raise ValueError("candidate runner timeout must be positive")
+        if (
+            isinstance(max_output_bytes, bool)
+            or not isinstance(max_output_bytes, int)
+            or not 1 <= max_output_bytes <= MAX_EXECUTION_OUTPUT_BYTES
+        ):
+            raise ValueError("candidate runner output limit is invalid")
+        self.command = command
+        self.timeout_seconds = float(timeout_seconds)
+        self.max_output_bytes = max_output_bytes
+
+    def run(
+        self, candidate_path: Path, workspace: Path, timeout: float | None = None
+    ) -> CandidateExecution:
+        raw_workspace = Path(workspace).expanduser()
+        if raw_workspace.is_symlink():
+            raise EvolutionError("candidate runner workspace must not be a symlink")
+        workspace = raw_workspace.resolve(strict=False)
+        raw_candidate = Path(candidate_path).expanduser()
+        if raw_candidate.is_symlink():
+            raise EvolutionError("candidate runner path must not be a symlink")
+        candidate = raw_candidate.resolve(strict=False)
+        if not candidate.is_file():
+            raise EvolutionError("candidate runner received a missing candidate path")
+        _confined(workspace, candidate, "candidate runner path")
+        effective_timeout = self.timeout_seconds if timeout is None else timeout
+        if (
+            isinstance(effective_timeout, bool)
+            or not isinstance(effective_timeout, (int, float))
+            or not math.isfinite(float(effective_timeout))
+            or effective_timeout <= 0
+        ):
+            raise ValueError("candidate runner timeout must be positive")
+        workspace.mkdir(parents=True, exist_ok=True)
+        started = time.monotonic()
+        process: subprocess.Popen[str] | None = None
+        stdout = ""
+        stderr = ""
+        error: str | None = None
+        status: Literal["succeeded", "failed", "timed_out"] = "failed"
+        exit_code: int | None = None
+        try:
+            process = subprocess.Popen(
+                [*self.command, str(candidate)],
+                cwd=workspace,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                start_new_session=True,
+            )
+            stdout, stderr = process.communicate(timeout=float(effective_timeout))
+            exit_code = process.returncode
+            output_overflow = (
+                len(str(stdout).encode("utf-8")) > self.max_output_bytes
+                or len(str(stderr).encode("utf-8")) > self.max_output_bytes
+            )
+            stdout = _bounded_output(stdout, self.max_output_bytes).strip()
+            stderr = _bounded_output(stderr, self.max_output_bytes).strip()
+            if output_overflow:
+                error = "output_limit_exceeded"
+            elif exit_code == 0:
+                status = "succeeded"
+            else:
+                error = "candidate_process_failed"
+        except subprocess.TimeoutExpired as exc:
+            if process is not None:
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except (AttributeError, OSError, ProcessLookupError):
+                    process.kill()
+                raw_stdout, raw_stderr = process.communicate()
+                stdout = _bounded_output(raw_stdout, self.max_output_bytes).strip()
+                stderr = _bounded_output(raw_stderr, self.max_output_bytes).strip()
+            else:
+                stdout = _bounded_output(exc.stdout, self.max_output_bytes).strip()
+                stderr = _bounded_output(exc.stderr, self.max_output_bytes).strip()
+            error = "candidate_process_timed_out"
+            status = "timed_out"
+        except OSError as exc:
+            error = "runner_start_failed"
+            stderr = _bounded_output(str(exc), self.max_output_bytes).strip()
+        artifacts: tuple[str, ...] = ()
+        try:
+            artifacts = _collect_declared_artifacts(workspace)
+        except EvolutionError as exc:
+            status = "failed"
+            error = "artifact_manifest_invalid"
+            stderr = _bounded_output(str(exc), self.max_output_bytes).strip()
+        duration_ms = min(86_400_000, max(0, round((time.monotonic() - started) * 1000)))
+        execution = CandidateExecution(
+            status=status,
+            exit_code=exit_code,
+            duration_ms=duration_ms,
+            stdout=stdout,
+            stderr=stderr,
+            error=error,
+            artifacts=artifacts,
+        )
+        _write_execution_evidence(workspace, execution)
+        return execution
+
+
+@dataclass(frozen=True)
 class EvolutionConfig:
     """Explicit, bounded knobs shared by all strategies."""
 
@@ -113,6 +405,7 @@ class EvolutionConfig:
     command: tuple[str, ...] = ()
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
+    runner_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if self.strategy not in EVOLUTION_STRATEGIES:
@@ -150,6 +443,7 @@ class EvolutionConfig:
         for name, fingerprint in (
             ("generator_fingerprint", self.generator_fingerprint),
             ("evaluator_fingerprint", self.evaluator_fingerprint),
+            ("runner_fingerprint", self.runner_fingerprint),
         ):
             if fingerprint is not None and (
                 not isinstance(fingerprint, str) or not _SHA256.fullmatch(fingerprint)
@@ -182,6 +476,8 @@ class EvolutionConfig:
             payload["generator_fingerprint"] = self.generator_fingerprint
         if self.evaluator_fingerprint is not None:
             payload["evaluator_fingerprint"] = self.evaluator_fingerprint
+        if self.runner_fingerprint is not None:
+            payload["runner_fingerprint"] = self.runner_fingerprint
         return payload
 
 
@@ -681,6 +977,48 @@ def _invalid_report(message: object) -> EvaluationReport:
             "error_info": [{"code": "evaluation_error", "message": _bounded_error(message)[:512]}],
         }
     )
+
+
+class ExecutionAwareCandidateEvaluator:
+    """Compose candidate execution with an existing independent evaluator.
+
+    The wrapped evaluator keeps its historical ``(candidate_path, contract)`` signature and can
+    inspect the sibling ``execution.json`` evidence. A valid evaluator report is never allowed to
+    override a runner failure.
+    """
+
+    def __init__(self, runner: CandidateRunner, evaluator: CandidateEvaluator) -> None:
+        if not callable(getattr(runner, "run", None)):
+            raise TypeError("runner must implement run")
+        if not callable(evaluator):
+            raise TypeError("evaluator must be callable")
+        self.runner = runner
+        self.evaluator = evaluator
+
+    def __call__(
+        self, candidate_path: Path, contract: AlgorithmProblemContract
+    ) -> EvaluationReport:
+        candidate = Path(candidate_path).expanduser().resolve(strict=False)
+        workspace = candidate.parent
+        try:
+            execution = self.runner.run(candidate, workspace)
+        except Exception as exc:  # noqa: BLE001 - runner is an injected local boundary
+            execution = CandidateExecution(
+                status="failed",
+                exit_code=None,
+                duration_ms=0,
+                error="runner_failed",
+                stderr=_bounded_output(str(exc), MAX_EXECUTION_OUTPUT_BYTES),
+            )
+            _write_execution_evidence(workspace, execution)
+        try:
+            report = _report(self.evaluator(candidate, contract))
+        except Exception as exc:  # noqa: BLE001 - evaluator failures are invalid evidence
+            return _invalid_report(exc)
+        if execution.status != "succeeded":
+            detail = execution.error or f"execution_{execution.status}"
+            return _invalid_report(detail)
+        return report
 
 
 def _drafts(value: CandidateDraft | Sequence[CandidateDraft]) -> tuple[CandidateDraft, ...]:

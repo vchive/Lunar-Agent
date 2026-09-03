@@ -35,8 +35,10 @@ from .controller import LocalController
 from .evolution import (
     CommandCandidateEvaluator,
     CommandCandidateGenerator,
+    CommandCandidateRunner,
     EvolutionConfig,
     EvolutionError,
+    ExecutionAwareCandidateEvaluator,
 )
 from .memory import MemoryStore
 from .models import Run
@@ -208,6 +210,10 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument(
         "--agent-runtime-api-key",
         help="optional runtime API key; detached runs pass it via FAMOU_AGENT_RUNTIME_API_KEY",
+    )
+    evolve_parser.add_argument(
+        "--candidate-runner-command",
+        help="explicit command that runs each candidate before evaluator-command",
     )
     evolve_parser.add_argument("--agent-name", default="evolution-agent")
     evolve_parser.add_argument("--agent-role", default="solver")
@@ -730,6 +736,19 @@ def _runtime_fingerprint(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _runner_fingerprint(command: tuple[str, ...], timeout: float) -> str | None:
+    """Return a credential-safe identity for an explicit candidate runner."""
+    if not command:
+        return None
+    payload = {
+        "command": list(command),
+        "kind": "candidate-runner",
+        "timeout": timeout,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Create/execute one ledger-backed local evolution run."""
     try:
@@ -784,6 +803,9 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         _parse_command(value, "--evaluator-portfolio-command")
         for value in args.evaluator_portfolio_commands
     )
+    candidate_runner_command = _parse_command(
+        args.candidate_runner_command, "--candidate-runner-command"
+    )
     agent_runtime = args.agent_runtime
     agent_runtime_command = _parse_command(
         args.agent_runtime_command, "--agent-runtime-command"
@@ -820,6 +842,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("--agent-runtime-api-key requires --agent-runtime openai-compatible")
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
+    runner_fingerprint: str | None = _runner_fingerprint(candidate_runner_command, args.timeout)
     if strategy_name == "openevolve":
         if (
             agent_command
@@ -828,8 +851,11 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             or evaluator_portfolio_commands
             or agent_runtime
             or any(value is not None and value != () for value in runtime_profile_options)
+            or candidate_runner_command
         ):
-            raise ValueError("Agent solver/evaluator commands are only supported by loop and population")
+            raise ValueError(
+                "native solver/evaluator and candidate runner commands are only supported by loop and population"
+            )
         command = openevolve_command
         if not command:
             raise ValueError("openevolve strategy requires --openevolve-command")
@@ -864,6 +890,8 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         evaluator_explicit = bool(
             evaluator_command or evaluator_agent_command or evaluator_portfolio_commands
         )
+        if candidate_runner_command and not evaluator_command:
+            raise ValueError("--candidate-runner-command requires --evaluator-command")
         if agent_runtime and solver_explicit and evaluator_explicit:
             raise ValueError(
                 "--agent-runtime is unused when both solver and evaluator are explicitly configured"
@@ -1070,6 +1098,10 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             )
         else:
             evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
+        if candidate_runner_command:
+            evaluator = ExecutionAwareCandidateEvaluator(
+                CommandCandidateRunner(candidate_runner_command, args.timeout), evaluator
+            )
         command = agent_command
     evolution_config = EvolutionConfig(
         strategy=strategy_name,
@@ -1085,6 +1117,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         command=command,
         generator_fingerprint=generator_fingerprint,
         evaluator_fingerprint=evaluator_fingerprint,
+        runner_fingerprint=runner_fingerprint,
     )
     if args.resume:
         state_path = workspace / "evolution" / "state.json"
@@ -1282,6 +1315,8 @@ def _detach_evolution(
         command.extend(("--agent-runtime-endpoint", args.agent_runtime_endpoint))
     if args.agent_runtime_model:
         command.extend(("--agent-runtime-model", args.agent_runtime_model))
+    if args.candidate_runner_command:
+        command.extend(("--candidate-runner-command", args.candidate_runner_command))
     if args.agent_name != "evolution-agent":
         command.extend(("--agent-name", args.agent_name))
     if args.agent_role != "solver":

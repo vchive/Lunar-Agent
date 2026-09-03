@@ -5,9 +5,11 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current runtime-backed
-evolution work is captured in [`specs/022-runtime-backed-evolution/`](specs/022-runtime-backed-evolution/),
-building on the completed independent evaluator ensemble in
+The project is being developed with Spec-Driven Development (SDD). The current verified candidate
+execution work is captured in
+[`specs/023-verified-algorithm-execution/`](specs/023-verified-algorithm-execution/), building on
+the completed runtime-backed evolution and independent evaluator ensemble in
+[`specs/022-runtime-backed-evolution/`](specs/022-runtime-backed-evolution/) and
 [`specs/021-evaluator-ensemble/`](specs/021-evaluator-ensemble/), which is built on
 independent artifact acceptance contracts in
 [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
@@ -253,6 +255,24 @@ Command-backed runs persist credential-safe SHA-256 fingerprints for both the ge
 evaluator adapter profiles. Resume rejects a changed command, Agent name, role, or required
 capability before claiming the task, so one candidate archive is never silently mixed across
 different execution configurations. Raw command arguments are not written to strategy state.
+
+For algorithm work that must prove a candidate actually runs, add an execution command. The runner
+receives the candidate path, runs in that candidate's attempt directory, and produces bounded
+`execution.json` evidence before the evaluator command is called:
+
+```bash
+lunar-agent evolve contract.json --strategy loop \
+  --generator-command "/absolute/path/to/generator" \
+  --candidate-runner-command "/absolute/path/to/run-candidate" \
+  --evaluator-command "/absolute/path/to/evaluate-candidate" \
+  --json --home .lunar
+```
+
+The evaluator keeps its existing candidate-path argument and can read the sibling
+`execution.json`. A runner timeout, non-zero exit, oversized output, or path violation becomes an
+invalid report and can never replace the best candidate. The evidence file is indexed and hashed
+by the local ledger. The runner is opt-in, so historical command-only and Agent-backed evolution
+remains compatible.
 
 ### Repository-owned runtime evolution
 
@@ -579,4 +599,4 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/022-runtime-backed-evolution/`](specs/022-runtime-backed-evolution/).
+[`specs/023-verified-algorithm-execution/`](specs/023-verified-algorithm-execution/).

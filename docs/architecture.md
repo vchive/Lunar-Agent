@@ -22,6 +22,8 @@ flowchart TD
     C --> AR[AgentRegistry\nexplicit role + capability selection]
     AR --> AA[Agent Adapter\nRuntime wrapper or command JSON adapter]
     AA --> AG[AgentCandidateGenerator\nsolver proposal bridge]
+    AG --> CR[CandidateRunner\noptional bounded execution]
+    CR --> CE[execution.json\nexit · duration · output evidence]
     AA --> PG[AgentPortfolioGenerator\nordered solver portfolio]
     AA --> AE[AgentCandidateEvaluator\nevaluator report bridge]
     AR --> EA[Explicit evaluator adapters ×2+]
@@ -167,6 +169,13 @@ report, or validity disagreement produces an invalid aggregate report.
 imports a validated result into Lunar-Agent's canonical archive. The existing `--workers` pool is
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
+
+An optional `CandidateRunner` executes each archived candidate before a legacy evaluator command is
+invoked. It writes one bounded `execution.json` beside the candidate, and the controller indexes
+that evidence as `candidate_execution`. The runner never decides validity or score; a wrapped
+evaluator remains authoritative, and any runner failure overrides an otherwise valid-looking report
+with `validity=0`. This creates a portable execution proof boundary without assuming a particular
+language, test framework, or operating-system sandbox.
 
 The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain

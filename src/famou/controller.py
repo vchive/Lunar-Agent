@@ -29,6 +29,7 @@ from .config import Config
 from .evaluator import Evaluation, Evaluator, acceptance_evaluator
 from .evolution import (
     CandidateEvaluator,
+    CandidateExecution,
     CandidateGenerator,
     EvolutionConfig,
     EvolutionContext,
@@ -252,6 +253,53 @@ class LocalController:
                 encoding="utf-8",
             )
             artifacts = ArtifactStore(run.workspace, self.store, run.id)
+            execution_root = Path(run.workspace) / "evolution" / "candidates"
+            if execution_root.is_dir() and not execution_root.is_symlink():
+                for execution_path in sorted(execution_root.glob("*/execution.json")):
+                    if execution_path.is_symlink() or not execution_path.is_file():
+                        continue
+                    relative = execution_path.resolve(strict=False).relative_to(
+                        Path(run.workspace).resolve()
+                    )
+                    if not any(
+                        item["path"] == relative.as_posix()
+                        and item["kind"] == "candidate_execution"
+                        for item in self.store.list_artifacts(run.id)
+                    ):
+                        artifacts.record(
+                            execution_path,
+                            evolution_task.id,
+                            kind="candidate_execution",
+                        )
+                    try:
+                        execution = CandidateExecution.from_dict(
+                            json.loads(execution_path.read_text(encoding="utf-8"))
+                        )
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                        continue
+                    for declared in execution.artifacts:
+                        declared_path = execution_path.parent / declared
+                        if declared_path.is_symlink() or not declared_path.is_file():
+                            continue
+                        try:
+                            declared_path.resolve(strict=False).relative_to(
+                                Path(run.workspace).resolve()
+                            )
+                        except ValueError:
+                            continue
+                        relative_declared = declared_path.resolve(strict=False).relative_to(
+                            Path(run.workspace).resolve()
+                        )
+                        if not any(
+                            item["path"] == relative_declared.as_posix()
+                            and item["kind"] == "candidate_execution_output"
+                            for item in self.store.list_artifacts(run.id)
+                        ):
+                            artifacts.record(
+                                declared_path,
+                                evolution_task.id,
+                                kind="candidate_execution_output",
+                            )
             for relative, kind in (
                 ("evolution/archive.jsonl", "evolution_archive"),
                 ("evolution/state.json", "evolution_state"),

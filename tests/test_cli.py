@@ -5,6 +5,7 @@ from io import StringIO
 from pathlib import Path
 
 from famou.cli import _adapter_fingerprint, _portfolio_fingerprint, main
+from famou.store import Store
 
 
 def _write_evolution_contract(path: Path, *, strategy: str = "loop", max_rounds: int = 2) -> None:
@@ -658,6 +659,186 @@ def test_cli_evolve_detach_propagates_runtime_without_secret_argv(tmp_path: Path
     assert "--agent-runtime" in child_command
     assert "secret-runtime-key" not in child_command
     assert child_kwargs["env"]["FAMOU_AGENT_RUNTIME_API_KEY"] == "secret-runtime-key"
+
+
+def test_cli_evolve_execution_backed_evaluator_indexes_evidence_and_provenance(
+    tmp_path: Path, capsys
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, _ = _write_evolution_commands(tmp_path)
+    runner = tmp_path / "runner.py"
+    runner.write_text(
+        "import pathlib, sys\n"
+        "candidate = pathlib.Path(sys.argv[1])\n"
+        "assert candidate.is_file()\n"
+        "pathlib.Path('runner-output.txt').write_text('ok')\n"
+        "pathlib.Path('execution-artifacts.json').write_text('[\"runner-output.txt\"]')\n"
+        "print('executed')\n",
+        encoding="utf-8",
+    )
+    evaluator = tmp_path / "execution-evaluator.py"
+    evaluator.write_text(
+        "import json, pathlib, sys\n"
+        "candidate = pathlib.Path(sys.argv[1])\n"
+        "evidence = json.loads((candidate.parent / 'execution.json').read_text())\n"
+        "score = 8 if evidence['status'] == 'succeeded' else 0\n"
+        "print(json.dumps({'schema_version':'1','evaluator_id':'exec-fixture','validity':"
+        "1 if score else 0,'quality':score if score else None,'combined_score':score,"
+        "'detailed_scores':{},'error_info':[] if score else [{'code':'execution',"
+        "'message':'candidate did not execute'}]}))\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--generator-command",
+                f"{sys.executable} {generator}",
+                "--candidate-runner-command",
+                f"{sys.executable} {runner}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["best_score"] == 8.0
+    workspace = Path(payload["workspace"])
+    evidence = workspace / "evolution" / "candidates" / "candidate-0001" / "execution.json"
+    assert evidence.is_file()
+    artifacts = Store(home / "state.db").list_artifacts(payload["run_id"])
+    assert any(item["path"].endswith("/execution.json") and item["kind"] == "candidate_execution" for item in artifacts)
+    assert any(
+        item["path"].endswith("/runner-output.txt")
+        and item["kind"] == "candidate_execution_output"
+        for item in artifacts
+    )
+    state = json.loads((workspace / "evolution" / "state.json").read_text(encoding="utf-8"))
+    assert len(state["config"]["runner_fingerprint"]) == 64
+    assert str(runner) not in json.dumps(state["config"])
+
+
+def test_cli_evolve_runner_requires_legacy_evaluator_command(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    runner = tmp_path / "runner.py"
+    runner.write_text("import sys\n", encoding="utf-8")
+    runner.chmod(runner.stat().st_mode | 0o100)
+
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--candidate-runner-command",
+                f"{sys.executable} {runner}",
+                "--agent-runtime",
+                "mock",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 2
+    )
+    assert "requires --evaluator-command" in json.loads(capsys.readouterr().err)["error"]
+
+
+def test_cli_evolve_detach_propagates_candidate_runner(tmp_path: Path, capsys, monkeypatch) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    runner = tmp_path / "runner.py"
+    runner.write_text("import sys\n", encoding="utf-8")
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--generator-command",
+                f"{sys.executable} {generator}",
+                "--candidate-runner-command",
+                f"{sys.executable} {runner}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--detach",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    child_command = calls[0][0]
+    assert "--candidate-runner-command" in child_command
+    assert f"{sys.executable} {runner}" in child_command
+
+
+def test_cli_evolve_resume_rejects_changed_runner_provenance(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    runner = tmp_path / "runner.py"
+    runner.write_text("print('ok')\n", encoding="utf-8")
+    home = tmp_path / "home"
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--generator-command",
+                f"{sys.executable} {generator}",
+                "--candidate-runner-command",
+                f"{sys.executable} {runner}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 0
+    )
+    run_id = json.loads(capsys.readouterr().out)["run_id"]
+    changed_runner = tmp_path / "changed-runner.py"
+    changed_runner.write_text("print('changed')\n", encoding="utf-8")
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--resume",
+                "--run-id",
+                run_id,
+                "--generator-command",
+                f"{sys.executable} {generator}",
+                "--candidate-runner-command",
+                f"{sys.executable} {changed_runner}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 2
+    )
+    assert "configuration does not match" in json.loads(capsys.readouterr().err)["error"]
 
 
 def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:

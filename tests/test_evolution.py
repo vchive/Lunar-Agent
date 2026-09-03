@@ -9,9 +9,14 @@ from famou.algorithm import AlgorithmProblemContract
 from famou.evolution import (
     CandidateArchive,
     CandidateDraft,
+    CandidateExecution,
+    CommandCandidateEvaluator,
+    CommandCandidateRunner,
     EvolutionConfig,
     EvolutionContext,
+    EvolutionError,
     EvolutionStrategy,
+    ExecutionAwareCandidateEvaluator,
     LoopStrategy,
     OpenEvolveStrategy,
     PopulationState,
@@ -130,6 +135,109 @@ def test_loop_invalid_candidate_never_becomes_best(tmp_path: Path) -> None:
     assert result.best_candidate_id is None
     assert result.best_candidate_path is None
     assert result.valid_candidates == 0
+
+
+def test_command_candidate_runner_records_success_evidence(tmp_path: Path) -> None:
+    runner_script = tmp_path / "runner.py"
+    runner_script.write_text(
+        "import pathlib, sys\n"
+        "candidate = pathlib.Path(sys.argv[1])\n"
+        "assert candidate.is_file()\n"
+        "pathlib.Path('runner-output.txt').write_text('ok')\n"
+        "pathlib.Path('execution-artifacts.json').write_text('[\"runner-output.txt\"]')\n"
+        "print('candidate ran')\n",
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("print('candidate')\n", encoding="utf-8")
+    runner = CommandCandidateRunner((sys.executable, str(runner_script)), max_output_bytes=128)
+
+    execution = runner.run(candidate, tmp_path, timeout=2)
+
+    assert isinstance(execution, CandidateExecution)
+    assert execution.status == "succeeded"
+    assert execution.exit_code == 0
+    assert execution.stdout == "candidate ran"
+    assert execution.artifacts == ("runner-output.txt",)
+    evidence = json.loads((tmp_path / "execution.json").read_text(encoding="utf-8"))
+    assert evidence["status"] == "succeeded"
+    assert evidence["stdout_bytes"] == len(b"candidate ran")
+
+
+@pytest.mark.parametrize("mode", ["nonzero", "timeout", "output"])
+def test_command_candidate_runner_fails_closed_with_bounded_evidence(
+    tmp_path: Path, mode: str
+) -> None:
+    runner_script = tmp_path / "runner.py"
+    behavior = {
+        "nonzero": "print('failed'); raise SystemExit(3)",
+        "timeout": "import time; time.sleep(2)",
+        "output": "print('x' * 500)",
+    }[mode]
+    runner_script.write_text(f"import sys\n{behavior}\n", encoding="utf-8")
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("print('candidate')\n", encoding="utf-8")
+    runner = CommandCandidateRunner(
+        (sys.executable, str(runner_script)), max_output_bytes=64, timeout_seconds=1
+    )
+
+    execution = runner.run(candidate, tmp_path)
+
+    assert execution.status in {"failed", "timed_out"}
+    assert execution.error
+    assert len(execution.stdout.encode()) <= 64
+    assert len(execution.stderr.encode()) <= 64
+    assert json.loads((tmp_path / "execution.json").read_text(encoding="utf-8"))["status"] == execution.status
+
+
+def test_command_candidate_runner_rejects_candidate_escape(tmp_path: Path) -> None:
+    runner_script = tmp_path / "runner.py"
+    runner_script.write_text("import sys\n", encoding="utf-8")
+    outside = tmp_path.parent / "outside-candidate.py"
+    outside.write_text("print('outside')\n", encoding="utf-8")
+    runner = CommandCandidateRunner((sys.executable, str(runner_script)))
+
+    with pytest.raises(EvolutionError, match="escapes"):
+        runner.run(outside, tmp_path)
+
+
+def test_execution_aware_evaluator_exposes_evidence_and_overrides_failed_runner(
+    tmp_path: Path,
+) -> None:
+    contract = _contract()
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("print('candidate')\n", encoding="utf-8")
+    runner_script = tmp_path / "runner.py"
+    runner_script.write_text("print('ran')\n", encoding="utf-8")
+    evaluator_script = tmp_path / "evaluator.py"
+    evaluator_script.write_text(
+        "import json, pathlib, sys\n"
+        "candidate = pathlib.Path(sys.argv[1])\n"
+        "evidence = json.loads((candidate.parent / 'execution.json').read_text())\n"
+        "score = 4 if evidence['status'] == 'succeeded' else 99\n"
+        "print(json.dumps({'schema_version':'1','evaluator_id':'fixture','validity':1,"
+        "'quality':score,'combined_score':score,'detailed_scores':{},'error_info':[]}))\n",
+        encoding="utf-8",
+    )
+    evaluator = CommandCandidateEvaluator((sys.executable, str(evaluator_script)))
+    wrapped = ExecutionAwareCandidateEvaluator(
+        CommandCandidateRunner((sys.executable, str(runner_script))), evaluator
+    )
+
+    report = wrapped(candidate, contract)
+
+    assert report.validity == 1
+    assert report.combined_score == 4
+    assert (tmp_path / "execution.json").is_file()
+
+    failing_script = tmp_path / "failing-runner.py"
+    failing_script.write_text("raise SystemExit(2)\n", encoding="utf-8")
+    failed = ExecutionAwareCandidateEvaluator(
+        CommandCandidateRunner((sys.executable, str(failing_script))), evaluator
+    )(candidate, contract)
+    assert failed.validity == 0
+    assert failed.combined_score == 0
+    assert failed.error_info
 
 
 def test_population_is_bounded_and_deterministic(tmp_path: Path) -> None:
