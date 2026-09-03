@@ -11,8 +11,10 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal
 
 MAX_CONTRACT_BYTES = 64 * 1024
@@ -28,6 +30,59 @@ MAX_INPUT_FILES = 64
 MAX_INPUT_FILE_BYTES = 16 * 1024 * 1024
 SUPPORTED_PROBLEM_TYPES = frozenset(
     {"scheduling", "routing", "packing", "assignment", "forecasting", "network_flow", "continuous"}
+)
+ALGORITHM_FAMILY_REPERTOIRES: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "routing": (
+            "nearest_insertion",
+            "savings_merge",
+            "regret_insertion",
+            "two_opt_local_search",
+            "large_neighborhood_search",
+        ),
+        "scheduling": (
+            "priority_dispatch",
+            "insertion_schedule",
+            "interval_local_search",
+            "critical_path_improvement",
+            "large_neighborhood_search",
+        ),
+        "packing": (
+            "first_fit_decreasing",
+            "best_fit_decreasing",
+            "shelf_packing",
+            "local_repacking",
+            "multi_start_constructive",
+        ),
+        "assignment": (
+            "greedy_min_cost",
+            "augmenting_path_assignment",
+            "local_swap_assignment",
+            "min_cost_flow_assignment",
+            "multi_start_assignment",
+        ),
+        "forecasting": (
+            "seasonal_naive",
+            "moving_average",
+            "exponential_smoothing",
+            "linear_trend_regression",
+            "residual_correction_ensemble",
+        ),
+        "network_flow": (
+            "augmenting_path_flow",
+            "successive_shortest_path",
+            "capacity_scaling_flow",
+            "cycle_canceling_flow",
+            "path_decomposition_search",
+        ),
+        "continuous": (
+            "coordinate_descent",
+            "projected_pattern_search",
+            "adaptive_step_search",
+            "nelder_mead_simplex",
+            "multi_start_local_search",
+        ),
+    }
 )
 PROVENANCE_VALUES = frozenset({"user_confirmed", "data_observed", "explicit_assumption"})
 VERIFICATION_VALUES = frozenset({"independent", "partial", "solver"})

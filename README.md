@@ -217,6 +217,14 @@ parent/inspiration families. The solver is asked to return the selected family t
 experiment declaration, but execution and the evaluator—not that declaration—still determine the
 outcome. No domain package, skill installation, or extra inference turn is required.
 
+For native population search, those canonical family tags also form bounded quality-diversity
+niches. Each island retains its best evaluator-valid candidate and, while capacity permits, one
+valid elite from every distinct family before filling remaining slots with the existing
+score/token-novelty order. Parent sampling uses family elites, and inspirations prefer valid
+families different from the parent and from each other. Unknown or malformed tags receive no
+protected slot, while untagged legacy archives retain the historical ranking fallback. Family is
+therefore a search descriptor only: evaluator validity and score still own final-best selection.
+
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
 output. Its exact source is visible to compiled-evaluator solvers as read-only scoring guidance,

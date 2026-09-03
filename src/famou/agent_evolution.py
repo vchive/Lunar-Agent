@@ -11,7 +11,7 @@ from pathlib import Path
 from statistics import median
 
 from .agents import AgentAdapter, AgentError, AgentRegistry, AgentRequest, AgentResult
-from .algorithm import AlgorithmProblemContract, EvaluationReport
+from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract, EvaluationReport
 from .evaluator_bundle import SolverScoringContract
 from .evolution import (
     CandidateDraft,
@@ -54,58 +54,6 @@ _SAFE_EXECUTION_ERRORS = frozenset(
     }
 )
 _SAFE_EXPERIMENT_TAG = re.compile(r"^[\w\u4e00-\u9fff][\w\u4e00-\u9fff.+:-]{0,127}$")
-
-_ALGORITHM_REPERTOIRES: dict[str, tuple[str, ...]] = {
-    "routing": (
-        "nearest_insertion",
-        "savings_merge",
-        "regret_insertion",
-        "two_opt_local_search",
-        "large_neighborhood_search",
-    ),
-    "scheduling": (
-        "priority_dispatch",
-        "insertion_schedule",
-        "interval_local_search",
-        "critical_path_improvement",
-        "large_neighborhood_search",
-    ),
-    "packing": (
-        "first_fit_decreasing",
-        "best_fit_decreasing",
-        "shelf_packing",
-        "local_repacking",
-        "multi_start_constructive",
-    ),
-    "assignment": (
-        "greedy_min_cost",
-        "augmenting_path_assignment",
-        "local_swap_assignment",
-        "min_cost_flow_assignment",
-        "multi_start_assignment",
-    ),
-    "forecasting": (
-        "seasonal_naive",
-        "moving_average",
-        "exponential_smoothing",
-        "linear_trend_regression",
-        "residual_correction_ensemble",
-    ),
-    "network_flow": (
-        "augmenting_path_flow",
-        "successive_shortest_path",
-        "capacity_scaling_flow",
-        "cycle_canceling_flow",
-        "path_decomposition_search",
-    ),
-    "continuous": (
-        "coordinate_descent",
-        "projected_pattern_search",
-        "adaptive_step_search",
-        "nelder_mead_simplex",
-        "multi_start_local_search",
-    ),
-}
 
 _PLAYBOOK_MODELING_CHECKS: dict[str, tuple[str, ...]] = {
     "routing": (
@@ -414,9 +362,9 @@ class AgentCandidateGenerator:
             for item in request.archive[-MAX_CONTEXT_ITEMS:]
         ]
         retained_tags = (
-            _ALGORITHM_REPERTOIRES[effective_contract.problem_type]
+            ALGORITHM_FAMILY_REPERTOIRES[effective_contract.problem_type]
             if effective_contract is not None
-            and effective_contract.problem_type in _ALGORITHM_REPERTOIRES
+            and effective_contract.problem_type in ALGORITHM_FAMILY_REPERTOIRES
             else ()
         )
         experiment_memory = _experiment_memory(
@@ -1138,9 +1086,9 @@ def _algorithm_playbook(
     search_directive: Mapping[str, object],
 ) -> dict[str, object] | None:
     """Allocate one domain algorithm family without adding mutable strategy state."""
-    if contract is None or contract.problem_type not in _ALGORITHM_REPERTOIRES:
+    if contract is None or contract.problem_type not in ALGORITHM_FAMILY_REPERTOIRES:
         return None
-    repertoire = _ALGORITHM_REPERTOIRES[contract.problem_type]
+    repertoire = ALGORITHM_FAMILY_REPERTOIRES[contract.problem_type]
     mode = search_directive.get("mode")
     if not isinstance(mode, str):
         mode = "explore"

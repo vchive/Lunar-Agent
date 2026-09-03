@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from .algorithm import (
+    ALGORITHM_FAMILY_REPERTOIRES,
     EVOLUTION_STRATEGIES,
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -1583,25 +1584,97 @@ class PopulationStrategy(_BaseStrategy):
                 item.evaluation.validity,
                 item.evaluation.combined_score,
                 _novelty(item, [peer for peer in all_active if peer.candidate_id != item.candidate_id], self.context.workspace),
+                item.candidate_id,
             ),
             reverse=True,
         )
+
+    def _candidate_family(self, candidate: Candidate) -> str | None:
+        """Project one exact canonical family tag from bounded experiment metadata."""
+        if not isinstance(candidate.metadata, dict):
+            return None
+        experiment = candidate.metadata.get("experiment")
+        if not isinstance(experiment, dict):
+            return None
+        change_tags = experiment.get("change_tags")
+        if not isinstance(change_tags, list):
+            return None
+        repertoire = ALGORITHM_FAMILY_REPERTOIRES.get(self.context.contract.problem_type, ())
+        return next(
+            (
+                family
+                for family in repertoire
+                if any(isinstance(tag, str) and tag == family for tag in change_tags)
+            ),
+            None,
+        )
+
+    def _family_elites(
+        self, candidates: list[Candidate], all_active: list[Candidate]
+    ) -> list[Candidate]:
+        """Return the best valid candidate for every recognized family."""
+        ranked = self._rank(candidates, all_active)
+        elites: list[Candidate] = []
+        seen: set[str] = set()
+        for candidate in ranked:
+            if candidate.evaluation.validity != 1:
+                continue
+            family = self._candidate_family(candidate)
+            if family is None or family in seen:
+                continue
+            seen.add(family)
+            elites.append(candidate)
+        return elites
 
     def _trim(self, active: dict[int, list[str]]) -> None:
         all_active = self._candidates(item for ids in active.values() for item in ids)
         for island in range(self.config.num_islands):
             candidates = self._candidates(active[island])
             ranked = self._rank(candidates, all_active)
-            active[island] = [item.candidate_id for item in ranked[: self._capacity(island)]]
+            capacity = self._capacity(island)
+            selected: list[Candidate] = []
+            selected_ids: set[str] = set()
+
+            valid = [candidate for candidate in ranked if candidate.evaluation.validity == 1]
+            if valid:
+                selected.append(valid[0])
+                selected_ids.add(valid[0].candidate_id)
+            for elite in self._family_elites(candidates, all_active):
+                if len(selected) >= capacity:
+                    break
+                if elite.candidate_id not in selected_ids:
+                    selected.append(elite)
+                    selected_ids.add(elite.candidate_id)
+            for candidate in ranked:
+                if len(selected) >= capacity:
+                    break
+                if candidate.candidate_id not in selected_ids:
+                    selected.append(candidate)
+                    selected_ids.add(candidate.candidate_id)
+            active[island] = [item.candidate_id for item in selected]
+
+    def _parent_pool(self, active: dict[int, list[str]], island: int) -> list[Candidate]:
+        all_active = self._candidates(item for ids in active.values() for item in ids)
+        candidates = self._candidates(active[island]) or all_active
+        ranked = self._rank(candidates, all_active)
+        elites = self._family_elites(candidates, all_active)
+        if not elites:
+            return ranked[:3]
+        valid_ranked = [candidate for candidate in ranked if candidate.evaluation.validity == 1]
+        selected = list(elites)
+        selected_ids = {candidate.candidate_id for candidate in selected}
+        selected.extend(
+            candidate
+            for candidate in valid_ranked
+            if candidate.candidate_id not in selected_ids
+        )
+        return selected[:3]
 
     def _select_parent(self, active: dict[int, list[str]], island: int) -> Candidate | None:
-        candidates = self._candidates(active[island])
-        if not candidates:
-            candidates = self._candidates(item for ids in active.values() for item in ids)
-        if not candidates:
+        pool = self._parent_pool(active, island)
+        if not pool:
             return None
-        ranked = self._rank(candidates, self._candidates(item for ids in active.values() for item in ids))
-        return self.rng.choice(ranked[: min(3, len(ranked))])
+        return self.rng.choice(pool)
 
     def _inspirations(self, active: dict[int, list[str]], island: int, parent: Candidate | None) -> tuple[Candidate, ...]:
         candidates = [
@@ -1617,12 +1690,44 @@ class PopulationStrategy(_BaseStrategy):
                 for item in self._candidates(item for ids in active.values() for item in ids)
                 if parent is None or item.candidate_id != parent.candidate_id
             ]
-        ranked = sorted(
-            candidates,
-            key=lambda item: _novelty(item, [parent] if parent else (), self.context.workspace),
-            reverse=True,
-        )
-        return tuple(ranked[:2])
+        valid = [candidate for candidate in candidates if candidate.evaluation.validity == 1]
+        remaining = valid or candidates
+        parent_family = self._candidate_family(parent) if parent is not None else None
+        selected: list[Candidate] = []
+        selected_families: set[str] = set()
+
+        while remaining and len(selected) < 2:
+            ranked = sorted(
+                remaining,
+                key=lambda item: (
+                    self._candidate_family(item) is not None
+                    and self._candidate_family(item) != parent_family
+                    and self._candidate_family(item) not in selected_families,
+                    self._candidate_family(item) is not None
+                    and self._candidate_family(item) != parent_family,
+                    self._candidate_family(item) is not None
+                    and self._candidate_family(item) not in selected_families,
+                    _novelty(
+                        item,
+                        tuple(([parent] if parent else []) + selected),
+                        self.context.workspace,
+                    ),
+                    item.evaluation.combined_score,
+                    item.candidate_id,
+                ),
+                reverse=True,
+            )
+            chosen = ranked[0]
+            selected.append(chosen)
+            family = self._candidate_family(chosen)
+            if family is not None:
+                selected_families.add(family)
+            remaining = [
+                candidate
+                for candidate in remaining
+                if candidate.candidate_id != chosen.candidate_id
+            ]
+        return tuple(selected)
 
     def _migrate(self, active: dict[int, list[str]], iteration: int) -> bool:
         if self.config.num_islands <= 1 or not self.config.migration_interval:

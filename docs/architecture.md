@@ -316,6 +316,15 @@ improvement history is still derived only after independent evaluation. The play
 constraint IDs but no raw rows, output contents, executable snippets, or third-party dependency
 promise. It is reconstructed on resume and cannot alter evaluator or selection authority.
 
+The native population selector consumes the same runtime-neutral family vocabulary. Within each
+island it preserves the global valid elite, then one valid elite for each recognized family while
+capacity remains, and finally fills by the existing evaluator score and code-token novelty rank.
+Parent pools contain one valid elite per family; inspiration selection prefers valid cross-family
+and mutually distinct representatives. Arbitrary tags never create niches, malformed or absent
+metadata falls back to legacy ranking, and state still persists only active candidate IDs. A
+restart reconstructs the same niches from the contract and append-only archive without another
+model call or mutable population metadata.
+
 The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
 available for mixed configurations. When both seams are already explicit, a runtime option is
