@@ -5,8 +5,10 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current built-in algorithm
-role DAG work is captured in
+The project is being developed with Spec-Driven Development (SDD). The current evolution Agent
+loop work is captured in
+[`specs/026-evolution-agent-loop/`](specs/026-evolution-agent-loop/), building on the built-in
+algorithm role DAG in
 [`specs/025-algorithm-role-dag/`](specs/025-algorithm-role-dag/), building on the conversational
 algorithm mission in
 [`specs/024-conversational-algorithm-mission/`](specs/024-conversational-algorithm-mission/), building
@@ -352,6 +354,25 @@ Each role gets a fresh runtime adapter, while the SQLite ledger and candidate ar
 durable authority. Runtime kind, endpoint/model, command identity, role, and capabilities are
 stored only as credential-safe fingerprints. Detached runs pass non-secret settings as arguments
 and an API key through `FAMOU_AGENT_RUNTIME_API_KEY`, never through argv or state.
+
+For an OpenAI-compatible local model that needs to inspect a candidate, edit files, or run tests
+before returning, opt into the bounded repository-owned loop:
+
+```bash
+lunar-agent evolve contract.json --strategy loop \
+  --agent-runtime openai-compatible \
+  --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
+  --agent-runtime-model your-local-model \
+  --agent-runtime-loop --agent-runtime-session-history \
+  --agent-runtime-allow-exec --agent-runtime-max-steps 40 \
+  --json --home .lunar
+```
+
+The loop reuses the same confined `read_file`, `write_file`, `list_dir`, and optional no-shell
+`run_command` tools used by normal Lunar-Agent sessions. Each solver and evaluator role receives a
+fresh runtime and tool registry. The loop is bounded to at most 200 tool calls, and memory,
+transcripts, and command execution are all explicit opt-ins. Its text still crosses the strict
+candidate/evaluation bridges, so a model cannot claim validity or bypass the evaluator.
 
 Hermes, DeepSeek Harness, Codex, Claude Code, and OpenClaw remain useful optional adapters or parent
 processes. They are execution-plane integrations; Lunar-Agent's local controller, evolution

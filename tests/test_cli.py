@@ -4,7 +4,7 @@ import sys
 from io import StringIO
 from pathlib import Path
 
-from famou.cli import _adapter_fingerprint, _portfolio_fingerprint, main
+from famou.cli import _adapter_fingerprint, _portfolio_fingerprint, _runtime_fingerprint, main
 from famou.store import Store
 
 
@@ -81,6 +81,25 @@ def test_adapter_fingerprint_is_canonical_and_profile_sensitive() -> None:
     )
     assert portfolio != reversed_portfolio
 
+    one_shot = _runtime_fingerprint(
+        "openai-compatible",
+        endpoint="http://127.0.0.1:11434",
+        model="local",
+        name="solver",
+        role="solver",
+    )
+    loop = _runtime_fingerprint(
+        "openai-compatible",
+        endpoint="http://127.0.0.1:11434",
+        model="local",
+        name="solver",
+        role="solver",
+        agent_loop=True,
+        loop_max_steps=80,
+        loop_allow_exec=True,
+    )
+    assert one_shot != loop
+
 
 def _write_evolution_commands(root: Path) -> tuple[Path, Path]:
     generator = root / "generator.py"
@@ -110,6 +129,27 @@ def test_cli_run_and_status_use_repository_runtime(tmp_path: Path, capsys) -> No
     assert main(["status", run_id, "--home", str(tmp_path)]) == 0
     status_output = capsys.readouterr().out
     assert "status: succeeded" in status_output
+
+
+def test_cli_evolution_loop_options_require_openai_runtime(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-runtime",
+                "mock",
+                "--agent-runtime-loop",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 2
+    )
+    assert "openai-compatible" in capsys.readouterr().err
 
 
 def test_cli_delegate_uses_explicit_absolute_command_and_returns_json(tmp_path: Path, capsys) -> None:

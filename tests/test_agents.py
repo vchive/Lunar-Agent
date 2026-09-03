@@ -12,7 +12,7 @@ from famou.agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
-from famou.runtime import MockRuntime
+from famou.runtime import MockRuntime, RuntimeResult
 
 
 class FixtureAdapter:
@@ -115,3 +115,41 @@ def test_runtime_adapter_preserves_existing_runtime_contract(tmp_path: Path) -> 
     assert result.adapter_name == "hermes-compatible"
     assert result.role == "solver"
     assert "Mock runtime" in result.text
+
+
+def test_runtime_adapter_attaches_context_and_transcript_artifact(tmp_path: Path) -> None:
+    class ContextRuntime:
+        name = "context-runtime"
+
+        def __init__(self) -> None:
+            self.context = None
+            self.transcript = None
+
+        def set_context(self, run_id, task_id, goal=None):
+            self.context = (run_id, task_id, goal)
+
+        def set_session_path(self, path):
+            self.transcript = Path(path)
+
+        def session_path(self):
+            return self.transcript
+
+        def run(self, prompt, workspace, timeout=None):
+            del prompt, timeout
+            assert self.transcript is not None
+            self.transcript.write_text("{}\n", encoding="utf-8")
+            return RuntimeResult("done")
+
+        def cancel(self):
+            return None
+
+        def process_info(self):
+            return (None, None)
+
+        def set_process_observer(self, observer):
+            del observer
+
+    runtime = ContextRuntime()
+    result = RuntimeAgentAdapter(runtime).run(request(tmp_path))
+    assert runtime.context == ("run-1", "task-1", "solve this")
+    assert result.artifacts == ("session-transcript.jsonl",)

@@ -19,7 +19,7 @@ from .agent_evolution import (
     AgentEvaluatorEnsemble,
     AgentPortfolioGenerator,
 )
-from .agent_loop import HermesSessionRuntime
+from .agent_loop import AgentLoopRuntime, HermesSessionRuntime
 from .agents import (
     DEFAULT_RUNTIME_CAPABILITIES,
     AgentError,
@@ -230,6 +230,32 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument(
         "--agent-runtime-api-key",
         help="optional runtime API key; detached runs pass it via FAMOU_AGENT_RUNTIME_API_KEY",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-loop",
+        action="store_true",
+        help="wrap an OpenAI-compatible evolution runtime in the bounded tool-capable Agent loop",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-max-steps",
+        type=int,
+        default=40,
+        help="maximum model tool calls per evolution Agent invocation (default: 40)",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-allow-exec",
+        action="store_true",
+        help="allow no-shell command execution inside the evolution Agent loop",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-memory",
+        action="store_true",
+        help="enable explicit durable memory tools inside the evolution Agent loop",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-session-history",
+        action="store_true",
+        help="persist a bounded transcript in each evolution Agent workspace",
     )
     evolve_parser.add_argument(
         "--candidate-runner-command",
@@ -742,6 +768,11 @@ def _runtime_fingerprint(
     name: str,
     role: str,
     required_capabilities: tuple[str, ...] = (),
+    agent_loop: bool = False,
+    loop_max_steps: int = 40,
+    loop_allow_exec: bool = False,
+    loop_memory: bool = False,
+    loop_session_history: bool = False,
 ) -> str:
     """Return a credential-safe identity for one repository-owned runtime Agent."""
     payload = {
@@ -754,8 +785,49 @@ def _runtime_fingerprint(
         "role": role,
         "runtime": runtime_name,
     }
+    if agent_loop:
+        payload["agent_loop"] = {
+            "allow_exec": loop_allow_exec,
+            "max_steps": loop_max_steps,
+            "memory": loop_memory,
+            "session_history": loop_session_history,
+        }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _build_evolution_runtime(
+    config: Config,
+    args: argparse.Namespace,
+    runtime_name: str,
+    command: tuple[str, ...],
+    endpoint: str | None,
+    model: str | None,
+    api_key: str | None,
+) -> object:
+    """Construct one fresh repository runtime for an evolution role."""
+    runtime = build_runtime(runtime_name, command or None, endpoint, model, api_key)
+    if not args.agent_runtime_loop:
+        return runtime
+    if not isinstance(runtime, OpenAICompatibleRuntime):
+        raise ValueError(  # noqa: TRY004 - this is a user-facing option conflict
+            "--agent-runtime-loop requires --agent-runtime openai-compatible"
+        )
+    memory = MemoryStore(config.database) if args.agent_runtime_memory else None
+    if memory is not None:
+        memory.initialize()
+    tools = LocalToolRegistry(
+        allow_exec=args.agent_runtime_allow_exec,
+        memory=memory,
+        redactions=(runtime.api_key,) if runtime.api_key else (),
+    )
+    return AgentLoopRuntime(
+        runtime,
+        tools=tools,
+        max_steps=args.agent_runtime_max_steps,
+        memory=memory,
+        session_history=args.agent_runtime_session_history,
+    )
 
 
 def _runner_fingerprint(command: tuple[str, ...], timeout: float) -> str | None:
@@ -1024,6 +1096,34 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         args.agent_runtime_model,
         args.agent_runtime_api_key,
     )
+    if (
+        not isinstance(args.agent_runtime_max_steps, int)
+        or isinstance(args.agent_runtime_max_steps, bool)
+        or not 1 <= args.agent_runtime_max_steps <= 200
+    ):
+        raise ValueError("--agent-runtime-max-steps must be between 1 and 200")
+    loop_options_used = bool(
+        args.agent_runtime_loop
+        or args.agent_runtime_allow_exec
+        or args.agent_runtime_memory
+        or args.agent_runtime_session_history
+        or args.agent_runtime_max_steps != 40
+    )
+    if loop_options_used and agent_runtime is None:
+        raise ValueError("evolution runtime loop options require --agent-runtime")
+    if args.agent_runtime_loop and agent_runtime != "openai-compatible":
+        raise ValueError("--agent-runtime-loop requires --agent-runtime openai-compatible")
+    if any(
+        option
+        for option in (
+            args.agent_runtime_allow_exec,
+            args.agent_runtime_memory,
+            args.agent_runtime_session_history,
+        )
+    ) and not args.agent_runtime_loop:
+        raise ValueError("evolution loop options require --agent-runtime-loop")
+    if args.agent_runtime_max_steps != 40 and not args.agent_runtime_loop:
+        raise ValueError("--agent-runtime-max-steps requires --agent-runtime-loop")
     if agent_runtime is None and any(value is not None and value != () for value in runtime_profile_options):
         raise ValueError("runtime profile options require --agent-runtime")
     if agent_runtime == "subprocess" and not agent_runtime_command:
@@ -1147,6 +1247,11 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 name=args.agent_name,
                 role=args.agent_role,
                 required_capabilities=tuple(args.agent_capabilities),
+                agent_loop=args.agent_runtime_loop,
+                loop_max_steps=args.agent_runtime_max_steps,
+                loop_allow_exec=args.agent_runtime_allow_exec,
+                loop_memory=args.agent_runtime_memory,
+                loop_session_history=args.agent_runtime_session_history,
             )
         else:
             generator_fingerprint = _adapter_fingerprint(
@@ -1180,6 +1285,11 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 name=args.evaluator_agent_name,
                 role=args.evaluator_agent_role,
                 required_capabilities=tuple(args.evaluator_agent_capabilities),
+                agent_loop=args.agent_runtime_loop,
+                loop_max_steps=args.agent_runtime_max_steps,
+                loop_allow_exec=args.agent_runtime_allow_exec,
+                loop_memory=args.agent_runtime_memory,
+                loop_session_history=args.agent_runtime_session_history,
             )
         else:
             evaluator_fingerprint = _adapter_fingerprint(
@@ -1222,9 +1332,11 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 timeout=args.timeout,
             )
         elif agent_runtime:
-            runtime = build_runtime(
+            runtime = _build_evolution_runtime(
+                config,
+                args,
                 agent_runtime,
-                agent_runtime_command or None,
+                agent_runtime_command,
                 runtime_endpoint,
                 runtime_model,
                 runtime_api_key,
@@ -1280,9 +1392,11 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 timeout=args.timeout,
             )
         elif agent_runtime:
-            runtime = build_runtime(
+            runtime = _build_evolution_runtime(
+                config,
+                args,
                 agent_runtime,
-                agent_runtime_command or None,
+                agent_runtime_command,
                 runtime_endpoint,
                 runtime_model,
                 runtime_api_key,
@@ -1523,6 +1637,16 @@ def _detach_evolution(
         command.extend(("--agent-runtime-endpoint", args.agent_runtime_endpoint))
     if args.agent_runtime_model:
         command.extend(("--agent-runtime-model", args.agent_runtime_model))
+    if args.agent_runtime_loop:
+        command.append("--agent-runtime-loop")
+    if args.agent_runtime_allow_exec:
+        command.append("--agent-runtime-allow-exec")
+    if args.agent_runtime_memory:
+        command.append("--agent-runtime-memory")
+    if args.agent_runtime_session_history:
+        command.append("--agent-runtime-session-history")
+    if args.agent_runtime_max_steps != 40:
+        command.extend(("--agent-runtime-max-steps", str(args.agent_runtime_max_steps)))
     if args.candidate_runner_command:
         command.extend(("--candidate-runner-command", args.candidate_runner_command))
     if args.agent_name != "evolution-agent":

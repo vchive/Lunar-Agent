@@ -257,6 +257,12 @@ class RuntimeAgentAdapter:
         if not isinstance(request, AgentRequest):
             raise TypeError("request must be an AgentRequest")
         try:
+            set_context = getattr(self.runtime, "set_context", None)
+            if callable(set_context):
+                set_context(request.run_id, request.task_id, request.prompt)
+            set_session_path = getattr(self.runtime, "set_session_path", None)
+            if callable(set_session_path):
+                set_session_path(request.workspace / "session-transcript.jsonl")
             result = self.runtime.run(request.prompt, request.workspace, request.timeout)
         except Exception as exc:
             if isinstance(exc, AgentError):
@@ -265,11 +271,23 @@ class RuntimeAgentAdapter:
         if not isinstance(result, RuntimeResult):
             raise AgentInvocationError("runtime returned an invalid result")
         try:
+            declared_artifacts = list(result.artifacts)
+            session_path = getattr(self.runtime, "session_path", None)
+            if callable(session_path):
+                transcript = session_path()
+                if transcript is not None and Path(transcript).is_file():
+                    resolved = Path(transcript).resolve(strict=False)
+                    try:
+                        relative = resolved.relative_to(request.workspace.resolve())
+                    except ValueError as exc:
+                        raise AgentInvocationError("runtime session artifact escapes workspace") from exc
+                    if relative.as_posix() not in declared_artifacts:
+                        declared_artifacts.append(relative.as_posix())
             return AgentResult(
                 adapter_name=self.name,
                 role=request.role,
                 text=result.text,
-                artifacts=tuple(result.artifacts),
+                artifacts=tuple(declared_artifacts),
                 metadata={**result.metadata, "runtime": self.name},
             )
         except (TypeError, ValueError) as exc:

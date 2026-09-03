@@ -70,7 +70,10 @@ loop or population strategy → canonical candidate archive
 This profile is the internal Agent skeleton for standalone Lunar-Agent use. It is intentionally small,
 local, and dependency-free at the protocol boundary; no Hermes/OpenCode/Codex/Claude Code/DeepSeek
 Harness process is required. A subprocess runtime or OpenAI-compatible server may still be backed
-by any of those tools when the owner explicitly supplies the command or endpoint.
+by any of those tools when the owner explicitly supplies the command or endpoint. Adding
+`--agent-runtime-loop` wraps the explicit OpenAI-compatible model in the repository-owned
+`AgentLoopRuntime`; the loop gets the same confined local tools as ordinary sessions, but remains
+bounded by tool-step, workspace, timeout, and artifact limits.
 
 ## Control flow
 
@@ -216,6 +219,24 @@ candidate source below the run workspace. The controller writes the same additiv
 `evolution/result.json`, the `evolution_finished` event, and `status --json`; parent Agents can join
 it with the returned workspace path without depending on archive internals. A missing, escaping, or
 symlinked source is treated as unavailable and never handed off as a best artifact.
+
+When evolution uses the optional runtime loop, each role invocation follows this sequence:
+
+```text
+AgentCandidateGenerator / AgentCandidateEvaluator
+        ↓ strict role prompt + bounded contract/evidence
+RuntimeAgentAdapter
+        ↓ set_context + per-attempt session-transcript.jsonl
+AgentLoopRuntime (OpenAI-compatible model)
+        ↓ read/write/list + optional memory/no-shell exec
+bounded RuntimeResult
+        ↓ strict CandidateDraft or EvaluationReport validation
+canonical archive / validity-first evaluator
+```
+
+The transcript is an ordinary run-relative artifact and is never used as evaluator authority.
+Changing loop settings changes the runtime fingerprint, so detached resume cannot silently combine
+one-shot and tool-capable sessions.
 
 ## Recovery and migration
 
