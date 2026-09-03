@@ -24,6 +24,8 @@ MAX_REPORT_BYTES = 32 * 1024
 MAX_ERROR_INFO = 32
 MAX_OUTPUTS = 32
 MAX_OUTPUT_FIELDS = 32
+MAX_INPUT_FILES = 64
+MAX_INPUT_FILE_BYTES = 16 * 1024 * 1024
 SUPPORTED_PROBLEM_TYPES = frozenset(
     {"scheduling", "routing", "packing", "assignment", "forecasting", "network_flow", "continuous"}
 )

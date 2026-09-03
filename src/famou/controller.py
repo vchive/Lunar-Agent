@@ -23,7 +23,13 @@ from .agents import (
     AgentSelectionError,
     RuntimeAgentAdapter,
 )
-from .algorithm import AlgorithmProblemContract, OutputSpec, materialize_algorithm_workspace
+from .algorithm import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    AlgorithmProblemContract,
+    OutputSpec,
+    materialize_algorithm_workspace,
+)
 from .artifacts import ArtifactError, ArtifactStore
 from .budget import BudgetExceeded, BudgetSpec
 from .config import Config
@@ -951,6 +957,7 @@ class LocalController:
         task_root = Path(run.workspace) / "tasks" / task.id / attempt.id
         artifacts = ArtifactStore(run.workspace, self.store, run.id)
         try:
+            self._materialize_task_input_data(run, task_root)
             request = AgentRequest(
                 run_id=run.id,
                 task_id=task.id,
@@ -1211,6 +1218,7 @@ class LocalController:
             self._active_runtimes[attempt.id] = runtime
         try:
             try:
+                self._materialize_task_input_data(run, task_root)
                 set_context = getattr(runtime, "set_context", None)
                 if callable(set_context):
                     set_context(run.id, task.id, run.goal)
@@ -1452,6 +1460,57 @@ class LocalController:
         contract = self._algorithm_contract(run)
         return contract.outputs if contract is not None else ()
 
+    def _materialize_task_input_data(self, run: Run, task_root: Path) -> tuple[str, ...]:
+        """Copy hashed run inputs into a private attempt workspace.
+
+        Runtime and Agent adapters are intentionally confined to ``task_root``.  Copying verified
+        input artifacts to the same relative ``data/raw/...`` path gives every attempt deterministic
+        read access without granting it access to the run ledger or another attempt's files.
+        """
+        input_artifacts = [
+            item
+            for item in self.store.list_artifacts(run.id)
+            if item["kind"] == "input_data"
+        ]
+        if len(input_artifacts) > MAX_INPUT_FILES:
+            raise ArtifactError(f"run has more than {MAX_INPUT_FILES} staged input files")
+        if not input_artifacts:
+            return ()
+        root = Path(run.workspace).expanduser().resolve(strict=False)
+        task_root = task_root.expanduser().resolve(strict=False)
+        copied: list[str] = []
+        for artifact in input_artifacts:
+            relative = artifact.get("path")
+            expected_digest = artifact.get("sha256")
+            expected_size = artifact.get("size")
+            if (
+                not isinstance(relative, str)
+                or not relative.startswith("data/raw/")
+                or not isinstance(expected_digest, str)
+                or not isinstance(expected_size, int)
+                or expected_size > MAX_INPUT_FILE_BYTES
+            ):
+                raise ArtifactError("staged input artifact metadata is malformed")
+            source = self._confined_regular_file(root, relative)
+            if source is None:
+                raise ArtifactError(f"staged input is missing or unsafe: {relative}")
+            content = source.read_bytes()
+            if len(content) != expected_size or hashlib.sha256(content).hexdigest() != expected_digest:
+                raise ArtifactError(f"staged input digest does not match the ledger: {relative}")
+            target = (task_root / relative).resolve(strict=False)
+            try:
+                target.relative_to(task_root)
+            except ValueError as exc:
+                raise ArtifactError(f"staged input escapes task workspace: {relative}") from exc
+            if self._raw_path_has_symlink(task_root, target):
+                raise ArtifactError(f"staged input target is symlinked: {relative}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(f".{target.name}.tmp")
+            temporary.write_bytes(content)
+            temporary.replace(target)
+            copied.append(relative)
+        return tuple(copied)
+
     @staticmethod
     def _raw_path_has_symlink(root: Path, path: Path) -> bool:
         """Check every existing component without following a symlink."""
@@ -1682,6 +1741,11 @@ class LocalController:
 
     def _build_task_prompt(self, run: Run, task: Any) -> str:
         dependencies = self.store.dependency_artifacts(task.id)
+        staged_inputs = [
+            item["path"]
+            for item in self.store.list_artifacts(run.id)
+            if item["kind"] == "input_data" and isinstance(item.get("path"), str)
+        ][:MAX_INPUT_FILES]
         answer_path = task.input_answer_path
         answer_content = ""
         if answer_path:
@@ -1693,6 +1757,12 @@ class LocalController:
             except (OSError, UnicodeDecodeError, ValueError):
                 answer_content = "<answer artifact could not be read>"
         output_specs = self._task_output_specs(run, task)
+        input_instructions: list[str] = []
+        if staged_inputs:
+            input_instructions = [
+                "Staged input data (read-only copies are available at these task-relative paths):"
+            ]
+            input_instructions.extend(f"- {path}" for path in staged_inputs)
         output_instructions: list[str] = []
         if output_specs:
             output_instructions = [
@@ -1708,9 +1778,9 @@ class LocalController:
                 for output in output_specs
             )
         if not dependencies and not answer_content:
-            sections = [*output_instructions, task.prompt]
+            sections = [*input_instructions, *output_instructions, task.prompt]
         else:
-            sections = [*output_instructions, task.prompt]
+            sections = [*input_instructions, *output_instructions, task.prompt]
             if answer_content:
                 sections.extend(
                     [

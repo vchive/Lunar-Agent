@@ -14,6 +14,8 @@ evolution Agent evidence work in
 [`specs/030-evolution-agent-evidence/`](specs/030-evolution-agent-evidence/), and the structured
 algorithm output work in
 [`specs/031-structured-algorithm-outputs/`](specs/031-structured-algorithm-outputs/), building on the
+algorithm input staging work in
+[`specs/032-algorithm-input-staging/`](specs/032-algorithm-input-staging/), building on the
 unified evolution benchmark in
 [`specs/028-unified-evolution-benchmark/`](specs/028-unified-evolution-benchmark/), building on the
 reproducible native benchmark in
@@ -69,6 +71,22 @@ The run ID remains stable. Contract, plan, compiler manifest, input answers, and
 artifacts are all local and SHA-256 indexed. The baseline generated DAG is
 `data_discovery → formulate → solve → verify`; candidate evolution remains an explicit opt-in
 stage through `evolve`.
+
+Provide real local data explicitly with repeatable `--input` options. A source is staged into the
+run's `data/raw/` directory and copied into each isolated task attempt; use `SOURCE=DEST` when the
+destination must match a contract path:
+
+```bash
+lunar-agent solve "根据订单数据设计配送路线" \
+  --input ./orders.csv \
+  --input ./vehicles.json=vehicles.json \
+  --runtime openai-compatible --agent-loop --json --home .lunar
+```
+
+Inputs are recorded as `kind=input_data` with size and SHA-256 metadata. The source machine path is
+never persisted, and resuming with the same bytes is idempotent. Algorithm roles read the verified
+copies from `data/raw/...` in their own attempt workspace, just as they write outputs under their
+private `output/` directory.
 
 For a more explicit specialist workflow, add `--role-dag`:
 

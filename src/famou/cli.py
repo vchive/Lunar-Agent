@@ -27,7 +27,7 @@ from .agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
-from .algorithm import AlgorithmProblemContract
+from .algorithm import MAX_INPUT_FILE_BYTES, MAX_INPUT_FILES, AlgorithmProblemContract
 from .artifacts import ArtifactStore
 from .benchmark import BenchmarkConfig, BenchmarkRunner
 from .budget import BudgetSpec
@@ -115,6 +115,20 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_input_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--input",
+        dest="input_files",
+        action="append",
+        default=[],
+        metavar="SOURCE[=DEST]",
+        help=(
+            "stage a local data file under data/raw (destination defaults to its basename; "
+            "repeat for multiple files)"
+        ),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="famou",
@@ -130,6 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("goal", nargs="?", help="user goal, or '-' to read it from stdin")
     run_parser.add_argument("--plan", type=Path, help="JSON plan file containing goal and tasks")
     _add_runtime_options(run_parser)
+    _add_input_options(run_parser)
     run_parser.add_argument(
         "--detach",
         action="store_true",
@@ -154,6 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="use the five-stage DataDiscovery/Formulator/Solver/Evaluator/Reviewer workflow",
     )
     _add_runtime_options(solve_parser)
+    _add_input_options(solve_parser)
     _add_home(solve_parser)
     _add_json(solve_parser)
 
@@ -517,6 +533,9 @@ def _detach(
 ) -> object:
     controller = _controller(args, config)
     run = controller.create(goal, plan_tasks)
+    staged_inputs = _stage_input_files(
+        run, controller.store, getattr(args, "input_files", None)
+    )
     log_path = Path(run.workspace) / "controller.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
@@ -583,6 +602,7 @@ def _detach(
         "workspace": str(run.workspace),
         "plan": bool(plan_tasks),
         "workers": args.workers,
+        "input_data": list(staged_inputs),
     }
 
 
@@ -983,6 +1003,110 @@ def _read_conversation_goal(args: argparse.Namespace) -> str:
     return goal.strip()
 
 
+def _safe_input_destination(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("input destination must be non-empty")
+    value = value.strip()
+    if "\\" in value or "\x00" in value:
+        raise ValueError("input destination must be a portable relative path")
+    candidate = Path(value)
+    if candidate.is_absolute() or any(part in {"", ".", ".."} for part in value.split("/")):
+        raise ValueError("input destination must be a portable relative path")
+    return "/".join(candidate.parts)
+
+
+def _input_source_and_destination(raw: object) -> tuple[Path, str]:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("--input requires SOURCE or SOURCE=DEST")
+    source_text, separator, destination = raw.partition("=")
+    source = Path(source_text if separator else raw).expanduser()
+    if not source_text.strip():
+        raise ValueError("--input source must be non-empty")
+    if source.is_symlink():
+        raise ValueError(f"input source must not be a symlink: {source}")
+    source_path = source.resolve(strict=False)
+    if source_path.is_symlink() or not source_path.is_file():
+        raise ValueError(f"input source is not a regular file: {source}")
+    target = destination.strip() if separator else source_path.name
+    return source_path, _safe_input_destination(target)
+
+
+def _path_has_symlink(root: Path, path: Path) -> bool:
+    current = path
+    while True:
+        if current.exists() and current.is_symlink():
+            return True
+        if current == root:
+            return False
+        if current.parent == current:
+            return True
+        current = current.parent
+
+
+def _stage_input_files(
+    run: Run, store: Store, raw_inputs: list[str] | tuple[str, ...] | None
+) -> tuple[str, ...]:
+    """Copy explicit user data into a run-relative, hashed ``data/raw`` directory.
+
+    Staging is idempotent for the same path and bytes, which lets a parent Agent safely retry a
+    detached ``solve`` invocation. A different file at an existing destination is rejected rather
+    than silently changing the problem underneath an immutable run.
+    """
+    values = tuple(raw_inputs or ())
+    if len(values) > MAX_INPUT_FILES:
+        raise ValueError(f"at most {MAX_INPUT_FILES} input files may be staged")
+    if not values:
+        return ()
+    root = Path(run.workspace).expanduser().resolve(strict=False)
+    raw_root = root / "data" / "raw"
+    if _path_has_symlink(root, raw_root):
+        raise ValueError("run data/raw directory must not be a symlink")
+    raw_root.mkdir(parents=True, exist_ok=True)
+    tasks = store.list_tasks(run.id)
+    if not tasks:
+        raise ValueError("run has no task to own staged input artifacts")
+    owner_task = tasks[0].id
+    artifact_store = ArtifactStore(root, store, run.id)
+    staged: list[str] = []
+    for raw in values:
+        source, destination = _input_source_and_destination(raw)
+        size = source.stat().st_size
+        if size > MAX_INPUT_FILE_BYTES:
+            raise ValueError(
+                f"input source exceeds {MAX_INPUT_FILE_BYTES} bytes: {source}"
+            )
+        content = source.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        target = root / "data" / "raw" / destination
+        if _path_has_symlink(root, target):
+            raise ValueError(f"input destination is symlinked: {destination}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise ValueError(f"input destination already contains different data: {destination}")
+        else:
+            temporary = target.with_name(f".{target.name}.tmp")
+            temporary.write_bytes(content)
+            temporary.replace(target)
+        relative = f"data/raw/{destination}"
+        if not any(
+            item["path"] == relative
+            and item["kind"] == "input_data"
+            and item["sha256"] == digest
+            for item in store.list_artifacts(run.id)
+        ):
+            artifact_store.record(target, owner_task, kind="input_data")
+        store.append_event(
+            run.id,
+            "algorithm_input_staged",
+            {"path": relative, "size": size, "sha256": digest},
+            task_id=owner_task,
+            event_id=f"event-algorithm-input-{run.id}-{hashlib.sha256(relative.encode()).hexdigest()}",
+        )
+        staged.append(relative)
+    return tuple(staged)
+
+
 def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Compile and execute one conversational algorithm mission."""
     controller = _controller(args, config)
@@ -999,6 +1123,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         manifest = _conversation_manifest(run)
         if manifest is not None and manifest.get("runtime_fingerprint") not in {None, fingerprint}:
             raise ValueError("solve resume compiler runtime does not match the existing run")
+        _stage_input_files(run, controller.store, args.input_files)
         settled = controller.resume_conversational(
             run.id,
             RuntimeContractCompiler(runtime),
@@ -1007,15 +1132,15 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         )
         return _solve_payload(controller, settled)
     goal = _read_conversation_goal(args)
+    run = controller.create_conversational_run(
+        goal, workspace=args.workspace, compiler_fingerprint=fingerprint
+    )
+    _stage_input_files(run, controller.store, args.input_files)
     if args.detach:
-        run = controller.create_conversational_run(
-            goal, workspace=args.workspace, compiler_fingerprint=fingerprint
-        )
         return _detach_solve(config, args, run)
-    settled = controller.start_conversational(
-        goal,
+    settled = controller.resume_conversational(
+        run.id,
         RuntimeContractCompiler(runtime),
-        workspace=args.workspace,
         compiler_fingerprint=fingerprint,
         plan_factory=_conversation_plan_factory(args),
     )
@@ -1024,12 +1149,20 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
 
 def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
     manifest = _conversation_manifest(run)
+    input_data = [
+        item for item in controller.store.list_artifacts(run.id) if item["kind"] == "input_data"
+    ]
+    algorithm_outputs = [
+        item for item in controller.store.list_artifacts(run.id) if item["kind"] == "output"
+    ]
     return {
         "run_id": run.id,
         "status": run.status.value,
         "run_status": run.status.value,
         "workspace": str(run.workspace),
         "input_request": controller.store.pending_input(run.id),
+        "input_data": input_data,
+        "algorithm_outputs": algorithm_outputs,
         "compiler": manifest,
         "plan": (
             {"plan_id": run.current_plan_id, "version": run.current_plan_version}
@@ -1106,12 +1239,17 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
     except OSError as exc:
         Store(config.database).cancel_run(run.id)
         raise ValueError(f"could not start detached solve: {exc}") from exc
+    input_data = [
+        item for item in Store(config.database).list_artifacts(run.id)
+        if item["kind"] == "input_data"
+    ]
     return {
         "run_id": run.id,
         "status": "pending",
         "run_status": "pending",
         "workspace": str(run.workspace),
         "detached": True,
+        "input_data": input_data,
     }
 
 
@@ -2135,13 +2273,16 @@ def main(argv: list[str] | None = None) -> int:
                 _emit(_detach(config, args, goal, plan_tasks), args.json)
                 return 0
             controller = _controller(args, config)
-            run = controller.start(goal, plan_tasks)
+            run = controller.create(goal, plan_tasks)
+            staged_inputs = _stage_input_files(run, controller.store, args.input_files)
+            run = controller.resume(run.id)
             _emit(
                 {
                     "run_id": run.id,
                     "status": run.status.value,
                     "workspace": str(run.workspace),
                     "input_request": controller.store.pending_input(run.id),
+                    "input_data": list(staged_inputs),
                     "workers": controller.max_workers,
                 },
                 args.json,

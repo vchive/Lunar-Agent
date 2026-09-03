@@ -207,6 +207,40 @@ def test_cli_run_and_status_use_repository_runtime(tmp_path: Path, capsys) -> No
     assert "status: succeeded" in status_output
 
 
+def test_cli_run_stages_input_for_subprocess_runtime(tmp_path: Path, capsys) -> None:
+    source = tmp_path / "orders.csv"
+    source.write_text("id\norder-1\n", encoding="utf-8")
+    worker = tmp_path / "worker.py"
+    worker.write_text(
+        "import pathlib\n"
+        "print(pathlib.Path('data/raw/orders.csv').read_text(encoding='utf-8'))\n",
+        encoding="utf-8",
+    )
+    assert (
+        main(
+            [
+                "run",
+                "inspect orders",
+                "--input",
+                str(source),
+                "--runtime",
+                "subprocess",
+                "--command",
+                f"{sys.executable} {worker}",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "succeeded"
+    artifacts = Store(tmp_path / "home" / "state.db").list_artifacts(payload["run_id"])
+    input_rows = [item for item in artifacts if item["kind"] == "input_data"]
+    assert len(input_rows) == 1 and input_rows[0]["path"] == "data/raw/orders.csv"
+
+
 def test_cli_evolution_loop_options_require_openai_runtime(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path)

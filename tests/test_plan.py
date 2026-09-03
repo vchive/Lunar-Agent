@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from famou.algorithm import AlgorithmProblemContract
+from famou.cli import _stage_input_files
 from famou.config import Config
 from famou.controller import LocalController
 from famou.evaluator import Evaluation
@@ -105,6 +106,68 @@ def test_plan_runs_in_dependency_order_and_handoffs_artifact(tmp_path: Path) -> 
     tasks = controller.store.list_tasks(run.id)
     assert [task.state.value for task in tasks] == ["succeeded", "succeeded"]
     assert tasks[1].dependencies == ("first",)
+
+
+def test_staged_input_data_is_hashed_and_materialized_into_attempts(tmp_path: Path) -> None:
+    source = tmp_path / "orders.csv"
+    source.write_text("id,demand\n1,3\n", encoding="utf-8")
+    controller = LocalController(Config(tmp_path / ".famou"), RecordingRuntime())
+    run = controller.create("inspect staged input")
+
+    assert _stage_input_files(run, controller.store, [str(source)]) == ("data/raw/orders.csv",)
+    # Repeating the same request is safe for detached/resume callers.
+    assert _stage_input_files(run, controller.store, [str(source)]) == ("data/raw/orders.csv",)
+    settled = controller.resume(run.id)
+
+    assert settled.status.value == "succeeded"
+    input_artifacts = [
+        item for item in controller.store.list_artifacts(run.id) if item["kind"] == "input_data"
+    ]
+    assert len(input_artifacts) == 1
+    copied = list(run.workspace.glob("tasks/*/*/data/raw/orders.csv"))
+    assert len(copied) == 1 and copied[0].read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+    assert "data/raw/orders.csv" in next(run.workspace.glob("tasks/*/*/prompt.md")).read_text(
+        encoding="utf-8"
+    )
+    assert any(event["type"] == "algorithm_input_staged" for event in controller.store.list_events(run.id))
+
+    source.write_text("id,demand\n2,99\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="different data"):
+        _stage_input_files(run, controller.store, [str(source)])
+
+
+def test_staged_inputs_reject_unsafe_destinations_sources_and_counts(tmp_path: Path) -> None:
+    source = tmp_path / "orders.csv"
+    source.write_text("id\n1\n", encoding="utf-8")
+    controller = LocalController(Config(tmp_path / ".famou"), RecordingRuntime())
+    run = controller.create("inspect staged input")
+
+    with pytest.raises(ValueError, match="portable relative"):
+        _stage_input_files(run, controller.store, [f"{source}=../escape.csv"])
+    symlink = tmp_path / "orders-link.csv"
+    symlink.symlink_to(source)
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        _stage_input_files(run, controller.store, [str(symlink)])
+    too_many = [f"{source}=orders-{index}.csv" for index in range(65)]
+    with pytest.raises(ValueError, match="at most 64"):
+        _stage_input_files(run, controller.store, too_many)
+
+
+def test_tampered_staged_input_fails_before_runtime_execution(tmp_path: Path) -> None:
+    source = tmp_path / "orders.csv"
+    source.write_text("id\n1\n", encoding="utf-8")
+    runtime = RecordingRuntime()
+    controller = LocalController(Config(tmp_path / ".famou", max_retries=1), runtime)
+    run = controller.create("inspect staged input")
+    _stage_input_files(run, controller.store, [str(source)])
+    (run.workspace / "data" / "raw" / "orders.csv").write_text("id\ncorrupted\n", encoding="utf-8")
+
+    settled = controller.resume(run.id)
+
+    assert settled.status.value == "failed"
+    assert runtime.prompts == []
+    task = controller.store.list_tasks(run.id)[0]
+    assert task.last_error is not None and "digest" in task.last_error
 
 
 def _structured_output_contract() -> AlgorithmProblemContract:
