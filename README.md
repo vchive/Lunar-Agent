@@ -7,8 +7,10 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current runtime-profile
-benchmark is captured in
+The project is being developed with Spec-Driven Development (SDD). The current conversational
+evolution handoff is captured in
+[`specs/035-conversational-evolution-handoff/`](specs/035-conversational-evolution-handoff/),
+building on the runtime-profile benchmark in
 [`specs/029-runtime-profile-benchmark/`](specs/029-runtime-profile-benchmark/), building on the
 evolution Agent evidence work in
 [`specs/030-evolution-agent-evidence/`](specs/030-evolution-agent-evidence/), and the structured
@@ -75,6 +77,22 @@ The run ID remains stable. Contract, plan, compiler manifest, input answers, and
 artifacts are all local and SHA-256 indexed. The baseline generated DAG is
 `data_discovery → formulate → solve → verify`; candidate evolution remains an explicit opt-in
 stage through `evolve`.
+
+For a conversational mission that should search candidates immediately, use `--evolve`. Lunar-
+Agent compiles the contract first and then links a second durable evolution run:
+
+```bash
+lunar-agent solve "根据订单数据优化配送路线" \
+  --runtime mock --evolve --strategy population --max-rounds 3 \
+  --json --home .lunar
+```
+
+The JSON response includes the intake `run_id` and `evolution.run_id`. The intake keeps the
+validated contract and explicitly supersedes its unstarted generated-plan tasks; the child owns
+`evolution/archive.jsonl`, `state.json`, and `result.json`. Staged `--input` files are copied into
+the child with the same SHA-256 and size, never with the source-machine path. Resuming the intake
+reuses the same child and rejects changed strategy settings. `evolve CONTRACT` remains available
+when separate generator/evaluator commands or an OpenEvolve wrapper are needed.
 
 Provide real local data explicitly with repeatable `--input` options. A source is staged into the
 run's `data/raw/` directory and copied into each isolated task attempt; use `SOURCE=DEST` when the

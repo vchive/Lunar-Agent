@@ -168,6 +168,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="use the five-stage DataDiscovery/Formulator/Solver/Evaluator/Reviewer workflow",
     )
+    solve_parser.add_argument(
+        "--evolve",
+        action="store_true",
+        help="handoff the compiled contract to a linked local evolution run",
+    )
+    solve_parser.add_argument(
+        "--strategy",
+        choices=("loop", "population", "openevolve"),
+        help="evolution strategy when --evolve is enabled (default: contract strategy)",
+    )
+    solve_parser.add_argument(
+        "--openevolve-command",
+        help="explicit OpenEvolve executable for --evolve --strategy openevolve",
+    )
+    solve_parser.add_argument("--max-rounds", type=int)
+    solve_parser.add_argument("--stagnation-rounds", type=int)
+    solve_parser.add_argument("--population-size", type=int)
+    solve_parser.add_argument("--offspring-per-iteration", type=int)
+    solve_parser.add_argument("--islands", type=int)
+    solve_parser.add_argument("--migration-interval", type=int)
+    solve_parser.add_argument("--migration-rate", type=float)
+    solve_parser.add_argument("--seed", type=int)
+    solve_parser.add_argument("--timeout", type=float)
     _add_runtime_options(solve_parser)
     _add_input_options(solve_parser)
     _add_home(solve_parser)
@@ -706,6 +729,39 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         if isinstance(evolution_finished, dict) and isinstance(evolution_finished.get("evaluated_candidates"), int)
         else sum(1 for event in events if event["type"] == "evolution_candidate_archived")
     )
+    evolution_link = next(
+        (
+            event["payload"]
+            for event in reversed(events)
+            if event["type"] == "evolution_linked" and isinstance(event.get("payload"), dict)
+        ),
+        None,
+    )
+    linked_evolution = None
+    if evolution_link is not None:
+        child_id = evolution_link.get("evolution_run_id")
+        if isinstance(child_id, str):
+            child = store.get_run(child_id)
+            if child is not None:
+                child_events = store.list_events(child.id)
+                child_result = next(
+                    (
+                        event["payload"]
+                        for event in reversed(child_events)
+                        if event["type"] == "evolution_finished"
+                        and isinstance(event.get("payload"), dict)
+                    ),
+                    None,
+                )
+                linked_evolution = {
+                    "run_id": child.id,
+                    "status": child.status.value,
+                    "workspace": str(child.workspace),
+                    "strategy": evolution_link.get("strategy"),
+                    "result": child_result,
+                }
+            else:
+                linked_evolution = {"run_id": child_id, "status": "missing"}
     artifacts = store.list_artifacts(run.id)
     algorithm_outputs = [item for item in artifacts if item["kind"] == "output"]
     role_evidence = [item for item in artifacts if item["kind"] == "role_evidence"]
@@ -773,7 +829,8 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             "result": evolution_finished,
             "iterations": evolution_iterations,
             "candidates": evolution_candidates,
-        } if evolution_configured or evolution_finished else None,
+            "linked": linked_evolution,
+        } if evolution_configured or evolution_finished or linked_evolution else None,
         "decisions": store.list_decisions(run.id),
         "agents": [
             {"task_id": task_id, **payload}
@@ -1111,6 +1168,25 @@ def _stage_input_files(
 
 def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Compile and execute one conversational algorithm mission."""
+    if not args.evolve and any(
+        getattr(args, name, None) is not None
+        for name in (
+            "strategy",
+            "openevolve_command",
+            "max_rounds",
+            "stagnation_rounds",
+            "population_size",
+            "offspring_per_iteration",
+            "islands",
+            "migration_interval",
+            "migration_rate",
+            "seed",
+            "timeout",
+        )
+    ):
+        raise ValueError("evolution options require --evolve")
+    if args.evolve:
+        _validate_evolution_cli_bounds(args)
     controller = _controller(args, config)
     runtime = controller.runtime
     fingerprint = _compiler_fingerprint(runtime)
@@ -1125,18 +1201,43 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         manifest = _conversation_manifest(run)
         if manifest is not None and manifest.get("runtime_fingerprint") not in {None, fingerprint}:
             raise ValueError("solve resume compiler runtime does not match the existing run")
+        evolution_request = _latest_evolution_request(controller.store, run.id)
+        if args.evolve and evolution_request is None:
+            controller.store.append_event(
+                run.id,
+                "evolution_requested",
+                _evolution_request_payload(args),
+                event_id="event-evolution-request-" + hashlib.sha256(run.id.encode()).hexdigest(),
+            )
+            evolution_request = _evolution_request_payload(args)
+        if args.evolve and evolution_request is not None:
+            _validate_evolution_override(args, evolution_request)
         _stage_input_files(run, controller.store, args.input_files)
         settled = controller.resume_conversational(
             run.id,
             RuntimeContractCompiler(runtime),
             compiler_fingerprint=fingerprint,
             plan_factory=_conversation_plan_factory(args, manifest),
+            execute_plan=not args.evolve and evolution_request is None,
         )
+        effective_args = _evolution_args(args, evolution_request)
+        if effective_args.evolve and settled.current_plan_id is not None:
+            _solve_evolution(config, effective_args, controller, settled)
+            settled = controller.store.get_run(settled.id) or settled
         return _solve_payload(controller, settled)
     goal = _read_conversation_goal(args)
     run = controller.create_conversational_run(
         goal, workspace=args.workspace, compiler_fingerprint=fingerprint
     )
+    evolution_request = None
+    if args.evolve:
+        evolution_request = _evolution_request_payload(args)
+        controller.store.append_event(
+            run.id,
+            "evolution_requested",
+            evolution_request,
+            event_id="event-evolution-request-" + hashlib.sha256(run.id.encode()).hexdigest(),
+        )
     _stage_input_files(run, controller.store, args.input_files)
     if args.detach:
         return _detach_solve(config, args, run)
@@ -1145,8 +1246,297 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         RuntimeContractCompiler(runtime),
         compiler_fingerprint=fingerprint,
         plan_factory=_conversation_plan_factory(args),
+        execute_plan=not args.evolve,
     )
+    effective_args = _evolution_args(args, evolution_request)
+    if effective_args.evolve and settled.current_plan_id is not None:
+        _solve_evolution(config, effective_args, controller, settled)
+        settled = controller.store.get_run(settled.id) or settled
     return _solve_payload(controller, settled)
+
+
+def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
+    """Return only bounded, non-secret settings needed to continue a solve handoff."""
+    return {
+        "strategy": args.strategy,
+        "max_rounds": args.max_rounds,
+        "stagnation_rounds": args.stagnation_rounds,
+        "population_size": args.population_size if args.population_size is not None else 8,
+        "offspring_per_iteration": (
+            args.offspring_per_iteration if args.offspring_per_iteration is not None else 1
+        ),
+        "islands": args.islands if args.islands is not None else 1,
+        "migration_interval": (
+            args.migration_interval if args.migration_interval is not None else 0
+        ),
+        "migration_rate": args.migration_rate if args.migration_rate is not None else 0.1,
+        "seed": args.seed,
+        "timeout": args.timeout if args.timeout is not None else 900.0,
+        "openevolve_command_configured": bool(args.openevolve_command),
+    }
+
+
+def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
+    """Validate option bounds before a handoff request is persisted in the intake ledger."""
+    try:
+        EvolutionConfig(
+            strategy="loop",
+            max_rounds=args.max_rounds if args.max_rounds is not None else 1,
+            stagnation_rounds=(
+                args.stagnation_rounds if args.stagnation_rounds is not None else 1
+            ),
+            population_size=args.population_size if args.population_size is not None else 8,
+            offspring_per_iteration=(
+                args.offspring_per_iteration if args.offspring_per_iteration is not None else 1
+            ),
+            num_islands=args.islands if args.islands is not None else 1,
+            migration_interval=(
+                args.migration_interval if args.migration_interval is not None else 0
+            ),
+            migration_rate=args.migration_rate if args.migration_rate is not None else 0.1,
+            rng_seed=args.seed,
+            timeout_seconds=args.timeout if args.timeout is not None else 900.0,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid solve evolution options: {exc}") from exc
+
+
+def _latest_evolution_request(store: Store, run_id: str) -> dict[str, object] | None:
+    for event in reversed(store.list_events(run_id)):
+        if event["type"] == "evolution_requested" and isinstance(event.get("payload"), dict):
+            return event["payload"]
+    return None
+
+
+def _validate_evolution_override(args: argparse.Namespace, request: dict[str, object]) -> None:
+    """Reject explicit resume settings that differ from the persisted handoff request."""
+    for name in (
+        "strategy",
+        "max_rounds",
+        "stagnation_rounds",
+        "population_size",
+        "offspring_per_iteration",
+        "islands",
+        "migration_interval",
+        "migration_rate",
+        "seed",
+        "timeout",
+    ):
+        supplied = getattr(args, name, None)
+        stored = request.get(name)
+        if supplied is not None and stored is not None and supplied != stored:
+            raise EvolutionError(f"solve evolution setting {name} does not match the existing handoff")
+
+
+def _evolution_args(
+    args: argparse.Namespace, request: dict[str, object] | None
+) -> argparse.Namespace:
+    """Overlay persisted handoff settings onto a CLI namespace during answer/resume."""
+    if request is None:
+        return args
+    values = vars(args).copy()
+    values["evolve"] = True
+    for name in (
+        "strategy",
+        "openevolve_command",
+        "max_rounds",
+        "stagnation_rounds",
+        "population_size",
+        "offspring_per_iteration",
+        "islands",
+        "migration_interval",
+        "migration_rate",
+        "seed",
+        "timeout",
+    ):
+        values.setdefault(name, None)
+    for name in (
+        "strategy",
+        "max_rounds",
+        "stagnation_rounds",
+        "population_size",
+        "offspring_per_iteration",
+        "islands",
+        "migration_interval",
+        "migration_rate",
+        "seed",
+        "timeout",
+    ):
+        if name in request and request[name] is not None:
+            values[name] = request[name]
+    return argparse.Namespace(**values)
+
+
+def _solve_evolution(
+    config: Config, args: argparse.Namespace, controller: LocalController, parent: Run
+) -> dict[str, object]:
+    """Create or resume the evolution child linked to one compiled conversational run."""
+    events = controller.store.list_events(parent.id)
+    linked = next(
+        (
+            event["payload"]
+            for event in reversed(events)
+            if event["type"] == "evolution_linked" and isinstance(event.get("payload"), dict)
+        ),
+        None,
+    )
+    contract_payload = controller.store.get_current_plan(parent.id)
+    if contract_payload is None or contract_payload.algorithm_problem is None:
+        raise ValueError("solve --evolve requires a compiled algorithm contract")
+    contract = AlgorithmProblemContract.from_dict(contract_payload.algorithm_problem)
+    strategy_name = args.strategy or contract.evolution.strategy
+
+    # Validate all strategy/runtime settings before creating any child workspace or mutating the
+    # intake plan. This keeps malformed opt-in requests side-effect free.
+    openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")
+    max_rounds = args.max_rounds if args.max_rounds is not None else contract.evolution.max_rounds
+    stagnation_rounds = (
+        args.stagnation_rounds
+        if args.stagnation_rounds is not None
+        else contract.evolution.stagnation_rounds
+    )
+    if strategy_name == "openevolve":
+        if not openevolve_command:
+            raise ValueError("--evolve --strategy openevolve requires --openevolve-command")
+        executable = Path(openevolve_command[0])
+        if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ValueError("--openevolve-command must start with an existing absolute executable path")
+
+        def generator(request):
+            del request
+            raise EvolutionError("openevolve does not use a native generator")
+
+        def evaluator(path, candidate_contract):
+            del path, candidate_contract
+            raise EvolutionError("OpenEvolve result must include evaluation")
+
+        generator_fingerprint = None
+        evaluator_fingerprint = None
+    else:
+        if openevolve_command:
+            raise ValueError("--openevolve-command requires --evolve --strategy openevolve")
+        runtime = controller.runtime
+        solver_adapter = RuntimeAgentAdapter(
+            runtime,
+            name="solve-evolution-solver",
+            roles=("solver",),
+            capabilities=DEFAULT_RUNTIME_CAPABILITIES,
+        )
+        evaluator_adapter = RuntimeAgentAdapter(
+            runtime,
+            name="solve-evolution-evaluator",
+            roles=("evaluator",),
+            capabilities=DEFAULT_RUNTIME_CAPABILITIES,
+        )
+        generator = AgentCandidateGenerator(
+            solver_adapter, contract=contract, role="solver", timeout=args.timeout
+        )
+        evaluator = AgentCandidateEvaluator(
+            evaluator_adapter, role="evaluator", timeout=args.timeout
+        )
+        runtime_fingerprint = _compiler_fingerprint(runtime)
+        generator_fingerprint = hashlib.sha256(
+            f"{runtime_fingerprint}:solver".encode()
+        ).hexdigest()
+        evaluator_fingerprint = hashlib.sha256(
+            f"{runtime_fingerprint}:evaluator".encode()
+        ).hexdigest()
+    evolution_config = EvolutionConfig(
+        strategy=strategy_name,
+        max_rounds=max_rounds,
+        stagnation_rounds=stagnation_rounds,
+        population_size=args.population_size,
+        offspring_per_iteration=args.offspring_per_iteration,
+        num_islands=args.islands,
+        migration_interval=args.migration_interval,
+        migration_rate=args.migration_rate,
+        rng_seed=args.seed,
+        timeout_seconds=args.timeout,
+        command=openevolve_command,
+        generator_fingerprint=generator_fingerprint,
+        evaluator_fingerprint=evaluator_fingerprint,
+    )
+    if linked is not None:
+        linked_contract = linked.get("contract_sha256")
+        if not isinstance(linked_contract, str) or linked_contract != contract.digest():
+            raise EvolutionError("evolution link has an invalid contract digest")
+        child_id = linked.get("evolution_run_id")
+        if not isinstance(child_id, str) or not child_id:
+            raise EvolutionError("evolution link has an invalid child run ID")
+        child = controller.store.get_run(child_id)
+        if child is None:
+            raise EvolutionError("linked evolution run no longer exists")
+        if linked.get("strategy") != strategy_name:
+            raise EvolutionError("solve evolution strategy does not match the existing handoff")
+        state_path = child.workspace / "evolution" / "state.json"
+        if state_path.is_file():
+            try:
+                state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise EvolutionError("linked evolution state is not valid JSON") from exc
+            if (
+                isinstance(state_payload, dict)
+                and state_payload.get("config") is not None
+                and state_payload.get("config") != evolution_config.to_dict()
+            ):
+                raise EvolutionError("solve evolution settings do not match the existing handoff")
+        if child.status.value not in {"succeeded", "failed", "cancelled"}:
+            controller.run_evolution(
+                child.id,
+                contract,
+                generator,
+                evaluator,
+                evolution_config,
+                resume=True,
+            )
+            child = controller.store.get_run(child.id) or child
+        return {"run": parent, "child": child}
+
+    child_workspace = (Path(parent.workspace) / "evolution-run").resolve()
+    existing = controller.store.get_run_by_workspace(child_workspace)
+    if existing is not None:
+        child = existing
+        canonical_path = child.workspace / "evolution" / "contract.json"
+        try:
+            canonical = AlgorithmProblemContract.from_dict(
+                json.loads(canonical_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise EvolutionError("existing evolution handoff workspace has an invalid contract") from exc
+        if canonical.digest() != contract.digest():
+            raise EvolutionError("existing evolution handoff workspace belongs to another contract")
+    else:
+        child = controller.create_evolution_run(contract, workspace=child_workspace)
+    # Re-run the copy after a crash between child creation and linking; identical bytes are
+    # idempotent and conflicting bytes fail closed before strategy execution.
+    controller.copy_staged_inputs(parent.id, child.id)
+    controller.store.supersede_pending_tasks(parent.id, "replaced by explicit evolution handoff")
+    controller.store.settle_run(parent.id)
+    controller.store.append_event(
+        parent.id,
+        "evolution_linked",
+        {
+            "evolution_run_id": child.id,
+            "contract_sha256": contract.digest(),
+            "strategy": strategy_name,
+        },
+        event_id="event-evolution-link-" + hashlib.sha256(child.id.encode()).hexdigest(),
+    )
+    controller.store.append_event(
+        child.id,
+        "evolution_parent_linked",
+        {"parent_run_id": parent.id, "contract_sha256": contract.digest()},
+        event_id="event-evolution-parent-link-" + hashlib.sha256(parent.id.encode()).hexdigest(),
+    )
+
+    controller.run_evolution(
+        child.id,
+        contract,
+        generator,
+        evaluator,
+        evolution_config,
+    )
+    return {"run": parent, "child": controller.store.get_run(child.id) or child}
 
 
 def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
@@ -1157,7 +1547,36 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
     algorithm_outputs = [
         item for item in controller.store.list_artifacts(run.id) if item["kind"] == "output"
     ]
-    return {
+    evolution_payload: dict[str, object] | None = None
+    for event in reversed(controller.store.list_events(run.id)):
+        if event["type"] != "evolution_linked" or not isinstance(event.get("payload"), dict):
+            continue
+        link = event["payload"]
+        child_id = link.get("evolution_run_id")
+        if not isinstance(child_id, str):
+            break
+        child = controller.store.get_run(child_id)
+        if child is None:
+            evolution_payload = {"run_id": child_id, "status": "missing"}
+            break
+        child_events = controller.store.list_events(child.id)
+        result = next(
+            (
+                item["payload"]
+                for item in reversed(child_events)
+                if item["type"] == "evolution_finished" and isinstance(item.get("payload"), dict)
+            ),
+            None,
+        )
+        evolution_payload = {
+            "run_id": child.id,
+            "status": child.status.value,
+            "workspace": str(child.workspace),
+            "strategy": link.get("strategy"),
+            "result": result,
+        }
+        break
+    payload = {
         "run_id": run.id,
         "status": run.status.value,
         "run_status": run.status.value,
@@ -1172,6 +1591,9 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
             else None
         ),
     }
+    if evolution_payload is not None:
+        payload["evolution"] = evolution_payload
+    return payload
 
 
 def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[str, object]:
@@ -1196,6 +1618,23 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
         command.extend(("--workspace", str(args.workspace)))
     if args.role_dag:
         command.append("--role-dag")
+    if args.evolve:
+        command.append("--evolve")
+    for option, value in (
+        ("--strategy", args.strategy),
+        ("--openevolve-command", args.openevolve_command),
+        ("--max-rounds", args.max_rounds),
+        ("--stagnation-rounds", args.stagnation_rounds),
+        ("--population-size", args.population_size),
+        ("--offspring-per-iteration", args.offspring_per_iteration),
+        ("--islands", args.islands),
+        ("--migration-interval", args.migration_interval),
+        ("--migration-rate", args.migration_rate),
+        ("--seed", args.seed),
+        ("--timeout", args.timeout),
+    ):
+        if value is not None:
+            command.extend((option, str(value)))
     if args.runtime_command:
         command.extend(("--command", args.runtime_command))
     if args.endpoint:
@@ -2231,15 +2670,29 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if task_id is None:
         raise ValueError("input request was answered concurrently; inspect status")
     controller = _controller(args, config)
+    evolution_request = _latest_evolution_request(store, run.id)
     if conversation and run.current_plan_id is None:
         resumed = controller.resume_conversational(
             run.id,
             RuntimeContractCompiler(controller.runtime),
             compiler_fingerprint=_compiler_fingerprint(controller.runtime),
             plan_factory=_conversation_plan_factory(args, manifest),
+            execute_plan=evolution_request is None,
         )
     else:
         resumed = controller.resume(run.id)
+    evolution_request = _latest_evolution_request(controller.store, resumed.id)
+    if resumed.current_plan_id is not None and evolution_request is not None:
+        evolution_args = _evolution_args(args, evolution_request)
+        # An OpenEvolve executable is intentionally not persisted in the request event. The
+        # caller must continue that explicit strategy with ``solve --resume`` and provide the
+        # command again; runtime-backed loop/population handoffs can resume automatically.
+        if not (
+            getattr(evolution_args, "strategy", None) == "openevolve"
+            and not getattr(args, "openevolve_command", None)
+        ):
+            _solve_evolution(config, evolution_args, controller, resumed)
+            resumed = controller.store.get_run(resumed.id) or resumed
     return {
         "run_id": resumed.id,
         "task_id": task_id,
@@ -2247,6 +2700,7 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         "workspace": str(resumed.workspace),
         "answer_path": relative_answer,
         "workers": controller.max_workers,
+        "evolution": _solve_payload(controller, resumed).get("evolution"),
     }
 
 
@@ -2260,7 +2714,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "solve":
             payload = _solve(config, args)
             _emit(payload, args.json)
-            return 0 if payload["status"] in {"succeeded", "awaiting_input", "pending", "running"} else 1
+            success = payload["status"] in {"succeeded", "awaiting_input", "pending", "running"}
+            evolution = payload.get("evolution")
+            if isinstance(evolution, dict):
+                success = success and evolution.get("status") in {
+                    "succeeded",
+                    "awaiting_input",
+                    "pending",
+                    "running",
+                    "stagnated",
+                }
+            return 0 if success else 1
         if args.command == "run":
             plan_tasks = None
             if args.plan is not None:
@@ -2319,7 +2783,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "answer":
             payload = _answer(config, args)
             _emit(payload, args.json)
-            return 0 if payload["status"] == "succeeded" else 1
+            success = payload["status"] == "succeeded"
+            evolution = payload.get("evolution")
+            if isinstance(evolution, dict):
+                success = success and evolution.get("status") in {
+                    "succeeded",
+                    "awaiting_input",
+                    "pending",
+                    "running",
+                    "stagnated",
+                }
+            return 0 if success else 1
         if args.command == "status":
             if args.json:
                 payload = _status_payload(config, args.run_id)

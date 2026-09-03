@@ -197,6 +197,78 @@ class LocalController:
         )
         return run
 
+    def copy_staged_inputs(self, source_run_id: str, target_run_id: str) -> tuple[str, ...]:
+        """Copy verified run inputs into another local run without carrying source paths.
+
+        The target must already have a task (evolution runs do); copied rows use the existing
+        ``input_data`` artifact kind and retain the source bytes' digest/size. Repeating the
+        operation with identical bytes is idempotent, while a conflicting target file fails
+        before any strategy can consume it.
+        """
+        source_run = self.store.get_run(source_run_id)
+        target_run = self.store.get_run(target_run_id)
+        if source_run is None or target_run is None:
+            raise ValueError("source and target runs must exist")
+        target_tasks = self.store.list_tasks(target_run.id)
+        if not target_tasks:
+            raise EvolutionError("target run has no task to own copied inputs")
+        source_root = Path(source_run.workspace).expanduser().resolve(strict=False)
+        target_root = Path(target_run.workspace).expanduser().resolve(strict=False)
+        target_task = target_tasks[0]
+        artifact_store = ArtifactStore(target_root, self.store, target_run.id)
+        copied: list[str] = []
+        for item in self.store.list_artifacts(source_run.id):
+            if item.get("kind") != "input_data":
+                continue
+            relative = item.get("path")
+            expected_digest = item.get("sha256")
+            expected_size = item.get("size")
+            if (
+                not isinstance(relative, str)
+                or not relative.startswith("data/raw/")
+                or not isinstance(expected_digest, str)
+                or not isinstance(expected_size, int)
+                or expected_size < 0
+                or expected_size > MAX_INPUT_FILE_BYTES
+            ):
+                raise ArtifactError("source input artifact metadata is malformed")
+            source = self._confined_regular_file(source_root, relative)
+            if source is None:
+                raise ArtifactError(f"source input is missing or unsafe: {relative}")
+            content = source.read_bytes()
+            if len(content) != expected_size or hashlib.sha256(content).hexdigest() != expected_digest:
+                raise ArtifactError(f"source input digest does not match the ledger: {relative}")
+            target = target_root / relative
+            if self._raw_path_has_symlink(target_root, target):
+                raise ArtifactError(f"target input path is symlinked: {relative}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != expected_digest:
+                    raise ArtifactError(f"target input already contains different data: {relative}")
+            else:
+                temporary = target.with_name(f".{target.name}.tmp")
+                temporary.write_bytes(content)
+                temporary.replace(target)
+            if not any(
+                existing.get("path") == relative
+                and existing.get("kind") == "input_data"
+                and existing.get("sha256") == expected_digest
+                for existing in self.store.list_artifacts(target_run.id)
+            ):
+                artifact_store.record(target, target_task.id, kind="input_data")
+            self.store.append_event(
+                target_run.id,
+                "algorithm_input_copied",
+                {"path": relative, "size": expected_size, "sha256": expected_digest},
+                task_id=target_task.id,
+                event_id=(
+                    "event-algorithm-input-copy-"
+                    + hashlib.sha256(f"{source_run.id}\0{relative}".encode()).hexdigest()
+                ),
+            )
+            copied.append(relative)
+        return tuple(copied)
+
     def run_evolution(
         self,
         run_id: str,
@@ -611,13 +683,15 @@ class LocalController:
         compiler_fingerprint: str | None = None,
         run_id: str | None = None,
         plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
+        execute_plan: bool = True,
     ) -> Run:
         """Compile an algorithm mission and promote the same durable run to a plan.
 
         The first task is an intake task owned by the controller.  A compiler may pause it through
         ``awaiting_input``; after ``answer_input`` the same method is called again and the task is
         resumed with the verified answer artifact.  Once a contract is accepted, generated plan
-        tasks are attached to this run and the ordinary scheduler takes over.
+        tasks are attached to this run and the ordinary scheduler takes over unless
+        ``execute_plan=False`` is used for an explicit orchestration handoff.
         """
         if not hasattr(compiler, "compile") or not callable(compiler.compile):
             raise TypeError("compiler must implement ContractCompiler")
@@ -634,9 +708,13 @@ class LocalController:
             if run.goal != goal.strip():
                 raise ValueError("supplied goal does not match the existing conversational run")
             if run.current_plan_id is not None:
-                return self.resume(run.id)
+                return self.resume(run.id) if execute_plan else run
         return self._compile_conversational_run(
-            run, compiler, compiler_fingerprint, plan_factory=plan_factory
+            run,
+            compiler,
+            compiler_fingerprint,
+            plan_factory=plan_factory,
+            execute_plan=execute_plan,
         )
 
     def create_conversational_run(
@@ -676,6 +754,7 @@ class LocalController:
         compiler_fingerprint: str | None,
         *,
         plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
+        execute_plan: bool = True,
     ) -> Run:
         """Run one intake attempt and either pause for input or install the generated plan."""
         if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
@@ -684,7 +763,7 @@ class LocalController:
             (item for item in self.store.list_tasks(run.id) if item.plan_task_id is None), None
         )
         if task is None:
-            return self.resume(run.id)
+            return self.resume(run.id) if execute_plan else (self.store.get_run(run.id) or run)
         if task.state.value == "waiting":
             return run
         attempt = self.store.claim_task(task.id, "contract-compiler")
@@ -836,7 +915,7 @@ class LocalController:
                 str(contract_path.relative_to(Path(run.workspace))),
             )
             self.store.settle_run(run.id)
-            return self.resume(run.id)
+            return self.resume(run.id) if execute_plan else (self.store.get_run(run.id) or run)
         except ContractCompilationError as exc:
             error = str(exc)[-2_000:] or "contract compilation failed"
         except Exception as exc:  # noqa: BLE001 - compiler is an untrusted boundary
@@ -862,17 +941,22 @@ class LocalController:
         *,
         compiler_fingerprint: str | None = None,
         plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
+        execute_plan: bool = True,
     ) -> Run:
-        """Resume intake when pending, otherwise resume generated algorithm tasks."""
+        """Resume intake or generated tasks; optionally stop after contract attachment."""
         run = self.store.get_run(run_id)
         if run is None:
             raise ValueError(f"unknown run: {run_id}")
         if not any(event["type"] == "conversation_started" for event in self.store.list_events(run_id)):
             raise ValueError("run is not a conversational algorithm mission")
         if run.current_plan_id is not None:
-            return self.resume(run_id)
+            return self.resume(run_id) if execute_plan else run
         return self._compile_conversational_run(
-            run, compiler, compiler_fingerprint, plan_factory=plan_factory
+            run,
+            compiler,
+            compiler_fingerprint,
+            plan_factory=plan_factory,
+            execute_plan=execute_plan,
         )
 
     def _write_compiler_manifest(
@@ -1598,7 +1682,9 @@ class LocalController:
         """Check every existing component without following a symlink."""
         current = path
         while True:
-            if current.exists() and current.is_symlink():
+            # ``Path.exists`` is false for a dangling symlink; inspect the link itself first so a
+            # target cannot be swapped after validation or escape through a broken link.
+            if current.is_symlink():
                 return True
             if current == root:
                 return False

@@ -180,11 +180,13 @@ class AgentCandidateGenerator:
                         "problem_id",
                         "problem_type",
                         "statement",
+                        "inputs",
                         "objective",
                         "decision_variables",
                         "prediction_target",
                         "success_criteria",
                         "deliverables",
+                        "outputs",
                     )
                     if key in payload
                 }

@@ -80,6 +80,29 @@ class MockRuntime:
         del timeout
         workspace.mkdir(parents=True, exist_ok=True)
         excerpt = " ".join(prompt.strip().split())[:240]
+        # Keep runtime-backed evolution smoke tests deterministic. The role bridges still parse
+        # these responses through CandidateDraft/EvaluationReport, so this fixture does not bypass
+        # the production validity boundary.
+        if "Return exactly one JSON EvaluationReport object" in prompt:
+            return RuntimeResult(
+                text=json.dumps(
+                    {
+                        "schema_version": "1",
+                        "evaluator_id": "repository-mock",
+                        "validity": 1,
+                        "quality": 1.0,
+                        "combined_score": 1.0,
+                        "detailed_scores": {},
+                        "error_info": [],
+                    }
+                ),
+                metadata={"provider": "repository-mock"},
+            )
+        if "You are the solver in a bounded local algorithm-evolution run." in prompt:
+            return RuntimeResult(
+                text="def solve():\n    return 0\n",
+                metadata={"provider": "repository-mock"},
+            )
         # Keep the repository-owned smoke runtime useful for the strict specialist role DAG.
         # These fixtures are emitted only when the task prompt explicitly declares the role path;
         # ordinary generic runs remain text-only and therefore exercise the legacy contract.

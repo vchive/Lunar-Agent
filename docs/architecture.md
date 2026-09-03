@@ -153,6 +153,11 @@ inspectable.
     workspace and returns their paths through `RuntimeResult`; the existing role/output acceptance
     and promotion boundaries remain authoritative. Tool-calling models continue to use the explicit
     `AgentLoopRuntime` path.
+13. `solve --evolve` compiles the contract first, then creates a linked child evolution run. The
+    intake retains the contract and supersedes only unstarted generated-plan tasks; the child owns
+    strategy state and candidate artifacts. Verified `input_data` rows are copied by digest into
+    the child workspace. A deterministic link event makes resume idempotent and strategy setting
+    changes fail closed. This is an orchestration convenience, not a service or a new strategy.
 
 ## Deliberate boundary versus WebAgent
 
@@ -191,6 +196,14 @@ strategy config. Resume compares those fingerprints before task claim, preventin
 evaluator command, Agent role, name, or capability change from silently extending an old archive.
 Only canonical SHA-256 values are persisted; raw command arguments and credentials are not copied
 into state.
+
+Conversational callers may use `solve --evolve` as a two-run handoff. The intake run first accepts
+the same strict contract used by ordinary `solve`; its generated DAG is recorded but unstarted
+tasks are marked `superseded`, then `LocalController.copy_staged_inputs` materializes the verified
+`data/raw/` artifacts in a child `evolution-run` workspace. Runtime-backed solver and evaluator
+role adapters run the selected strategy there. The intake's `evolution_linked` event contains only
+the child ID, contract digest, and strategy, so polling or resuming cannot duplicate the child or
+leak prompts, commands, endpoints, or credentials.
 
 `loop` and `population` are implemented as library strategies over the same append-only archive.
 Each loop round receives a fresh generation request and returns best-so-far from all valid history;

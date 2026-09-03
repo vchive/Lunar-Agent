@@ -710,6 +710,37 @@ class Store:
             budget=BudgetSpec.from_dict(json.loads(row["budget"] or "{}")),
         )
 
+    def get_run_by_workspace(self, workspace: str | Path) -> Run | None:
+        """Return the newest run owning one canonical absolute workspace, if any."""
+        normalized = str(Path(workspace).expanduser().resolve(strict=False))
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM runs WHERE workspace = ? ORDER BY created_at DESC LIMIT 1",
+                (normalized,),
+            ).fetchone()
+        if row is None:
+            return None
+        return Run(
+            id=row["id"],
+            goal=row["goal"],
+            status=RunStatus(row["status"]),
+            workspace=Path(row["workspace"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            runner_pid=row["runner_pid"],
+            runner_pgid=row["runner_pgid"],
+            current_plan_id=row["current_plan_id"],
+            current_plan_version=row["current_plan_version"],
+            route_domain=row["route_domain"],
+            route_reason=row["route_reason"],
+            route_confidence=row["route_confidence"],
+            solver_profile=row["solver_profile"],
+            evaluator_profile=row["evaluator_profile"],
+            route_required_capabilities=tuple(json.loads(row["route_required_capabilities"] or "[]")),
+            route_evidence=tuple(json.loads(row["route_evidence"] or "[]")),
+            budget=BudgetSpec.from_dict(json.loads(row["budget"] or "{}")),
+        )
+
     def get_task(self, task_id: str) -> Task | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
@@ -1101,6 +1132,53 @@ class Store:
                 {"attempt_id": attempt_id, "error": error},
             )
         return True
+
+    def supersede_pending_tasks(self, run_id: str, reason: str) -> int:
+        """Mark unstarted tasks as superseded and retain an audit event for each one.
+
+        This is used by an explicit orchestration handoff (for example, conversational intake to
+        evolution) when a generated plan is intentionally replaced before any of its work starts.
+        Running or uncertain tasks are never touched; callers must recover or finish those through
+        the normal lifecycle instead.
+        """
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("supersede reason must be non-empty")
+        reason = reason.strip()[-2_000:]
+        timestamp = utc_now()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id FROM tasks WHERE run_id = ? AND plan_task_id IS NOT NULL "
+                "AND state IN (?, ?, ?)",
+                (
+                    run_id,
+                    TaskStatus.PENDING.value,
+                    TaskStatus.READY.value,
+                    TaskStatus.WAITING.value,
+                ),
+            ).fetchall()
+            for row in rows:
+                changed = connection.execute(
+                    "UPDATE tasks SET state = ?, last_error = ?, updated_at = ? "
+                    "WHERE id = ? AND plan_task_id IS NOT NULL AND state IN (?, ?, ?)",
+                    (
+                        TaskStatus.SUPERSEDED.value,
+                        reason,
+                        timestamp,
+                        row["id"],
+                        TaskStatus.PENDING.value,
+                        TaskStatus.READY.value,
+                        TaskStatus.WAITING.value,
+                    ),
+                ).rowcount
+                if changed:
+                    self._append_event(
+                        connection,
+                        run_id,
+                        row["id"],
+                        "task_superseded",
+                        {"reason": reason},
+                    )
+        return len(rows)
 
     def set_attempt_process(self, attempt_id: str, pid: int | None, pgid: int | None) -> bool:
         with self._connect() as connection:
