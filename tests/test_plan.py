@@ -142,6 +142,9 @@ def test_algorithm_outputs_are_promoted_hashed_and_delivered(tmp_path: Path) -> 
     delivered_path = run.workspace / "output" / "routes.csv"
     assert run.status.value == "succeeded"
     assert delivered_path.read_text(encoding="utf-8").startswith("item_id,route_id")
+    prompt_files = list(run.workspace.glob("tasks/*/*/prompt.md"))
+    assert len(prompt_files) == 1
+    assert "output/routes.csv" in prompt_files[0].read_text(encoding="utf-8")
     output_artifacts = [
         item for item in controller.store.list_artifacts(run.id) if item["kind"] == "output"
     ]

@@ -1692,10 +1692,25 @@ class LocalController:
                     answer_content = candidate.read_text(encoding="utf-8")[:8_000]
             except (OSError, UnicodeDecodeError, ValueError):
                 answer_content = "<answer artifact could not be read>"
+        output_specs = self._task_output_specs(run, task)
+        output_instructions: list[str] = []
+        if output_specs:
+            output_instructions = [
+                "Declared algorithm data outputs (write these files; a prose answer alone is not sufficient):"
+            ]
+            output_instructions.extend(
+                "- {path} | format={format} | fields={fields} | {required}".format(
+                    path=output.path,
+                    format=output.format,
+                    fields=", ".join(output.fields) if output.fields else "untyped",
+                    required="required" if output.required else "optional",
+                )
+                for output in output_specs
+            )
         if not dependencies and not answer_content:
-            sections = [task.prompt]
+            sections = [*output_instructions, task.prompt]
         else:
-            sections = [task.prompt]
+            sections = [*output_instructions, task.prompt]
             if answer_content:
                 sections.extend(
                     [
@@ -1787,6 +1802,7 @@ class LocalController:
 
         if isinstance(details, dict):
             visit(details.get("acceptance"))
+            visit(details.get("outputs"))
         return tuple(found[: cls._MAX_RETRY_FEEDBACK_VALUES])
 
     @staticmethod
