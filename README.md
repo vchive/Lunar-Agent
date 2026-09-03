@@ -5,8 +5,10 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current effect-layer work is
-captured in [`specs/021-evaluator-ensemble/`](specs/021-evaluator-ensemble/), built on
+The project is being developed with Spec-Driven Development (SDD). The current runtime-backed
+evolution work is captured in [`specs/022-runtime-backed-evolution/`](specs/022-runtime-backed-evolution/),
+building on the completed independent evaluator ensemble in
+[`specs/021-evaluator-ensemble/`](specs/021-evaluator-ensemble/), which is built on
 independent artifact acceptance contracts in
 [`specs/008-artifact-acceptance-contracts/`](specs/008-artifact-acceptance-contracts/) and domain
 routing, profiles, and budgets in
@@ -251,6 +253,42 @@ Command-backed runs persist credential-safe SHA-256 fingerprints for both the ge
 evaluator adapter profiles. Resume rejects a changed command, Agent name, role, or required
 capability before claiming the task, so one candidate archive is never silently mixed across
 different execution configurations. Raw command arguments are not written to strategy state.
+
+### Repository-owned runtime evolution
+
+Native evolution can use Lunar-Agent's own runtime as the solver, evaluator, or both. This is the
+standalone path: it does not import or discover a machine-wide Hermes, OpenCode, Codex, Claude Code,
+or DeepSeek Harness installation. The runtime profile is explicit and is adapted through the same
+strict `AgentCandidateGenerator` / `AgentCandidateEvaluator` bridges as external workers:
+
+```bash
+# A local runtime command can produce candidate source for solver prompts and
+# a strict EvaluationReport JSON object for evaluator prompts.
+lunar-agent evolve contract.json --strategy population \
+  --agent-runtime subprocess \
+  --agent-runtime-command "/absolute/path/to/local-agent --json" \
+  --json --home .lunar
+
+# Or call an OpenAI-compatible local server directly.
+lunar-agent evolve contract.json --strategy loop \
+  --agent-runtime openai-compatible \
+  --agent-runtime-endpoint "http://127.0.0.1:11434/v1/chat/completions" \
+  --agent-runtime-model "your-local-model" \
+  --json --home .lunar
+```
+
+The available profiles are `mock`, `subprocess`, and `openai-compatible`. A runtime fills either
+or both unconfigured roles, so an explicit `--evaluator-command` (or Agent evaluator) can be paired
+with a runtime-backed solver, and vice versa. `--agent-runtime` cannot be combined with
+`openevolve`, and supplying it when both roles are already explicit is rejected as ambiguous.
+Each role gets a fresh runtime adapter, while the SQLite ledger and candidate archive remain the
+durable authority. Runtime kind, endpoint/model, command identity, role, and capabilities are
+stored only as credential-safe fingerprints. Detached runs pass non-secret settings as arguments
+and an API key through `FAMOU_AGENT_RUNTIME_API_KEY`, never through argv or state.
+
+Hermes, DeepSeek Harness, Codex, Claude Code, and OpenClaw remain useful optional adapters or parent
+processes. They are execution-plane integrations; Lunar-Agent's local controller, evolution
+strategy, evaluator authority, artifacts, and resume semantics stay repository-owned.
 
 For higher-assurance algorithm work, configure two or more independent evaluator Agents. Every
 member reads the same candidate in an isolated workspace; validity is accepted only when all
@@ -541,4 +579,4 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/019-verified-evolution-feedback/`](specs/019-verified-evolution-feedback/).
+[`specs/022-runtime-backed-evolution/`](specs/022-runtime-backed-evolution/).

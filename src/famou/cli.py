@@ -25,6 +25,7 @@ from .agents import (
     AgentError,
     AgentRegistry,
     CommandAgentAdapter,
+    RuntimeAgentAdapter,
 )
 from .algorithm import AlgorithmProblemContract
 from .artifacts import ArtifactStore
@@ -186,6 +187,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="repeatable explicit solver Agent command for a deterministic portfolio",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime",
+        choices=("mock", "subprocess", "openai-compatible"),
+        help="use a repository-owned runtime for any unbound solver/evaluator seam",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-command",
+        help="runtime subprocess command (used with --agent-runtime subprocess)",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-endpoint",
+        help="OpenAI-compatible endpoint (used with --agent-runtime openai-compatible)",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-model",
+        help="OpenAI-compatible model name (used with --agent-runtime openai-compatible)",
+    )
+    evolve_parser.add_argument(
+        "--agent-runtime-api-key",
+        help="optional runtime API key; detached runs pass it via FAMOU_AGENT_RUNTIME_API_KEY",
     )
     evolve_parser.add_argument("--agent-name", default="evolution-agent")
     evolve_parser.add_argument("--agent-role", default="solver")
@@ -683,6 +705,31 @@ def _portfolio_fingerprint(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _runtime_fingerprint(
+    runtime_name: str,
+    *,
+    command: tuple[str, ...] = (),
+    endpoint: str | None = None,
+    model: str | None = None,
+    name: str,
+    role: str,
+    required_capabilities: tuple[str, ...] = (),
+) -> str:
+    """Return a credential-safe identity for one repository-owned runtime Agent."""
+    payload = {
+        "command": list(command),
+        "endpoint": endpoint,
+        "kind": "runtime",
+        "model": model,
+        "name": name,
+        "required_capabilities": sorted(set(required_capabilities)),
+        "role": role,
+        "runtime": runtime_name,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Create/execute one ledger-backed local evolution run."""
     try:
@@ -737,6 +784,40 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         _parse_command(value, "--evaluator-portfolio-command")
         for value in args.evaluator_portfolio_commands
     )
+    agent_runtime = args.agent_runtime
+    agent_runtime_command = _parse_command(
+        args.agent_runtime_command, "--agent-runtime-command"
+    )
+    runtime_profile_options = (
+        agent_runtime_command,
+        args.agent_runtime_endpoint,
+        args.agent_runtime_model,
+        args.agent_runtime_api_key,
+    )
+    if agent_runtime is None and any(value is not None and value != () for value in runtime_profile_options):
+        raise ValueError("runtime profile options require --agent-runtime")
+    if agent_runtime == "subprocess" and not agent_runtime_command:
+        raise ValueError("--agent-runtime subprocess requires --agent-runtime-command")
+    if agent_runtime == "subprocess" and (
+        args.agent_runtime_endpoint or args.agent_runtime_model
+    ):
+        raise ValueError("endpoint/model options require --agent-runtime openai-compatible")
+    if agent_runtime == "openai-compatible" and agent_runtime_command:
+        raise ValueError("--agent-runtime-command requires --agent-runtime subprocess")
+    if agent_runtime in {"mock", None} and (
+        args.agent_runtime_endpoint or args.agent_runtime_model
+    ):
+        raise ValueError("endpoint/model options require --agent-runtime openai-compatible")
+    runtime_endpoint = args.agent_runtime_endpoint
+    runtime_model = args.agent_runtime_model
+    runtime_api_key = args.agent_runtime_api_key
+    if agent_runtime == "openai-compatible":
+        runtime_endpoint = runtime_endpoint or os.environ.get("FAMOU_MODEL_ENDPOINT")
+        runtime_model = runtime_model or os.environ.get("FAMOU_MODEL") or "local"
+        if runtime_api_key is None:
+            runtime_api_key = os.environ.get("FAMOU_AGENT_RUNTIME_API_KEY")
+    if agent_runtime != "openai-compatible" and args.agent_runtime_api_key is not None:
+        raise ValueError("--agent-runtime-api-key requires --agent-runtime openai-compatible")
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
     if strategy_name == "openevolve":
@@ -745,6 +826,8 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             or agent_portfolio_commands
             or evaluator_agent_command
             or evaluator_portfolio_commands
+            or agent_runtime
+            or any(value is not None and value != () for value in runtime_profile_options)
         ):
             raise ValueError("Agent solver/evaluator commands are only supported by loop and population")
         command = openevolve_command
@@ -777,12 +860,23 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             raise ValueError("generator and Agent portfolio commands are mutually exclusive")
         if agent_command and agent_portfolio_commands:
             raise ValueError("--agent-command and --agent-portfolio-command are mutually exclusive")
-        if sum(bool(option) for option in (evaluator_command, evaluator_agent_command, evaluator_portfolio_commands)) > 1:
+        solver_explicit = bool(generator_command or agent_command or agent_portfolio_commands)
+        evaluator_explicit = bool(
+            evaluator_command or evaluator_agent_command or evaluator_portfolio_commands
+        )
+        if agent_runtime and solver_explicit and evaluator_explicit:
+            raise ValueError(
+                "--agent-runtime is unused when both solver and evaluator are explicitly configured"
+            )
+        if sum(
+            bool(option)
+            for option in (evaluator_command, evaluator_agent_command, evaluator_portfolio_commands)
+        ) > 1:
             raise ValueError(
                 "--evaluator-command, --evaluator-agent-command, and "
                 "--evaluator-portfolio-command are mutually exclusive"
             )
-        if not evaluator_command and not evaluator_agent_command and not evaluator_portfolio_commands:
+        if not evaluator_explicit and not agent_runtime:
             raise ValueError(
                 "loop and population require --evaluator-command or "
                 "--evaluator-agent-command or --evaluator-portfolio-command plus "
@@ -808,6 +902,16 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 role=args.agent_role,
                 required_capabilities=tuple(args.agent_capabilities),
             )
+        elif agent_runtime:
+            generator_fingerprint = _runtime_fingerprint(
+                agent_runtime,
+                command=agent_runtime_command,
+                endpoint=runtime_endpoint,
+                model=runtime_model,
+                name=args.agent_name,
+                role=args.agent_role,
+                required_capabilities=tuple(args.agent_capabilities),
+            )
         else:
             generator_fingerprint = _adapter_fingerprint(
                 generator_command,
@@ -827,6 +931,16 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             evaluator_fingerprint = _portfolio_fingerprint(
                 evaluator_portfolio_commands,
                 kind="portfolio-evaluator",
+                name=args.evaluator_agent_name,
+                role=args.evaluator_agent_role,
+                required_capabilities=tuple(args.evaluator_agent_capabilities),
+            )
+        elif agent_runtime:
+            evaluator_fingerprint = _runtime_fingerprint(
+                agent_runtime,
+                command=agent_runtime_command,
+                endpoint=runtime_endpoint,
+                model=runtime_model,
                 name=args.evaluator_agent_name,
                 role=args.evaluator_agent_role,
                 required_capabilities=tuple(args.evaluator_agent_capabilities),
@@ -871,6 +985,27 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 required_capabilities=tuple(args.agent_capabilities),
                 timeout=args.timeout,
             )
+        elif agent_runtime:
+            runtime = build_runtime(
+                agent_runtime,
+                agent_runtime_command or None,
+                runtime_endpoint,
+                runtime_model,
+                runtime_api_key,
+            )
+            generator_adapter = RuntimeAgentAdapter(
+                runtime,
+                name=args.agent_name,
+                roles=(args.agent_role,),
+                capabilities=tuple(sorted(set(DEFAULT_RUNTIME_CAPABILITIES) | set(args.agent_capabilities))),
+            )
+            generator = AgentCandidateGenerator(
+                generator_adapter,
+                contract=contract,
+                role=args.agent_role,
+                required_capabilities=tuple(args.agent_capabilities),
+                timeout=args.timeout,
+            )
         elif generator_command:
             generator = CommandCandidateGenerator(generator_command, args.timeout)
         else:
@@ -904,6 +1039,31 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             )
             evaluator = AgentEvaluatorEnsemble(
                 evaluator_adapters,
+                role=args.evaluator_agent_role,
+                required_capabilities=tuple(args.evaluator_agent_capabilities),
+                timeout=args.timeout,
+            )
+        elif agent_runtime:
+            runtime = build_runtime(
+                agent_runtime,
+                agent_runtime_command or None,
+                runtime_endpoint,
+                runtime_model,
+                runtime_api_key,
+            )
+            evaluator_adapter = RuntimeAgentAdapter(
+                runtime,
+                name=args.evaluator_agent_name,
+                roles=(args.evaluator_agent_role,),
+                capabilities=tuple(
+                    sorted(
+                        set(DEFAULT_RUNTIME_CAPABILITIES)
+                        | set(args.evaluator_agent_capabilities)
+                    )
+                ),
+            )
+            evaluator = AgentCandidateEvaluator(
+                evaluator_adapter,
                 role=args.evaluator_agent_role,
                 required_capabilities=tuple(args.evaluator_agent_capabilities),
                 timeout=args.timeout,
@@ -1114,6 +1274,14 @@ def _detach_evolution(
         command.extend(("--agent-command", args.agent_command))
     for portfolio_command in args.agent_portfolio_commands:
         command.extend(("--agent-portfolio-command", portfolio_command))
+    if args.agent_runtime:
+        command.extend(("--agent-runtime", args.agent_runtime))
+    if args.agent_runtime_command:
+        command.extend(("--agent-runtime-command", args.agent_runtime_command))
+    if args.agent_runtime_endpoint:
+        command.extend(("--agent-runtime-endpoint", args.agent_runtime_endpoint))
+    if args.agent_runtime_model:
+        command.extend(("--agent-runtime-model", args.agent_runtime_model))
     if args.agent_name != "evolution-agent":
         command.extend(("--agent-name", args.agent_name))
     if args.agent_role != "solver":
@@ -1147,6 +1315,10 @@ def _detach_evolution(
     ):
         if value is not None:
             command.extend((option, str(value)))
+    child_env = None
+    if args.agent_runtime_api_key is not None:
+        child_env = os.environ.copy()
+        child_env["FAMOU_AGENT_RUNTIME_API_KEY"] = args.agent_runtime_api_key
     try:
         with log_path.open("a", encoding="utf-8") as log:
             process = subprocess.Popen(
@@ -1157,6 +1329,7 @@ def _detach_evolution(
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
                 close_fds=True,
+                env=child_env,
             )
         pid = getattr(process, "pid", None)
         if isinstance(pid, int) and pid > 1:

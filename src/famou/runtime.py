@@ -11,7 +11,7 @@ import json
 import os
 import shlex
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -375,7 +375,7 @@ class OpenAICompatibleRuntime:
 
 def build_runtime(
     name: str,
-    command: str | None = None,
+    command: str | Sequence[str] | None = None,
     endpoint: str | None = None,
     model: str | None = None,
     api_key: str | None = None,

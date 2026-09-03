@@ -507,6 +507,159 @@ def test_cli_evolve_rejects_single_evaluator_portfolio_and_openevolve_mix(
     assert "only supported" in json.loads(capsys.readouterr().err)["error"]
 
 
+def test_cli_evolve_uses_repository_runtime_for_solver_and_evaluator(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    runtime = tmp_path / "runtime-agent.py"
+    runtime.write_text(
+        "import json, sys\n"
+        "prompt = sys.stdin.read()\n"
+        "if 'independent evaluator' in prompt:\n"
+        "    report = {'schema_version':'1','evaluator_id':'runtime','validity':1,"
+        "'quality':6,'combined_score':6,'detailed_scores':{},'error_info':[]}\n"
+        "    print(json.dumps(report))\n"
+        "else:\n"
+        "    print('def solve():\\n    return 6')\n",
+        encoding="utf-8",
+    )
+    runtime.chmod(runtime.stat().st_mode | 0o100)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-runtime",
+                "subprocess",
+                "--agent-runtime-command",
+                f"{sys.executable} {runtime}",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    assert payload["best_score"] == 6.0
+    state = json.loads(
+        (Path(payload["workspace"]) / "evolution" / "state.json").read_text(encoding="utf-8")
+    )
+    assert len(state["config"]["generator_fingerprint"]) == 64
+    assert len(state["config"]["evaluator_fingerprint"]) == 64
+    assert "runtime-agent.py" not in json.dumps(state["config"])
+
+
+def test_cli_evolve_runtime_can_fill_one_role_and_rejects_unused_profile(
+    tmp_path: Path, capsys
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    runtime = tmp_path / "runtime-agent.py"
+    runtime.write_text(
+        "import json, sys\n"
+        "prompt = sys.stdin.read()\n"
+        "if 'independent evaluator' in prompt:\n"
+        "    print(json.dumps({'schema_version':'1','evaluator_id':'runtime','validity':1,"
+        "'quality':2,'combined_score':2,'detailed_scores':{},'error_info':[]}))\n"
+        "else:\n"
+        "    print(json.dumps({'source':'def solve():\\n    return 2'}))\n",
+        encoding="utf-8",
+    )
+    runtime.chmod(runtime.stat().st_mode | 0o100)
+    _, evaluator = _write_evolution_commands(tmp_path)
+    solver = tmp_path / "solver.py"
+    solver.write_text(
+        "import json, sys\n"
+        "json.loads(sys.stdin.read())\n"
+        "print(json.dumps({'source':'def solve():\\n    return 2'}))\n",
+        encoding="utf-8",
+    )
+    solver.chmod(solver.stat().st_mode | 0o100)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-runtime",
+                "subprocess",
+                "--agent-runtime-command",
+                f"{sys.executable} {runtime}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(tmp_path / "mixed-home"),
+            ]
+        )
+        == 0
+    )
+    mixed = json.loads(capsys.readouterr().out)
+    assert mixed["best_score"] == 2.0
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-runtime",
+                "subprocess",
+                "--agent-runtime-command",
+                f"{sys.executable} {runtime}",
+                "--agent-command",
+                f"{sys.executable} {solver}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(tmp_path / "unused-home"),
+            ]
+        )
+        == 2
+    )
+    assert "unused" in json.loads(capsys.readouterr().err)["error"]
+
+
+def test_cli_evolve_detach_propagates_runtime_without_secret_argv(tmp_path: Path, capsys, monkeypatch) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    runtime = tmp_path / "runtime-agent.py"
+    runtime.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    runtime.chmod(runtime.stat().st_mode | 0o100)
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-runtime",
+                "openai-compatible",
+                "--agent-runtime-endpoint",
+                "http://127.0.0.1:1234/v1/chat/completions",
+                "--agent-runtime-model",
+                "fixture-model",
+                "--agent-runtime-api-key",
+                "secret-runtime-key",
+                "--detach",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    child_command, child_kwargs = calls[0]
+    assert "--agent-runtime" in child_command
+    assert "secret-runtime-key" not in child_command
+    assert child_kwargs["env"]["FAMOU_AGENT_RUNTIME_API_KEY"] == "secret-runtime-key"
+
+
 def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path, strategy="population", max_rounds=1)

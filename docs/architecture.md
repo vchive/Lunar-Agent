@@ -18,6 +18,7 @@ flowchart TD
     PD --> S
     C --> D[DAG scheduler\nclaim · retry · recover · cancel]
     D --> A[Runtime Adapter\nmock / subprocess / OpenAI-compatible\nHermesSessionRuntime]
+    A --> RA[Repository-owned Evolution Runtime\nMockRuntime · SubprocessRuntime\nOpenAICompatibleRuntime]
     C --> AR[AgentRegistry\nexplicit role + capability selection]
     AR --> AA[Agent Adapter\nRuntime wrapper or command JSON adapter]
     AA --> AG[AgentCandidateGenerator\nsolver proposal bridge]
@@ -40,6 +41,28 @@ flowchart TD
     S --> DL[deliver\nonly verified artifacts]
     DL --> P
 ```
+
+The ordinary task runtime and the evolution runtime share the repository-owned adapter boundary.
+For an evolution run, `--agent-runtime` constructs a fresh runtime-backed Agent adapter for each
+unbound role and sends it through the existing strict candidate-generation/evaluation bridges:
+
+```text
+Repository-owned runtime profile
+├── MockRuntime
+├── SubprocessRuntime (explicit command)
+└── OpenAICompatibleRuntime (explicit endpoint/model)
+        ↓
+RuntimeAgentAdapter (one fresh instance per role)
+        ↓
+AgentCandidateGenerator / AgentCandidateEvaluator
+        ↓
+loop or population strategy → canonical candidate archive
+```
+
+This profile is the internal Agent skeleton for standalone Lunar-Agent use. It is intentionally small,
+local, and dependency-free at the protocol boundary; no Hermes/OpenCode/Codex/Claude Code/DeepSeek
+Harness process is required. A subprocess runtime or OpenAI-compatible server may still be backed
+by any of those tools when the owner explicitly supplies the command or endpoint.
 
 ## Control flow
 
@@ -144,6 +167,12 @@ report, or validity disagreement produces an invalid aggregate report.
 imports a validated result into Lunar-Agent's canonical archive. The existing `--workers` pool is
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
+
+The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
+fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
+available for mixed configurations. When both seams are already explicit, a runtime option is
+rejected rather than silently ignored. Runtime provenance is recorded as credential-safe digests;
+detached children receive secrets only through `FAMOU_AGENT_RUNTIME_API_KEY`.
 
 For Agent-backed generation, the bridge projects bounded `evaluation_feedback` from prior validated
 reports into the next prompt. This lets a solver address constraint failures and weak metrics while
