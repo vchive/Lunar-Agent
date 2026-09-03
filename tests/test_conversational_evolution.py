@@ -55,6 +55,7 @@ def test_solve_evolve_links_completed_child_and_returns_best_candidate(tmp_path:
     assert evolution["run_id"]
     assert evolution["status"] == "succeeded"
     assert evolution["result"]["best_candidate_path"]
+    assert evolution["materialization"] is None
     assert payload["run_id"] != evolution["run_id"]
     tasks = Store(home / "state.db").list_tasks(payload["run_id"])
     assert [task.state.value for task in tasks[1:]] == ["superseded"] * 4

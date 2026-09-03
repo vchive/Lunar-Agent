@@ -17,7 +17,7 @@ import re
 import signal
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -270,6 +270,7 @@ class CommandCandidateRunner:
         command: Sequence[str],
         timeout_seconds: float = 900.0,
         max_output_bytes: int = MAX_EXECUTION_OUTPUT_BYTES,
+        environment: Mapping[str, str] | None = None,
     ) -> None:
         command = tuple(command)
         if not command or len(command) > MAX_COMMAND_ARGS:
@@ -293,6 +294,26 @@ class CommandCandidateRunner:
         self.command = command
         self.timeout_seconds = float(timeout_seconds)
         self.max_output_bytes = max_output_bytes
+        if environment is None:
+            self.environment = None
+        else:
+            if len(environment) > 64:
+                raise ValueError("candidate runner environment has too many entries")
+            normalized_environment: dict[str, str] = {}
+            for key, value in environment.items():
+                if (
+                    not isinstance(key, str)
+                    or not key
+                    or "=" in key
+                    or "\x00" in key
+                    or not isinstance(value, str)
+                    or "\x00" in value
+                ):
+                    raise ValueError("candidate runner environment is invalid")
+                if len(key.encode("utf-8")) > 128 or len(value.encode("utf-8")) > 4_096:
+                    raise ValueError("candidate runner environment entry is too large")
+                normalized_environment[key] = value
+            self.environment = normalized_environment
 
     def run(
         self, candidate_path: Path, workspace: Path, timeout: float | None = None
@@ -328,6 +349,7 @@ class CommandCandidateRunner:
             process = subprocess.Popen(
                 [*self.command, str(candidate)],
                 cwd=workspace,
+                env=self.environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -7,8 +7,10 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current conversational
-evolution handoff is captured in
+The project is being developed with Spec-Driven Development (SDD). The current evolved-output
+materialization boundary is captured in
+[`specs/036-evolved-output-materialization/`](specs/036-evolved-output-materialization/), building
+on the conversational evolution handoff in
 [`specs/035-conversational-evolution-handoff/`](specs/035-conversational-evolution-handoff/),
 building on the runtime-profile benchmark in
 [`specs/029-runtime-profile-benchmark/`](specs/029-runtime-profile-benchmark/), building on the
@@ -90,9 +92,21 @@ lunar-agent solve "根据订单数据优化配送路线" \
 The JSON response includes the intake `run_id` and `evolution.run_id`. The intake keeps the
 validated contract and explicitly supersedes its unstarted generated-plan tasks; the child owns
 `evolution/archive.jsonl`, `state.json`, and `result.json`. Staged `--input` files are copied into
-the child with the same SHA-256 and size, never with the source-machine path. Resuming the intake
-reuses the same child and rejects changed strategy settings. `evolve CONTRACT` remains available
-when separate generator/evaluator commands or an OpenEvolve wrapper are needed.
+the child with the same SHA-256 and size, never with the source-machine path.
+
+When the compiled contract declares `outputs`, Lunar-Agent then runs the selected best `.py`
+candidate once more in an isolated final workspace. It receives copied `data/raw/*`, must write the
+exact declared `output/*` files, and runs with the repository's Python interpreter in isolated mode
+and a minimal non-secret environment. CSV/JSON/JSONL/text format and fields are independently
+validated before bytes are atomically promoted to the intake workspace. The response exposes this
+as `evolution.materialization`; a failed process, timeout, missing/malformed output, symlink,
+oversized file, or conflicting destination makes the effective `solve` status fail and prevents
+`deliver`.
+
+Resuming the intake reuses the same child and terminal materialization, verifies candidate and
+output digests, and rejects changed strategy settings instead of executing or overwriting again.
+Contracts without `outputs` keep the existing source-only result. `evolve CONTRACT` remains
+available when separate generator/evaluator commands or an OpenEvolve wrapper are needed.
 
 Provide real local data explicitly with repeatable `--input` options. A source is staged into the
 run's `data/raw/` directory and copied into each isolated task attempt; use `SOURCE=DEST` when the

@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shutil
 import signal
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -44,6 +47,7 @@ from .evolution import (
     CandidateEvaluator,
     CandidateExecution,
     CandidateGenerator,
+    CommandCandidateRunner,
     EvolutionConfig,
     EvolutionContext,
     EvolutionError,
@@ -78,6 +82,8 @@ class LocalController:
     )
     _MAX_RETRY_FEEDBACK_VALUES = 16
     _MAX_RETRY_FEEDBACK_BYTES = 8_000
+    _MAX_MATERIALIZATION_RESULT_BYTES = 64 * 1024
+    _MATERIALIZATION_CANDIDATE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
     def __init__(
         self,
@@ -445,6 +451,520 @@ class LocalController:
             settled = self.store.settle_run(run.id)
             raise EvolutionError(error) from exc
 
+    def materialize_evolved_outputs(
+        self,
+        parent_run_id: str,
+        evolution_run_id: str,
+        contract: AlgorithmProblemContract,
+        result: StrategyResult,
+        *,
+        timeout_seconds: float = 900.0,
+    ) -> dict[str, Any]:
+        """Execute one selected Python candidate and promote independently verified data.
+
+        Evolution scores select source; they do not authorize delivery.  This phase therefore
+        copies the selected source and hashed inputs into a deterministic child-run attempt,
+        executes it with a minimal environment, applies the immutable parent ``OutputSpec``
+        contract, and promotes only matching bytes.  A terminal marker makes both success and
+        failure idempotent across ``solve --resume``.
+        """
+        if not isinstance(contract, AlgorithmProblemContract):
+            raise TypeError("contract must be an AlgorithmProblemContract")
+        if not isinstance(result, StrategyResult):
+            raise TypeError("result must be a StrategyResult")
+        if not contract.outputs:
+            return {
+                "schema_version": "1",
+                "status": "skipped",
+                "reason": "algorithm contract declares no outputs",
+            }
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or timeout_seconds <= 0
+            or timeout_seconds > 86_400
+        ):
+            raise ValueError("materialization timeout must be between 0 and 86400 seconds")
+
+        parent = self.store.get_run(parent_run_id)
+        child = self.store.get_run(evolution_run_id)
+        if parent is None or child is None:
+            raise ValueError("parent and evolution runs must exist")
+        parent_contract = self._algorithm_contract(parent)
+        if parent_contract is None or parent_contract.digest() != contract.digest():
+            raise EvolutionError("materialization contract does not match the parent run")
+        child_contract_path = Path(child.workspace) / "evolution" / "contract.json"
+        child_contract = self._confined_regular_file(
+            Path(child.workspace), "evolution/contract.json"
+        )
+        if child_contract is None or child_contract != child_contract_path.resolve(strict=False):
+            raise EvolutionError("evolution run is missing its canonical contract")
+        try:
+            stored_child_contract = AlgorithmProblemContract.from_dict(
+                json.loads(child_contract.read_text(encoding="utf-8"))
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise EvolutionError("canonical evolution contract is invalid") from exc
+        if stored_child_contract.digest() != contract.digest():
+            raise EvolutionError("materialization contract does not match the evolution run")
+        if (
+            child.status != RunStatus.SUCCEEDED
+            or result.status not in {"completed", "stagnated"}
+            or result.best_candidate_id is None
+            or result.best_candidate_path is None
+        ):
+            raise EvolutionError("materialization requires a successful evolution result")
+        if not self._MATERIALIZATION_CANDIDATE_ID.fullmatch(result.best_candidate_id):
+            raise EvolutionError("best candidate ID is invalid")
+
+        child_root = Path(child.workspace).expanduser().resolve(strict=False)
+        candidate = self._confined_regular_file(child_root, result.best_candidate_path)
+        if candidate is None:
+            raise EvolutionError("best candidate path is missing or unsafe")
+        candidate_bytes = candidate.read_bytes()
+        candidate_digest = hashlib.sha256(candidate_bytes).hexdigest()
+        attempt_relative = (
+            "evolution/materialization/"
+            f"{result.best_candidate_id}-{candidate_digest[:12]}"
+        )
+        materialization_root = child_root / "evolution" / "materialization"
+        if self._raw_path_has_symlink(child_root, materialization_root):
+            raise EvolutionError("materialization directory must not contain a symlink")
+        materialization_root.mkdir(parents=True, exist_ok=True)
+        marker = materialization_root / "result.json"
+        if marker.is_symlink():
+            raise EvolutionError("materialization result must not be a symlink")
+        if marker.exists():
+            payload = self._read_materialization_result(marker)
+            self._validate_materialization_replay(
+                payload,
+                parent,
+                child,
+                contract,
+                result,
+                candidate_digest,
+                attempt_relative,
+            )
+            self._record_materialization_result(parent, child, payload, marker)
+            return payload
+
+        attempt = child_root / attempt_relative
+        if attempt.exists() or attempt.is_symlink():
+            if attempt.is_symlink() or not attempt.is_dir():
+                raise EvolutionError("materialization attempt path is unsafe")
+            try:
+                attempt.resolve(strict=False).relative_to(materialization_root.resolve())
+            except ValueError as exc:
+                raise EvolutionError("materialization attempt escapes its workspace") from exc
+            shutil.rmtree(attempt)
+        attempt.mkdir(parents=True, exist_ok=False)
+        candidate_copy = attempt / "candidate.py"
+        temporary_candidate = attempt / ".candidate.py.tmp"
+        temporary_candidate.write_bytes(candidate_bytes)
+        temporary_candidate.replace(candidate_copy)
+
+        child_task = self.store.list_tasks(child.id)[0]
+        execution: CandidateExecution | None = None
+        validation = Evaluation(False, (), "candidate execution did not start", {"kind": "output"})
+        outputs: tuple[dict[str, Any], ...] = ()
+        error: str | None = None
+        try:
+            self._materialize_task_input_data(child, attempt)
+            if candidate.suffix.lower() != ".py":
+                raise EvolutionError(
+                    "automatic output materialization requires a .py candidate"
+                )
+            runner = CommandCandidateRunner(
+                (sys.executable, "-I"),
+                timeout_seconds=float(timeout_seconds),
+                environment={
+                    "PYTHONHASHSEED": "0",
+                    "PYTHONIOENCODING": "utf-8",
+                },
+            )
+            execution = runner.run(candidate_copy, attempt, timeout=float(timeout_seconds))
+            execution_path = attempt / "execution.json"
+            ArtifactStore(child_root, self.store, child.id).record(
+                execution_path, child_task.id, kind="evolved_candidate_execution"
+            )
+            self.store.append_event(
+                child.id,
+                "evolved_candidate_executed",
+                {
+                    "candidate_id": result.best_candidate_id,
+                    "candidate_sha256": candidate_digest,
+                    "status": execution.status,
+                    "exit_code": execution.exit_code,
+                    "duration_ms": execution.duration_ms,
+                    "evidence_path": execution_path.relative_to(child_root).as_posix(),
+                },
+                task_id=child_task.id,
+                event_id=(
+                    "event-evolved-candidate-executed-"
+                    + hashlib.sha256(
+                        f"{parent.id}\0{child.id}\0{candidate_digest}".encode()
+                    ).hexdigest()
+                ),
+            )
+            if execution.status == "timed_out":
+                error = "candidate process timed out"
+            elif execution.status != "succeeded":
+                error = f"candidate process failed: {execution.error or execution.exit_code}"
+            else:
+                validation = self._evaluate_evolved_outputs(contract.outputs, attempt)
+                if not validation.passed:
+                    error = validation.reason
+                else:
+                    outputs = self._promote_evolved_outputs(
+                        parent, child.id, attempt, contract.outputs
+                    )
+        except (ArtifactError, EvolutionError, OSError, TypeError, ValueError) as exc:
+            error = self._sanitize_error(exc)
+
+        execution_path = attempt / "execution.json"
+        execution_payload: dict[str, object] = {
+            "status": execution.status if execution is not None else "failed",
+            "exit_code": execution.exit_code if execution is not None else None,
+            "duration_ms": execution.duration_ms if execution is not None else 0,
+            "evidence_path": (
+                execution_path.relative_to(child_root).as_posix()
+                if execution_path.is_file() and not execution_path.is_symlink()
+                else None
+            ),
+        }
+        payload: dict[str, Any] = {
+            "schema_version": "1",
+            "status": "succeeded" if error is None else "failed",
+            "parent_run_id": parent.id,
+            "evolution_run_id": child.id,
+            "contract_sha256": contract.digest(),
+            "candidate_id": result.best_candidate_id,
+            "candidate_path": result.best_candidate_path,
+            "candidate_sha256": candidate_digest,
+            "attempt_path": attempt_relative,
+            "execution": execution_payload,
+            "validation": validation.as_dict(),
+            "outputs": list(outputs),
+            "error": error,
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+        if len(encoded.encode("utf-8")) > self._MAX_MATERIALIZATION_RESULT_BYTES:
+            raise EvolutionError("materialization result exceeds the bounded size")
+        temporary_marker = materialization_root / ".result.json.tmp"
+        if temporary_marker.is_symlink():
+            raise EvolutionError("materialization temporary result must not be a symlink")
+        temporary_marker.write_text(encoded, encoding="utf-8")
+        temporary_marker.replace(marker)
+        self._record_materialization_result(parent, child, payload, marker)
+        return payload
+
+    def _read_materialization_result(self, path: Path) -> dict[str, Any]:
+        if path.is_symlink() or path.stat().st_size > self._MAX_MATERIALIZATION_RESULT_BYTES:
+            raise EvolutionError("materialization result is unsafe or oversized")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise EvolutionError("materialization result is invalid JSON") from exc
+        if not isinstance(payload, dict) or payload.get("status") not in {"succeeded", "failed"}:
+            raise EvolutionError("materialization result has an invalid status")
+        return payload
+
+    def _validate_materialization_replay(
+        self,
+        payload: dict[str, Any],
+        parent: Run,
+        child: Run,
+        contract: AlgorithmProblemContract,
+        result: StrategyResult,
+        candidate_digest: str,
+        attempt_relative: str,
+    ) -> None:
+        expected = {
+            "schema_version": "1",
+            "parent_run_id": parent.id,
+            "evolution_run_id": child.id,
+            "contract_sha256": contract.digest(),
+            "candidate_id": result.best_candidate_id,
+            "candidate_path": result.best_candidate_path,
+            "candidate_sha256": candidate_digest,
+            "attempt_path": attempt_relative,
+        }
+        for key, value in expected.items():
+            if payload.get(key) != value:
+                label = "candidate digest" if key == "candidate_sha256" else key.replace("_", " ")
+                raise EvolutionError(f"materialization {label} does not match current state")
+        if not isinstance(payload.get("execution"), dict):
+            raise EvolutionError("materialization execution evidence is malformed")
+        if not isinstance(payload.get("validation"), dict) or not isinstance(payload.get("outputs"), list):
+            raise EvolutionError("materialization validation evidence is malformed")
+        attempt_candidate = self._confined_regular_file(
+            Path(child.workspace), f"{attempt_relative}/candidate.py"
+        )
+        if (
+            attempt_candidate is None
+            or hashlib.sha256(attempt_candidate.read_bytes()).hexdigest() != candidate_digest
+        ):
+            raise EvolutionError("materialization candidate copy does not match its digest")
+        execution_payload = payload["execution"]
+        evidence_relative = execution_payload.get("evidence_path")
+        if evidence_relative is not None:
+            if not isinstance(evidence_relative, str) or evidence_relative != (
+                f"{attempt_relative}/execution.json"
+            ):
+                raise EvolutionError("materialization execution path does not match its attempt")
+            evidence_path = self._confined_regular_file(Path(child.workspace), evidence_relative)
+            if evidence_path is None:
+                raise EvolutionError("materialization execution evidence is missing or unsafe")
+            try:
+                execution = CandidateExecution.from_dict(
+                    json.loads(evidence_path.read_text(encoding="utf-8"))
+                )
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise EvolutionError("materialization execution evidence is invalid") from exc
+            if (
+                execution.status != execution_payload.get("status")
+                or execution.exit_code != execution_payload.get("exit_code")
+                or execution.duration_ms != execution_payload.get("duration_ms")
+            ):
+                raise EvolutionError("materialization execution evidence does not match its result")
+        elif payload["status"] == "succeeded":
+            raise EvolutionError("successful materialization is missing execution evidence")
+        if payload["status"] != "succeeded":
+            return
+        if (
+            payload["execution"].get("status") != "succeeded"
+            or payload["validation"].get("passed") is not True
+            or payload.get("error") is not None
+        ):
+            raise EvolutionError("successful materialization has inconsistent evidence")
+        output_by_path = {
+            item.get("path"): item for item in payload["outputs"] if isinstance(item, dict)
+        }
+        parent_artifacts = self._latest_artifacts_by_path(
+            [item for item in self.store.list_artifacts(parent.id) if item["kind"] == "output"]
+        )
+        for spec in contract.outputs:
+            item = output_by_path.get(spec.path)
+            if item is None:
+                if spec.required:
+                    raise EvolutionError(
+                        f"materialization result is missing required output metadata: {spec.path}"
+                    )
+                continue
+            digest = item.get("sha256")
+            size = item.get("size")
+            path = self._confined_regular_file(Path(parent.workspace), spec.path)
+            ledger = parent_artifacts.get(spec.path)
+            if (
+                path is None
+                or not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or not isinstance(size, int)
+                or item.get("format") != spec.format
+                or item.get("fields") != list(spec.fields)
+                or item.get("required") is not spec.required
+                or path.stat().st_size != size
+                or hashlib.sha256(path.read_bytes()).hexdigest() != digest
+                or ledger is None
+                or ledger.get("sha256") != digest
+                or ledger.get("size") != size
+            ):
+                raise EvolutionError(f"materialized output digest does not match: {spec.path}")
+
+    def _record_materialization_result(
+        self, parent: Run, child: Run, payload: dict[str, Any], marker: Path
+    ) -> None:
+        child_tasks = self.store.list_tasks(child.id)
+        if not child_tasks:
+            raise EvolutionError("evolution run has no task for materialization evidence")
+        execution = payload.get("execution")
+        evidence_relative = execution.get("evidence_path") if isinstance(execution, dict) else None
+        if isinstance(evidence_relative, str):
+            evidence_path = self._confined_regular_file(Path(child.workspace), evidence_relative)
+            if evidence_path is None:
+                raise EvolutionError("materialization execution evidence is missing or unsafe")
+            evidence_digest = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            if not any(
+                item["path"] == evidence_relative
+                and item["kind"] == "evolved_candidate_execution"
+                and item["sha256"] == evidence_digest
+                for item in self.store.list_artifacts(child.id)
+            ):
+                ArtifactStore(child.workspace, self.store, child.id).record(
+                    evidence_path,
+                    child_tasks[0].id,
+                    kind="evolved_candidate_execution",
+                )
+        relative_marker = marker.relative_to(Path(child.workspace)).as_posix()
+        marker_digest = hashlib.sha256(marker.read_bytes()).hexdigest()
+        if not any(
+            item["path"] == relative_marker
+            and item["kind"] == "evolved_materialization"
+            and item["sha256"] == marker_digest
+            for item in self.store.list_artifacts(child.id)
+        ):
+            ArtifactStore(child.workspace, self.store, child.id).record(
+                marker, child_tasks[0].id, kind="evolved_materialization"
+            )
+        event_payload = {
+            key: payload.get(key)
+            for key in (
+                "status",
+                "evolution_run_id",
+                "contract_sha256",
+                "candidate_id",
+                "candidate_path",
+                "candidate_sha256",
+                "attempt_path",
+                "execution",
+                "validation",
+                "outputs",
+                "error",
+            )
+        }
+        self.store.append_event(
+            parent.id,
+            "evolved_candidate_materialized",
+            event_payload,
+            event_id=(
+                "event-evolved-materialization-"
+                + hashlib.sha256(f"{parent.id}\0{child.id}".encode()).hexdigest()
+            ),
+        )
+
+    @staticmethod
+    def _evaluate_evolved_outputs(
+        specs: tuple[OutputSpec, ...], workspace: Path
+    ) -> Evaluation:
+        rules = [
+            {
+                "output_valid": {
+                    "path": output.path,
+                    "format": output.format,
+                    "fields": list(output.fields),
+                }
+            }
+            for output in specs
+            if output.required
+            or (workspace / output.path).exists()
+            or (workspace / output.path).is_symlink()
+        ]
+        if not rules:
+            return Evaluation(
+                True,
+                ("no optional output was produced",),
+                "no optional output required validation",
+                {"kind": "output_contract", "checks": []},
+            )
+        evaluator = acceptance_evaluator(
+            rules[0] if len(rules) == 1 else {"all": rules}
+        )
+        if evaluator is None:  # pragma: no cover - rules above are canonical
+            raise EvolutionError("could not construct evolved output evaluator")
+        return evaluator.evaluate("", workspace)
+
+    def _promote_evolved_outputs(
+        self,
+        parent: Run,
+        evolution_run_id: str,
+        attempt: Path,
+        specs: tuple[OutputSpec, ...],
+    ) -> tuple[dict[str, Any], ...]:
+        """Preflight every output, then atomically publish immutable parent bytes."""
+        root = Path(parent.workspace).expanduser().resolve(strict=False)
+        tasks = self.store.list_tasks(parent.id)
+        owner = next(
+            (task for task in tasks if (task.plan_task_id or task.id) in {"solve", "solver"}),
+            tasks[0] if tasks else None,
+        )
+        if owner is None:
+            raise EvolutionError("parent run has no task to own materialized outputs")
+        latest = self._latest_artifacts_by_path(
+            [item for item in self.store.list_artifacts(parent.id) if item["kind"] == "output"]
+        )
+        prepared: list[tuple[OutputSpec, Path, Path, bytes, str]] = []
+        for output in specs:
+            source = self._confined_regular_file(attempt, output.path)
+            if source is None:
+                if output.required:
+                    raise ArtifactError(f"required algorithm output is missing or unsafe: {output.path}")
+                continue
+            size = source.stat().st_size
+            if size > MAX_ARTIFACT_BYTES:
+                raise ArtifactError(
+                    f"algorithm output exceeds {MAX_ARTIFACT_BYTES} bytes: {output.path}"
+                )
+            content = source.read_bytes()
+            digest = hashlib.sha256(content).hexdigest()
+            target = self._confined_output_target(root, output.path)
+            existing = latest.get(output.path)
+            if target.exists() or target.is_symlink():
+                current = self._confined_regular_file(root, output.path)
+                if current is None or hashlib.sha256(current.read_bytes()).hexdigest() != digest:
+                    raise ArtifactError(
+                        f"parent output already contains different data: {output.path}"
+                    )
+            if existing is not None and (
+                existing.get("sha256") != digest or existing.get("size") != size
+            ):
+                raise ArtifactError(
+                    f"parent output ledger contains different data: {output.path}"
+                )
+            prepared.append((output, source, target, content, digest))
+
+        current_artifact_bytes = sum(
+            int(item["size"]) for item in self.store.list_artifacts(parent.id)
+        )
+        additional_artifact_bytes = sum(
+            len(content)
+            for output, _source, _target, content, _digest in prepared
+            if latest.get(output.path) is None
+        )
+        artifact_limit = (parent.budget or BudgetSpec()).max_artifact_bytes
+        if current_artifact_bytes + additional_artifact_bytes > artifact_limit:
+            raise ArtifactError(
+                "materialized outputs would exceed the parent artifact byte budget"
+            )
+
+        promoted: list[dict[str, Any]] = []
+        artifacts = ArtifactStore(root, self.store, parent.id)
+        for output, source, target, content, digest in prepared:
+            del source
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                temporary = target.with_name(f".{target.name}.materializing")
+                if temporary.is_symlink():
+                    raise ArtifactError(f"algorithm output temporary path is symlinked: {output.path}")
+                temporary.write_bytes(content)
+                temporary.replace(target)
+            existing = latest.get(output.path)
+            artifact_id = existing["id"] if existing is not None else artifacts.record(
+                target, owner.id, kind="output"
+            )
+            promoted.append(
+                {
+                    "artifact_id": artifact_id,
+                    "path": output.path,
+                    "format": output.format,
+                    "fields": list(output.fields),
+                    "required": output.required,
+                    "size": len(content),
+                    "sha256": digest,
+                }
+            )
+        if promoted:
+            self.store.append_event(
+                parent.id,
+                "evolved_outputs_promoted",
+                {"evolution_run_id": evolution_run_id, "outputs": promoted},
+                task_id=owner.id,
+                event_id=(
+                    "event-evolved-outputs-promoted-"
+                    + hashlib.sha256(f"{parent.id}\0{evolution_run_id}".encode()).hexdigest()
+                ),
+            )
+        return tuple(promoted)
+
     def _observe_evolution(
         self, run_id: str, task_id: str, event: str, payload: dict[str, object]
     ) -> None:
@@ -609,7 +1129,8 @@ class LocalController:
             raise ValueError(f"unknown run: {run_id}")
         tasks = self.store.list_tasks(run_id)
         artifacts = self.store.list_artifacts(run_id)
-        evaluations = [event for event in self.store.list_events(run_id) if event["type"] == "task_evaluated"]
+        events = self.store.list_events(run_id)
+        evaluations = [event for event in events if event["type"] == "task_evaluated"]
         passed = bool(tasks) and run.status == RunStatus.SUCCEEDED and all(
             any(item.get("task_id") == task.id and item["payload"].get("passed") is True for item in evaluations)
             for task in tasks if task.state.value == "succeeded"
@@ -620,9 +1141,52 @@ class LocalController:
         output_artifacts = self._latest_artifacts_by_path(
             [item for item in artifacts if item["kind"] == "output"]
         )
+        contract = self._algorithm_contract(run)
+        evolution_link = next(
+            (
+                event["payload"]
+                for event in reversed(events)
+                if event["type"] == "evolution_linked"
+                and isinstance(event.get("payload"), dict)
+            ),
+            None,
+        )
+        materialization = next(
+            (
+                event["payload"]
+                for event in reversed(events)
+                if event["type"] == "evolved_candidate_materialized"
+                and isinstance(event.get("payload"), dict)
+            ),
+            None,
+        )
+        evolved_delivery = contract is not None and bool(contract.outputs) and evolution_link is not None
+        if evolved_delivery:
+            child_id = evolution_link.get("evolution_run_id")
+            child = self.store.get_run(child_id) if isinstance(child_id, str) else None
+            if (
+                materialization is None
+                or materialization.get("status") != "succeeded"
+                or materialization.get("contract_sha256") != contract.digest()
+                or materialization.get("evolution_run_id") != child_id
+                or child is None
+                or child.status != RunStatus.SUCCEEDED
+                or not isinstance(materialization.get("execution"), dict)
+                or materialization["execution"].get("status") != "succeeded"
+                or not isinstance(materialization.get("validation"), dict)
+                or materialization["validation"].get("passed") is not True
+                or not isinstance(materialization.get("outputs"), list)
+                or materialization.get("error") is not None
+            ):
+                raise ValueError("run has no successful evolved output materialization to deliver")
+            # The intake compiler and skipped fixed DAG intentionally have no ordinary task
+            # evaluations.  The process evidence plus exact OutputSpec validation is the
+            # equivalent independent success boundary for this execution path.
+            passed = run.status == RunStatus.SUCCEEDED
+
         role_artifacts = [item for item in artifacts if item["kind"] == "role_evidence"]
         role_requirements: list[str] = []
-        for task in tasks:
+        for task in tasks if not evolved_delivery else ():
             for rule, relative in self._role_evidence_specs(task.acceptance):
                 result_path = str(task.result_path) if task.result_path is not None else ""
                 attempt_prefix = result_path.rsplit("/", 1)[0] + "/" if "/" in result_path else ""
@@ -638,7 +1202,6 @@ class LocalController:
             raise ValueError(
                 "run is missing verified role evidence: " + ", ".join(role_requirements[:16])
             )
-        contract = self._algorithm_contract(run)
         if contract is not None and contract.outputs:
             missing = [
                 output.path
@@ -649,6 +1212,35 @@ class LocalController:
                 raise ValueError(
                     "run is missing verified algorithm outputs: " + ", ".join(missing[:16])
                 )
+            for output in contract.outputs:
+                artifact = output_artifacts.get(output.path)
+                if artifact is None:
+                    continue
+                if evolved_delivery:
+                    materialized_outputs = [
+                        item
+                        for item in materialization["outputs"]
+                        if isinstance(item, dict) and item.get("path") == output.path
+                    ]
+                    if len(materialized_outputs) != 1 or (
+                        materialized_outputs[0].get("sha256") != artifact.get("sha256")
+                        or materialized_outputs[0].get("size") != artifact.get("size")
+                        or materialized_outputs[0].get("format") != output.format
+                        or materialized_outputs[0].get("fields") != list(output.fields)
+                        or materialized_outputs[0].get("required") is not output.required
+                    ):
+                        raise ValueError(
+                            f"evolved output metadata does not match its artifact: {output.path}"
+                        )
+                path = self._confined_regular_file(Path(run.workspace), output.path)
+                if (
+                    path is None
+                    or path.stat().st_size != artifact.get("size")
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != artifact.get("sha256")
+                ):
+                    raise ValueError(
+                        f"verified algorithm output no longer matches its digest: {output.path}"
+                    )
         usable = [
             *output_artifacts.values(),
             *role_artifacts,

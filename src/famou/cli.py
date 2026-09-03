@@ -737,6 +737,15 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         ),
         None,
     )
+    evolution_materialization = next(
+        (
+            event["payload"]
+            for event in reversed(events)
+            if event["type"] == "evolved_candidate_materialized"
+            and isinstance(event.get("payload"), dict)
+        ),
+        None,
+    )
     linked_evolution = None
     if evolution_link is not None:
         child_id = evolution_link.get("evolution_run_id")
@@ -759,6 +768,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
                     "workspace": str(child.workspace),
                     "strategy": evolution_link.get("strategy"),
                     "result": child_result,
+                    "materialization": evolution_materialization,
                 }
             else:
                 linked_evolution = {"run_id": child_id, "status": "missing"}
@@ -1480,16 +1490,22 @@ def _solve_evolution(
                 and state_payload.get("config") != evolution_config.to_dict()
             ):
                 raise EvolutionError("solve evolution settings do not match the existing handoff")
-        if child.status.value not in {"succeeded", "failed", "cancelled"}:
-            controller.run_evolution(
+        child, result = controller.run_evolution(
+            child.id,
+            contract,
+            generator,
+            evaluator,
+            evolution_config,
+            resume=child.status.value not in {"succeeded", "failed", "cancelled"},
+        )
+        if contract.outputs and child.status.value == "succeeded":
+            controller.materialize_evolved_outputs(
+                parent.id,
                 child.id,
                 contract,
-                generator,
-                evaluator,
-                evolution_config,
-                resume=True,
+                result,
+                timeout_seconds=evolution_config.timeout_seconds,
             )
-            child = controller.store.get_run(child.id) or child
         return {"run": parent, "child": child}
 
     child_workspace = (Path(parent.workspace) / "evolution-run").resolve()
@@ -1529,13 +1545,21 @@ def _solve_evolution(
         event_id="event-evolution-parent-link-" + hashlib.sha256(parent.id.encode()).hexdigest(),
     )
 
-    controller.run_evolution(
+    child, result = controller.run_evolution(
         child.id,
         contract,
         generator,
         evaluator,
         evolution_config,
     )
+    if contract.outputs and child.status.value == "succeeded":
+        controller.materialize_evolved_outputs(
+            parent.id,
+            child.id,
+            contract,
+            result,
+            timeout_seconds=evolution_config.timeout_seconds,
+        )
     return {"run": parent, "child": controller.store.get_run(child.id) or child}
 
 
@@ -1548,6 +1572,15 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
         item for item in controller.store.list_artifacts(run.id) if item["kind"] == "output"
     ]
     evolution_payload: dict[str, object] | None = None
+    materialization = next(
+        (
+            event["payload"]
+            for event in reversed(controller.store.list_events(run.id))
+            if event["type"] == "evolved_candidate_materialized"
+            and isinstance(event.get("payload"), dict)
+        ),
+        None,
+    )
     for event in reversed(controller.store.list_events(run.id)):
         if event["type"] != "evolution_linked" or not isinstance(event.get("payload"), dict):
             continue
@@ -1574,11 +1607,15 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
             "workspace": str(child.workspace),
             "strategy": link.get("strategy"),
             "result": result,
+            "materialization": materialization,
         }
         break
+    effective_status = run.status.value
+    if isinstance(materialization, dict) and materialization.get("status") == "failed":
+        effective_status = "failed"
     payload = {
         "run_id": run.id,
-        "status": run.status.value,
+        "status": effective_status,
         "run_status": run.status.value,
         "workspace": str(run.workspace),
         "input_request": controller.store.pending_input(run.id),
@@ -2693,14 +2730,17 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         ):
             _solve_evolution(config, evolution_args, controller, resumed)
             resumed = controller.store.get_run(resumed.id) or resumed
+    solved_payload = _solve_payload(controller, resumed)
     return {
         "run_id": resumed.id,
         "task_id": task_id,
-        "status": resumed.status.value,
+        "status": solved_payload["status"],
+        "run_status": resumed.status.value,
         "workspace": str(resumed.workspace),
         "answer_path": relative_answer,
         "workers": controller.max_workers,
-        "evolution": _solve_payload(controller, resumed).get("evolution"),
+        "algorithm_outputs": solved_payload.get("algorithm_outputs", []),
+        "evolution": solved_payload.get("evolution"),
     }
 
 
