@@ -152,9 +152,11 @@ class BundleRuntime:
     def __init__(self, envelope: dict[str, object] | None = None) -> None:
         self.envelope = envelope or _envelope()
         self.bundle_calls = 0
+        self.audit_calls = 0
         self.generation_calls = 0
         self.evaluator_calls = 0
         self.bundle_prompts: list[str] = []
+        self.audit_prompts: list[str] = []
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
         del workspace, timeout
@@ -166,6 +168,19 @@ class BundleRuntime:
             self.bundle_calls += 1
             self.bundle_prompts.append(prompt)
             return RuntimeResult(json.dumps(self.envelope))
+        if "adversarial evaluator auditor" in prompt:
+            self.audit_calls += 1
+            self.audit_prompts.append(prompt)
+            return RuntimeResult(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "constraint_coverage": self.envelope["constraint_coverage"],
+                        "probes": self.envelope["probes"],
+                        "score_order": self.envelope["score_order"],
+                    }
+                )
+            )
         if "solver in a bounded local algorithm-evolution run" in prompt:
             self.generation_calls += 1
             cost = 9 if self.generation_calls == 1 else 1
@@ -221,12 +236,14 @@ def test_compiler_preflights_freezes_and_loads_bundle(tmp_path: Path) -> None:
     bundle = _compile_bundle(runtime, tmp_path)
 
     assert runtime.bundle_calls == 1
+    assert runtime.audit_calls == 1
     assert len(bundle.fingerprint) == 64
     assert bundle.root == tmp_path / "evaluator-bundle"
     assert {path.name for path in bundle.root.iterdir()} == {
         "objective.md",
         "evaluator.py",
         "probes.json",
+        "audit.json",
         "input-profile.json",
         "manifest.json",
     }
@@ -327,7 +344,8 @@ def test_bundle_rejects_unsafe_probe_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "mode", ["tampered", "profile-tampered", "writable", "symlink", "missing"]
+    "mode",
+    ["tampered", "audit-tampered", "profile-tampered", "writable", "symlink", "missing"],
 )
 def test_frozen_bundle_loader_rejects_integrity_drift(tmp_path: Path, mode: str) -> None:
     bundle = _compile_bundle(BundleRuntime(), tmp_path)
@@ -336,6 +354,11 @@ def test_frozen_bundle_loader_rejects_integrity_drift(tmp_path: Path, mode: str)
         evaluator.chmod(0o644)
         evaluator.write_text(evaluator.read_text() + "\n# changed\n", encoding="utf-8")
         evaluator.chmod(0o444)
+    elif mode == "audit-tampered":
+        audit = bundle.root / "audit.json"
+        audit.chmod(0o644)
+        audit.write_text(audit.read_text() + "\n", encoding="utf-8")
+        audit.chmod(0o444)
     elif mode == "profile-tampered":
         profile = bundle.root / "input-profile.json"
         profile.chmod(0o644)
@@ -387,12 +410,14 @@ def test_bundle_resume_reprofiles_inputs_without_recompiling(tmp_path: Path) -> 
 
     assert _compile_bundle(runtime, tmp_path).fingerprint == bundle.fingerprint
     assert runtime.bundle_calls == 1
+    assert runtime.audit_calls == 1
 
     input_path = tmp_path / "data" / "raw" / "orders.csv"
     input_path.write_text("id\nchanged-order\n", encoding="utf-8")
     with pytest.raises(EvaluatorBundleError, match="input profile digest does not match"):
         _compile_bundle(runtime, tmp_path)
     assert runtime.bundle_calls == 1
+    assert runtime.audit_calls == 1
 
 
 def test_solve_uses_and_resumes_one_frozen_evaluator_bundle(
@@ -426,6 +451,7 @@ def test_solve_uses_and_resumes_one_frozen_evaluator_bundle(
     payload = json.loads(capsys.readouterr().out)
     assert payload["evolution"]["result"]["best_candidate_id"] == "candidate-0002"
     assert runtime.bundle_calls == 1
+    assert runtime.audit_calls == 1
     assert runtime.evaluator_calls == 0
     bundle_root = Path(payload["workspace"]) / "evaluator-bundle"
     assert "real-order-must-not-be-in-bundle" not in "".join(
@@ -437,10 +463,12 @@ def test_solve_uses_and_resumes_one_frozen_evaluator_bundle(
     )
     store = Store(home / "state.db")
     artifacts = store.list_artifacts(payload["run_id"])
-    assert sum(item["kind"] == "evaluator_bundle" for item in artifacts) == 5
+    assert sum(item["kind"] == "evaluator_bundle" for item in artifacts) == 6
     assert '"row_count": 1' in runtime.bundle_prompts[0]
     assert '"name": "id"' in runtime.bundle_prompts[0]
     assert "real-order-must-not-be-in-bundle" not in runtime.bundle_prompts[0]
+    assert "real-order-must-not-be-in-bundle" not in runtime.audit_prompts[0]
+    assert "valid-low-cost" not in runtime.audit_prompts[0]
     manifest = json.loads((bundle_root / "manifest.json").read_text())
     assert len(manifest["input_profile_sha256"]) == 64
     assert (
@@ -477,6 +505,7 @@ def test_solve_uses_and_resumes_one_frozen_evaluator_bundle(
     resumed = json.loads(capsys.readouterr().out)
     assert resumed["evolution"]["run_id"] == payload["evolution"]["run_id"]
     assert runtime.bundle_calls == 1
+    assert runtime.audit_calls == 1
 
     staged_input = Path(payload["workspace"]) / "data" / "raw" / "orders.csv"
     staged_input.write_text("id\ntampered-after-ledger\n", encoding="utf-8")
@@ -502,6 +531,7 @@ def test_solve_uses_and_resumes_one_frozen_evaluator_bundle(
     ) == 2
     assert "input digest does not match" in capsys.readouterr().err
     assert runtime.bundle_calls == 1
+    assert runtime.audit_calls == 1
 
 
 def test_compile_evaluator_cli_rejects_conflicting_or_non_native_modes(

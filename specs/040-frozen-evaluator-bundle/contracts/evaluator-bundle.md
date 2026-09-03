@@ -24,6 +24,12 @@ failure.
 
 ## Freeze and recovery
 
-The promoted directory contains exactly `objective.md`, `evaluator.py`, `probes.json`, and
-`manifest.json`. Loader and per-candidate evaluation verify regular-file type, permissions, exact
-shape, SHA-256 digests, aggregate digest, and contract digest before use.
+Feature 040 originally promoted `objective.md`, `evaluator.py`, `probes.json`, and `manifest.json`.
+Features 041–042 extend the current `frozen-evaluator-bundle-v2` file set with canonical
+`input-profile.json` and independent `audit.json`. Loader and per-candidate evaluation verify
+regular-file type, permissions, exact shape, canonical suite/profile bytes, SHA-256 digests,
+aggregate digest, and contract digest before use.
+
+Bundles created with protocol `frozen-evaluator-bundle-v1` are intentionally not migrated in
+place. A v2 loader fails closed on them; rerun compilation with the original contract and private
+inputs to create fresh compiler and adversarial-audit evidence.

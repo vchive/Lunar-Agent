@@ -7,10 +7,12 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current private-data
-profiling boundary is captured in
-[`specs/041-private-data-profiling/`](specs/041-private-data-profiling/), building on the frozen
-evaluator bundle in
+The project is being developed with Spec-Driven Development (SDD). The current adversarial
+evaluator-audit boundary is captured in
+[`specs/042-adversarial-evaluator-audit/`](specs/042-adversarial-evaluator-audit/), building on the
+private-data profiling boundary in
+[`specs/041-private-data-profiling/`](specs/041-private-data-profiling/) and the frozen evaluator
+bundle in
 [`specs/040-frozen-evaluator-bundle/`](specs/040-frozen-evaluator-bundle/), which builds on the
 execution-grounded refinement loop in
 [`specs/039-execution-grounded-refinement/`](specs/039-execution-grounded-refinement/) and the
@@ -166,12 +168,19 @@ or ledger drift fail before the compiler or search runs.
 
 The compiler must return a strict objective, Python evaluator, one synthetic rejecting probe per
 hard constraint, at least two valid probes, and a declared better/worse score ordering. Lunar-Agent
-statically rejects dangerous imports and dynamic execution, runs every probe locally, parses every
-result through `EvaluationReport`, and starts search only after constraint validity and score
-ordering pass. It then hashes and freezes `objective.md`, `evaluator.py`, `probes.json`, canonical
-`input-profile.json`, and `manifest.json` under the intake run. The canonical profile digest is part
-of bundle identity. Resume re-profiles current ledger-bound bytes and reuses the same bundle without
-asking a model to rewrite the judge; input or profile drift fails closed.
+statically rejects dangerous imports and dynamic execution, runs every probe locally, and parses
+every result through `EvaluationReport`. It then starts a fresh adversarial auditor turn. The auditor
+sees the immutable contract, private structural profile, objective, and evaluator source—but not
+the compiler's probes, raw values, or any solver/search evidence—and must produce a second complete
+probe suite. Search starts only after both suites prove constraint validity, matching error codes,
+and strict score ordering. This catches correlated evaluator/self-test omissions such as accepting
+duplicate entities merely because row counts match.
+
+Lunar-Agent hashes and freezes `objective.md`, `evaluator.py`, canonical `probes.json`, independent
+`audit.json`, canonical `input-profile.json`, and `manifest.json` under the intake run. The profile
+and audit digests are part of bundle identity. Resume re-profiles current ledger-bound bytes and
+reuses the same bundle without another compiler or auditor call; input, profile, audit, permission,
+or manifest drift fails closed.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

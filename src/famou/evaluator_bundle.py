@@ -41,9 +41,16 @@ MAX_PROBE_FILE_BYTES = 64 * 1024
 MAX_PROBE_BYTES = 512 * 1024
 MAX_EVALUATOR_OUTPUT_BYTES = 64 * 1024
 MAX_IDENTIFIER_BYTES = 128
-BUNDLE_PROTOCOL = "frozen-evaluator-bundle-v1"
+BUNDLE_PROTOCOL = "frozen-evaluator-bundle-v2"
 BUNDLE_FILES = frozenset(
-    {"objective.md", "evaluator.py", "probes.json", "input-profile.json", "manifest.json"}
+    {
+        "audit.json",
+        "objective.md",
+        "evaluator.py",
+        "probes.json",
+        "input-profile.json",
+        "manifest.json",
+    }
 )
 _ALLOWED_IMPORTS = frozenset(
     {
@@ -155,7 +162,17 @@ class EvaluatorBundleEnvelope:
     probes: tuple[EvaluatorProbe, ...]
     score_order: tuple[ScoreOrder, ...]
 
-    def probes_dict(self) -> dict[str, object]:
+    def probe_suite(self) -> ProbeSuite:
+        return ProbeSuite(self.constraint_coverage, self.probes, self.score_order)
+
+
+@dataclass(frozen=True)
+class ProbeSuite:
+    constraint_coverage: tuple[str, ...]
+    probes: tuple[EvaluatorProbe, ...]
+    score_order: tuple[ScoreOrder, ...]
+
+    def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": "1",
             "constraint_coverage": list(self.constraint_coverage),
@@ -227,7 +244,7 @@ def compile_evaluator_bundle(
     profile = _build_input_profile(root, contract, inputs)
     prompt = _compiler_prompt(contract, profile)
     try:
-        result = runtime.run(prompt, compiler_workspace, timeout)
+        result = _run_isolated(runtime, prompt, compiler_workspace, timeout)
     except Exception as exc:
         raise EvaluatorBundleError(f"evaluator compiler failed: {_error_category(exc)}") from exc
     if not isinstance(result, RuntimeResult):
@@ -239,21 +256,23 @@ def compile_evaluator_bundle(
         evaluator_path = staging / "evaluator.py"
         probes_path = staging / "probes.json"
         profile_path = staging / "input-profile.json"
+        audit_path = staging / "audit.json"
         objective_path.write_text(envelope.objective + "\n", encoding="utf-8")
         evaluator_path.write_text(envelope.evaluator_source, encoding="utf-8")
-        probes_path.write_text(
-            json.dumps(
-                envelope.probes_dict(), ensure_ascii=False, sort_keys=True, indent=2
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        probes_path.write_text(_canonical_probe_suite(envelope.probe_suite()), encoding="utf-8")
         profile_path.write_text(canonical_profile_json(profile), encoding="utf-8")
         frozen_inputs = {
             path.name: _sha256(path)
             for path in (objective_path, evaluator_path, probes_path, profile_path)
         }
-        _preflight(evaluator_path, envelope, contract, staging, timeout)
+        _preflight(
+            evaluator_path,
+            envelope.probe_suite(),
+            contract,
+            staging,
+            timeout,
+            label="compiler",
+        )
         current = tuple(staging.iterdir())
         if {path.name for path in current} != set(frozen_inputs) or any(
             path.is_symlink()
@@ -262,8 +281,40 @@ def compile_evaluator_bundle(
             for path in current
         ):
             raise EvaluatorBundleError("evaluator preflight modified the frozen bundle inputs")
+        audit_suite = _compile_audit_suite(
+            runtime,
+            contract,
+            profile,
+            envelope.objective,
+            envelope.evaluator_source,
+            root,
+            timeout,
+        )
+        audit_path.write_text(_canonical_probe_suite(audit_suite), encoding="utf-8")
+        frozen_inputs[audit_path.name] = _sha256(audit_path)
+        _preflight(
+            evaluator_path,
+            audit_suite,
+            contract,
+            staging,
+            timeout,
+            label="audit",
+        )
+        current = tuple(staging.iterdir())
+        if {path.name for path in current} != set(frozen_inputs) or any(
+            path.is_symlink()
+            or not path.is_file()
+            or _sha256(path) != frozen_inputs[path.name]
+            for path in current
+        ):
+            raise EvaluatorBundleError("evaluator audit modified the frozen bundle inputs")
         manifest = _manifest(
-            contract, objective_path, evaluator_path, probes_path, profile_path
+            contract,
+            objective_path,
+            evaluator_path,
+            probes_path,
+            audit_path,
+            profile_path,
         )
         manifest_path = staging / "manifest.json"
         manifest_path.write_text(
@@ -274,6 +325,7 @@ def compile_evaluator_bundle(
             objective_path,
             evaluator_path,
             probes_path,
+            audit_path,
             profile_path,
             manifest_path,
         ):
@@ -337,6 +389,7 @@ def load_evaluator_bundle(
         "objective_sha256",
         "evaluator_sha256",
         "probes_sha256",
+        "audit_sha256",
         "input_profile_sha256",
         "bundle_sha256",
     }
@@ -350,10 +403,19 @@ def load_evaluator_bundle(
         ("objective.md", "objective_sha256"),
         ("evaluator.py", "evaluator_sha256"),
         ("probes.json", "probes_sha256"),
+        ("audit.json", "audit_sha256"),
         ("input-profile.json", "input_profile_sha256"),
     ):
         if _sha256(root / name) != manifest.get(key):
             raise EvaluatorBundleError(f"frozen evaluator {name} digest does not match")
+    for name, label in (("probes.json", "compiler"), ("audit.json", "audit")):
+        path = root / name
+        try:
+            stored_suite = _parse_probe_suite(path.read_text(encoding="utf-8"), contract, label=label)
+            if path.read_text(encoding="utf-8") != _canonical_probe_suite(stored_suite):
+                raise EvaluatorBundleError(f"frozen evaluator {label} suite is not canonical")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise EvaluatorBundleError(f"frozen evaluator {label} suite is invalid") from exc
     profile_path = root / "input-profile.json"
     try:
         stored_profile = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -392,8 +454,8 @@ def _parse_envelope(raw: str, contract: AlgorithmProblemContract) -> EvaluatorBu
     if _SECRET.search(raw):
         raise EvaluatorBundleError("evaluator compiler response contains credential-like content")
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
+        payload = _strict_json_loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise EvaluatorBundleError("evaluator compiler must return one strict JSON object") from exc
     expected = {
         "schema_version",
@@ -410,37 +472,91 @@ def _parse_envelope(raw: str, contract: AlgorithmProblemContract) -> EvaluatorBu
     objective = _text(payload["objective"], "evaluator objective", MAX_OBJECTIVE_BYTES)
     source = _text(payload["evaluator_source"], "evaluator source", MAX_EVALUATOR_BYTES)
     _validate_source(source)
-    constraint_ids = tuple(item.id for item in contract.hard_constraints)
-    coverage = _string_array(payload["constraint_coverage"], "constraint coverage")
-    if len(coverage) != len(set(coverage)) or set(coverage) != set(constraint_ids):
-        raise EvaluatorBundleError("evaluator constraint coverage must exactly match hard constraints")
-    required_probe_paths = frozenset(
+    probes = _parse_probes(payload["probes"], _required_probe_paths(contract))
+    suite = _validate_probe_suite(
+        payload["constraint_coverage"], probes, payload["score_order"], contract
+    )
+    return EvaluatorBundleEnvelope(
+        objective,
+        source,
+        suite.constraint_coverage,
+        suite.probes,
+        suite.score_order,
+    )
+
+
+def _parse_probe_suite(
+    raw: str, contract: AlgorithmProblemContract, *, label: str = "audit"
+) -> ProbeSuite:
+    if not isinstance(raw, str) or not raw.strip():
+        raise EvaluatorBundleError(f"evaluator {label} returned empty output")
+    if len(raw.encode("utf-8")) > MAX_BUNDLE_RESPONSE_BYTES:
+        raise EvaluatorBundleError(f"evaluator {label} response exceeds the bounded size")
+    if _SECRET.search(raw):
+        raise EvaluatorBundleError(
+            f"evaluator {label} response contains credential-like content"
+        )
+    try:
+        payload = _strict_json_loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise EvaluatorBundleError(
+            f"evaluator {label} must return one strict JSON object"
+        ) from exc
+    expected = {"schema_version", "constraint_coverage", "probes", "score_order"}
+    if not isinstance(payload, dict) or set(payload) != expected:
+        raise EvaluatorBundleError(f"evaluator {label} suite has an invalid shape")
+    if payload["schema_version"] != "1":
+        raise EvaluatorBundleError(f"evaluator {label} schema_version must be '1'")
+    required_probe_paths = _required_probe_paths(contract)
+    probes = _parse_probes(payload["probes"], required_probe_paths)
+    return _validate_probe_suite(
+        payload["constraint_coverage"], probes, payload["score_order"], contract, label=label
+    )
+
+
+def _required_probe_paths(contract: AlgorithmProblemContract) -> frozenset[str]:
+    return frozenset(
         [
             *(f"data/raw/{item.path}" for item in contract.inputs),
             *(item.path for item in contract.outputs if item.required),
         ]
     )
-    probes = _parse_probes(payload["probes"], required_probe_paths)
+
+
+def _validate_probe_suite(
+    coverage_value: object,
+    probes: tuple[EvaluatorProbe, ...],
+    orders_value: object,
+    contract: AlgorithmProblemContract,
+    *,
+    label: str = "evaluator",
+) -> ProbeSuite:
+    constraint_ids = tuple(item.id for item in contract.hard_constraints)
+    coverage = _string_array(coverage_value, f"{label} constraint coverage")
+    if len(coverage) != len(set(coverage)) or set(coverage) != set(constraint_ids):
+        raise EvaluatorBundleError(
+            f"{label} constraint coverage must exactly match hard constraints"
+        )
     valid_names = {probe.name for probe in probes if probe.expected_validity == 1}
     invalid_by_constraint = [
         probe.constraint_id for probe in probes if probe.expected_validity == 0
     ]
     if len(valid_names) < 2:
-        raise EvaluatorBundleError("evaluator bundle requires at least two valid probes")
+        raise EvaluatorBundleError(f"{label} requires at least two valid probes")
     if sorted(value for value in invalid_by_constraint if value is not None) != sorted(
         constraint_ids
     ) or any(
         probe.constraint_id is None for probe in probes if probe.expected_validity == 0
     ):
         raise EvaluatorBundleError(
-            "evaluator constraint probe coverage must exactly match hard constraints"
+            f"{label} constraint probe coverage must exactly match hard constraints"
         )
     if any(
         probe.constraint_id is not None for probe in probes if probe.expected_validity == 1
     ):
-        raise EvaluatorBundleError("valid evaluator probes cannot name a constraint")
-    orders = _parse_score_order(payload["score_order"], valid_names)
-    return EvaluatorBundleEnvelope(objective, source, coverage, probes, orders)
+        raise EvaluatorBundleError(f"valid {label} probes cannot name a constraint")
+    orders = _parse_score_order(orders_value, valid_names)
+    return ProbeSuite(coverage, probes, orders)
 
 
 def _parse_probes(
@@ -568,14 +684,16 @@ def _validate_source(source: str) -> None:
 
 def _preflight(
     evaluator: Path,
-    envelope: EvaluatorBundleEnvelope,
+    suite: ProbeSuite,
     contract: AlgorithmProblemContract,
     staging: Path,
     timeout: float,
+    *,
+    label: str,
 ) -> None:
     reports: dict[str, EvaluationReport] = {}
-    probe_root = staging / ".preflight"
-    for probe in envelope.probes:
+    probe_root = staging / f".{label}-preflight"
+    for probe in suite.probes:
         workspace = probe_root / probe.name
         workspace.mkdir(parents=True)
         candidate = workspace / "candidate.py"
@@ -609,27 +727,27 @@ def _preflight(
             )
             if validator is None or not validator.evaluate("", workspace).passed:
                 raise EvaluatorBundleError(
-                    f"evaluator probe {probe.name} violates the declared output schema"
+                    f"{label} probe {probe.name} violates the declared output schema"
                 )
         report = _run_evaluator(evaluator, candidate, timeout)
         if report.validity != probe.expected_validity:
             raise EvaluatorBundleError(
-                f"evaluator constraint probe {probe.name} returned wrong validity"
+                f"{label} constraint probe {probe.name} returned wrong validity"
             )
         if probe.constraint_id is not None and not any(
             item.get("code") == probe.constraint_id for item in report.error_info
         ):
             raise EvaluatorBundleError(
-                f"evaluator constraint probe {probe.name} did not report {probe.constraint_id}"
+                f"{label} constraint probe {probe.name} did not report {probe.constraint_id}"
             )
         reports[probe.name] = report
-    for order in envelope.score_order:
+    for order in suite.score_order:
         if not (
             reports[order.better].combined_score
             > reports[order.worse].combined_score
         ):
             raise EvaluatorBundleError(
-                f"evaluator score order failed: {order.better} must beat {order.worse}"
+                f"{label} score order failed: {order.better} must beat {order.worse}"
             )
     shutil.rmtree(probe_root)
 
@@ -713,6 +831,7 @@ def _manifest(
     objective: Path,
     evaluator: Path,
     probes: Path,
+    audit: Path,
     input_profile: Path,
 ) -> dict[str, str]:
     identity = {
@@ -722,6 +841,7 @@ def _manifest(
         "objective_sha256": _sha256(objective),
         "evaluator_sha256": _sha256(evaluator),
         "probes_sha256": _sha256(probes),
+        "audit_sha256": _sha256(audit),
         "input_profile_sha256": _sha256(input_profile),
     }
     return {**identity, "bundle_sha256": _dict_digest(identity)}
@@ -762,6 +882,96 @@ def _compiler_prompt(
         f"Private input profile SHA-256: {profile_digest}\n"
         f"Private input profile:\n{profile}"
     )
+
+
+def _compile_audit_suite(
+    runtime: Runtime | BundleRuntime,
+    contract: AlgorithmProblemContract,
+    input_profile: dict[str, object],
+    objective: str,
+    evaluator_source: str,
+    root: Path,
+    timeout: float,
+) -> ProbeSuite:
+    workspace = root / ".evaluator-auditor"
+    if workspace.is_symlink():
+        raise EvaluatorBundleError("evaluator auditor workspace must not be a symlink")
+    workspace.mkdir(parents=True, exist_ok=True)
+    try:
+        result = _run_isolated(
+            runtime,
+            _auditor_prompt(contract, input_profile, objective, evaluator_source),
+            workspace,
+            timeout,
+        )
+    except Exception as exc:
+        raise EvaluatorBundleError(f"evaluator auditor failed: {_error_category(exc)}") from exc
+    if not isinstance(result, RuntimeResult):
+        raise EvaluatorBundleError("evaluator auditor returned an invalid runtime result")
+    return _parse_probe_suite(result.text, contract)
+
+
+def _run_isolated(
+    runtime: Runtime | BundleRuntime,
+    prompt: str,
+    workspace: Path,
+    timeout: float,
+) -> RuntimeResult:
+    isolated = getattr(runtime, "run_isolated", None)
+    if callable(isolated):
+        return isolated(prompt, workspace, timeout)
+    return runtime.run(prompt, workspace, timeout)
+
+
+def _auditor_prompt(
+    contract: AlgorithmProblemContract,
+    input_profile: dict[str, object],
+    objective: str,
+    evaluator_source: str,
+) -> str:
+    context = json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
+    profile = json.dumps(input_profile, ensure_ascii=False, sort_keys=True, indent=2)
+    return (
+        "You are an independent adversarial evaluator auditor. Attack the supplied frozen evaluator "
+        "before any solver candidate exists. Return exactly one JSON object with schema_version='1', "
+        "constraint_coverage, probes, and score_order. Provide exactly one expected_validity=0 probe "
+        "per hard constraint, at least two valid probes, and at least one strict better/worse score "
+        "ordering. Probe boundary cases, duplicate/omitted entities, and false rejection where relevant. "
+        "Each probe must include every declared input and required output, using only relative paths "
+        "below data/raw/ or output/. Do not return evaluator code, fixes, markdown, credentials, commands, "
+        "external paths, or prose. The private profile contains structure only; never invent or request raw "
+        "values. You have deliberately not received the compiler's self probes.\n\n"
+        f"Canonical contract:\n{context}\n\n"
+        f"Private input profile SHA-256: {profile_sha256(input_profile)}\n"
+        f"Private input profile:\n{profile}\n\n"
+        f"Frozen objective:\n{objective}\n\n"
+        f"Frozen evaluator source:\n{evaluator_source}"
+    )
+
+
+def _canonical_probe_suite(suite: ProbeSuite) -> str:
+    return json.dumps(
+        suite.to_dict(),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def _strict_json_loads(raw: str) -> object:
+    def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    def constant(value: str) -> object:
+        raise ValueError(f"non-finite JSON number: {value}")
+
+    return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
 
 
 def _probe_path(value: object) -> str:

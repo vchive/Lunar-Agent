@@ -246,6 +246,18 @@ evaluator remains authoritative, and any runner failure overrides an otherwise v
 with `validity=0`. This creates a portable execution proof boundary without assuming a particular
 language, test framework, or operating-system sandbox.
 
+Conversational native evolution may opt into a repository-owned compiled evaluator. Lunar-Agent
+first derives a value-free structural profile from the exact input ledger, then runs two bounded
+runtime turns before candidate generation. The compiler emits an objective, restricted evaluator,
+and self probes. After those probes execute successfully, a fresh auditor sees the contract,
+profile, objective, and evaluator source but not the self probes or any candidate/search evidence.
+It must independently construct complete constraint counterexamples and score-order anchors, which
+are executed through the same preflight gate. Only then are `probes.json`, `audit.json`, evaluator,
+objective, and profile frozen under protocol `frozen-evaluator-bundle-v2`. Resume verifies their
+canonical bytes and aggregate fingerprint without model calls. This reduces correlated evaluator
+and self-test omissions; it is not a claim that two calls to one configured model are fully
+independent or that generated Python is an OS sandbox.
+
 The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve and is allowed to
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
 available for mixed configurations. When both seams are already explicit, a runtime option is

@@ -25,6 +25,10 @@ the user informed with a concise final summary, including files changed and chec
 memory tools are available, recall relevant notes before continuing old work and remember only
 concise, reusable facts or decisions.
 """
+ISOLATED_SYSTEM_PROMPT = """You are executing one stateless Lunar-Agent protocol step. Follow the
+user message exactly, return only its requested machine-readable response, and do not use tools,
+memory, session history, or unstated external context.
+"""
 
 # Compatibility alias for callers that imported the earlier experimental name.
 BUILD_SYSTEM_PROMPT = HERMES_SYSTEM_PROMPT
@@ -205,6 +209,37 @@ class AgentLoopRuntime:
                     raise AgentInputRequired(
                         result.input_question or result.output[:8_000], result.input_options
                     )
+
+    def run_isolated(
+        self, prompt: str, workspace: Path, timeout: float | None = None
+    ) -> RuntimeResult:
+        """Run one stateless, tool-free model turn for a trust-boundary decision.
+
+        Evaluator compilation and adversarial audit must not inherit the user's durable transcript,
+        memory tools, or a previous compiler response. Keeping this primitive on the repository-
+        owned loop lets protocol code request that boundary without depending on model internals.
+        """
+        workspace.mkdir(parents=True, exist_ok=True)
+        turn = self.model.complete(
+            [
+                {"role": "system", "content": ISOLATED_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            (),
+            timeout,
+        )
+        if turn.tool_calls:
+            raise RuntimeExecutionError("isolated agent turn returned tool calls")
+        if not turn.text:
+            raise RuntimeExecutionError("isolated agent turn returned empty content")
+        return RuntimeResult(
+            text=turn.text,
+            metadata={
+                "provider": "openai-compatible",
+                "mode": "agent-loop-isolated",
+                "session_history": "false",
+            },
+        )
 
     @staticmethod
     def _remaining_timeout(started: float, timeout: float | None) -> float | None:
