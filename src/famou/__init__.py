@@ -42,6 +42,14 @@ from .data_profile import (
     canonical_profile_json,
     profile_sha256,
 )
+from .effect_trial import (
+    EffectTrialConfig,
+    EffectTrialError,
+    EffectTrialReport,
+    EffectTrialRunner,
+    TrialBaseline,
+    TrialSuite,
+)
 from .evaluator_bundle import (
     EvaluatorBundleError,
     FrozenEvaluatorBundle,
@@ -115,6 +123,10 @@ __all__ = [
     "ContractCompilationError",
     "ContractCompiler",
     "DataProfileError",
+    "EffectTrialConfig",
+    "EffectTrialError",
+    "EffectTrialReport",
+    "EffectTrialRunner",
     "EvaluatorBundleError",
     "EvolutionConfig",
     "EvolutionContext",
@@ -133,6 +145,8 @@ __all__ = [
     "RuntimeContractCompiler",
     "SolverScoringContract",
     "StrategyResult",
+    "TrialBaseline",
+    "TrialSuite",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_private_input_profile",

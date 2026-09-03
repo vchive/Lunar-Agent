@@ -34,6 +34,7 @@ from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
 from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
+from .effect_trial import EffectTrialConfig, EffectTrialError, EffectTrialRunner
 from .evaluator_bundle import SolverScoringContract, compile_evaluator_bundle
 from .evolution import (
     CandidateInputArtifact,
@@ -436,6 +437,42 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_parser.add_argument("--timeout", type=float, default=900.0)
     _add_home(benchmark_parser)
     _add_json(benchmark_parser)
+
+    effect_parser = subparsers.add_parser(
+        "effect-trial",
+        help="run a small frozen normal-Agent trial against exported Famou-Bench history",
+    )
+    effect_parser.add_argument("suite", type=Path, help="frozen one/two-case suite JSON")
+    effect_parser.add_argument("baseline", type=Path, help="FM-Eval per-run baseline export JSON")
+    effect_parser.add_argument(
+        "--case-source",
+        action="append",
+        default=[],
+        metavar="KEY=PATH",
+        help="map one selected case key to its local public source root; repeat per case",
+    )
+    effect_parser.add_argument("--subject-command", required=True, help="explicit normal-Agent command")
+    effect_parser.add_argument("--harness-command", required=True, help="explicit exact-harness command")
+    effect_parser.add_argument("--requested-model", required=True, help="requested model identity")
+    effect_parser.add_argument("--runs-per-case", type=int, default=3)
+    effect_parser.add_argument("--timeout", type=float, default=3600.0)
+    effect_parser.add_argument("--workspace", type=Path, required=True, help="trial workspace")
+    effect_parser.add_argument(
+        "--subject-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="pass one explicitly named existing environment variable to the subject",
+    )
+    effect_parser.add_argument(
+        "--harness-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="pass one explicitly named existing environment variable to the harness",
+    )
+    effect_parser.add_argument("--resume", action="store_true", help="resume the frozen trial")
+    _add_json(effect_parser)
 
     answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
     answer_parser.add_argument("run_id")
@@ -910,6 +947,30 @@ def _parse_command(value: str | None, label: str) -> tuple[str, ...]:
     if not command:
         raise ValueError(f"{label} must not be empty")
     return command
+
+
+def _effect_mapping(values: list[str], label: str) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    for value in values:
+        if not isinstance(value, str) or "=" not in value:
+            raise ValueError(f"{label} must use KEY=PATH")
+        key, raw_path = value.split("=", 1)
+        if not key or not raw_path or key in result:
+            raise ValueError(f"{label} must contain unique non-empty KEY=PATH entries")
+        result[key] = Path(raw_path)
+    return result
+
+
+def _effect_environment(names: list[str], label: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for name in names:
+        if name in result:
+            raise ValueError(f"{label} environment names must be unique")
+        value = os.environ.get(name)
+        if value is None:
+            raise ValueError(f"{label} environment variable is not set: {name}")
+        result[name] = value
+    return result
 
 
 def _adapter_fingerprint(
@@ -2603,6 +2664,26 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     return {**report.to_dict(), "status": status, "workspace": str(workspace)}
 
 
+def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
+    trial_config = EffectTrialConfig(
+        runs_per_case=args.runs_per_case,
+        timeout_seconds=args.timeout,
+        requested_model=args.requested_model,
+        subject_command=_parse_command(args.subject_command, "--subject-command"),
+        harness_command=_parse_command(args.harness_command, "--harness-command"),
+        subject_environment=_effect_environment(args.subject_env, "subject"),
+        harness_environment=_effect_environment(args.harness_env, "harness"),
+    )
+    return EffectTrialRunner(
+        args.suite,
+        args.baseline,
+        args.workspace,
+        case_sources=_effect_mapping(args.case_source, "--case-source"),
+        config=trial_config,
+        resume=args.resume,
+    ).run().to_dict()
+
+
 def _delegate(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Delegate one task through an explicitly supplied command adapter."""
     command = _parse_command(args.agent_command, "--agent-command")
@@ -2971,6 +3052,10 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "effect-trial":
+            payload = _effect_trial(args)
+            _emit(payload, args.json)
+            return 0
         config = _config(args)
         if args.command == "init":
             _emit({"home": str(config.home), "status": "initialized"}, args.json)
@@ -3159,7 +3244,7 @@ def main(argv: list[str] | None = None) -> int:
             decision = controller.deliver(args.run_id)
             _emit(decision.to_dict(), args.json)
             return 0
-    except (AgentError, ValueError, TypeError, OSError, EvolutionError) as exc:
+    except (AgentError, ValueError, TypeError, OSError, EvolutionError, EffectTrialError) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
         return 2
     return 2

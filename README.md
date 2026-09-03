@@ -8,7 +8,13 @@ installation. A natural-language answer is only the audit trail; an algorithm mi
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
 The project is being developed with Spec-Driven Development (SDD). The current solver-visible
-scoring contract is captured in
+effect-measurement boundary is captured in
+[`specs/048-famou-bench-breakthrough/`](specs/048-famou-bench-breakthrough/). It adds a bounded,
+recoverable one/two-case normal-Agent trial against exported `famou-bench 1.10.6` per-run history.
+It deliberately does not call an evolution strategy or claim 20-case parity. This builds on the
+quality-diverse native population in
+[`specs/047-quality-diversity-population/`](specs/047-quality-diversity-population/) and the
+solver-visible scoring contract in
 [`specs/043-solver-scoring-contract/`](specs/043-solver-scoring-contract/), building on the
 adversarial evaluator-audit boundary in
 [`specs/042-adversarial-evaluator-audit/`](specs/042-adversarial-evaluator-audit/), the
@@ -224,6 +230,38 @@ score/token-novelty order. Parent sampling uses family elites, and inspirations 
 families different from the parent and from each other. Unknown or malformed tags receive no
 protected slot, while untagged legacy archives retain the historical ranking fallback. Family is
 therefore a search descriptor only: evaluator validity and score still own final-best selection.
+
+## Small Famou-Bench effect trials
+
+The available FM-Eval WebAgent history for `famou-bench 1.10.6` is a normal-Agent experiment, not
+a deep-evolution experiment. Its model/tool interactions are turns inside one solution attempt.
+WebAgent deep evolution is activated separately by `/evolve`; the checked-in source defaults to
+five outer iterations when no numeric budget is supplied.
+
+For an affordable first effect milestone, export one or two exact cases and the matching WebAgent
+per-run receipts, then run Lunar repeatedly in normal mode:
+
+```bash
+lunar-agent effect-trial suite.json baseline.json \
+  --case-source logistics_vehicle_dispatch_scheduling=/absolute/case/root \
+  --subject-command "/absolute/lunar-famou-subject" \
+  --harness-command "/absolute/famou-harness-adapter" \
+  --requested-model gpt-5.6-sol \
+  --runs-per-case 3 --timeout 3600 \
+  --workspace .lunar/effect-trial-001 --json
+```
+
+The suite freezes the benchmark publication, evaluation profile, CaseRevision, public-file ledger,
+and extractor/evaluator digests. The baseline contains individual FM-Eval results; Lunar derives
+the historical best locally and does not accept a manually entered target score. Only the separate
+harness command may provide validity and score. A case milestone is achieved when all planned
+Lunar runs finish, model identities match, and at least one evaluator-valid Lunar score is strictly
+higher than that case's evaluator-valid WebAgent historical best. This is a single-case
+breakthrough—not whole-suite parity or statistical superiority. Use `--resume` with the same
+options to preserve completed logical runs after an interruption. Subject/harness separation is a
+bounded request and filesystem-layout contract, not an OS sandbox; use an owner-provided sandbox
+for an untrusted same-user command. Lunar rechecks frozen controls, public sources, and run records
+before writing a successful report.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
