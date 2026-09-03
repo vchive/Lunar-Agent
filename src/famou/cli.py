@@ -29,6 +29,7 @@ from .agents import (
 )
 from .algorithm import AlgorithmProblemContract
 from .artifacts import ArtifactStore
+from .benchmark import BenchmarkConfig, BenchmarkRunner
 from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
@@ -303,6 +304,36 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument("--timeout", type=float, default=900.0)
     _add_home(evolve_parser)
     _add_json(evolve_parser)
+
+    benchmark_parser = subparsers.add_parser(
+        "benchmark", help="compare native evolution strategies on one local contract"
+    )
+    benchmark_parser.add_argument("contract", type=Path, help="algorithm problem contract JSON")
+    benchmark_parser.add_argument(
+        "--strategy",
+        dest="strategies",
+        action="append",
+        choices=("loop", "population"),
+        help="strategy to compare; repeat for order (default: loop and population)",
+    )
+    benchmark_parser.add_argument("--workspace", type=Path, help="new benchmark workspace")
+    benchmark_parser.add_argument(
+        "--generator-command", required=True, help="explicit generator command"
+    )
+    benchmark_parser.add_argument(
+        "--evaluator-command", required=True, help="explicit evaluator command"
+    )
+    benchmark_parser.add_argument("--max-rounds", type=int)
+    benchmark_parser.add_argument("--stagnation-rounds", type=int)
+    benchmark_parser.add_argument("--population-size", type=int, default=8)
+    benchmark_parser.add_argument("--offspring-per-iteration", type=int, default=1)
+    benchmark_parser.add_argument("--islands", type=int, default=1)
+    benchmark_parser.add_argument("--migration-interval", type=int, default=0)
+    benchmark_parser.add_argument("--migration-rate", type=float, default=0.1)
+    benchmark_parser.add_argument("--seed", type=int)
+    benchmark_parser.add_argument("--timeout", type=float, default=900.0)
+    _add_home(benchmark_parser)
+    _add_json(benchmark_parser)
 
     answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
     answer_parser.add_argument("run_id")
@@ -1478,6 +1509,76 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
+    """Compare native strategies with one explicit generator/evaluator pair."""
+    try:
+        payload = json.loads(args.contract.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"could not read contract {args.contract}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"contract is not valid JSON: {exc.msg}") from exc
+    contract = AlgorithmProblemContract.from_dict(payload)
+    strategies = tuple(args.strategies or ("loop", "population"))
+    generator_command = _parse_command(args.generator_command, "--generator-command")
+    evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
+    if not generator_command or not evaluator_command:
+        raise ValueError("benchmark requires non-empty generator and evaluator commands")
+    max_rounds = args.max_rounds if args.max_rounds is not None else contract.evolution.max_rounds
+    stagnation_rounds = (
+        args.stagnation_rounds
+        if args.stagnation_rounds is not None
+        else contract.evolution.stagnation_rounds
+    )
+    benchmark_config = BenchmarkConfig(
+        strategies=strategies,
+        max_rounds=max_rounds,
+        stagnation_rounds=stagnation_rounds,
+        population_size=args.population_size,
+        offspring_per_iteration=args.offspring_per_iteration,
+        num_islands=args.islands,
+        migration_interval=args.migration_interval,
+        migration_rate=args.migration_rate,
+        rng_seed=args.seed,
+        timeout_seconds=args.timeout,
+        generator_fingerprint=_adapter_fingerprint(
+            generator_command,
+            kind="benchmark-generator",
+            name="command-generator",
+            role="solver",
+        ),
+        evaluator_fingerprint=_adapter_fingerprint(
+            evaluator_command,
+            kind="benchmark-evaluator",
+            name="command-evaluator",
+            role="evaluator",
+        ),
+    )
+    workspace = args.workspace
+    if workspace is None:
+        workspace = config.runs / f"benchmark-{uuid.uuid4().hex[:12]}"
+    workspace = workspace.expanduser().resolve()
+
+    def generator_factory(_strategy: str) -> CommandCandidateGenerator:
+        return CommandCandidateGenerator(generator_command, args.timeout)
+
+    def evaluator_factory(_strategy: str) -> CommandCandidateEvaluator:
+        return CommandCandidateEvaluator(evaluator_command, args.timeout)
+
+    report = BenchmarkRunner(
+        contract,
+        workspace,
+        generator_factory=generator_factory,
+        evaluator_factory=evaluator_factory,
+        config=benchmark_config,
+    ).run()
+    status = (
+        "completed"
+        if any(item.status in {"completed", "stagnated"} for item in report.runs)
+        else "failed"
+    )
+    return {**report.to_dict(), "status": status, "workspace": str(workspace)}
+
+
 def _delegate(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Delegate one task through an explicitly supplied command adapter."""
     command = _parse_command(args.agent_command, "--agent-command")
@@ -1864,6 +1965,10 @@ def main(argv: list[str] | None = None) -> int:
             payload = _evolve(config, args)
             _emit(payload, args.json)
             return 0 if payload.get("status") in {"completed", "stagnated", "pending"} else 1
+        if args.command == "benchmark":
+            payload = _benchmark(config, args)
+            _emit(payload, args.json)
+            return 0 if payload.get("status") == "completed" else 1
         if args.command == "answer":
             payload = _answer(config, args)
             _emit(payload, args.json)

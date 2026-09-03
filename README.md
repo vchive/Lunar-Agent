@@ -5,8 +5,10 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current evolution Agent
-loop work is captured in
+The project is being developed with Spec-Driven Development (SDD). The current reproducible
+evolution benchmark is captured in
+[`specs/027-evolution-benchmark/`](specs/027-evolution-benchmark/), building on the evolution Agent
+loop in
 [`specs/026-evolution-agent-loop/`](specs/026-evolution-agent-loop/), building on the built-in
 algorithm role DAG in
 [`specs/025-algorithm-role-dag/`](specs/025-algorithm-role-dag/), building on the conversational
@@ -373,6 +375,26 @@ The loop reuses the same confined `read_file`, `write_file`, `list_dir`, and opt
 fresh runtime and tool registry. The loop is bounded to at most 200 tool calls, and memory,
 transcripts, and command execution are all explicit opt-ins. Its text still crosses the strict
 candidate/evaluation bridges, so a model cannot claim validity or bypass the evaluator.
+
+### Reproducible strategy benchmark
+
+Use `benchmark` to compare native strategies with the same contract, command-backed generator and
+evaluator, and bounded budget. Each strategy gets a fresh workspace and archive:
+
+```bash
+lunar-agent benchmark contract.json \
+  --strategy loop --strategy population \
+  --generator-command "/absolute/path/to/generator" \
+  --evaluator-command "/absolute/path/to/evaluator" \
+  --max-rounds 3 --population-size 4 --seed 7 \
+  --json --home .lunar
+```
+
+The JSON report contains per-strategy status, elapsed time, candidate counts, best score, and
+relative archive paths. Generator/evaluator identities are stored as SHA-256 fingerprints; raw
+commands and model credentials are not included. The first benchmark compares the local `loop`
+and `population` strategies. OpenEvolve remains an explicit adapter until its external result
+envelope is normalized for a fair apples-to-apples run.
 
 Hermes, DeepSeek Harness, Codex, Claude Code, and OpenClaw remain useful optional adapters or parent
 processes. They are execution-plane integrations; Lunar-Agent's local controller, evolution

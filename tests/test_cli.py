@@ -591,6 +591,47 @@ def test_cli_evolve_uses_repository_runtime_for_solver_and_evaluator(tmp_path: P
     assert "runtime-agent.py" not in json.dumps(state["config"])
 
 
+def test_cli_benchmark_compares_native_strategies(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    workspace = tmp_path / "benchmark"
+
+    assert (
+        main(
+            [
+                "benchmark",
+                str(contract_path),
+                "--strategy",
+                "loop",
+                "--strategy",
+                "population",
+                "--generator-command",
+                f"{sys.executable} {generator}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--max-rounds",
+                "1",
+                "--population-size",
+                "2",
+                "--json",
+                "--workspace",
+                str(workspace),
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    assert [item["strategy"] for item in payload["runs"]] == ["loop", "population"]
+    assert all(item["best_score"] is not None for item in payload["runs"])
+    assert str(generator) not in json.dumps(payload["config"])
+    assert (workspace / "benchmark.json").is_file()
+
+
 def test_cli_evolve_runtime_can_fill_one_role_and_rejects_unused_profile(
     tmp_path: Path, capsys
 ) -> None:

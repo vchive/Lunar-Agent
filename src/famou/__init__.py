@@ -17,6 +17,14 @@ from .agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
+from .benchmark import (
+    BENCHMARK_STRATEGIES,
+    BenchmarkConfig,
+    BenchmarkError,
+    BenchmarkReport,
+    BenchmarkRun,
+    BenchmarkRunner,
+)
 from .conversational import (
     CallableContractCompiler,
     CompilationQuestion,
@@ -55,6 +63,7 @@ from .evolution import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "BENCHMARK_STRATEGIES",
     "AgentAdapter",
     "AgentCandidateEvaluator",
     "AgentCandidateGenerator",
@@ -66,6 +75,11 @@ __all__ = [
     "AgentRequest",
     "AgentResult",
     "AgentSelectionError",
+    "BenchmarkConfig",
+    "BenchmarkError",
+    "BenchmarkReport",
+    "BenchmarkRun",
+    "BenchmarkRunner",
     "CallableContractCompiler",
     "Candidate",
     "CandidateArchive",

@@ -189,6 +189,13 @@ imports a validated result into Lunar-Agent's canonical archive. The existing `-
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
 
+The `benchmark` command is a thin orchestration layer above this seam. It validates one canonical
+contract, creates isolated `strategies/<name>` workspaces, and runs the selected native strategies
+with one common `EvolutionConfig`. A failure in one strategy is captured in that strategy's report
+entry while the remaining comparisons continue. The benchmark does not merge archives, change
+selection rules, or treat elapsed time as a quality score; it exposes both so a human or parent
+Agent can make the tradeoff explicit.
+
 An optional `CandidateRunner` executes each archived candidate before a legacy evaluator command is
 invoked. It writes one bounded `execution.json` beside the candidate, and the controller indexes
 that evidence as `candidate_execution`. The runner never decides validity or score; a wrapped
