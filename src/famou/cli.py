@@ -185,6 +185,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--openevolve-command",
         help="explicit OpenEvolve executable for --evolve --strategy openevolve",
     )
+    solve_parser.add_argument(
+        "--evaluator-command",
+        help="explicit local objective harness for native --evolve candidates",
+    )
     solve_parser.add_argument("--max-rounds", type=int)
     solve_parser.add_argument("--stagnation-rounds", type=int)
     solve_parser.add_argument("--population-size", type=int)
@@ -430,6 +434,10 @@ def build_parser() -> argparse.ArgumentParser:
     answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
     answer_parser.add_argument("run_id")
     answer_parser.add_argument("answer", nargs="?", help="answer text, or '-' to read stdin")
+    answer_parser.add_argument(
+        "--evaluator-command",
+        help="explicit local objective harness for a pending native evolution handoff",
+    )
     _add_runtime_options(answer_parser)
     _add_home(answer_parser)
     _add_json(answer_parser)
@@ -1209,6 +1217,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         for name in (
             "strategy",
             "openevolve_command",
+            "evaluator_command",
             "max_rounds",
             "stagnation_rounds",
             "population_size",
@@ -1223,6 +1232,8 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("evolution options require --evolve")
     if args.evolve:
         _validate_evolution_cli_bounds(args)
+        if args.strategy == "openevolve" and args.evaluator_command:
+            raise ValueError("--evaluator-command is supported only by native evolution strategies")
     controller = _controller(args, config)
     runtime = controller.runtime
     fingerprint = _compiler_fingerprint(runtime)
@@ -1309,6 +1320,7 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
         "seed": args.seed,
         "timeout": args.timeout if args.timeout is not None else 900.0,
         "openevolve_command_configured": bool(args.openevolve_command),
+        "evaluator_command_configured": bool(args.evaluator_command),
     }
 
 
@@ -1335,6 +1347,17 @@ def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid solve evolution options: {exc}") from exc
+    evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
+    if evaluator_command:
+        executable = Path(evaluator_command[0])
+        if (
+            not executable.is_absolute()
+            or not executable.is_file()
+            or not os.access(executable, os.X_OK)
+        ):
+            raise ValueError(
+                "--evaluator-command must start with an existing absolute executable path"
+            )
 
 
 def _latest_evolution_request(store: Store, run_id: str) -> dict[str, object] | None:
@@ -1362,6 +1385,13 @@ def _validate_evolution_override(args: argparse.Namespace, request: dict[str, ob
         stored = request.get(name)
         if supplied is not None and stored is not None and supplied != stored:
             raise EvolutionError(f"solve evolution setting {name} does not match the existing handoff")
+    configured = request.get("evaluator_command_configured", False)
+    if not isinstance(configured, bool):
+        raise EvolutionError("solve evolution evaluator command marker is invalid")
+    if configured != bool(getattr(args, "evaluator_command", None)):
+        if configured:
+            raise EvolutionError("solve evolution requires the configured evaluator command")
+        raise EvolutionError("solve evolution did not configure an evaluator command")
 
 
 def _evolution_args(
@@ -1375,6 +1405,7 @@ def _evolution_args(
     for name in (
         "strategy",
         "openevolve_command",
+        "evaluator_command",
         "max_rounds",
         "stagnation_rounds",
         "population_size",
@@ -1422,6 +1453,7 @@ def _solve_evolution(
     contract = AlgorithmProblemContract.from_dict(contract_payload.algorithm_problem)
     candidate_inputs = _candidate_input_artifacts(controller.store, parent.id)
     strategy_name = args.strategy or contract.evolution.strategy
+    evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
 
     # Validate all strategy/runtime settings before creating any child workspace or mutating the
     # intake plan. This keeps malformed opt-in requests side-effect free.
@@ -1433,6 +1465,8 @@ def _solve_evolution(
         else contract.evolution.stagnation_rounds
     )
     if strategy_name == "openevolve":
+        if evaluator_command:
+            raise ValueError("--evaluator-command is supported only by native evolution strategies")
         if not openevolve_command:
             raise ValueError("--evolve --strategy openevolve requires --openevolve-command")
         executable = Path(openevolve_command[0])
@@ -1472,16 +1506,34 @@ def _solve_evolution(
             timeout=args.timeout,
             inputs=candidate_inputs,
         )
-        evaluator = AgentCandidateEvaluator(
-            evaluator_adapter, role="evaluator", timeout=args.timeout
-        )
         runtime_fingerprint = _compiler_fingerprint(runtime)
         generator_fingerprint = hashlib.sha256(
             f"{runtime_fingerprint}:solver".encode()
         ).hexdigest()
-        evaluator_fingerprint = hashlib.sha256(
-            f"{runtime_fingerprint}:evaluator".encode()
-        ).hexdigest()
+        if evaluator_command:
+            evaluator = CommandCandidateEvaluator(
+                evaluator_command,
+                args.timeout,
+                environment={
+                    "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8",
+                    "PYTHONHASHSEED": "0",
+                    "PYTHONIOENCODING": "utf-8",
+                },
+            )
+            evaluator_fingerprint = _adapter_fingerprint(
+                evaluator_command,
+                kind="objective-harness",
+                name="command-evaluator",
+                role="evaluator",
+            )
+        else:
+            evaluator = AgentCandidateEvaluator(
+                evaluator_adapter, role="evaluator", timeout=args.timeout
+            )
+            evaluator_fingerprint = hashlib.sha256(
+                f"{runtime_fingerprint}:evaluator".encode()
+            ).hexdigest()
     runner_fingerprint = (
         None
         if strategy_name == "openevolve"
@@ -1716,6 +1768,7 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
     for option, value in (
         ("--strategy", args.strategy),
         ("--openevolve-command", args.openevolve_command),
+        ("--evaluator-command", args.evaluator_command),
         ("--max-rounds", args.max_rounds),
         ("--stagnation-rounds", args.stagnation_rounds),
         ("--population-size", args.population_size),
@@ -2778,11 +2831,23 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if resumed.current_plan_id is not None and evolution_request is not None:
         evolution_args = _evolution_args(args, evolution_request)
         # An OpenEvolve executable is intentionally not persisted in the request event. The
-        # caller must continue that explicit strategy with ``solve --resume`` and provide the
-        # command again; runtime-backed loop/population handoffs can resume automatically.
+        # same is true for an objective harness. The caller must continue either explicit path
+        # with ``solve --resume`` and provide the command again; runtime-backed native handoffs
+        # can resume automatically.
+        harness_deferred = bool(evolution_request.get("evaluator_command_configured")) and not bool(
+            getattr(args, "evaluator_command", None)
+        )
+        if (
+            not evolution_request.get("evaluator_command_configured")
+            and getattr(args, "evaluator_command", None)
+        ):
+            raise EvolutionError("solve evolution did not configure an evaluator command")
         if not (
-            getattr(evolution_args, "strategy", None) == "openevolve"
-            and not getattr(args, "openevolve_command", None)
+            harness_deferred
+            or (
+                getattr(evolution_args, "strategy", None) == "openevolve"
+                and not getattr(args, "openevolve_command", None)
+            )
         ):
             _solve_evolution(config, evolution_args, controller, resumed)
             resumed = controller.store.get_run(resumed.id) or resumed

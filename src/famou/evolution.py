@@ -1038,15 +1038,47 @@ class CommandCandidateGenerator:
 class CommandCandidateEvaluator:
     """Adapt an explicit local command that emits an EvaluationReport JSON object."""
 
-    def __init__(self, command: Sequence[str], timeout_seconds: float = 900.0) -> None:
+    def __init__(
+        self,
+        command: Sequence[str],
+        timeout_seconds: float = 900.0,
+        environment: Mapping[str, str] | None = None,
+    ) -> None:
         command = tuple(command)
         if not command or len(command) > MAX_COMMAND_ARGS:
             raise ValueError("evaluator command must be a non-empty bounded argument sequence")
         executable = Path(command[0])
         if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
             raise ValueError("evaluator command must start with an existing absolute executable path")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(float(timeout_seconds))
+            or timeout_seconds <= 0
+        ):
+            raise ValueError("candidate evaluator timeout must be positive")
         self.command = command
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = float(timeout_seconds)
+        if environment is None:
+            self.environment = None
+        else:
+            if len(environment) > 64:
+                raise ValueError("candidate evaluator environment has too many entries")
+            normalized_environment: dict[str, str] = {}
+            for key, value in environment.items():
+                if (
+                    not isinstance(key, str)
+                    or not key
+                    or "=" in key
+                    or "\x00" in key
+                    or not isinstance(value, str)
+                    or "\x00" in value
+                ):
+                    raise ValueError("candidate evaluator environment is invalid")
+                if len(key.encode("utf-8")) > 128 or len(value.encode("utf-8")) > 4_096:
+                    raise ValueError("candidate evaluator environment entry is too large")
+                normalized_environment[key] = value
+            self.environment = normalized_environment
 
     def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
         del contract
@@ -1054,6 +1086,7 @@ class CommandCandidateEvaluator:
             completed = subprocess.run(
                 [*self.command, str(candidate_path)],
                 cwd=candidate_path.parent,
+                env=self.environment,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,

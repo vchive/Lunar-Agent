@@ -9,6 +9,8 @@ only when its declared output files pass independent checks and are delivered as
 
 The project is being developed with Spec-Driven Development (SDD). The current execution-grounded
 search boundary is captured in
+[`specs/038-objective-harness-handoff/`](specs/038-objective-harness-handoff/), which adds an
+optional exact local objective scorer to the execution-grounded search in
 [`specs/037-execution-grounded-evolution/`](specs/037-execution-grounded-evolution/), building on
 the evolved-output materialization boundary in
 [`specs/036-evolved-output-materialization/`](specs/036-evolved-output-materialization/), building
@@ -116,6 +118,27 @@ Resuming the intake reuses the same child and terminal materialization, verifies
 output digests, and rejects changed strategy settings instead of executing or overwriting again.
 Contracts without `outputs` keep the existing source-only result. `evolve CONTRACT` remains
 available when separate generator/evaluator commands or an OpenEvolve wrapper are needed.
+
+When a domain already has an exact local objective or constraint checker, keep the conversational
+compiler/generator path and replace only model scoring:
+
+```bash
+lunar-agent solve "optimize routes and write output/routes.csv" \
+  --input ./orders.csv --runtime openai-compatible \
+  --endpoint http://127.0.0.1:11434/v1 --model local-model \
+  --evolve --strategy population \
+  --evaluator-command "/absolute/python /absolute/score_routes.py" \
+  --json --home .lunar
+```
+
+The harness receives the candidate path after local execution/output validation and can inspect its
+sibling `data/raw/*`, `output/*`, and `execution.json`. It returns the existing strict
+`EvaluationReport`; archive selection maximizes its non-negative `combined_score`, so a cost
+minimizer can use `1 / (1 + cost)` and retain raw cost with direction `minimize` in
+`detailed_scores`. The subprocess receives a minimal UTF-8/locale environment rather than model
+credentials or arbitrary parent variables. Its command is fingerprinted but not persisted; resume
+must supply the same `--evaluator-command` again. Final output still comes from the independent
+clean-room materialization, never directly from search evidence.
 
 Provide real local data explicitly with repeatable `--input` options. A source is staged into the
 run's `data/raw/` directory and copied into each isolated task attempt; use `SOURCE=DEST` when the
