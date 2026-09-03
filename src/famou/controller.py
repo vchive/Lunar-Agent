@@ -481,6 +481,7 @@ class LocalController:
         workspace: str | Path | None = None,
         compiler_fingerprint: str | None = None,
         run_id: str | None = None,
+        plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
     ) -> Run:
         """Compile an algorithm mission and promote the same durable run to a plan.
 
@@ -505,7 +506,9 @@ class LocalController:
                 raise ValueError("supplied goal does not match the existing conversational run")
             if run.current_plan_id is not None:
                 return self.resume(run.id)
-        return self._compile_conversational_run(run, compiler, compiler_fingerprint)
+        return self._compile_conversational_run(
+            run, compiler, compiler_fingerprint, plan_factory=plan_factory
+        )
 
     def create_conversational_run(
         self,
@@ -538,7 +541,12 @@ class LocalController:
         return run
 
     def _compile_conversational_run(
-        self, run: Run, compiler: ContractCompiler, compiler_fingerprint: str | None
+        self,
+        run: Run,
+        compiler: ContractCompiler,
+        compiler_fingerprint: str | None,
+        *,
+        plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
     ) -> Run:
         """Run one intake attempt and either pause for input or install the generated plan."""
         if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
@@ -624,6 +632,7 @@ class LocalController:
                     task.id,
                     status="needs_input",
                     compiler_fingerprint=compiler_fingerprint,
+                    plan_kind="role_dag" if plan_factory is not None else "legacy",
                     evidence=result.evidence,
                 )
                 self.store.await_input(
@@ -636,7 +645,7 @@ class LocalController:
                 return self.store.get_run(run.id) or run
             assert result.contract is not None
             contract = result.contract
-            plan = result.plan or build_algorithm_plan(run.goal, contract)
+            plan = result.plan or (plan_factory or build_algorithm_plan)(run.goal, contract)
             if plan.algorithm_problem is None:
                 raise ContractCompilationError("generated plan is missing algorithm_problem")
             try:
@@ -673,6 +682,7 @@ class LocalController:
                 task.id,
                 status="compiled",
                 compiler_fingerprint=compiler_fingerprint,
+                plan_kind="role_dag" if plan_factory is not None else "legacy",
                 contract_sha256=contract.digest(),
                 plan=plan,
                 contract_path=str(contract_path.relative_to(Path(run.workspace))),
@@ -717,7 +727,12 @@ class LocalController:
         return settled or run
 
     def resume_conversational(
-        self, run_id: str, compiler: ContractCompiler, *, compiler_fingerprint: str | None = None
+        self,
+        run_id: str,
+        compiler: ContractCompiler,
+        *,
+        compiler_fingerprint: str | None = None,
+        plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
     ) -> Run:
         """Resume intake when pending, otherwise resume generated algorithm tasks."""
         run = self.store.get_run(run_id)
@@ -727,7 +742,9 @@ class LocalController:
             raise ValueError("run is not a conversational algorithm mission")
         if run.current_plan_id is not None:
             return self.resume(run_id)
-        return self._compile_conversational_run(run, compiler, compiler_fingerprint)
+        return self._compile_conversational_run(
+            run, compiler, compiler_fingerprint, plan_factory=plan_factory
+        )
 
     def _write_compiler_manifest(
         self,
@@ -736,6 +753,7 @@ class LocalController:
         *,
         status: str,
         compiler_fingerprint: str | None,
+        plan_kind: str = "legacy",
         evidence: tuple[str, ...] = (),
         contract_sha256: str | None = None,
         plan: PlanDocument | None = None,
@@ -747,6 +765,7 @@ class LocalController:
             "status": status,
             "goal_sha256": hashlib.sha256(run.goal.encode("utf-8")).hexdigest(),
             "runtime_fingerprint": compiler_fingerprint,
+            "plan_kind": plan_kind,
             "evidence": list(evidence),
         }
         if contract_sha256 is not None:

@@ -5,8 +5,10 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current conversational
-algorithm mission work is captured in
+The project is being developed with Spec-Driven Development (SDD). The current built-in algorithm
+role DAG work is captured in
+[`specs/025-algorithm-role-dag/`](specs/025-algorithm-role-dag/), building on the conversational
+algorithm mission in
 [`specs/024-conversational-algorithm-mission/`](specs/024-conversational-algorithm-mission/), building
 on the verified candidate execution work in
 [`specs/023-verified-algorithm-execution/`](specs/023-verified-algorithm-execution/), building on
@@ -53,6 +55,15 @@ The run ID remains stable. Contract, plan, compiler manifest, input answers, and
 artifacts are all local and SHA-256 indexed. The baseline generated DAG is
 `data_discovery → formulate → solve → verify`; candidate evolution remains an explicit opt-in
 stage through `evolve`.
+
+For a more explicit specialist workflow, add `--role-dag`:
+
+```bash
+lunar-agent solve "根据订单数据设计配送路线" --runtime mock --role-dag --json --home .lunar
+```
+
+This uses `data_discovery → problem_formulator → solver → evaluator → reviewer`. It is still the
+same local SQLite run and artifact handoff; the switch only selects a richer built-in plan factory.
 
 ## Bootstrap
 

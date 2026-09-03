@@ -47,6 +47,7 @@ flowchart TD
     CC -->|needs_input| P
     CC -->|compiled| CP[contract.json + plan.json\ncompiler manifest]
     CP --> S
+    S --> RD[Optional role DAG\nDataDiscovery → Formulator → Solver → Evaluator → Reviewer]
 ```
 
 The ordinary task runtime and the evolution runtime share the repository-owned adapter boundary.
@@ -124,6 +125,10 @@ inspectable.
     `data_discovery → formulate → solve → verify` DAG. Clarification uses the existing durable
     `awaiting_input`/`answer` lifecycle, so a parent Agent can poll one handle rather than joining
     separate intake and execution runs.
+11. `solve --role-dag` selects the built-in five-role composition
+    `data_discovery → problem_formulator → solver → evaluator → reviewer`. These are ordinary
+    durable tasks, so roles remain runtime-neutral and can later be routed to explicit Agent,
+    runtime, or evolution adapters without changing the controller or ledger.
 
 ## Deliberate boundary versus WebAgent
 

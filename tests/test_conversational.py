@@ -10,6 +10,7 @@ from famou.conversational import (
     ContractCompilationError,
     RuntimeContractCompiler,
     build_algorithm_plan,
+    build_algorithm_role_plan,
 )
 from famou.runtime import MockRuntime, RuntimeResult
 
@@ -121,3 +122,17 @@ def test_mock_compiler_is_standalone() -> None:
     assert result.status == "compiled"
     assert result.contract is not None
     assert result.contract.problem_type == "routing"
+
+
+def test_role_plan_has_five_authority_bound_stages() -> None:
+    plan = build_algorithm_role_plan("route orders", _contract())
+    assert [task.id for task in plan.tasks] == [
+        "data_discovery",
+        "problem_formulator",
+        "solver",
+        "evaluator",
+        "reviewer",
+    ]
+    assert plan.tasks[-1].depends_on == ("evaluator",)
+    assert all("Role:" in task.prompt for task in plan.tasks)
+    assert plan.algorithm_problem == _contract().to_dict()

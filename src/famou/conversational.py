@@ -311,6 +311,61 @@ def build_algorithm_plan(goal: str, contract: AlgorithmProblemContract) -> PlanD
     )
 
 
+def build_algorithm_role_plan(goal: str, contract: AlgorithmProblemContract) -> PlanDocument:
+    """Build the opt-in five-role workflow for higher-assurance algorithm missions.
+
+    Roles are ordinary plan tasks on purpose.  This keeps the scheduler, retries, cancellation,
+    and artifact handoff identical to legacy plans while making authority boundaries visible in the
+    prompts consumed by any selected runtime.
+    """
+    plan_id = f"plan-{contract.problem_id}-{contract.digest()[:8]}-roles"
+    tasks = (
+        PlanTask(
+            "data_discovery",
+            "DataDiscovery — observe and profile inputs",
+            "Role: DataDiscovery. Inspect only declared input files under data/raw. Report observed schema, row counts, missing values, and data-quality issues in data/processed/data-profile.json. You may not invent fields, constraints, or objective values; do not edit the validated contract.",
+        ),
+        PlanTask(
+            "problem_formulator",
+            "ProblemFormulator — make the objective measurable",
+            "Role: ProblemFormulator. Read the validated contract and the verified DataDiscovery artifacts. Translate the existing decision variables, objective, provenance, and success criteria into a measurable formulation in solve/problem-formulation.md. You may clarify unresolved assumptions but may not relax, add, or silently reinterpret hard constraints.",
+            ("data_discovery",),
+        ),
+        PlanTask(
+            "solver",
+            "Solver — implement a reproducible candidate",
+            "Role: Solver. Implement and test a reproducible candidate from the validated formulation. Keep source and run instructions under solve/ and requested outputs under output/. Do not claim a score or change contract authority; leave all evidence needed by the independent Evaluator.",
+            ("problem_formulator",),
+        ),
+        PlanTask(
+            "evaluator",
+            "Evaluator — independently test the candidate",
+            "Role: Evaluator. Independently execute or inspect the Solver candidate against every success criterion and hard constraint using only verified artifacts and observed data. Write a structured report under evaluate/evaluation.json. Do not accept Solver claims without evidence and do not modify the candidate or contract.",
+            ("solver",),
+        ),
+        PlanTask(
+            "reviewer",
+            "Reviewer — audit evidence and deliver",
+            "Role: Reviewer. Audit the formulation, candidate, and independent evaluation. Summarize only verified evidence, unresolved assumptions, and any required follow-up in evaluate/review.md. You may recommend retry or replan, but may not mark an invalid candidate valid or change hard constraints.",
+            ("evaluator",),
+        ),
+    )
+    return PlanDocument(
+        goal=goal,
+        plan_id=plan_id,
+        tasks=tasks,
+        objective=contract.objective.to_dict(),
+        hard_constraints=tuple(item.description for item in contract.hard_constraints),
+        soft_constraints=tuple(item.description for item in contract.soft_constraints),
+        evidence=("contract compiled with the built-in specialist role DAG",),
+        assumptions=contract.assumptions,
+        acceptance={"required": True},
+        verification={"required": True, "independent": True},
+        delivery={"artifacts": list(contract.deliverables)},
+        algorithm_problem=contract.to_dict(),
+    )
+
+
 def _default_contract(goal: str) -> AlgorithmProblemContract:
     """Repository-owned deterministic fallback for ``--runtime mock`` smoke tests."""
     lowered = goal.lower()

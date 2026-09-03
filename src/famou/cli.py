@@ -32,7 +32,7 @@ from .artifacts import ArtifactStore
 from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
-from .conversational import RuntimeContractCompiler
+from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
 from .evolution import (
     CommandCandidateEvaluator,
     CommandCandidateGenerator,
@@ -146,6 +146,11 @@ def build_parser() -> argparse.ArgumentParser:
     solve_parser.add_argument("--run-id", help="existing run ID (required with --resume)")
     solve_parser.add_argument(
         "--detach", action="store_true", help="return a run ID and compile/execute in the background"
+    )
+    solve_parser.add_argument(
+        "--role-dag",
+        action="store_true",
+        help="use the five-stage DataDiscovery/Formulator/Solver/Evaluator/Reviewer workflow",
     )
     _add_runtime_options(solve_parser)
     _add_home(solve_parser)
@@ -795,6 +800,17 @@ def _conversation_manifest(run: Run) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _conversation_plan_factory(
+    args: argparse.Namespace, manifest: dict[str, object] | None = None
+) -> object | None:
+    """Resolve role-plan mode, preferring the persisted mode during answer/resume."""
+    if getattr(args, "role_dag", False) or (
+        manifest is not None and manifest.get("plan_kind") == "role_dag"
+    ):
+        return build_algorithm_role_plan
+    return None
+
+
 def _read_conversation_goal(args: argparse.Namespace) -> str:
     if args.goal == "-":
         goal = sys.stdin.read()
@@ -825,9 +841,11 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         manifest = _conversation_manifest(run)
         if manifest is not None and manifest.get("runtime_fingerprint") not in {None, fingerprint}:
             raise ValueError("solve resume compiler runtime does not match the existing run")
-        goal = run.goal
         settled = controller.resume_conversational(
-            run.id, RuntimeContractCompiler(runtime), compiler_fingerprint=fingerprint
+            run.id,
+            RuntimeContractCompiler(runtime),
+            compiler_fingerprint=fingerprint,
+            plan_factory=_conversation_plan_factory(args, manifest),
         )
         return _solve_payload(controller, settled)
     goal = _read_conversation_goal(args)
@@ -841,6 +859,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         RuntimeContractCompiler(runtime),
         workspace=args.workspace,
         compiler_fingerprint=fingerprint,
+        plan_factory=_conversation_plan_factory(args),
     )
     return _solve_payload(controller, settled)
 
@@ -882,6 +901,8 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
     ]
     if args.workspace:
         command.extend(("--workspace", str(args.workspace)))
+    if args.role_dag:
+        command.append("--role-dag")
     if args.runtime_command:
         command.extend(("--command", args.runtime_command))
     if args.endpoint:
@@ -1621,8 +1642,8 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     conversation = any(
         event["type"] == "conversation_started" for event in store.list_events(run.id)
     )
+    manifest = _conversation_manifest(run) if conversation else None
     if conversation:
-        manifest = _conversation_manifest(run)
         current_fingerprint = _compiler_fingerprint(_controller(args, config).runtime)
         if manifest is not None and manifest.get("runtime_fingerprint") not in {
             None,
@@ -1646,6 +1667,7 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
             run.id,
             RuntimeContractCompiler(controller.runtime),
             compiler_fingerprint=_compiler_fingerprint(controller.runtime),
+            plan_factory=_conversation_plan_factory(args, manifest),
         )
     else:
         resumed = controller.resume(run.id)

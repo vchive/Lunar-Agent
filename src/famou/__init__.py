@@ -25,6 +25,7 @@ from .conversational import (
     ContractCompiler,
     RuntimeContractCompiler,
     build_algorithm_plan,
+    build_algorithm_role_plan,
 )
 from .evolution import (
     Candidate,
@@ -94,6 +95,7 @@ __all__ = [
     "RuntimeContractCompiler",
     "StrategyResult",
     "build_algorithm_plan",
+    "build_algorithm_role_plan",
     "build_strategy",
     "config_from_contract",
 ]
