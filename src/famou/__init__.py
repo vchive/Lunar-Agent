@@ -1,6 +1,10 @@
 """Standalone local Hermes-inspired agent controller."""
 
-from .agent_evolution import AgentCandidateEvaluator, AgentCandidateGenerator
+from .agent_evolution import (
+    AgentCandidateEvaluator,
+    AgentCandidateGenerator,
+    AgentPortfolioGenerator,
+)
 from .agents import (
     AgentAdapter,
     AgentError,
@@ -41,6 +45,7 @@ __all__ = [
     "AgentCandidateGenerator",
     "AgentError",
     "AgentInvocationError",
+    "AgentPortfolioGenerator",
     "AgentRegistry",
     "AgentRequest",
     "AgentResult",

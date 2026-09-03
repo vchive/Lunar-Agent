@@ -13,7 +13,11 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from .agent_evolution import AgentCandidateEvaluator, AgentCandidateGenerator
+from .agent_evolution import (
+    AgentCandidateEvaluator,
+    AgentCandidateGenerator,
+    AgentPortfolioGenerator,
+)
 from .agent_loop import HermesSessionRuntime
 from .agents import (
     DEFAULT_RUNTIME_CAPABILITIES,
@@ -175,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument("--strategy", choices=("loop", "population", "openevolve"), help="override the contract strategy")
     evolve_parser.add_argument("--generator-command", help="explicit generator command; receives a request JSON path")
     evolve_parser.add_argument("--agent-command", help="explicit Agent command used as candidate generator")
+    evolve_parser.add_argument(
+        "--agent-portfolio-command",
+        dest="agent_portfolio_commands",
+        action="append",
+        default=[],
+        help="repeatable explicit solver Agent command for a deterministic portfolio",
+    )
     evolve_parser.add_argument("--agent-name", default="evolution-agent")
     evolve_parser.add_argument("--agent-role", default="solver")
     evolve_parser.add_argument(
@@ -642,6 +653,27 @@ def _adapter_fingerprint(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _portfolio_fingerprint(
+    commands: tuple[tuple[str, ...], ...],
+    *,
+    name: str,
+    role: str,
+    required_capabilities: tuple[str, ...] = (),
+) -> str | None:
+    """Return a digest for an ordered portfolio without persisting raw command arguments."""
+    if not commands:
+        return None
+    payload = {
+        "commands": [list(command) for command in commands],
+        "kind": "portfolio-generator",
+        "name": name,
+        "required_capabilities": sorted(set(required_capabilities)),
+        "role": role,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Create/execute one ledger-backed local evolution run."""
     try:
@@ -685,13 +717,17 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     stagnation_rounds = args.stagnation_rounds if args.stagnation_rounds is not None else contract.evolution.stagnation_rounds
     openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")
     agent_command = _parse_command(args.agent_command, "--agent-command")
+    agent_portfolio_commands = tuple(
+        _parse_command(value, "--agent-portfolio-command")
+        for value in args.agent_portfolio_commands
+    )
     evaluator_agent_command = _parse_command(
         args.evaluator_agent_command, "--evaluator-agent-command"
     )
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
     if strategy_name == "openevolve":
-        if agent_command or evaluator_agent_command:
+        if agent_command or agent_portfolio_commands or evaluator_agent_command:
             raise ValueError("Agent solver/evaluator commands are only supported by loop and population")
         command = openevolve_command
         if not command:
@@ -719,19 +755,31 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     else:
         generator_command = _parse_command(args.generator_command, "--generator-command")
         evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
-        if generator_command and agent_command:
-            raise ValueError("--agent-command and --generator-command are mutually exclusive")
+        if generator_command and (agent_command or agent_portfolio_commands):
+            raise ValueError("generator and Agent portfolio commands are mutually exclusive")
+        if agent_command and agent_portfolio_commands:
+            raise ValueError("--agent-command and --agent-portfolio-command are mutually exclusive")
         if evaluator_command and evaluator_agent_command:
             raise ValueError("--evaluator-command and --evaluator-agent-command are mutually exclusive")
         if not evaluator_command and not evaluator_agent_command:
             raise ValueError(
                 "loop and population require --evaluator-command or "
-                "--evaluator-agent-command plus --generator-command or --agent-command"
+                "--evaluator-agent-command plus --generator-command, --agent-command, or "
+                "at least two --agent-portfolio-command options"
             )
+        if agent_portfolio_commands and len(agent_portfolio_commands) < 2:
+            raise ValueError("--agent-portfolio-command requires at least two commands")
         if agent_command:
             generator_fingerprint = _adapter_fingerprint(
                 agent_command,
                 kind="generator",
+                name=args.agent_name,
+                role=args.agent_role,
+                required_capabilities=tuple(args.agent_capabilities),
+            )
+        elif agent_portfolio_commands:
+            generator_fingerprint = _portfolio_fingerprint(
+                agent_portfolio_commands,
                 name=args.agent_name,
                 role=args.agent_role,
                 required_capabilities=tuple(args.agent_capabilities),
@@ -768,6 +816,24 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             )
             generator = AgentCandidateGenerator(
                 adapter,
+                contract=contract,
+                role=args.agent_role,
+                required_capabilities=tuple(args.agent_capabilities),
+                timeout=args.timeout,
+            )
+        elif agent_portfolio_commands:
+            declared = {*DEFAULT_RUNTIME_CAPABILITIES, *args.agent_capabilities}
+            adapters = tuple(
+                CommandAgentAdapter(
+                    command,
+                    roles=(args.agent_role,),
+                    capabilities=tuple(sorted(declared)),
+                    name=f"{args.agent_name}-{index:02d}",
+                )
+                for index, command in enumerate(agent_portfolio_commands, start=1)
+            )
+            generator = AgentPortfolioGenerator(
+                adapters,
                 contract=contract,
                 role=args.agent_role,
                 required_capabilities=tuple(args.agent_capabilities),
@@ -996,6 +1062,8 @@ def _detach_evolution(
         command.extend(("--generator-command", args.generator_command))
     if args.agent_command:
         command.extend(("--agent-command", args.agent_command))
+    for portfolio_command in args.agent_portfolio_commands:
+        command.extend(("--agent-portfolio-command", portfolio_command))
     if args.agent_name != "evolution-agent":
         command.extend(("--agent-name", args.agent_name))
     if args.agent_role != "solver":

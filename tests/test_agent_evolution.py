@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_evolution import AgentCandidateEvaluator, AgentCandidateGenerator
+from famou.agent_evolution import (
+    AgentCandidateEvaluator,
+    AgentCandidateGenerator,
+    AgentPortfolioGenerator,
+)
 from famou.agents import AgentResult
 from famou.algorithm import AlgorithmProblemContract, EvaluationReport
 from famou.evolution import (
@@ -218,6 +222,60 @@ def test_agent_generator_receives_verified_evaluation_feedback(tmp_path: Path) -
     assert "constraint_violation" in agent.requests[1].prompt
     assert "serve-all failed" in agent.requests[1].prompt
     assert "return 1" not in agent.requests[1].prompt
+
+
+def test_agent_portfolio_rotates_explicit_solvers_deterministically(tmp_path: Path) -> None:
+    contract = _contract("population")
+    root = tmp_path / "run"
+    (root / "evolution").mkdir(parents=True)
+    (root / "evolution" / "contract.json").write_text(
+        json.dumps(contract.to_dict()), encoding="utf-8"
+    )
+    first = FixtureAgent()
+    second = FixtureAgent()
+    generator = AgentPortfolioGenerator(
+        (first, second), contract=contract, role="solver", required_capabilities=("read_files",)
+    )
+    context = EvolutionContext(
+        contract,
+        root,
+        generator,
+        lambda path, ignored: _report(path, contract),
+        EvolutionConfig(strategy="population", max_rounds=2, population_size=2),
+    )
+    result = PopulationStrategy(context).run()
+    assert result.status == "completed"
+    assert len(first.requests) == 2
+    assert len(second.requests) == 2
+    assert all(request.role == "solver" for request in first.requests + second.requests)
+    assert first.requests[0].task_id.endswith("0001")
+    assert second.requests[0].task_id.endswith("0002")
+    assert first.requests[1].task_id.endswith("0003")
+    assert second.requests[1].task_id.endswith("0004")
+    assert len({str(request.workspace) for request in first.requests + second.requests}) == 4
+
+
+def test_agent_portfolio_requires_two_adapters() -> None:
+    with pytest.raises(ValueError, match="at least two"):
+        AgentPortfolioGenerator((FixtureAgent(),))
+
+
+def test_agent_portfolio_member_failure_is_bounded(tmp_path: Path) -> None:
+    generator = AgentPortfolioGenerator((FixtureAgent(failed=True), FixtureAgent()))
+    with pytest.raises(EvolutionError, match="candidate generation returned failed"):
+        generator(
+            type(
+                "Request",
+                (),
+                {
+                    "iteration": 1,
+                    "parent": None,
+                    "inspirations": (),
+                    "archive": (),
+                    "workspace": tmp_path,
+                },
+            )()
+        )
 
 
 def test_agent_generation_feedback_is_bounded_and_hides_evaluation_errors(tmp_path: Path) -> None:

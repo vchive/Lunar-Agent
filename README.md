@@ -289,6 +289,21 @@ lunar-agent evolve contract.json --strategy population \
   --json --home .lunar
 ```
 
+Population search can also rotate multiple explicit solver Agents using repeatable
+`--agent-portfolio-command` options:
+
+```bash
+lunar-agent evolve contract.json --strategy population \
+  --agent-portfolio-command "/absolute/path/to/solver-a --json" \
+  --agent-portfolio-command "/absolute/path/to/solver-b --json" \
+  --evaluator-agent-command "/absolute/path/to/evaluator --json" \
+  --json --home .lunar
+```
+
+Calls use the ordered portfolio deterministically in round-robin order. Every proposal still goes
+through the same archive and independent evaluator, and the ordered command list is covered by the
+resume fingerprint. The single `--agent-command` form remains unchanged.
+
 The JSON result includes `best_candidate_path` when a valid candidate was selected. It is relative
 to the returned `workspace`, so a parent Agent can inspect the source without parsing the internal
 candidate archive. Failed or all-invalid runs return `null` for both the best candidate ID and path.

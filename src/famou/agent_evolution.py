@@ -160,6 +160,52 @@ class AgentCandidateGenerator:
             raise EvolutionError(f"agent candidate is invalid: {_bounded_error(exc)}") from exc
 
 
+class AgentPortfolioGenerator:
+    """Rotate multiple explicit solver Agents through one generation seam.
+
+    The portfolio is intentionally a composition rather than a new strategy: archive persistence,
+    evaluator authority, prompt bounds, and failure handling remain exactly those of
+    ``AgentCandidateGenerator``. A deterministic round-robin schedule makes detached/resumed
+    population runs reproducible when the ordered adapter list is unchanged.
+    """
+
+    def __init__(
+        self,
+        adapters: Sequence[AgentAdapter],
+        *,
+        contract: AlgorithmProblemContract | None = None,
+        role: str = "solver",
+        required_capabilities: Sequence[str] = (),
+        timeout: float | None = None,
+    ) -> None:
+        if isinstance(adapters, (str, bytes)):
+            raise TypeError("adapters must be a sequence of Agent adapters")
+        normalized = tuple(adapters)
+        if len(normalized) < 2:
+            raise ValueError("Agent portfolio requires at least two adapters")
+        self.generators = tuple(
+            AgentCandidateGenerator(
+                adapter,
+                contract=contract,
+                role=role,
+                required_capabilities=required_capabilities,
+                timeout=timeout,
+            )
+            for adapter in normalized
+        )
+        self.adapters = tuple(generator.adapter for generator in self.generators)
+        self._calls = 0
+
+    def __call__(self, request: GenerationRequest) -> CandidateDraft:
+        self._calls += 1
+        generator = self.generators[(self._calls - 1) % len(self.generators)]
+        # Keep task/workspace identities global to the portfolio. Without this handoff, each
+        # composed generator would start at call 1 and collide when population seeds share an
+        # iteration.
+        generator._calls = self._calls - 1
+        return generator(request)
+
+
 class AgentCandidateEvaluator:
     """Use a distinct explicit Agent to return a strict validity-first evaluation report."""
 
@@ -321,4 +367,4 @@ def _bounded_error(error: object) -> str:
     return text[-2_000:] if text else "unknown agent generation error"
 
 
-__all__ = ["AgentCandidateEvaluator", "AgentCandidateGenerator"]
+__all__ = ["AgentCandidateEvaluator", "AgentCandidateGenerator", "AgentPortfolioGenerator"]

@@ -21,6 +21,7 @@ flowchart TD
     C --> AR[AgentRegistry\nexplicit role + capability selection]
     AR --> AA[Agent Adapter\nRuntime wrapper or command JSON adapter]
     AA --> AG[AgentCandidateGenerator\nsolver proposal bridge]
+    AA --> PG[AgentPortfolioGenerator\nordered solver portfolio]
     AA --> AE[AgentCandidateEvaluator\nevaluator report bridge]
     A --> W[Run workspace\nprompts · results · transcripts]
     AA --> W
@@ -142,6 +143,11 @@ For Agent-backed generation, the bridge projects bounded `evaluation_feedback` f
 reports into the next prompt. This lets a solver address constraint failures and weak metrics while
 keeping candidate source, prompts, logs, and raw adapter errors out of the context. Feedback is
 read-only evidence; it cannot alter evaluator validity or population ranking.
+
+Population runs may use `AgentPortfolioGenerator`, which rotates two or more explicitly registered
+solver adapters in deterministic round-robin order. The portfolio is a composition over the same
+generation bridge, not a new strategy or service: each member receives a unique run-scoped request
+workspace, and the ordered command/profile digest is checked on resume.
 
 Every strategy result includes `best_candidate_path` when validity-first selection found a regular
 candidate source below the run workspace. The controller writes the same additive field to

@@ -4,7 +4,7 @@ import sys
 from io import StringIO
 from pathlib import Path
 
-from famou.cli import _adapter_fingerprint, main
+from famou.cli import _adapter_fingerprint, _portfolio_fingerprint, main
 
 
 def _write_evolution_contract(path: Path, *, strategy: str = "loop", max_rounds: int = 2) -> None:
@@ -65,6 +65,20 @@ def test_adapter_fingerprint_is_canonical_and_profile_sensitive() -> None:
     assert first == reordered
     assert first != changed_role
     assert first is not None and len(first) == 64
+
+    portfolio = _portfolio_fingerprint(
+        (command, ("/absolute/solver-b", "--json")),
+        name="solver",
+        role="solver",
+        required_capabilities=("read_files",),
+    )
+    reversed_portfolio = _portfolio_fingerprint(
+        (("/absolute/solver-b", "--json"), command),
+        name="solver",
+        role="solver",
+        required_capabilities=("read_files",),
+    )
+    assert portfolio != reversed_portfolio
 
 
 def _write_evolution_commands(root: Path) -> tuple[Path, Path]:
@@ -308,6 +322,70 @@ def test_cli_evolve_can_use_separate_evaluator_agent(tmp_path: Path, capsys) -> 
     assert main(["status", payload["run_id"], "--json", "--home", str(tmp_path / "home")]) == 0
     status = json.loads(capsys.readouterr().out)
     assert status["evolution"]["result"]["best_candidate_path"] == payload["best_candidate_path"]
+
+
+def test_cli_evolve_accepts_solver_portfolio_and_rejects_conflicts(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, strategy="population", max_rounds=1)
+    solver_a = tmp_path / "solver-a.py"
+    solver_b = tmp_path / "solver-b.py"
+    for path, value in ((solver_a, 2), (solver_b, 4)):
+        path.write_text(
+            "import json, sys\n"
+            "json.loads(sys.stdin.read())\n"
+            f"print(json.dumps({{'source':'def solve():\\n    return {value}\\n'}}))\n",
+            encoding="utf-8",
+        )
+    evaluator = tmp_path / "evaluator.py"
+    evaluator.write_text(
+        "import json, pathlib, re, sys\n"
+        "source = pathlib.Path(sys.argv[1]).read_text()\n"
+        "score = float(re.search(r'return (\\d+)', source).group(1))\n"
+        "print(json.dumps({'schema_version':'1','evaluator_id':'portfolio','validity':1,'quality':score,'combined_score':score,'detailed_scores':{'quality':{'value':score,'direction':'maximize'}},'error_info':[]}))\n",
+        encoding="utf-8",
+    )
+    command = [
+        "evolve",
+        str(contract_path),
+        "--agent-portfolio-command",
+        f"{sys.executable} {solver_a}",
+        "--agent-portfolio-command",
+        f"{sys.executable} {solver_b}",
+        "--evaluator-command",
+        f"{sys.executable} {evaluator}",
+        "--population-size",
+        "2",
+        "--json",
+        "--home",
+        str(tmp_path / "home"),
+    ]
+    assert main(command) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    state = json.loads(
+        (Path(payload["workspace"]) / "evolution" / "state.json").read_text(encoding="utf-8")
+    )
+    assert len(state["config"]["generator_fingerprint"]) == 64
+    assert payload["best_score"] == 4.0
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--agent-command",
+                f"{sys.executable} {solver_a}",
+                "--agent-portfolio-command",
+                f"{sys.executable} {solver_b}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
+                "--json",
+                "--home",
+                str(tmp_path / "conflict-home"),
+            ]
+        )
+        == 2
+    )
+    assert "mutually exclusive" in json.loads(capsys.readouterr().err)["error"]
 
 
 def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path: Path, capsys) -> None:
