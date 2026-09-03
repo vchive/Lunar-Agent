@@ -17,5 +17,5 @@
 ## Phase 3 — documentation and verification
 
 - [x] T031-08 Document the data-output contract, lifecycle, CLI consumption, and SDD decisions.
-- [ ] T031-09 Run full tests, lint, compileall, diff checks, and Specify checks; commit as `vchive`
+- [x] T031-09 Run full tests, lint, compileall, diff checks, and Specify checks; commit as `vchive`
   on `main`.
