@@ -321,10 +321,57 @@ def build_parser() -> argparse.ArgumentParser:
         "--generator-command", help="explicit generator command for native strategies"
     )
     benchmark_parser.add_argument(
-        "--evaluator-command", required=True, help="explicit evaluator command"
+        "--evaluator-command", help="explicit evaluator command"
     )
     benchmark_parser.add_argument(
         "--openevolve-command", help="explicit OpenEvolve command for the openevolve strategy"
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime",
+        choices=("mock", "subprocess", "openai-compatible"),
+        help="use a repository-owned runtime for native solver/evaluator roles",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-command",
+        help="runtime subprocess command (used with --agent-runtime subprocess)",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-endpoint",
+        help="OpenAI-compatible endpoint (used with --agent-runtime openai-compatible)",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-model",
+        help="OpenAI-compatible model name (used with --agent-runtime openai-compatible)",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-api-key",
+        help="optional runtime API key; prefer FAMOU_AGENT_RUNTIME_API_KEY",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-loop",
+        action="store_true",
+        help="wrap an OpenAI-compatible runtime in the bounded tool-capable loop",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-max-steps",
+        type=int,
+        default=40,
+        help="maximum model tool calls per runtime invocation (default: 40)",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-allow-exec",
+        action="store_true",
+        help="allow no-shell command execution inside the runtime loop",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-memory",
+        action="store_true",
+        help="enable explicit durable memory tools inside the runtime loop",
+    )
+    benchmark_parser.add_argument(
+        "--agent-runtime-session-history",
+        action="store_true",
+        help="persist a bounded transcript in each runtime workspace",
     )
     benchmark_parser.add_argument("--max-rounds", type=int)
     benchmark_parser.add_argument("--stagnation-rounds", type=int)
@@ -1513,7 +1560,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
 
 
 def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
-    """Compare native strategies with one explicit generator/evaluator pair."""
+    """Compare strategies with explicit commands or repository-owned runtime profiles."""
     try:
         payload = json.loads(args.contract.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -1525,14 +1572,87 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     generator_command = _parse_command(args.generator_command, "--generator-command")
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
     openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")
-    if any(strategy != "openevolve" for strategy in strategies) and not generator_command:
-        raise ValueError("benchmark requires --generator-command for loop/population")
+    agent_runtime = args.agent_runtime
+    agent_runtime_command = _parse_command(
+        args.agent_runtime_command, "--agent-runtime-command"
+    )
+    runtime_profile_options = (
+        agent_runtime_command,
+        args.agent_runtime_endpoint,
+        args.agent_runtime_model,
+        args.agent_runtime_api_key,
+    )
+    if (
+        not isinstance(args.agent_runtime_max_steps, int)
+        or isinstance(args.agent_runtime_max_steps, bool)
+        or not 1 <= args.agent_runtime_max_steps <= 200
+    ):
+        raise ValueError("--agent-runtime-max-steps must be between 1 and 200")
+    loop_options_used = bool(
+        args.agent_runtime_loop
+        or args.agent_runtime_allow_exec
+        or args.agent_runtime_memory
+        or args.agent_runtime_session_history
+        or args.agent_runtime_max_steps != 40
+    )
+    if loop_options_used and agent_runtime is None:
+        raise ValueError("benchmark runtime loop options require --agent-runtime")
+    if args.agent_runtime_loop and agent_runtime != "openai-compatible":
+        raise ValueError("--agent-runtime-loop requires --agent-runtime openai-compatible")
+    if any(
+        option
+        for option in (
+            args.agent_runtime_allow_exec,
+            args.agent_runtime_memory,
+            args.agent_runtime_session_history,
+        )
+    ) and not args.agent_runtime_loop:
+        raise ValueError("benchmark runtime loop options require --agent-runtime-loop")
+    if args.agent_runtime_max_steps != 40 and not args.agent_runtime_loop:
+        raise ValueError("--agent-runtime-max-steps requires --agent-runtime-loop")
+    if agent_runtime is None and any(
+        value is not None and value != () for value in runtime_profile_options
+    ):
+        raise ValueError("runtime profile options require --agent-runtime")
+    if agent_runtime == "subprocess" and not agent_runtime_command:
+        raise ValueError("--agent-runtime subprocess requires --agent-runtime-command")
+    if agent_runtime == "subprocess" and (
+        args.agent_runtime_endpoint or args.agent_runtime_model
+    ):
+        raise ValueError("endpoint/model options require --agent-runtime openai-compatible")
+    if agent_runtime == "openai-compatible" and agent_runtime_command:
+        raise ValueError("--agent-runtime-command requires --agent-runtime subprocess")
+    if agent_runtime in {"mock", None} and (
+        args.agent_runtime_endpoint or args.agent_runtime_model
+    ):
+        raise ValueError("endpoint/model options require --agent-runtime openai-compatible")
+    if agent_runtime != "openai-compatible" and args.agent_runtime_api_key is not None:
+        raise ValueError("--agent-runtime-api-key requires --agent-runtime openai-compatible")
+    runtime_endpoint = args.agent_runtime_endpoint
+    runtime_model = args.agent_runtime_model
+    runtime_api_key = args.agent_runtime_api_key
+    if agent_runtime == "openai-compatible":
+        runtime_endpoint = runtime_endpoint or os.environ.get("FAMOU_MODEL_ENDPOINT")
+        runtime_model = runtime_model or os.environ.get("FAMOU_MODEL") or "local"
+        if runtime_api_key is None:
+            runtime_api_key = os.environ.get("FAMOU_AGENT_RUNTIME_API_KEY")
+        if not runtime_endpoint:
+            raise ValueError(
+                "openai-compatible runtime requires --agent-runtime-endpoint or FAMOU_MODEL_ENDPOINT"
+            )
+    if agent_runtime and "openevolve" in strategies:
+        raise ValueError("--agent-runtime cannot be combined with --strategy openevolve")
     if "openevolve" in strategies and not openevolve_command:
         raise ValueError("benchmark requires --openevolve-command for openevolve")
     if openevolve_command and "openevolve" not in strategies:
         raise ValueError("--openevolve-command requires --strategy openevolve")
-    if not evaluator_command:
-        raise ValueError("benchmark requires a non-empty --evaluator-command")
+    native_selected = any(strategy != "openevolve" for strategy in strategies)
+    if native_selected and not agent_runtime and not generator_command:
+        raise ValueError("benchmark requires --generator-command for loop/population")
+    if not evaluator_command and not agent_runtime:
+        raise ValueError("benchmark requires --evaluator-command or --agent-runtime")
+    if agent_runtime and generator_command and evaluator_command:
+        raise ValueError("runtime profile is unused when generator and evaluator are explicit")
     max_rounds = args.max_rounds if args.max_rounds is not None else contract.evolution.max_rounds
     stagnation_rounds = (
         args.stagnation_rounds
@@ -1550,19 +1670,63 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
         migration_rate=args.migration_rate,
         rng_seed=args.seed,
         timeout_seconds=args.timeout,
-        generator_fingerprint=_adapter_fingerprint(
-            generator_command,
-            kind="benchmark-generator",
-            name="command-generator",
-            role="solver",
+        generator_fingerprint=(
+            _adapter_fingerprint(
+                generator_command,
+                kind="benchmark-generator",
+                name="command-generator",
+                role="solver",
+            )
+            if generator_command
+            else _runtime_fingerprint(
+                agent_runtime,
+                command=agent_runtime_command,
+                endpoint=runtime_endpoint,
+                model=runtime_model,
+                name="benchmark-solver",
+                role="solver",
+                agent_loop=args.agent_runtime_loop,
+                loop_max_steps=args.agent_runtime_max_steps,
+                loop_allow_exec=args.agent_runtime_allow_exec,
+                loop_memory=args.agent_runtime_memory,
+                loop_session_history=args.agent_runtime_session_history,
+            )
         ),
-        evaluator_fingerprint=_adapter_fingerprint(
-            evaluator_command,
-            kind="benchmark-evaluator",
-            name="command-evaluator",
-            role="evaluator",
+        evaluator_fingerprint=(
+            _adapter_fingerprint(
+                evaluator_command,
+                kind="benchmark-evaluator",
+                name="command-evaluator",
+                role="evaluator",
+            )
+            if evaluator_command
+            else _runtime_fingerprint(
+                agent_runtime,
+                command=agent_runtime_command,
+                endpoint=runtime_endpoint,
+                model=runtime_model,
+                name="benchmark-evaluator",
+                role="evaluator",
+                agent_loop=args.agent_runtime_loop,
+                loop_max_steps=args.agent_runtime_max_steps,
+                loop_allow_exec=args.agent_runtime_allow_exec,
+                loop_memory=args.agent_runtime_memory,
+                loop_session_history=args.agent_runtime_session_history,
+            )
         ),
         strategy_commands={"openevolve": openevolve_command} if openevolve_command else {},
+        runtime_profile=(
+            {
+                "kind": agent_runtime,
+                "loop": args.agent_runtime_loop,
+                "max_steps": args.agent_runtime_max_steps,
+                "allow_exec": args.agent_runtime_allow_exec,
+                "memory": args.agent_runtime_memory,
+                "session_history": args.agent_runtime_session_history,
+            }
+            if agent_runtime
+            else None
+        ),
     )
     workspace = args.workspace
     if workspace is None:
@@ -1570,12 +1734,34 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     workspace = workspace.expanduser().resolve()
 
     def generator_factory(_strategy: str) -> CommandCandidateGenerator:
-        if not generator_command:
-            raise ValueError("native strategy has no generator command")
-        return CommandCandidateGenerator(generator_command, args.timeout)
+        if generator_command:
+            return CommandCandidateGenerator(generator_command, args.timeout)
+        runtime = _build_evolution_runtime(
+            config,
+            args,
+            agent_runtime,
+            agent_runtime_command,
+            runtime_endpoint,
+            runtime_model,
+            runtime_api_key,
+        )
+        adapter = RuntimeAgentAdapter(runtime, name="benchmark-solver", roles=("solver",))
+        return AgentCandidateGenerator(adapter, contract=contract, timeout=args.timeout)
 
-    def evaluator_factory(_strategy: str) -> CommandCandidateEvaluator:
-        return CommandCandidateEvaluator(evaluator_command, args.timeout)
+    def evaluator_factory(_strategy: str) -> object:
+        if evaluator_command:
+            return CommandCandidateEvaluator(evaluator_command, args.timeout)
+        runtime = _build_evolution_runtime(
+            config,
+            args,
+            agent_runtime,
+            agent_runtime_command,
+            runtime_endpoint,
+            runtime_model,
+            runtime_api_key,
+        )
+        adapter = RuntimeAgentAdapter(runtime, name="benchmark-evaluator", roles=("evaluator",))
+        return AgentCandidateEvaluator(adapter, timeout=args.timeout)
 
     report = BenchmarkRunner(
         contract,

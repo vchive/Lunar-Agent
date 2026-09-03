@@ -1,11 +1,87 @@
 import json
 import shlex
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from typing import ClassVar, Self
 
 from famou.cli import _adapter_fingerprint, _portfolio_fingerprint, _runtime_fingerprint, main
 from famou.store import Store
+
+
+class BenchmarkModelHandler(BaseHTTPRequestHandler):
+    observed: ClassVar[list[dict[str, object]]] = []
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length))
+        self.__class__.observed.append(
+            {"authorization": self.headers.get("Authorization"), "body": payload}
+        )
+        messages = payload.get("messages", [])
+        latest = messages[-1].get("content", "") if messages else ""
+        if "independent evaluator" in latest:
+            content = json.dumps(
+                {
+                    "schema_version": "1",
+                    "evaluator_id": "benchmark-runtime",
+                    "validity": 1,
+                    "quality": 5,
+                    "combined_score": 5,
+                    "detailed_scores": {},
+                    "error_info": [],
+                }
+            )
+            tool_calls = []
+        elif payload.get("tools") and not any(item.get("role") == "tool" for item in messages):
+            content = ""
+            tool_calls = [
+                {
+                    "id": "fixture-write",
+                    "type": "function",
+                    "function": {
+                        "name": "write_file",
+                        "arguments": json.dumps({"path": "checked.txt", "content": "ok"}),
+                    },
+                }
+            ]
+        else:
+            content = "def solve():\n    return 5\n"
+            tool_calls = []
+        response = {"choices": [{"message": {"content": content}}]}
+        if tool_calls:
+            response["choices"][0]["message"]["tool_calls"] = tool_calls
+        body = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        del format, args
+
+
+class BenchmarkModelServer:
+    def __init__(self) -> None:
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), BenchmarkModelHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_port}"
+
+    def __enter__(self) -> Self:
+        BenchmarkModelHandler.observed = []
+        self.thread.start()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
 
 
 def _write_evolution_contract(path: Path, *, strategy: str = "loop", max_rounds: int = 2) -> None:
@@ -680,6 +756,91 @@ def test_cli_benchmark_includes_explicit_openevolve(tmp_path: Path, capsys) -> N
     assert [item["strategy"] for item in payload["runs"]] == ["loop", "openevolve"]
     assert all(item["status"] == "completed" for item in payload["runs"])
     assert "openevolve" in payload["config"]["strategy_commands_sha256"]
+
+
+def test_cli_benchmark_runtime_one_shot_and_loop_profiles(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    with BenchmarkModelServer() as server:
+        common = [
+            "benchmark",
+            str(contract_path),
+            "--strategy",
+            "loop",
+            "--strategy",
+            "population",
+            "--agent-runtime",
+            "openai-compatible",
+            "--agent-runtime-endpoint",
+            server.url,
+            "--agent-runtime-model",
+            "fixture-model",
+            "--agent-runtime-api-key",
+            "secret-runtime-key",
+            "--max-rounds",
+            "1",
+            "--population-size",
+            "2",
+            "--json",
+            "--home",
+            str(tmp_path / "home"),
+        ]
+        assert main([*common, "--workspace", str(tmp_path / "one-shot")]) == 0
+        one_shot = json.loads(capsys.readouterr().out)
+        assert one_shot["status"] == "completed"
+        assert one_shot["config"]["runtime_profile"]["loop"] is False
+        assert "secret-runtime-key" not in json.dumps(one_shot)
+
+        assert (
+            main(
+                [
+                    *common,
+                    "--agent-runtime-loop",
+                    "--agent-runtime-session-history",
+                    "--agent-runtime-max-steps",
+                    "3",
+                    "--workspace",
+                    str(tmp_path / "loop"),
+                ]
+            )
+            == 0
+        )
+        loop = json.loads(capsys.readouterr().out)
+        assert loop["status"] == "completed"
+        assert loop["config"]["runtime_profile"]["loop"] is True
+        assert loop["config"]["runtime_profile"]["max_steps"] == 3
+        assert one_shot["config"]["generator_fingerprint"] != loop["config"]["generator_fingerprint"]
+        assert any(
+            item["body"].get("tools")
+            for item in BenchmarkModelHandler.observed
+            if isinstance(item.get("body"), dict)
+        )
+
+
+def test_cli_benchmark_rejects_runtime_openevolve_mix(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    assert (
+        main(
+            [
+                "benchmark",
+                str(contract_path),
+                "--strategy",
+                "openevolve",
+                "--agent-runtime",
+                "mock",
+                "--evaluator-command",
+                "/absolute/evaluator",
+                "--openevolve-command",
+                "/absolute/openevolve",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 2
+    )
+    assert "cannot be combined" in json.loads(capsys.readouterr().err)["error"]
 
 
 def test_cli_evolve_runtime_can_fill_one_role_and_rejects_unused_profile(

@@ -198,6 +198,13 @@ both so a human or parent Agent can make the tradeoff explicit. OpenEvolve recei
 projection in its generated config, but its executable and result envelope remain independently
 validated by `OpenEvolveStrategy`.
 
+For native strategies, benchmark factories may instead construct a fresh repository-owned runtime
+for each solver/evaluator role. The one-shot profile uses `RuntimeAgentAdapter` directly; the
+tool-capable profile wraps an explicit OpenAI-compatible runtime in `AgentLoopRuntime`. The profile
+descriptor and loop settings are included in the report, while endpoint, model, command, and API
+key remain out of persisted JSON. To compare one-shot with loop, run the same contract and budget
+in separate benchmark workspaces.
+
 An optional `CandidateRunner` executes each archived candidate before a legacy evaluator command is
 invoked. It writes one bounded `execution.json` beside the candidate, and the controller indexes
 that evidence as `candidate_execution`. The runner never decides validity or score; a wrapped

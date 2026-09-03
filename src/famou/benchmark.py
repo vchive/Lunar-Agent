@@ -69,6 +69,7 @@ class BenchmarkConfig:
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
     strategy_commands: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    runtime_profile: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.strategies, (str, bytes)):
@@ -100,6 +101,48 @@ class BenchmarkConfig:
         if "openevolve" in normalized and not normalized_commands.get("openevolve"):
             raise BenchmarkError("openevolve strategy requires an explicit command")
         object.__setattr__(self, "strategy_commands", normalized_commands)
+        if self.runtime_profile is not None:
+            if not isinstance(self.runtime_profile, dict):
+                raise BenchmarkError("runtime_profile must be an object or null")
+            allowed = {
+                "kind",
+                "loop",
+                "max_steps",
+                "allow_exec",
+                "memory",
+                "session_history",
+            }
+            if set(self.runtime_profile) - allowed:
+                raise BenchmarkError("runtime_profile contains unsupported fields")
+            kind = self.runtime_profile.get("kind")
+            if kind not in {"mock", "subprocess", "openai-compatible"}:
+                raise BenchmarkError("runtime_profile kind is unsupported")
+            for name in ("loop", "allow_exec", "memory", "session_history"):
+                value = self.runtime_profile.get(name, False)
+                if not isinstance(value, bool):
+                    raise BenchmarkError(f"runtime_profile {name} must be boolean")
+            max_steps = self.runtime_profile.get("max_steps", 40)
+            if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= 200:
+                raise BenchmarkError("runtime_profile max_steps must be between 1 and 200")
+            if self.runtime_profile.get("loop", False) is not True and any(
+                self.runtime_profile.get(name, False)
+                for name in ("allow_exec", "memory", "session_history")
+            ):
+                raise BenchmarkError("runtime_profile loop options require loop mode")
+            if self.runtime_profile.get("loop", False) is not True and max_steps != 40:
+                raise BenchmarkError("runtime_profile max_steps requires loop mode")
+            object.__setattr__(
+                self,
+                "runtime_profile",
+                {
+                    "kind": kind,
+                    "loop": self.runtime_profile.get("loop", False),
+                    "max_steps": max_steps,
+                    "allow_exec": self.runtime_profile.get("allow_exec", False),
+                    "memory": self.runtime_profile.get("memory", False),
+                    "session_history": self.runtime_profile.get("session_history", False),
+                },
+            )
         for strategy in normalized:
             EvolutionConfig(
                 strategy=strategy,  # type: ignore[arg-type]
@@ -156,6 +199,7 @@ class BenchmarkConfig:
             "timeout_seconds": self.timeout_seconds,
             "generator_fingerprint": self.generator_fingerprint,
             "evaluator_fingerprint": self.evaluator_fingerprint,
+            "runtime_profile": self.runtime_profile,
             "strategy_commands_sha256": {
                 strategy: hashlib.sha256(
                     json.dumps(list(command), ensure_ascii=False, separators=(",", ":")).encode(

@@ -5,8 +5,10 @@ tools, and long-running memory. It keeps the durable task ledger, artifacts, and
 a run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
 installation.
 
-The project is being developed with Spec-Driven Development (SDD). The current unified evolution
+The project is being developed with Spec-Driven Development (SDD). The current runtime-profile
 benchmark is captured in
+[`specs/029-runtime-profile-benchmark/`](specs/029-runtime-profile-benchmark/), building on the
+unified evolution benchmark in
 [`specs/028-unified-evolution-benchmark/`](specs/028-unified-evolution-benchmark/), building on the
 reproducible native benchmark in
 [`specs/027-evolution-benchmark/`](specs/027-evolution-benchmark/), building on the evolution Agent
@@ -399,6 +401,22 @@ and `population` strategies. Add `--strategy openevolve --openevolve-command
 "/absolute/path/to/wrapper"` to include the explicit OpenEvolve adapter; its wrapper receives a
 generated config and must write the strict candidate result envelope. OpenEvolve remains an opt-in
 subprocess and is never installed or discovered by Lunar-Agent.
+
+The same benchmark can use Lunar-Agent's repository-owned runtime instead of command adapters. A
+one-shot comparison uses:
+
+```bash
+lunar-agent benchmark contract.json --strategy loop --strategy population \
+  --agent-runtime openai-compatible \
+  --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
+  --agent-runtime-model your-local-model \
+  --json --home .lunar
+```
+
+Run the identical command in a new workspace with `--agent-runtime-loop` to measure the bounded
+tool-capable profile. Loop settings are fingerprinted, and memory, transcripts, and no-shell
+execution remain explicit opt-ins. Runtime-backed calls still use the strict candidate/evaluator
+bridges, so a model response cannot bypass validity checks.
 
 Hermes, DeepSeek Harness, Codex, Claude Code, and OpenClaw remain useful optional adapters or parent
 processes. They are execution-plane integrations; Lunar-Agent's local controller, evolution
