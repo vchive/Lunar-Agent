@@ -7,9 +7,11 @@ run-scoped local directory. It does **not** require a machine-wide Hermes, OpenC
 installation. A natural-language answer is only the audit trail; an algorithm mission is complete
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
-The project is being developed with Spec-Driven Development (SDD). The current frozen-evaluator
-boundary is captured in
-[`specs/040-frozen-evaluator-bundle/`](specs/040-frozen-evaluator-bundle/), building on the
+The project is being developed with Spec-Driven Development (SDD). The current private-data
+profiling boundary is captured in
+[`specs/041-private-data-profiling/`](specs/041-private-data-profiling/), building on the frozen
+evaluator bundle in
+[`specs/040-frozen-evaluator-bundle/`](specs/040-frozen-evaluator-bundle/), which builds on the
 execution-grounded refinement loop in
 [`specs/039-execution-grounded-refinement/`](specs/039-execution-grounded-refinement/) and the
 optional exact scorer in
@@ -155,13 +157,21 @@ lunar-agent solve "minimize route cost and write output/routes.csv" \
   --max-rounds 5 --json --home .lunar
 ```
 
-The evaluator compiler is a separate runtime turn. It must return a strict objective, Python
-evaluator, one synthetic rejecting probe per hard constraint, at least two valid probes, and a
-declared better/worse score ordering. Lunar-Agent statically rejects dangerous imports and dynamic
-execution, runs every probe locally, parses every result through `EvaluationReport`, and starts
-search only after constraint validity and score ordering pass. It then hashes and freezes
-`objective.md`, `evaluator.py`, `probes.json`, and `manifest.json` under the intake run. Resume
-verifies and reuses the same bundle instead of asking a model to rewrite the judge.
+The evaluator compiler is a separate runtime turn. Before invoking it, Lunar-Agent verifies the
+exact staged input ledger and locally profiles CSV, JSON, JSONL, or text data. The compiler sees
+only relative paths, format, byte size/SHA-256, row or line count, actual field names, conservative
+types, null counts, and unique counts. It never receives rows, raw values, samples, extrema,
+category labels, or source-machine paths. Malformed/ambiguous data, unsupported formats, symlinks,
+or ledger drift fail before the compiler or search runs.
+
+The compiler must return a strict objective, Python evaluator, one synthetic rejecting probe per
+hard constraint, at least two valid probes, and a declared better/worse score ordering. Lunar-Agent
+statically rejects dangerous imports and dynamic execution, runs every probe locally, parses every
+result through `EvaluationReport`, and starts search only after constraint validity and score
+ordering pass. It then hashes and freezes `objective.md`, `evaluator.py`, `probes.json`, canonical
+`input-profile.json`, and `manifest.json` under the intake run. The canonical profile digest is part
+of bundle identity. Resume re-profiles current ledger-bound bytes and reuses the same bundle without
+asking a model to rewrite the judge; input or profile drift fails closed.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

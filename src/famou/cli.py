@@ -1593,6 +1593,7 @@ def _solve_evolution(
                 runtime,
                 contract,
                 Path(parent.workspace),
+                inputs=candidate_inputs,
                 timeout=args.timeout,
             )
             evaluator = bundle

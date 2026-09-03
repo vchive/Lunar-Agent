@@ -36,6 +36,12 @@ from .conversational import (
     build_algorithm_plan,
     build_algorithm_role_plan,
 )
+from .data_profile import (
+    DataProfileError,
+    build_private_input_profile,
+    canonical_profile_json,
+    profile_sha256,
+)
 from .evaluator_bundle import (
     EvaluatorBundleError,
     FrozenEvaluatorBundle,
@@ -107,6 +113,7 @@ __all__ = [
     "ContractCandidateRunner",
     "ContractCompilationError",
     "ContractCompiler",
+    "DataProfileError",
     "EvaluatorBundleError",
     "EvolutionConfig",
     "EvolutionContext",
@@ -126,10 +133,13 @@ __all__ = [
     "StrategyResult",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
+    "build_private_input_profile",
     "build_strategy",
+    "canonical_profile_json",
     "compile_evaluator_bundle",
     "config_from_contract",
     "contract_candidate_runner_fingerprint",
     "load_evaluator_bundle",
+    "profile_sha256",
     "stage_candidate_inputs",
 ]

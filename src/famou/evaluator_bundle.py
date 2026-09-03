@@ -22,8 +22,14 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .algorithm import AlgorithmProblemContract, EvaluationReport
+from .data_profile import (
+    DataProfileError,
+    build_private_input_profile,
+    canonical_profile_json,
+    profile_sha256,
+)
 from .evaluator import acceptance_evaluator
-from .evolution import CandidateExecution
+from .evolution import CandidateExecution, CandidateInputArtifact, EvolutionError
 from .runtime import Runtime, RuntimeResult
 
 MAX_BUNDLE_RESPONSE_BYTES = 512 * 1024
@@ -36,7 +42,9 @@ MAX_PROBE_BYTES = 512 * 1024
 MAX_EVALUATOR_OUTPUT_BYTES = 64 * 1024
 MAX_IDENTIFIER_BYTES = 128
 BUNDLE_PROTOCOL = "frozen-evaluator-bundle-v1"
-BUNDLE_FILES = frozenset({"objective.md", "evaluator.py", "probes.json", "manifest.json"})
+BUNDLE_FILES = frozenset(
+    {"objective.md", "evaluator.py", "probes.json", "input-profile.json", "manifest.json"}
+)
 _ALLOWED_IMPORTS = frozenset(
     {
         "bisect",
@@ -94,7 +102,7 @@ _SECRET = re.compile(
 )
 
 
-class EvaluatorBundleError(RuntimeError):
+class EvaluatorBundleError(EvolutionError):
     """A bounded evaluator compilation, preflight, or integrity failure."""
 
 
@@ -161,6 +169,7 @@ class FrozenEvaluatorBundle:
     root: Path
     fingerprint: str
     contract_sha256: str
+    input_profile_sha256: str
     timeout_seconds: float = 900.0
 
     def __call__(
@@ -189,6 +198,7 @@ def compile_evaluator_bundle(
     contract: AlgorithmProblemContract,
     workspace: Path,
     *,
+    inputs: tuple[CandidateInputArtifact, ...] = (),
     timeout: float = 900.0,
 ) -> FrozenEvaluatorBundle:
     """Compile and preflight a bundle, or verify and reuse an existing frozen bundle."""
@@ -202,13 +212,20 @@ def compile_evaluator_bundle(
     root.mkdir(parents=True, exist_ok=True)
     destination = root / "evaluator-bundle"
     if destination.exists() or destination.is_symlink():
-        return load_evaluator_bundle(destination, contract, timeout=timeout)
+        profile = _build_input_profile(root, contract, inputs)
+        return load_evaluator_bundle(
+            destination,
+            contract,
+            input_profile=profile,
+            timeout=timeout,
+        )
 
     compiler_workspace = root / ".evaluator-compiler"
     if compiler_workspace.is_symlink():
         raise EvaluatorBundleError("evaluator compiler workspace must not be a symlink")
     compiler_workspace.mkdir(parents=True, exist_ok=True)
-    prompt = _compiler_prompt(contract)
+    profile = _build_input_profile(root, contract, inputs)
+    prompt = _compiler_prompt(contract, profile)
     try:
         result = runtime.run(prompt, compiler_workspace, timeout)
     except Exception as exc:
@@ -221,6 +238,7 @@ def compile_evaluator_bundle(
         objective_path = staging / "objective.md"
         evaluator_path = staging / "evaluator.py"
         probes_path = staging / "probes.json"
+        profile_path = staging / "input-profile.json"
         objective_path.write_text(envelope.objective + "\n", encoding="utf-8")
         evaluator_path.write_text(envelope.evaluator_source, encoding="utf-8")
         probes_path.write_text(
@@ -230,9 +248,10 @@ def compile_evaluator_bundle(
             + "\n",
             encoding="utf-8",
         )
+        profile_path.write_text(canonical_profile_json(profile), encoding="utf-8")
         frozen_inputs = {
             path.name: _sha256(path)
-            for path in (objective_path, evaluator_path, probes_path)
+            for path in (objective_path, evaluator_path, probes_path, profile_path)
         }
         _preflight(evaluator_path, envelope, contract, staging, timeout)
         current = tuple(staging.iterdir())
@@ -243,31 +262,44 @@ def compile_evaluator_bundle(
             for path in current
         ):
             raise EvaluatorBundleError("evaluator preflight modified the frozen bundle inputs")
-        manifest = _manifest(contract, objective_path, evaluator_path, probes_path)
+        manifest = _manifest(
+            contract, objective_path, evaluator_path, probes_path, profile_path
+        )
         manifest_path = staging / "manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
         )
-        for path in (objective_path, evaluator_path, probes_path, manifest_path):
+        for path in (
+            objective_path,
+            evaluator_path,
+            probes_path,
+            profile_path,
+            manifest_path,
+        ):
             path.chmod(0o444)
         staging.chmod(0o555)
-        load_evaluator_bundle(staging, contract, timeout=timeout)
+        load_evaluator_bundle(staging, contract, input_profile=profile, timeout=timeout)
         try:
             staging.replace(destination)
         except FileExistsError:
             _remove_tree(staging)
-            return load_evaluator_bundle(destination, contract, timeout=timeout)
+            return load_evaluator_bundle(
+                destination, contract, input_profile=profile, timeout=timeout
+            )
     except Exception:
         _remove_tree(staging)
         raise
-    return load_evaluator_bundle(destination, contract, timeout=timeout)
+    return load_evaluator_bundle(
+        destination, contract, input_profile=profile, timeout=timeout
+    )
 
 
 def load_evaluator_bundle(
     root: Path,
     contract: AlgorithmProblemContract,
     *,
+    input_profile: dict[str, object] | None = None,
     timeout: float = 900.0,
 ) -> FrozenEvaluatorBundle:
     """Load a frozen bundle after exact file, mode, schema, and digest verification."""
@@ -305,6 +337,7 @@ def load_evaluator_bundle(
         "objective_sha256",
         "evaluator_sha256",
         "probes_sha256",
+        "input_profile_sha256",
         "bundle_sha256",
     }
     if not isinstance(manifest, dict) or set(manifest) != expected_keys:
@@ -317,12 +350,26 @@ def load_evaluator_bundle(
         ("objective.md", "objective_sha256"),
         ("evaluator.py", "evaluator_sha256"),
         ("probes.json", "probes_sha256"),
+        ("input-profile.json", "input_profile_sha256"),
     ):
         if _sha256(root / name) != manifest.get(key):
             raise EvaluatorBundleError(f"frozen evaluator {name} digest does not match")
+    profile_path = root / "input-profile.json"
+    try:
+        stored_profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        if not isinstance(stored_profile, dict):
+            raise EvaluatorBundleError("frozen evaluator input profile has an invalid shape")
+        if profile_path.read_text(encoding="utf-8") != canonical_profile_json(stored_profile):
+            raise EvaluatorBundleError("frozen evaluator input profile is not canonical")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, DataProfileError) as exc:
+        raise EvaluatorBundleError("frozen evaluator input profile is invalid") from exc
     identity = {key: manifest[key] for key in expected_keys - {"bundle_sha256"}}
     if _dict_digest(identity) != manifest.get("bundle_sha256"):
         raise EvaluatorBundleError("frozen evaluator aggregate digest does not match")
+    if input_profile is not None and profile_sha256(input_profile) != manifest.get(
+        "input_profile_sha256"
+    ):
+        raise EvaluatorBundleError("frozen evaluator input profile digest does not match")
     try:
         source = (root / "evaluator.py").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -332,6 +379,7 @@ def load_evaluator_bundle(
         root=root,
         fingerprint=manifest["bundle_sha256"],
         contract_sha256=manifest["contract_sha256"],
+        input_profile_sha256=manifest["input_profile_sha256"],
         timeout_seconds=timeout,
     )
 
@@ -665,6 +713,7 @@ def _manifest(
     objective: Path,
     evaluator: Path,
     probes: Path,
+    input_profile: Path,
 ) -> dict[str, str]:
     identity = {
         "schema_version": "1",
@@ -673,12 +722,28 @@ def _manifest(
         "objective_sha256": _sha256(objective),
         "evaluator_sha256": _sha256(evaluator),
         "probes_sha256": _sha256(probes),
+        "input_profile_sha256": _sha256(input_profile),
     }
     return {**identity, "bundle_sha256": _dict_digest(identity)}
 
 
-def _compiler_prompt(contract: AlgorithmProblemContract) -> str:
+def _build_input_profile(
+    root: Path,
+    contract: AlgorithmProblemContract,
+    inputs: tuple[CandidateInputArtifact, ...],
+) -> dict[str, object]:
+    try:
+        return build_private_input_profile(root, contract, inputs)
+    except DataProfileError as exc:
+        raise EvaluatorBundleError(str(exc)) from exc
+
+
+def _compiler_prompt(
+    contract: AlgorithmProblemContract, input_profile: dict[str, object]
+) -> str:
     context = json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
+    profile = json.dumps(input_profile, ensure_ascii=False, sort_keys=True, indent=2)
+    profile_digest = profile_sha256(input_profile)
     return (
         "You are compiling one frozen local evaluator bundle for a bounded algorithm evolution. "
         "Return exactly one JSON object with schema_version='1', objective, evaluator_source, "
@@ -691,7 +756,11 @@ def _compiler_prompt(contract: AlgorithmProblemContract) -> str:
         "constraint with matching constraint_id/error_info.code, at least two valid probes, and at "
         "least one strict better/worse score_order assertion. Probe files may exist only under "
         "data/raw/ or output/. Do not return markdown, commands, credentials, or external paths.\n\n"
-        f"Canonical contract:\n{context}"
+        "The private input profile contains structural counts and types only. Use observed fields "
+        "to align parsing, but do not infer business semantics or constraints from missing values.\n\n"
+        f"Canonical contract:\n{context}\n\n"
+        f"Private input profile SHA-256: {profile_digest}\n"
+        f"Private input profile:\n{profile}"
     )
 
 
