@@ -34,7 +34,7 @@ flowchart TD
     OS --> AW[Algorithm workspace\ndata/raw · processed · solve · evaluate · output · evolution]
     AW --> W
     W --> AS[ArtifactStore\nrun-relative paths + SHA-256]
-    AS --> AC[Acceptance Contract\nbounded local artifact checks + output_valid]
+    AS --> AC[Acceptance Contract\nbounded local artifact checks + role/output validation]
     AC --> E[Evaluator Profile\nstructured evidence]
     E --> S
     S --> V[PATCH / REPLAN\noptimistic version check]
@@ -105,7 +105,8 @@ dependent nodes receive only verified predecessor artifacts and bounded previews
 adapters never own durable state. The selected evaluator profile establishes a base decision, then
 an optional declarative acceptance contract independently checks result text and regular artifacts
 only beneath that attempt workspace. Contracts can require file existence, artifact text, JSON
-parsing/top-level keys, and `all`/`any` composition; they never execute commands, invoke a model,
+parsing/top-level keys, generic structured hand-offs, strict data profiles, strict
+`EvaluationReport` files, and `all`/`any` composition; they never execute commands, invoke a model,
 or inspect an escaping path. Both decisions persist as a bounded structured evidence tree. A
 retry preserves the task and plan contract and appends a bounded, task-scoped projection of the
 latest failed evaluation (or generic runtime-failure guidance) to the next attempt prompt; raw
@@ -141,7 +142,11 @@ inspectable.
 11. `solve --role-dag` selects the built-in five-role composition
     `data_discovery → problem_formulator → solver → evaluator → reviewer`. These are ordinary
     durable tasks, so roles remain runtime-neutral and can later be routed to explicit Agent,
-    runtime, or evolution adapters without changing the controller or ledger.
+    runtime, or evolution adapters without changing the controller or ledger. The four non-Solver
+    hand-offs have strict acceptance rules: a bounded DataDiscovery profile, non-empty formulation
+    and review markdown, and an `EvaluationReport`-validated `evaluate/evaluation.json`. Present
+    role files are hashed as `role_evidence` artifacts even when another acceptance rule fails;
+    delivery still requires the evidence to belong to the successful attempt.
 
 ## Deliberate boundary versus WebAgent
 

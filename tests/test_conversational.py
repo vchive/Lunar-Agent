@@ -136,6 +136,21 @@ def test_role_plan_has_five_authority_bound_stages() -> None:
     assert plan.tasks[-1].depends_on == ("evaluator",)
     assert all("Role:" in task.prompt for task in plan.tasks)
     assert plan.algorithm_problem == _contract().to_dict()
+    acceptance = {task.id: task.acceptance for task in plan.tasks}
+    assert acceptance["data_discovery"] == {
+        "data_profile_valid": "data/processed/data-profile.json"
+    }
+    assert acceptance["problem_formulator"] == {
+        "artifact_valid": {
+            "path": "solve/problem-formulation.md",
+            "format": "text",
+            "fields": [],
+        }
+    }
+    assert acceptance["evaluator"] == {"evaluation_report_valid": "evaluate/evaluation.json"}
+    assert acceptance["reviewer"] == {
+        "artifact_valid": {"path": "evaluate/review.md", "format": "text", "fields": []}
+    }
 
 
 def test_algorithm_plan_turns_declared_outputs_into_independent_checks() -> None:

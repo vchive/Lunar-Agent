@@ -339,12 +339,14 @@ def build_algorithm_role_plan(goal: str, contract: AlgorithmProblemContract) -> 
             "data_discovery",
             "DataDiscovery — observe and profile inputs",
             "Role: DataDiscovery. Inspect only declared input files under data/raw. Report observed schema, row counts, missing values, and data-quality issues in data/processed/data-profile.json. You may not invent fields, constraints, or objective values; do not edit the validated contract.",
+            acceptance={"data_profile_valid": "data/processed/data-profile.json"},
         ),
         PlanTask(
             "problem_formulator",
             "ProblemFormulator — make the objective measurable",
             "Role: ProblemFormulator. Read the validated contract and the verified DataDiscovery artifacts. Translate the existing decision variables, objective, provenance, and success criteria into a measurable formulation in solve/problem-formulation.md. You may clarify unresolved assumptions but may not relax, add, or silently reinterpret hard constraints.",
             ("data_discovery",),
+            {"artifact_valid": {"path": "solve/problem-formulation.md", "format": "text", "fields": []}},
         ),
         PlanTask(
             "solver",
@@ -358,12 +360,14 @@ def build_algorithm_role_plan(goal: str, contract: AlgorithmProblemContract) -> 
             "Evaluator — independently test the candidate",
             "Role: Evaluator. Independently execute or inspect the Solver candidate against every success criterion and hard constraint using only verified artifacts and observed data. Write a structured report under evaluate/evaluation.json. Do not accept Solver claims without evidence and do not modify the candidate or contract.",
             ("solver",),
+            {"evaluation_report_valid": "evaluate/evaluation.json"},
         ),
         PlanTask(
             "reviewer",
             "Reviewer — audit evidence and deliver",
             "Role: Reviewer. Audit the formulation, candidate, and independent evaluation. Summarize only verified evidence, unresolved assumptions, and any required follow-up in evaluate/review.md. You may recommend retry or replan, but may not mark an invalid candidate valid or change hard constraints.",
             ("evaluator",),
+            {"artifact_valid": {"path": "evaluate/review.md", "format": "text", "fields": []}},
         ),
     )
     return PlanDocument(

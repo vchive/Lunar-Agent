@@ -22,6 +22,9 @@ rule := {"result_contains": text}
       | {"artifact_text_contains": {"path": relative_path, "contains": text}}
       | {"json_parse": relative_path}
       | {"json_has_keys": {"path": relative_path, "keys": [text, ...]}}
+      | {"artifact_valid": {"path": relative_path, "format": "json|jsonl|csv|text", "fields": [text, ...]}}
+      | {"data_profile_valid": relative_path}
+      | {"evaluation_report_valid": relative_path}
       | {"all": [rule, ...]}
       | {"any": [rule, ...]}
 ```
@@ -45,6 +48,9 @@ Top-level legacy forms are also accepted:
 - Contracts and values have the limits in `data-model.md`; credential-like text is rejected.
 - A file must be a regular UTF-8 file and no larger than the configured inspection bound for text
   or JSON rules.
+- `artifact_valid` applies the same bounded format/field checks to a non-`output/` hand-off file.
+  `data_profile_valid` requires the built-in DataDiscovery profile shape, and
+  `evaluation_report_valid` parses the existing validity-first `EvaluationReport` contract.
 
 ## Evaluation output
 

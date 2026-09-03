@@ -19,6 +19,7 @@ MAX_JSON_KEYS = 16
 MAX_ARTIFACT_BYTES = 256 * 1024
 MAX_OUTPUT_FIELDS = 32
 OUTPUT_FORMATS = frozenset({"json", "jsonl", "csv", "text"})
+ROLE_EVIDENCE_FORMATS = frozenset({"json", "jsonl", "csv", "text"})
 _SECRET_RE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*\S+)"
 )
@@ -185,6 +186,35 @@ def _compile_rule(value: object, depth: int, count: list[int]) -> dict[str, Any]
         if output_format == "text" and normalized_fields:
             raise ValueError("text output_valid rules cannot declare fields")
         return {rule: {"path": path, "format": output_format, "fields": normalized_fields}}
+    if rule == "artifact_valid":
+        item = _object(payload, "artifact_valid", {"path", "format", "fields"})
+        path = _safe_relative_path(item["path"])
+        artifact_format = _bounded_text(item["format"], "artifact_valid format", limit=32).lower()
+        if artifact_format not in ROLE_EVIDENCE_FORMATS:
+            raise ValueError("artifact_valid format must be json, jsonl, csv, or text")
+        fields = item["fields"]
+        if (
+            not isinstance(fields, list)
+            or len(fields) > MAX_OUTPUT_FIELDS
+            or any(not isinstance(field, str) for field in fields)
+        ):
+            raise ValueError("artifact_valid fields must be a bounded string array")
+        normalized_fields = [_bounded_text(field, "artifact_valid field", limit=128) for field in fields]
+        if len(set(normalized_fields)) != len(normalized_fields):
+            raise ValueError("artifact_valid fields must be unique")
+        if artifact_format == "text" and normalized_fields:
+            raise ValueError("text artifact_valid rules cannot declare fields")
+        return {rule: {"path": path, "format": artifact_format, "fields": normalized_fields}}
+    if rule == "data_profile_valid":
+        path = _safe_relative_path(payload)
+        if not path.startswith("data/processed/") or path == "data/processed/":
+            raise ValueError("data_profile_valid path must be below data/processed/")
+        return {rule: path}
+    if rule == "evaluation_report_valid":
+        path = _safe_relative_path(payload)
+        if not path.startswith("evaluate/") or path == "evaluate/":
+            raise ValueError("evaluation_report_valid path must be below evaluate/")
+        return {rule: path}
     if rule in {"all", "any"}:
         if not isinstance(payload, list) or not payload:
             raise ValueError(f"{rule} must be a non-empty rule array")
@@ -261,6 +291,163 @@ def _detail(rule: str, passed: bool, reason: str, **metadata: object) -> dict[st
     return {"rule": rule, "passed": passed, "reason": reason, **metadata}
 
 
+def _structured_content_check(
+    content: str, output_format: str, fields: list[str]
+) -> tuple[str | None, int | None, list[str]]:
+    """Validate one bounded text/JSON/JSONL/CSV payload without exposing its contents."""
+    error: str | None = None
+    row_count: int | None = None
+    observed_fields: list[str] = []
+    if output_format == "text":
+        if not content.strip():
+            error = "text artifact is empty"
+    elif output_format == "json":
+        try:
+            parsed = json.loads(content or "")
+        except json.JSONDecodeError:
+            error = "JSON artifact is invalid"
+        else:
+            if isinstance(parsed, dict):
+                row_count = 1
+                observed_fields = [str(key) for key in parsed]
+                missing = [field for field in fields if field not in parsed]
+                if missing:
+                    error = f"JSON artifact is missing fields: {', '.join(missing)}"
+            elif isinstance(parsed, list):
+                row_count = len(parsed)
+                for index, item in enumerate(parsed):
+                    if not isinstance(item, dict):
+                        error = f"JSON artifact row {index} is not an object"
+                        break
+                    if index == 0:
+                        observed_fields = [str(key) for key in item]
+                    missing = [field for field in fields if field not in item]
+                    if missing:
+                        error = f"JSON artifact row {index} is missing fields: {', '.join(missing)}"
+                        break
+            else:
+                error = "JSON artifact root must be an object or array"
+    elif output_format == "jsonl":
+        row_count = 0
+        for index, line in enumerate(content.splitlines()):
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                error = f"JSONL artifact line {index + 1} is invalid"
+                break
+            if not isinstance(parsed, dict):
+                error = f"JSONL artifact line {index + 1} is not an object"
+                break
+            row_count += 1
+            if not observed_fields:
+                observed_fields = [str(key) for key in parsed]
+            missing = [field for field in fields if field not in parsed]
+            if missing:
+                error = f"JSONL artifact line {index + 1} is missing fields: {', '.join(missing)}"
+                break
+        if error is None and row_count == 0:
+            error = "JSONL artifact contains no records"
+    elif output_format == "csv":
+        try:
+            reader = csv.DictReader(io.StringIO(content))
+            observed_fields = [field for field in (reader.fieldnames or []) if field is not None]
+            if not observed_fields:
+                error = "CSV artifact has no header"
+            else:
+                missing = [field for field in fields if field not in observed_fields]
+                if missing:
+                    error = f"CSV artifact is missing fields: {', '.join(missing)}"
+                else:
+                    row_count = sum(1 for _ in reader)
+        except (csv.Error, UnicodeError):
+            error = "CSV artifact is invalid"
+    return error, row_count, observed_fields
+
+
+def _validate_data_profile(content: str) -> tuple[str | None, dict[str, object]]:
+    """Validate the compact DataDiscovery profile schema used by the built-in role DAG."""
+    try:
+        payload = json.loads(content or "")
+    except json.JSONDecodeError:
+        return "data profile is not valid JSON", {}
+    if not isinstance(payload, dict):
+        return "data profile root must be an object", {}
+    if set(payload) - {"schema_version", "inputs", "notes"}:
+        return "data profile contains unknown top-level fields", {}
+    if payload.get("schema_version") != "1":
+        return "data profile schema_version must be '1'", {}
+    inputs = payload.get("inputs")
+    if not isinstance(inputs, list) or not inputs or len(inputs) > 64:
+        return "data profile inputs must be a non-empty bounded array", {}
+    for index, item in enumerate(inputs):
+        if not isinstance(item, dict) or set(item) != {"path", "format", "row_count", "columns", "issues"}:
+            return f"data profile input {index} has an invalid shape", {}
+        path = item["path"]
+        if (
+            not isinstance(path, str)
+            or not path.startswith("data/raw/")
+            or path == "data/raw/"
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            or "\\" in path
+            or "\x00" in path
+        ):
+            return f"data profile input {index} path is invalid", {}
+        if not isinstance(item["format"], str) or not item["format"].strip() or len(item["format"].encode("utf-8")) > 32:
+            return f"data profile input {index} format is invalid", {}
+        row_count = item["row_count"]
+        if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:
+            return f"data profile input {index} row_count is invalid", {}
+        columns = item["columns"]
+        if not isinstance(columns, list) or len(columns) > 128 or any(
+            not isinstance(column, str) or not column.strip() or len(column.encode("utf-8")) > 128
+            for column in columns
+        ):
+            return f"data profile input {index} columns are invalid", {}
+        if len(set(columns)) != len(columns):
+            return f"data profile input {index} columns must be unique", {}
+        issues = item["issues"]
+        if not isinstance(issues, list) or len(issues) > 32 or any(
+            not isinstance(issue, str) or not issue.strip() or len(issue.encode("utf-8")) > 512
+            for issue in issues
+        ):
+            return f"data profile input {index} issues are invalid", {}
+    notes = payload.get("notes", "")
+    if not isinstance(notes, str) or len(notes.encode("utf-8")) > 2_000:
+        return "data profile notes are invalid", {}
+    if _SECRET_RE.search(content):
+        return "data profile contains credential-like content", {}
+    return None, {
+        "schema_version": "1",
+        "input_count": len(inputs),
+        "row_counts": [item["row_count"] for item in inputs],
+    }
+
+
+def _validate_evaluation_report(content: str) -> tuple[str | None, dict[str, object]]:
+    """Parse the existing validity-first EvaluationReport contract without leaking its payload."""
+    try:
+        payload = json.loads(content or "")
+    except json.JSONDecodeError:
+        return "evaluation report is not valid JSON", {}
+    try:
+        # Local import keeps algorithm.py independent from the acceptance interpreter.
+        from .algorithm import EvaluationReport
+
+        report = EvaluationReport.from_dict(payload)
+    except (TypeError, ValueError) as exc:
+        return f"evaluation report is invalid: {str(exc)[:512]}", {}
+    return None, {
+        "schema_version": report.schema_version,
+        "evaluator_id": report.evaluator_id,
+        "validity": report.validity,
+        "combined_score": report.combined_score,
+        "detailed_score_count": len(report.detailed_scores),
+        "error_count": len(report.error_info),
+    }
+
+
 def _evaluate_rule(
     rule: dict[str, Any], result: str, workspace: Path
 ) -> tuple[bool, tuple[str, ...], str, dict[str, object]]:
@@ -333,71 +520,12 @@ def _evaluate_rule(
         content, error = _read_artifact(workspace, path)
         row_count: int | None = None
         observed_fields: list[str] = []
-        if error is None and output_format == "text":
-            if not (content or "").strip():
-                error = "text output is empty"
-        elif error is None and output_format == "json":
-            try:
-                parsed = json.loads(content or "")
-            except json.JSONDecodeError:
-                error = "JSON output is invalid"
-            else:
-                if isinstance(parsed, dict):
-                    row_count = 1
-                    observed_fields = [str(key) for key in parsed]
-                    missing = [field for field in fields if field not in parsed]
-                    if missing:
-                        error = f"JSON output is missing fields: {', '.join(missing)}"
-                elif isinstance(parsed, list):
-                    row_count = len(parsed)
-                    for index, item in enumerate(parsed):
-                        if not isinstance(item, dict):
-                            error = f"JSON output row {index} is not an object"
-                            break
-                        if index == 0:
-                            observed_fields = [str(key) for key in item]
-                        missing = [field for field in fields if field not in item]
-                        if missing:
-                            error = f"JSON output row {index} is missing fields: {', '.join(missing)}"
-                            break
-                else:
-                    error = "JSON output root must be an object or array"
-        elif error is None and output_format == "jsonl":
-            row_count = 0
-            for index, line in enumerate((content or "").splitlines()):
-                if not line.strip():
-                    continue
-                try:
-                    parsed = json.loads(line)
-                except json.JSONDecodeError:
-                    error = f"JSONL output line {index + 1} is invalid"
-                    break
-                if not isinstance(parsed, dict):
-                    error = f"JSONL output line {index + 1} is not an object"
-                    break
-                row_count += 1
-                if not observed_fields:
-                    observed_fields = [str(key) for key in parsed]
-                missing = [field for field in fields if field not in parsed]
-                if missing:
-                    error = f"JSONL output line {index + 1} is missing fields: {', '.join(missing)}"
-                    break
-            if error is None and row_count == 0:
-                error = "JSONL output contains no records"
-        elif error is None and output_format == "csv":
-            try:
-                reader = csv.DictReader(io.StringIO(content or ""))
-                observed_fields = [field for field in (reader.fieldnames or []) if field is not None]
-                if not observed_fields:
-                    error = "CSV output has no header"
-                else:
-                    missing = [field for field in fields if field not in observed_fields]
-                    if missing:
-                        error = f"CSV output is missing fields: {', '.join(missing)}"
-                    else:
-                        row_count = sum(1 for _ in reader)
-            except (csv.Error, UnicodeError):
-                error = "CSV output is invalid"
+        if error is None:
+            error, row_count, observed_fields = _structured_content_check(
+                content or "", output_format, fields
+            )
+            if error is not None:
+                error = error.replace(" artifact", " output")
         passed = error is None
         reason = f"output {path!r} is a valid {output_format} artifact" if passed else f"output {path!r}: {error}"
         return passed, ((f"output valid: {path}",) if passed else ()), reason, _detail(
@@ -409,6 +537,55 @@ def _evaluate_rule(
             fields=fields,
             row_count=row_count,
             observed_fields=observed_fields[:MAX_OUTPUT_FIELDS],
+        )
+    if name == "artifact_valid":
+        path = payload["path"]
+        artifact_format = payload["format"]
+        fields = payload["fields"]
+        content, error = _read_artifact(workspace, path)
+        row_count: int | None = None
+        observed_fields: list[str] = []
+        if error is None:
+            error, row_count, observed_fields = _structured_content_check(
+                content or "", artifact_format, fields
+            )
+        passed = error is None
+        reason = (
+            f"artifact {path!r} is a valid {artifact_format} artifact"
+            if passed
+            else f"artifact {path!r}: {error}"
+        )
+        return passed, ((f"artifact valid: {path}",) if passed else ()), reason, _detail(
+            name,
+            passed,
+            reason,
+            path=path,
+            format=artifact_format,
+            fields=fields,
+            row_count=row_count,
+            observed_fields=observed_fields[:MAX_OUTPUT_FIELDS],
+        )
+    if name == "data_profile_valid":
+        path = payload
+        content, error = _read_artifact(workspace, path)
+        metadata: dict[str, object] = {}
+        if error is None:
+            error, metadata = _validate_data_profile(content or "")
+        passed = error is None
+        reason = f"data profile {path!r} is valid" if passed else f"data profile {path!r}: {error}"
+        return passed, ((f"data profile valid: {path}",) if passed else ()), reason, _detail(
+            name, passed, reason, path=path, **metadata
+        )
+    if name == "evaluation_report_valid":
+        path = payload
+        content, error = _read_artifact(workspace, path)
+        metadata: dict[str, object] = {}
+        if error is None:
+            error, metadata = _validate_evaluation_report(content or "")
+        passed = error is None
+        reason = f"evaluation report {path!r} is valid" if passed else f"evaluation report {path!r}: {error}"
+        return passed, ((f"evaluation report valid: {path}",) if passed else ()), reason, _detail(
+            name, passed, reason, path=path, **metadata
         )
     children = [_evaluate_rule(child, result, workspace) for child in payload]
     child_passed = [item[0] for item in children]

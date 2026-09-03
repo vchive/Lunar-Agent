@@ -16,6 +16,8 @@ algorithm output work in
 [`specs/031-structured-algorithm-outputs/`](specs/031-structured-algorithm-outputs/), building on the
 algorithm input staging work in
 [`specs/032-algorithm-input-staging/`](specs/032-algorithm-input-staging/), building on the
+strict role evidence contracts in
+[`specs/033-role-evidence-contracts/`](specs/033-role-evidence-contracts/), building on the
 unified evolution benchmark in
 [`specs/028-unified-evolution-benchmark/`](specs/028-unified-evolution-benchmark/), building on the
 reproducible native benchmark in
@@ -96,6 +98,11 @@ lunar-agent solve "根据订单数据设计配送路线" --runtime mock --role-d
 
 This uses `data_discovery → problem_formulator → solver → evaluator → reviewer`. It is still the
 same local SQLite run and artifact handoff; the switch only selects a richer built-in plan factory.
+Each non-Solver role also has a strict hand-off contract: DataDiscovery must write
+`data/processed/data-profile.json`, ProblemFormulator must write
+`solve/problem-formulation.md`, Evaluator must write a schema-valid `evaluate/evaluation.json`, and
+Reviewer must write `evaluate/review.md`. These files are hashed as `role_evidence` artifacts;
+missing or malformed evidence causes a retry/failure even when the model returns convincing prose.
 
 ### Conversation versus result data
 
@@ -115,6 +122,10 @@ Agent can consume data deterministically:
 lunar-agent status <run-id> --json   # algorithm_outputs + SHA-256 metadata
 lunar-agent deliver <run-id> --json  # fail-closed delivery decision
 ```
+
+Role-DAG evidence is available through the same `status --json` response under `role_evidence` and
+is included in delivery evidence. It remains attempt-local, so only validated Solver data files
+are promoted to the stable `output/` directory.
 
 If a required output is missing or malformed, a convincing chat response cannot make the run
 succeed. Contracts written before the optional `outputs` field remain fully compatible and keep

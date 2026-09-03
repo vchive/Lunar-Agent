@@ -86,6 +86,82 @@ def test_output_valid_rejects_non_output_paths_and_invalid_format() -> None:
         validate_acceptance({"output_valid": {"path": "output/report.bin", "format": "binary", "fields": []}})
 
 
+def test_role_artifact_rules_validate_profiles_and_text_hand_offs(tmp_path: Path) -> None:
+    workspace = tmp_path / "attempt"
+    (workspace / "data" / "processed").mkdir(parents=True)
+    (workspace / "solve").mkdir()
+    (workspace / "data" / "processed" / "data-profile.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "inputs": [
+                    {
+                        "path": "data/raw/orders.csv",
+                        "format": "csv",
+                        "row_count": 2,
+                        "columns": ["order_id", "destination"],
+                        "issues": [],
+                    }
+                ],
+                "notes": "profiled locally",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "solve" / "problem-formulation.md").write_text("# Formulation\n", encoding="utf-8")
+    profile = acceptance_evaluator({"data_profile_valid": "data/processed/data-profile.json"})
+    formulation = acceptance_evaluator(
+        {"artifact_valid": {"path": "solve/problem-formulation.md", "format": "text", "fields": []}}
+    )
+    assert profile is not None and profile.evaluate("claimed", workspace).passed
+    assert formulation is not None and formulation.evaluate("claimed", workspace).passed
+
+    (workspace / "data" / "processed" / "data-profile.json").write_text(
+        json.dumps({"schema_version": "1", "inputs": [{"path": "../outside"}]}), encoding="utf-8"
+    )
+    assert not profile.evaluate("claimed", workspace).passed
+
+
+def test_evaluation_report_rule_rejects_prose_and_invalid_validity(tmp_path: Path) -> None:
+    workspace = tmp_path / "attempt"
+    (workspace / "evaluate").mkdir(parents=True)
+    evaluator = acceptance_evaluator({"evaluation_report_valid": "evaluate/evaluation.json"})
+    assert evaluator is not None
+    (workspace / "evaluate" / "evaluation.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "evaluator_id": "fixture",
+                "validity": 1,
+                "quality": 0.8,
+                "combined_score": 3.0,
+                "detailed_scores": {"distance": {"value": 3.0, "direction": "minimize"}},
+                "error_info": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert evaluator.evaluate("not a report", workspace).passed
+
+    (workspace / "evaluate" / "evaluation.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "evaluator_id": "fixture",
+                "validity": 0,
+                "quality": 0,
+                "combined_score": 2,
+                "detailed_scores": {},
+                "error_info": [{"code": "bad", "message": "constraint failed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    invalid = evaluator.evaluate("claimed", workspace)
+    assert not invalid.passed
+    assert "combined_score" in invalid.reason
+
+
 def test_any_keeps_evidence_for_every_alternative(tmp_path: Path) -> None:
     workspace = tmp_path / "attempt"
     workspace.mkdir()

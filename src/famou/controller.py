@@ -69,6 +69,9 @@ class LocalController:
             "json_parse",
             "json_has_keys",
             "output_valid",
+            "artifact_valid",
+            "data_profile_valid",
+            "evaluation_report_valid",
             "all",
             "any",
         }
@@ -545,6 +548,24 @@ class LocalController:
         output_artifacts = self._latest_artifacts_by_path(
             [item for item in artifacts if item["kind"] == "output"]
         )
+        role_artifacts = [item for item in artifacts if item["kind"] == "role_evidence"]
+        role_requirements: list[str] = []
+        for task in tasks:
+            for rule, relative in self._role_evidence_specs(task.acceptance):
+                result_path = str(task.result_path) if task.result_path is not None else ""
+                attempt_prefix = result_path.rsplit("/", 1)[0] + "/" if "/" in result_path else ""
+                present = any(
+                    item.get("task_id") == task.id
+                    and item.get("path", "").endswith(f"/{relative}")
+                    and (not attempt_prefix or item.get("path", "").startswith(attempt_prefix))
+                    for item in role_artifacts
+                )
+                if not present:
+                    role_requirements.append(f"{task.plan_task_id or task.id}/{relative}")
+        if role_requirements:
+            raise ValueError(
+                "run is missing verified role evidence: " + ", ".join(role_requirements[:16])
+            )
         contract = self._algorithm_contract(run)
         if contract is not None and contract.outputs:
             missing = [
@@ -556,7 +577,11 @@ class LocalController:
                 raise ValueError(
                     "run is missing verified algorithm outputs: " + ", ".join(missing[:16])
                 )
-        usable = [*output_artifacts.values(), *[item for item in artifacts if item["kind"] in {"result", "runtime"}]]
+        usable = [
+            *output_artifacts.values(),
+            *role_artifacts,
+            *[item for item in artifacts if item["kind"] in {"result", "runtime"}],
+        ]
         if not passed or not usable:
             raise ValueError("run has no fully verified artifacts to deliver")
         evidence = tuple(item["path"] for item in usable[:16])
@@ -1015,6 +1040,7 @@ class LocalController:
             for relative_path in result.artifacts:
                 runtime_path = self._runtime_artifact_path(task_root, relative_path)
                 artifacts.record(runtime_path, task.id, kind="runtime")
+            self._record_role_evidence(run, task, task_root)
             self._check_budget(run.id, budget, started)
             result_payload = {
                 "attempt_id": attempt.id,
@@ -1253,6 +1279,7 @@ class LocalController:
                 for relative_path in result.artifacts:
                     runtime_path = self._runtime_artifact_path(task_root, relative_path)
                     artifacts.record(runtime_path, task.id, kind="runtime")
+                self._record_role_evidence(run, task, task_root)
                 self._check_budget(run.id, budget, started)
                 evaluation = self._evaluate(run, task, result.text, task_root)
                 evaluation_payload = {
@@ -1460,6 +1487,61 @@ class LocalController:
         contract = self._algorithm_contract(run)
         return contract.outputs if contract is not None else ()
 
+    @staticmethod
+    def _role_evidence_specs(value: object) -> tuple[tuple[str, str], ...]:
+        """Extract explicitly declared role-evidence paths from a task acceptance contract."""
+        found: list[tuple[str, str]] = []
+
+        def visit(item: object) -> None:
+            if isinstance(item, str):
+                try:
+                    item = json.loads(item)
+                except (TypeError, json.JSONDecodeError):
+                    return
+            if isinstance(item, dict):
+                if len(item) == 1:
+                    rule, payload = next(iter(item.items()))
+                    if rule in {"artifact_valid", "data_profile_valid", "evaluation_report_valid"}:
+                        path = payload.get("path") if isinstance(payload, dict) else payload
+                        if isinstance(path, str):
+                            pair = (rule, path)
+                            if pair not in found:
+                                found.append(pair)
+                for child in item.values():
+                    visit(child)
+            elif isinstance(item, list):
+                for child in item:
+                    visit(child)
+
+        visit(value)
+        return tuple(found[:16])
+
+    def _record_role_evidence(self, run: Run, task: Any, task_root: Path) -> tuple[dict[str, Any], ...]:
+        """Hash present role hand-off files, including invalid files for retry/audit evidence."""
+        specs = self._role_evidence_specs(task.acceptance)
+        if not specs:
+            return ()
+        root = Path(run.workspace).expanduser().resolve(strict=False)
+        artifacts = ArtifactStore(root, self.store, run.id)
+        recorded: list[dict[str, Any]] = []
+        for rule, relative in specs:
+            source = self._confined_regular_file(task_root, relative)
+            if source is None:
+                continue
+            size = source.stat().st_size
+            if size > MAX_ARTIFACT_BYTES:
+                raise ArtifactError(f"role evidence exceeds {MAX_ARTIFACT_BYTES} bytes: {relative}")
+            artifact_id = artifacts.record(source, task.id, kind="role_evidence")
+            recorded.append({"artifact_id": artifact_id, "rule": rule, "path": str(source.relative_to(root)), "size": size})
+        if recorded:
+            self.store.append_event(
+                run.id,
+                "role_evidence_recorded",
+                {"artifacts": recorded},
+                task_id=task.id,
+            )
+        return tuple(recorded)
+
     def _materialize_task_input_data(self, run: Run, task_root: Path) -> tuple[str, ...]:
         """Copy hashed run inputs into a private attempt workspace.
 
@@ -1616,6 +1698,11 @@ class LocalController:
     @staticmethod
     def _acceptance_output_specs(value: object) -> dict[str, tuple[str, tuple[str, ...]]]:
         specs: dict[str, tuple[str, tuple[str, ...]]] = {}
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (TypeError, json.JSONDecodeError):
+                return specs
         if isinstance(value, dict):
             if set(value) == {"output_valid"} and isinstance(value["output_valid"], dict):
                 payload = value["output_valid"]

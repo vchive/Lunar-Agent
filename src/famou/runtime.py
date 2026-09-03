@@ -71,6 +71,62 @@ class MockRuntime:
         del timeout
         workspace.mkdir(parents=True, exist_ok=True)
         excerpt = " ".join(prompt.strip().split())[:240]
+        # Keep the repository-owned smoke runtime useful for the strict specialist role DAG.
+        # These fixtures are emitted only when the task prompt explicitly declares the role path;
+        # ordinary generic runs remain text-only and therefore exercise the legacy contract.
+        if "data/processed/data-profile.json" in prompt:
+            profile = workspace / "data" / "processed" / "data-profile.json"
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "inputs": [
+                            {
+                                "path": "data/raw/input.json",
+                                "format": "json",
+                                "row_count": 0,
+                                "columns": [],
+                                "issues": ["mock runtime did not receive a staged input file"],
+                            }
+                        ],
+                        "notes": "deterministic repository mock profile",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        if "solve/problem-formulation.md" in prompt:
+            formulation = workspace / "solve" / "problem-formulation.md"
+            formulation.parent.mkdir(parents=True, exist_ok=True)
+            formulation.write_text(
+                "# Mock formulation\n\nThe validated contract remains authoritative.\n",
+                encoding="utf-8",
+            )
+        if "evaluate/evaluation.json" in prompt:
+            report = workspace / "evaluate" / "evaluation.json"
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "evaluator_id": "repository-mock",
+                        "validity": 1,
+                        "quality": 1.0,
+                        "combined_score": 1.0,
+                        "detailed_scores": {},
+                        "error_info": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        if "evaluate/review.md" in prompt:
+            review = workspace / "evaluate" / "review.md"
+            review.parent.mkdir(parents=True, exist_ok=True)
+            review.write_text(
+                "# Mock review\n\nEvidence is bounded and locally verified.\n",
+                encoding="utf-8",
+            )
         return RuntimeResult(
             text=f"Mock runtime completed the task: {excerpt}",
             metadata={"provider": "repository-mock"},

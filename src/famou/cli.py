@@ -708,6 +708,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
     )
     artifacts = store.list_artifacts(run.id)
     algorithm_outputs = [item for item in artifacts if item["kind"] == "output"]
+    role_evidence = [item for item in artifacts if item["kind"] == "role_evidence"]
     return {
         "run": {
             "id": run.id,
@@ -760,6 +761,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         # Keep structured data discoverable without requiring callers to filter the complete
         # audit ledger.  The rows remain the same hashed, run-relative artifact metadata.
         "algorithm_outputs": algorithm_outputs,
+        "role_evidence": role_evidence,
         "input_request": store.pending_input(run.id),
         "recovery": latest_recovery,
         "plan": current_plan.to_dict() if current_plan else None,
