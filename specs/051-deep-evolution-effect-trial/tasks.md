@@ -19,4 +19,4 @@
 
 - [x] T051-10 Add deep-trial quickstart and architecture/report vocabulary.
 - [x] T051-11 Run focused/full tests, lint, compileall, Specify checks, and diff review.
-- [ ] T051-12 Mark implemented, commit, and push as `vchive` on `main`.
+- [x] T051-12 Mark implemented, commit, and push as `vchive` on `main`.
