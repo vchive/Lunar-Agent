@@ -393,25 +393,39 @@ def run_subject_adapter(
     timeout: float | None = None,
     model_runtime: object | None = None,
 ) -> dict[str, object]:
-    """Run one fresh Lunar Agent session for a Feature 048 subject request."""
+    """Run one fresh Lunar Agent session for a normal or deep subject request.
+
+    Deep requests intentionally execute one outer round at a time.  The caller owns the shared
+    attempt workspace and supplies the bounded previous-round evaluator summary; this adapter still
+    starts a fresh, stateless Agent session and never discovers machine-wide Agent state.
+    """
     request_file = Path(request_path).expanduser()
-    request = _strict_object(
-        _read_json(request_file, "subject request"),
-        {
-            "schema_version",
-            "mode",
-            "benchmark",
-            "case",
-            "run_index",
-            "requested_model",
-            "entrypoint",
-            "public_files",
-            "receipt_path",
-        },
-        "subject request",
-    )
-    if request["schema_version"] != "1" or request["mode"] != "normal":
-        raise EffectAdapterError("subject request must describe schema v1 normal mode")
+    raw_request = _read_json(request_file, "subject request")
+    mode = raw_request.get("mode") if isinstance(raw_request, dict) else None
+    normal_fields = {
+        "schema_version",
+        "mode",
+        "benchmark",
+        "case",
+        "run_index",
+        "requested_model",
+        "entrypoint",
+        "public_files",
+        "receipt_path",
+    }
+    deep_fields = normal_fields | {
+        "round_index",
+        "outer_rounds",
+        "previous_evaluation",
+    }
+    if mode == "normal":
+        request = _strict_object(raw_request, normal_fields, "subject request")
+    elif mode == "deep_evolution":
+        request = _strict_object(raw_request, deep_fields, "deep subject request")
+    else:
+        raise EffectAdapterError("subject request must describe schema v1 normal or deep_evolution mode")
+    if request["schema_version"] != "1":
+        raise EffectAdapterError("subject request must use schema version 1")
     BenchmarkIdentity.from_dict(request["benchmark"])
     case = _strict_object(request["case"], {"key", "revision_id", "digest"}, "subject case")
     for key, value in case.items():
@@ -420,6 +434,30 @@ def run_subject_adapter(
     requested_model = _bounded_text(request["requested_model"], "subject requested model")
     entrypoint = _relative_path(request["entrypoint"], "subject entrypoint")
     receipt_relative = _relative_path(request["receipt_path"], "subject receipt path")
+    round_index: int | None = None
+    outer_rounds: int | None = None
+    if mode == "deep_evolution":
+        round_index = _integer(request["round_index"], "subject round index", minimum=1, maximum=1000)
+        outer_rounds = _integer(request["outer_rounds"], "subject outer rounds", minimum=1, maximum=1000)
+        if round_index > outer_rounds:
+            raise EffectAdapterError("subject round index exceeds outer rounds")
+        previous = request["previous_evaluation"]
+        if previous is not None:
+            previous_item = _strict_object(
+                previous,
+                {"round_index", "validity_score", "overall_score", "quality_score"},
+                "previous evaluation",
+            )
+            previous_round = _integer(
+                previous_item["round_index"], "previous evaluation round", minimum=1, maximum=1000
+            )
+            if previous_round != round_index - 1:
+                raise EffectAdapterError("previous evaluation round does not precede subject round")
+            _finite(previous_item["validity_score"], "previous validity score", nullable=True)
+            _finite(previous_item["overall_score"], "previous overall score", nullable=True)
+            _finite(previous_item["quality_score"], "previous quality score", nullable=True)
+        elif round_index != 1:
+            raise EffectAdapterError("deep subject continuation requires previous evaluation")
     if not isinstance(request["public_files"], list) or not request["public_files"]:
         raise EffectAdapterError("subject public file ledger must be a non-empty array")
     descriptors = tuple(PublicFile.from_dict(item) for item in request["public_files"])
@@ -471,13 +509,38 @@ def run_subject_adapter(
         },
     )
     agent = AgentLoopRuntime(runtime, tools=tools, max_steps=max_steps)
-    prompt = f"""You are the normal-mode subject under an external Famou-Bench evaluation.
+    if mode == "normal":
+        prompt = f"""You are the normal-mode subject under an external Famou-Bench evaluation.
 
 Solve the public task below and create the requested concrete data/solution files inside this
 attempt workspace. Inspect `case/` as needed. Use `_agent_summary.md` to identify your final answer
 file for the independent extractor. Do not score, evaluate, or claim a benchmark result yourself;
 a separate private harness does that after you finish. Do not modify `request.json` or public files.
 
+Public entrypoint: case/{entrypoint}
+Case key: {case['key']}
+
+--- public instruction ---
+{instruction}
+--- end instruction ---
+"""
+    else:
+        previous = request["previous_evaluation"]
+        feedback = "No previous round exists; establish a correct baseline candidate."
+        if isinstance(previous, dict):
+            feedback = (
+                "Previous evaluator summary (use only to improve the candidate): "
+                f"round={previous['round_index']}, validity={previous['validity_score']}, "
+                f"overall={previous['overall_score']}, quality={previous['quality_score']}"
+            )
+        prompt = f"""You are the deep-evolution subject in outer round {round_index}/{outer_rounds}.
+
+Start a fresh bounded Agent session, but continue from the candidate artifacts already present in
+this attempt workspace. Improve the concrete solution for the public task and preserve any valid
+work while fixing weaknesses. The independent private harness will score this round after you
+finish; never write a score or claim benchmark results. Do not modify request.json or public files.
+
+{feedback}
 Public entrypoint: case/{entrypoint}
 Case key: {case['key']}
 
@@ -500,7 +563,7 @@ Case key: {case['key']}
         model_evidence = "runtime_observed"
     receipt: dict[str, object] = {
         "schema_version": "1",
-        "mode": "normal",
+        "mode": mode,
         "status": "completed",
         "requested_model": requested_model,
         "effective_model": effective_model,
@@ -508,6 +571,8 @@ Case key: {case['key']}
         "interaction_turns": turns,
         "usage": _model_usage(result.metadata),
     }
+    if mode == "deep_evolution":
+        receipt.update({"round_index": round_index, "outer_rounds": outer_rounds})
     _atomic_json(receipt_path, receipt, overwrite=False)
     return receipt
 

@@ -34,6 +34,7 @@ from .budget import BudgetSpec
 from .config import Config
 from .controller import LocalController
 from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
+from .deep_effect_trial import DeepEffectTrialConfig, DeepEffectTrialRunner
 from .effect_adapters import (
     EffectAdapterError,
     convert_fm_eval_baseline,
@@ -481,6 +482,48 @@ def build_parser() -> argparse.ArgumentParser:
     effect_parser.add_argument("--resume", action="store_true", help="resume the frozen trial")
     _add_json(effect_parser)
 
+    deep_effect_parser = subparsers.add_parser(
+        "effect-deep-trial",
+        help="run a bounded five-round deep-evolution trial against exported Famou-Bench history",
+    )
+    deep_effect_parser.add_argument("suite", type=Path, help="frozen one/two-case suite JSON")
+    deep_effect_parser.add_argument("baseline", type=Path, help="FM-Eval per-run baseline export JSON")
+    deep_effect_parser.add_argument(
+        "--case-source",
+        action="append",
+        default=[],
+        metavar="KEY=PATH",
+        help="map one selected case key to its local public source root; repeat per case",
+    )
+    deep_effect_parser.add_argument("--subject-command", required=True, help="explicit deep subject command")
+    deep_effect_parser.add_argument("--harness-command", required=True, help="explicit exact-harness command")
+    deep_effect_parser.add_argument("--requested-model", required=True, help="requested model identity")
+    deep_effect_parser.add_argument("--runs-per-case", type=int, default=2)
+    deep_effect_parser.add_argument(
+        "--outer-rounds",
+        type=int,
+        default=5,
+        help="outer evolution rounds (default: 5, matching WebAgent no-argument /evolve)",
+    )
+    deep_effect_parser.add_argument("--timeout", type=float, default=3600.0)
+    deep_effect_parser.add_argument("--workspace", type=Path, required=True, help="trial workspace")
+    deep_effect_parser.add_argument(
+        "--subject-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="pass one explicitly named existing environment variable to the subject",
+    )
+    deep_effect_parser.add_argument(
+        "--harness-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="pass one explicitly named existing environment variable to the harness",
+    )
+    deep_effect_parser.add_argument("--resume", action="store_true", help="resume the deep trial")
+    _add_json(deep_effect_parser)
+
     kit_parser = subparsers.add_parser(
         "effect-kit", help="build a content-addressed public Famou-Bench trial kit"
     )
@@ -504,7 +547,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json(kit_parser)
 
     subject_parser = subparsers.add_parser(
-        "effect-subject", help="run Lunar as a fresh normal Famou-Bench subject"
+        "effect-subject", help="run Lunar as a fresh normal or deep-evolution Famou-Bench subject"
     )
     subject_parser.add_argument("request", type=Path, help="generated subject request JSON")
     subject_parser.add_argument("--endpoint", help="OpenAI-compatible chat endpoint URL")
@@ -2770,6 +2813,27 @@ def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
     ).run().to_dict()
 
 
+def _effect_deep_trial(args: argparse.Namespace) -> dict[str, object]:
+    base = EffectTrialConfig(
+        runs_per_case=args.runs_per_case,
+        timeout_seconds=args.timeout,
+        requested_model=args.requested_model,
+        subject_command=_parse_command(args.subject_command, "--subject-command"),
+        harness_command=_parse_command(args.harness_command, "--harness-command"),
+        subject_environment=_effect_environment(args.subject_env, "subject"),
+        harness_environment=_effect_environment(args.harness_env, "harness"),
+    )
+    config = DeepEffectTrialConfig(base=base, outer_rounds=args.outer_rounds)
+    return DeepEffectTrialRunner(
+        args.suite,
+        args.baseline,
+        args.workspace,
+        case_sources=_effect_mapping(args.case_source, "--case-source"),
+        config=config,
+        resume=args.resume,
+    ).run().to_dict()
+
+
 def _effect_kit(args: argparse.Namespace) -> dict[str, object]:
     return build_effect_kit(
         args.output,
@@ -3188,6 +3252,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "effect-trial":
             payload = _effect_trial(args)
+            _emit(payload, args.json)
+            return 0
+        if args.command == "effect-deep-trial":
+            payload = _effect_deep_trial(args)
             _emit(payload, args.json)
             return 0
         if args.command == "effect-kit":

@@ -223,6 +223,29 @@ imports a validated result into Lunar-Agent's canonical archive. The existing `-
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
 
+### Frozen effect protocols
+
+The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be
+mistaken for outer evolution generations:
+
+```text
+effect-trial (normal)             effect-deep-trial (outer loop)
+fresh attempt                     fresh attempt
+  └─ subject once                    ├─ subject round 1 → exact harness
+      └─ exact harness               ├─ subject round 2 → exact harness
+                                     ├─ ...
+                                     └─ subject round 5 → exact harness
+```
+
+`effect-deep-trial` defaults to the five outer rounds used by WebAgent's no-argument `/evolve`
+source behavior. Every subject invocation is a fresh, stateless repository-owned Agent session;
+continuity comes from the attempt files and a bounded previous-round evaluator summary. The private
+extractor/evaluator remains the only score authority and runs after each round. A run's score is the
+maximum valid round score, while invalid rounds remain in its record. Reports expose per-round best,
+P50/P90, run-level score/validity/quality distributions, and strict deltas against the imported
+normal WebAgent history. The comparison is descriptive and effect-layer comparable, but deliberately
+does not claim WebAgent prompt/role identity, full-suite parity, or statistical superiority.
+
 The `benchmark` command is a thin orchestration layer above this seam. It validates one canonical
 contract, creates isolated `strategies/<name>` workspaces, and runs the selected native strategies
 or the explicit OpenEvolve adapter with one common `EvolutionConfig`. A failure in one strategy is

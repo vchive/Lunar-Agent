@@ -8,7 +8,9 @@ installation. A natural-language answer is only the audit trail; an algorithm mi
 only when its declared output files pass independent checks and are delivered as hashed artifacts.
 
 The project is being developed with Spec-Driven Development (SDD). The current executable
-effect-measurement boundary is captured in
+deep-evolution effect-measurement boundary is captured in
+[`specs/051-deep-evolution-effect-trial/`](specs/051-deep-evolution-effect-trial/); its normal
+single-session predecessor remains in
 [`specs/050-content-addressed-effect-kit/`](specs/050-content-addressed-effect-kit/). It compiles
 one or two local Famou cases into a deterministic public-only trial kit and records owner-confirmed
 cross-release content equivalence without pretending it is an official publication identity. This
@@ -303,6 +305,28 @@ model/extractor credentials. Lunar does not download historical publications or 
 FM-Eval; those remain explicit owner-controlled local inputs. A content-equivalence attestation is
 reported as `descriptive_owner_attested_content_equivalent`, never as cryptographic proof of an
 identical official publication or as a statistically powered superiority conclusion.
+
+To measure the outer evolution effect separately, use the deep protocol. It defaults to five outer
+rounds, matching the checked-in WebAgent `/evolve` source default when no numeric argument is given:
+
+```bash
+lunar-agent effect-deep-trial .lunar/famou-kit/suite.json baseline.json \
+  --case-source supply_chain_inventory=.lunar/famou-kit/cases/supply_chain_inventory \
+  --subject-command "/absolute/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
+  --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
+  --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case" \
+  --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL \
+  --requested-model gpt-5.6-sol --runs-per-case 2 \
+  --workspace .lunar/deep-effect-trial-001 --json
+```
+
+Each logical run keeps one attempt workspace but starts a fresh subject process for every round.
+The next round receives only the previous round's bounded validity/quality/score summary; the
+baseline rows and private harness remain outside the subject boundary. The exact harness runs after
+every round, and the report records the best round, P50/P90 score and quality distributions, and a
+round-best curve. This is an effect-layer comparison, not WebAgent prompt identity, full-suite
+parity, or a statistically powered superiority result. Use `--resume` with the same options after
+an interruption. The `effect-trial` command remains the normal-mode baseline and is unchanged.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

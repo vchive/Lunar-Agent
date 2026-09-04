@@ -42,6 +42,7 @@ from .data_profile import (
     canonical_profile_json,
     profile_sha256,
 )
+from .deep_effect_trial import DeepEffectTrialConfig, DeepEffectTrialRunner
 from .effect_adapters import (
     EffectAdapterError,
     convert_fm_eval_baseline,
@@ -131,6 +132,8 @@ __all__ = [
     "ContractCompilationError",
     "ContractCompiler",
     "DataProfileError",
+    "DeepEffectTrialConfig",
+    "DeepEffectTrialRunner",
     "EffectAdapterError",
     "EffectKitError",
     "EffectTrialConfig",
