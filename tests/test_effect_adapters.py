@@ -86,6 +86,10 @@ def _make_case(tmp_path: Path) -> tuple[Path, Path]:
     )
     (public / "data" / "instance.json").write_text('{"target":42}', encoding="utf-8")
     (private / "data" / "instance.json").write_text('{"target":42}', encoding="utf-8")
+    (private / "data" / ".DS_Store").write_bytes(b"ignored metadata")
+    (private / "data" / "ignored.pyc").write_bytes(b"ignored cache")
+    (private / "data" / "__pycache__").mkdir()
+    (private / "data" / "__pycache__" / "ignored.pyc").write_bytes(b"ignored cache")
     (private / "instruction.md").write_bytes((public / "instruction.md").read_bytes())
     (private / "tests" / "extractor_agent.py").write_text(
         """import argparse,json,os

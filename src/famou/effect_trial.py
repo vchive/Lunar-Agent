@@ -43,6 +43,8 @@ _LIMITATIONS = (
     "normal_mode_does_not_measure_deep_evolution",
     "process_capability_separation_is_not_an_os_sandbox",
 )
+_ATTESTED_EQUIVALENCE_AUTHORITY = "owner_attested_content_equivalent"
+_ATTESTED_EQUIVALENCE_LIMITATION = "historical_publication_equivalence_is_owner_attested"
 
 
 class EffectTrialError(ValueError):
@@ -1080,6 +1082,12 @@ class EffectTrialRunner:
         provider_observed = self.baseline.model.evidence == "provider_observed" and bool(subject_evidence) and all(
             value == "provider_observed" for value in subject_evidence
         )
+        attested_equivalence = (
+            self.baseline.authority == _ATTESTED_EQUIVALENCE_AUTHORITY
+        )
+        limitations = list(_LIMITATIONS)
+        if attested_equivalence:
+            limitations.append(_ATTESTED_EQUIVALENCE_LIMITATION)
         report_payload = {
             "schema_version": "1", "protocol": "famou-bench-breakthrough-v1", "mode": "normal",
             "suite_sha256": self.suite_sha256, "baseline_sha256": self.baseline_sha256,
@@ -1094,11 +1102,15 @@ class EffectTrialRunner:
             "config": self.config.safe_dict(), "cases": case_reports,
             "milestone": {"achieved": bool(achieved), "case_keys": achieved},
             "comparability": {
-                "kind": "descriptive_same_frozen_harness",
+                "kind": (
+                    "descriptive_owner_attested_content_equivalent"
+                    if attested_equivalence
+                    else "descriptive_same_frozen_harness"
+                ),
                 "model_identity_evidence": "provider_observed" if provider_observed else "not_provider_observed",
                 "formal_conclusion_eligibility": "ineligible",
                 "baseline_conclusion_eligibility": self.baseline.conclusion_eligibility,
-                "limitations": list(_LIMITATIONS),
+                "limitations": limitations,
             },
         }
         _atomic_json(self.workspace / "report.json", report_payload, MAX_MANIFEST_BYTES)

@@ -40,6 +40,7 @@ from .effect_adapters import (
     run_harness_adapter,
     run_subject_adapter,
 )
+from .effect_kit import EffectKitError, build_effect_kit
 from .effect_trial import EffectTrialConfig, EffectTrialError, EffectTrialRunner
 from .evaluator_bundle import SolverScoringContract, compile_evaluator_bundle
 from .evolution import (
@@ -480,6 +481,28 @@ def build_parser() -> argparse.ArgumentParser:
     effect_parser.add_argument("--resume", action="store_true", help="resume the frozen trial")
     _add_json(effect_parser)
 
+    kit_parser = subparsers.add_parser(
+        "effect-kit", help="build a content-addressed public Famou-Bench trial kit"
+    )
+    kit_parser.add_argument("output", type=Path, help="new local kit directory")
+    kit_parser.add_argument(
+        "--case",
+        action="append",
+        default=[],
+        required=True,
+        metavar="KEY=PATH",
+        help="map a selected key to an absolute private case root; repeat for at most two cases",
+    )
+    kit_parser.add_argument("--benchmark-name", default="famou-bench")
+    kit_parser.add_argument("--profile-name", default="famou-agentco-default")
+    kit_parser.add_argument("--profile-revision", type=int, default=1)
+    kit_parser.add_argument(
+        "--owner-attested-content-equivalence",
+        action="store_true",
+        help="record that the owner established cross-release selected-case content equivalence",
+    )
+    _add_json(kit_parser)
+
     subject_parser = subparsers.add_parser(
         "effect-subject", help="run Lunar as a fresh normal Famou-Bench subject"
     )
@@ -529,6 +552,11 @@ def build_parser() -> argparse.ArgumentParser:
     baseline_parser.add_argument("--authority", default="descriptive")
     baseline_parser.add_argument(
         "--conclusion-eligibility", choices=("eligible", "ineligible"), default="ineligible"
+    )
+    baseline_parser.add_argument(
+        "--owner-attested-content-equivalence",
+        action="store_true",
+        help="label historical/local content equivalence as owner-attested and formally ineligible",
     )
     _add_json(baseline_parser)
 
@@ -2742,6 +2770,17 @@ def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
     ).run().to_dict()
 
 
+def _effect_kit(args: argparse.Namespace) -> dict[str, object]:
+    return build_effect_kit(
+        args.output,
+        _effect_mapping(args.case, "--case"),
+        benchmark_name=args.benchmark_name,
+        evaluation_profile_name=args.profile_name,
+        evaluation_profile_revision=args.profile_revision,
+        owner_attested_content_equivalence=args.owner_attested_content_equivalence,
+    )
+
+
 def _effect_subject(args: argparse.Namespace) -> dict[str, object]:
     return run_subject_adapter(
         args.request,
@@ -2775,6 +2814,7 @@ def _effect_baseline(args: argparse.Namespace) -> dict[str, object]:
         model_evidence=args.model_evidence,
         authority=args.authority,
         conclusion_eligibility=args.conclusion_eligibility,
+        content_equivalence_attested=args.owner_attested_content_equivalence,
     )
 
 
@@ -3150,6 +3190,9 @@ def main(argv: list[str] | None = None) -> int:
             payload = _effect_trial(args)
             _emit(payload, args.json)
             return 0
+        if args.command == "effect-kit":
+            _emit(_effect_kit(args), args.json)
+            return 0
         if args.command == "effect-subject":
             _emit(_effect_subject(args), args.json)
             return 0
@@ -3355,6 +3398,7 @@ def main(argv: list[str] | None = None) -> int:
         EvolutionError,
         EffectTrialError,
         EffectAdapterError,
+        EffectKitError,
     ) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
         return 2

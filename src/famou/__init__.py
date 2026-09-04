@@ -49,6 +49,7 @@ from .effect_adapters import (
     run_harness_adapter,
     run_subject_adapter,
 )
+from .effect_kit import EffectKitError, build_effect_kit
 from .effect_trial import (
     EffectTrialConfig,
     EffectTrialError,
@@ -131,6 +132,7 @@ __all__ = [
     "ContractCompiler",
     "DataProfileError",
     "EffectAdapterError",
+    "EffectKitError",
     "EffectTrialConfig",
     "EffectTrialError",
     "EffectTrialReport",
@@ -157,6 +159,7 @@ __all__ = [
     "TrialSuite",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
+    "build_effect_kit",
     "build_private_input_profile",
     "build_strategy",
     "canonical_profile_json",

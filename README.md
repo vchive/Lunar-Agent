@@ -9,11 +9,14 @@ only when its declared output files pass independent checks and are delivered as
 
 The project is being developed with Spec-Driven Development (SDD). The current executable
 effect-measurement boundary is captured in
-[`specs/049-famou-bench-adapters/`](specs/049-famou-bench-adapters/). It provides a fresh built-in
-Lunar subject, exact private extractor/evaluator harness adapter, and offline FM-Eval per-run
-results converter for the strict protocol in
+[`specs/050-content-addressed-effect-kit/`](specs/050-content-addressed-effect-kit/). It compiles
+one or two local Famou cases into a deterministic public-only trial kit and records owner-confirmed
+cross-release content equivalence without pretending it is an official publication identity. This
+builds on the fresh Lunar subject, exact private extractor/evaluator harness adapter, and offline
+FM-Eval per-run results converter in
+[`specs/049-famou-bench-adapters/`](specs/049-famou-bench-adapters/) and the strict protocol in
 [`specs/048-famou-bench-breakthrough/`](specs/048-famou-bench-breakthrough/). That protocol adds a bounded,
-recoverable one/two-case normal-Agent trial against exported `famou-bench 1.10.6` per-run history.
+recoverable one/two-case normal-Agent trial against exported Famou-Bench per-run history.
 It deliberately does not call an evolution strategy or claim 20-case parity. This builds on the
 quality-diverse native population in
 [`specs/047-quality-diversity-population/`](specs/047-quality-diversity-population/) and the
@@ -241,23 +244,38 @@ a deep-evolution experiment. Its model/tool interactions are turns inside one so
 WebAgent deep evolution is activated separately by `/evolve`; the checked-in source defaults to
 five outer iterations when no numeric budget is supplied.
 
-For an affordable first effect milestone, export one or two exact cases and save the matching
-FM-Eval experiment-results response. Convert those per-run results offline; immutable suite
-identity still comes from the separately exported publication/CaseRevision manifest:
+For an affordable first effect milestone, build a deterministic public-only kit from one or two
+local private case trees. When the owner has established that the selected historical and current
+case contents are equivalent despite release-label changes, record that explicitly:
 
 ```bash
-lunar-agent effect-baseline results.json suite.json baseline.json \
+lunar-agent effect-kit .lunar/famou-kit \
+  --case supply_chain_inventory=/absolute/famou-bench/03_assignment/supply_chain_inventory \
+  --owner-attested-content-equivalence --json
+```
+
+The generated `suite.json` derives its local publication, profile, CaseRevision, public ledger, and
+harness identities from bytes. The generated `cases/<key>/` tree contains only `instruction.md`
+and direct `data/*` inputs. No private source path, evaluator, extractor, ground truth, release
+number, or raw data value is copied into the JSON provenance.
+
+Save the matching FM-Eval experiment-results response and convert those per-run results offline.
+The attestation flag labels this comparison as owner-attested and forces formal ineligibility:
+
+```bash
+lunar-agent effect-baseline results.json .lunar/famou-kit/suite.json baseline.json \
   --experiment-id fmexp-... \
   --requested-model gpt-5.6-sol \
   --effective-model openai/gpt-5.6-sol \
-  --model-evidence not_observable --json
+  --model-evidence not_observable \
+  --owner-attested-content-equivalence --json
 ```
 
 Then run Lunar repeatedly in normal mode using the built-in adapters:
 
 ```bash
-lunar-agent effect-trial suite.json baseline.json \
-  --case-source logistics_vehicle_dispatch_scheduling=/absolute/case/root \
+lunar-agent effect-trial .lunar/famou-kit/suite.json baseline.json \
+  --case-source supply_chain_inventory=.lunar/famou-kit/cases/supply_chain_inventory \
   --subject-command "/absolute/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
   --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
   --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL" \
@@ -281,8 +299,10 @@ before writing a successful report. The built-in subject is a fresh attempt-loca
 no memory or transcript reuse. The harness recomputes FM-Eval's canonical CaseRevision content
 digest, matches its public projection, hashes `tests/extractor_agent.py` and
 `tests/evaluator.py`, runs each stage once, and starts the evaluator without inherited
-model/extractor credentials. Lunar does not download the historical `1.10.6` publication or
-authenticate to FM-Eval; those remain explicit owner-controlled local inputs.
+model/extractor credentials. Lunar does not download historical publications or authenticate to
+FM-Eval; those remain explicit owner-controlled local inputs. A content-equivalence attestation is
+reported as `descriptive_owner_attested_content_equivalent`, never as cryptographic proof of an
+identical official publication or as a statistically powered superiority conclusion.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

@@ -38,6 +38,8 @@ MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_PROCESS_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_ROWS = 10_000
 MAX_TIMEOUT_SECONDS = 86_400.0
+_LFS_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+_LFS_MAX_SIZE = 4096
 _BASE_ENVIRONMENT = {
     "PATH": os.defpath,
     "LANG": "C.UTF-8",
@@ -272,7 +274,17 @@ def famou_case_content_digest(case_root: str | Path) -> str:
         executable = bool(info.st_mode & 0o111)
         if executable and not relative.startswith(("tests/", "environment/")):
             raise EffectAdapterError("private case has an executable non-script file")
+        if relative.startswith("data/"):
+            basename = path.name
+            if (
+                basename.startswith("-")
+                or len(basename.encode("utf-8")) > 255
+                or any(not character.isprintable() for character in basename)
+            ):
+                raise EffectAdapterError(f"private case has an unsafe data filename: {relative}")
         content = path.read_bytes()
+        if len(content) <= _LFS_MAX_SIZE and content.startswith(_LFS_PREFIX):
+            raise EffectAdapterError(f"private case contains an unmaterialized Git LFS file: {relative}")
         rows.append(
             {
                 "ordinal": ordinal,
@@ -312,6 +324,8 @@ def _verify_candidate_public_projection(candidate: Path, case_root: Path) -> Non
     expected["instruction.md"] = _sha256(instruction)
     data_root = case_root / "data"
     for source in sorted(data_root.iterdir(), key=lambda value: value.name.encode("utf-8")):
+        if source.name in {".DS_Store", "__pycache__"} or source.name.endswith(".pyc"):
+            continue
         if source.is_symlink() or not source.is_file():
             raise EffectAdapterError("private case data must contain only regular files")
         expected[f"data/{source.name}"] = _sha256(source)
@@ -815,11 +829,21 @@ def convert_fm_eval_baseline(
     model_evidence: str,
     authority: str = "descriptive",
     conclusion_eligibility: str = "ineligible",
+    content_equivalence_attested: bool = False,
 ) -> dict[str, object]:
     """Convert an authorized local FM-Eval results response to a Feature 048 baseline."""
     results_payload = _read_json(results_path, "FM-Eval results export")
     suite = TrialSuite.from_dict(_read_json(suite_path, "frozen suite"))
     experiment_id = _bounded_text(experiment_id, "experiment id")
+    if not isinstance(content_equivalence_attested, bool):
+        raise EffectAdapterError("content-equivalence attestation must be boolean")
+    if content_equivalence_attested:
+        if authority != "descriptive" or conclusion_eligibility != "ineligible":
+            raise EffectAdapterError(
+                "content-equivalence attestation conflicts with authority or eligibility"
+            )
+        authority = "owner_attested_content_equivalent"
+        conclusion_eligibility = "ineligible"
     observed_id = _experiment_identity(results_payload)
     if observed_id is None:
         raise EffectAdapterError("FM-Eval export does not contain an experiment identity")
