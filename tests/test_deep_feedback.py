@@ -93,6 +93,25 @@ def test_candidate_manifest_excludes_control_and_public_files(tmp_path: Path) ->
     assert manifest[0]["sha256"].startswith("sha256:")
 
 
+def test_candidate_manifest_walks_multiple_nested_directories_once(tmp_path: Path) -> None:
+    for relative, content in (
+        ("solver/main.py", "print('solver')"),
+        ("reports/round-1/summary.json", "{}"),
+        ("reports/round-2/summary.json", "{}"),
+    ):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    manifest = build_candidate_manifest(tmp_path)
+
+    assert [item["path"] for item in manifest] == [
+        "reports/round-1/summary.json",
+        "reports/round-2/summary.json",
+        "solver/main.py",
+    ]
+
+
 def test_feedback_validation_rejects_absolute_or_bad_manifest_paths() -> None:
     feedback = build_round_feedback(
         1,
