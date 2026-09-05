@@ -181,6 +181,20 @@ tests/test_deep_feedback.py
 
 subject receipt 仍然不允许携带分数；分数只能来自 private harness。
 
+### Feature 053：深度试验失败统计
+
+目录：
+
+```text
+specs/053-deep-effect-failure-statistics
+```
+
+深度试验的每个 case 报告现在包含有界 `failure_statistics` 投影：逻辑 run 错误码、round
+反馈类别、已记录/已完成 round 数、超时计数，以及覆盖每个配置 round（含空 round）的固定
+明细。该投影只从已验证的持久记录派生，不创建分数，也不改变 private harness 的评分权威。
+本次还修复了候选物化的极短超时可靠性：候选解释器启动保留 50ms 下限，避免正常候选在
+启动阶段被误判超时；较长预算保持原值。
+
 ## 4. 本地知识库索引
 
 知识库根目录：
@@ -402,7 +416,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/052-deep-evolution-feedback-contract
+specs/053-deep-effect-failure-statistics
 ```
 
 后续新功能必须：

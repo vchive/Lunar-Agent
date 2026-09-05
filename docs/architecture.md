@@ -250,6 +250,11 @@ against the imported normal WebAgent history. The comparison is descriptive and 
 comparable, but deliberately does not claim WebAgent prompt/role identity, full-suite parity, or
 statistical superiority.
 
+Deep reports also expose a bounded `failure_statistics` projection per case. It separates logical
+run error codes from round feedback categories, records completed versus partial rounds, counts
+timeouts, and emits one entry for every configured outer round. The projection is derived from
+validated durable records only; it cannot supply or alter evaluator scores.
+
 The `benchmark` command is a thin orchestration layer above this seam. It validates one canonical
 contract, creates isolated `strategies/<name>` workspaces, and runs the selected native strategies
 or the explicit OpenEvolve adapter with one common `EvolutionConfig`. A failure in one strategy is

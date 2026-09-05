@@ -95,6 +95,77 @@ def _score_fields(round_record: dict[str, Any]) -> bool:
     )
 
 
+def _failure_statistics(records: list[dict[str, Any]], outer_rounds: int) -> dict[str, object]:
+    """Aggregate bounded run/round failure counters for operational diagnostics.
+
+    Counts are derived solely from durable logical records and their validated feedback.  They
+    describe execution health; they do not alter score authority or infer a baseline.
+    """
+
+    _normal._integer(outer_rounds, "failure statistics outer rounds", 1, MAX_OUTER_ROUNDS)
+    run_error_codes: dict[str, int] = {}
+    round_failure_categories: dict[str, int] = {}
+    round_error_codes: dict[str, int] = {}
+    per_round: list[dict[str, object]] = []
+    total_rounds = 0
+    completed_rounds = 0
+    for record in records:
+        code = record.get("error_code")
+        if code:
+            run_error_codes[str(code)] = run_error_codes.get(str(code), 0) + 1
+        for item in record.get("rounds", []):
+            total_rounds += 1
+            if item.get("status") == "completed":
+                completed_rounds += 1
+            feedback = item.get("feedback") or {}
+            category = feedback.get("failure_category")
+            if category:
+                key = str(category)
+                round_failure_categories[key] = round_failure_categories.get(key, 0) + 1
+            round_code = item.get("error_code")
+            if round_code:
+                key = str(round_code)
+                round_error_codes[key] = round_error_codes.get(key, 0) + 1
+    # Sort keys before returning so this projection remains deterministic even if a caller passes
+    # records in a different order. The records themselves are already validated by the runner.
+    run_error_codes = dict(sorted(run_error_codes.items()))
+    round_failure_categories = dict(sorted(round_failure_categories.items()))
+    round_error_codes = dict(sorted(round_error_codes.items()))
+    for round_index in range(1, outer_rounds + 1):
+        items = [
+            item
+            for record in records
+            for item in record.get("rounds", [])
+            if item.get("round_index") == round_index
+        ]
+        categories: dict[str, int] = {}
+        for item in items:
+            category = (item.get("feedback") or {}).get("failure_category")
+            if category:
+                key = str(category)
+                categories[key] = categories.get(key, 0) + 1
+        per_round.append(
+            {
+                "round_index": round_index,
+                "recorded": len(items),
+                "completed": sum(1 for item in items if item.get("status") == "completed"),
+                "failure_categories": dict(sorted(categories.items())),
+            }
+        )
+    return {
+        "runs": len(records),
+        "failed_runs": sum(1 for record in records if record.get("status") == "failed"),
+        "run_error_codes": run_error_codes,
+        "rounds": total_rounds,
+        "completed_rounds": completed_rounds,
+        "round_failure_categories": round_failure_categories,
+        "round_error_codes": round_error_codes,
+        "timeout_count": run_error_codes.get("process_timeout", 0)
+        + round_error_codes.get("process_timeout", 0),
+        "per_round": per_round,
+    }
+
+
 class DeepEffectTrialRunner(EffectTrialRunner):
     """Run a recoverable one/two-case, bounded outer-loop effect trial."""
 
@@ -727,6 +798,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                     "preserve_best_and_probe",
                 )
             },
+            "failure_statistics": _failure_statistics(records, self.deep_config.outer_rounds),
             "round_curve": curve,
             "runs": projected,
         }

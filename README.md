@@ -9,7 +9,11 @@ only when its declared output files pass independent checks and are delivered as
 
 The project is being developed with Spec-Driven Development (SDD). The current executable
 deep-evolution effect-measurement boundary is captured in
-[`specs/051-deep-evolution-effect-trial/`](specs/051-deep-evolution-effect-trial/); its normal
+[`specs/051-deep-evolution-effect-trial/`](specs/051-deep-evolution-effect-trial/), with the
+controlled feedback contract in
+[`specs/052-deep-evolution-feedback-contract/`](specs/052-deep-evolution-feedback-contract/) and
+the diagnostic failure projection in
+[`specs/053-deep-effect-failure-statistics/`](specs/053-deep-effect-failure-statistics/). Its normal
 single-session predecessor remains in
 [`specs/050-content-addressed-effect-kit/`](specs/050-content-addressed-effect-kit/). It compiles
 one or two local Famou cases into a deterministic public-only trial kit and records owner-confirmed
@@ -330,6 +334,11 @@ P50/P90 score and quality distributions, the round-best curve, and safe feedback
 is an effect-layer comparison, not WebAgent prompt identity, full-suite parity, or a statistically
 powered superiority result. Use `--resume` with the same options after an interruption. The
 `effect-trial` command remains the normal-mode baseline and is unchanged.
+
+Each case report also includes bounded `failure_statistics`: failed logical-run error codes,
+round-level feedback categories, recorded/completed round counts, timeout totals, and a fixed
+per-round ledger (including empty rounds). These counters are operational projections of validated
+receipts; they do not create scores or change the private harness's score authority.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

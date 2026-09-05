@@ -17,5 +17,10 @@ contains only the previous round's validity/quality/overall score summary. The i
 scores every round; `report.json` contains `round_curve`, `score_p50`, `score_p90`, `quality_p50`,
 and `quality_p90`. Use `--resume` after an interruption.
 
+The case report also contains `failure_statistics` with run and round error-code counts,
+feedback failure categories, timeout totals, and a deterministic per-round recorded/completed
+ledger. It is diagnostic metadata derived from validated receipts and does not act as a scoring
+source.
+
 This is a descriptive one/two-case effect check. It does not claim WebAgent prompt/role identity,
 full-suite parity, or a statistically powered superiority result.

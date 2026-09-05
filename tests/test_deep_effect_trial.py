@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from famou.deep_effect_trial import DeepEffectTrialConfig, DeepEffectTrialRunner
+from famou.deep_effect_trial import (
+    DeepEffectTrialConfig,
+    DeepEffectTrialRunner,
+    _failure_statistics,
+)
 from famou.effect_adapters import EffectAdapterError, famou_case_content_digest, run_subject_adapter
 from famou.effect_trial import EffectTrialConfig, EffectTrialError
 from famou.runtime import ModelTurn, ToolCall
@@ -250,6 +254,25 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
     assert case["runs"][0]["rounds"][1]["overall_score"] == 0.55
     assert case["runs"][0]["rounds"][0]["feedback"]["directive"] == "refine_best"
     assert case["runs"][0]["rounds"][2]["feedback"]["stagnation"]["consecutive_rounds"] == 1
+    assert case["failure_statistics"] == {
+        "runs": 2,
+        "failed_runs": 0,
+        "run_error_codes": {},
+        "rounds": 10,
+        "completed_rounds": 10,
+        "round_failure_categories": {"none": 10},
+        "round_error_codes": {},
+        "timeout_count": 0,
+        "per_round": [
+            {
+                "round_index": index,
+                "recorded": 2,
+                "completed": 2,
+                "failure_categories": {"none": 2},
+            }
+            for index in range(1, 6)
+        ],
+    }
 
     def no_process(*args, **kwargs):
         raise AssertionError("completed deep trial must not re-invoke a process on resume")
@@ -297,3 +320,53 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
             resume=True,
             process_executor=no_process,
         ).run()
+
+
+def test_failure_statistics_count_run_and_round_failures() -> None:
+    records = [
+        {
+            "status": "failed",
+            "error_code": "process_timeout",
+            "rounds": [],
+        },
+        {
+            "status": "completed",
+            "error_code": None,
+            "rounds": [
+                {
+                    "round_index": 1,
+                    "status": "completed",
+                    "feedback": {"failure_category": "invalid_candidate"},
+                    "error_code": None,
+                },
+                {
+                    "round_index": 2,
+                    "status": "completed",
+                    "feedback": {"failure_category": "none"},
+                    "error_code": None,
+                },
+            ],
+        },
+    ]
+
+    stats = _failure_statistics(records, 3)
+
+    assert stats["runs"] == 2
+    assert stats["failed_runs"] == 1
+    assert stats["run_error_codes"] == {"process_timeout": 1}
+    assert stats["timeout_count"] == 1
+    assert stats["rounds"] == 2
+    assert stats["completed_rounds"] == 2
+    assert stats["round_failure_categories"] == {"invalid_candidate": 1, "none": 1}
+    assert stats["per_round"][0] == {
+        "round_index": 1,
+        "recorded": 1,
+        "completed": 1,
+        "failure_categories": {"invalid_candidate": 1},
+    }
+    assert stats["per_round"][2] == {
+        "round_index": 3,
+        "recorded": 0,
+        "completed": 0,
+        "failure_categories": {},
+    }
