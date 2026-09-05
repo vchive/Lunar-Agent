@@ -11,6 +11,7 @@
 工作区在本次交接开始时干净，`main` 与 `origin/main` 同步。最近提交：
 
 ```text
+f633dde fix: allow candidate interpreter startup before timeout
 edaa4a6 feat: add controlled deep evolution feedback
 22c4e10 chore: close deep trial SDD checklist
 79f1012 feat: add matched deep evolution effect trials
@@ -438,3 +439,12 @@ uv run pytest -q tests/test_deep_feedback.py tests/test_deep_effect_trial.py
 
 接着优先寻找/生成经过授权的 FM-Eval historical results export；在没有真实 baseline 前，
 不要宣称 Lunar 已经打平或超过 WebAgent。
+
+## 10. 本次续接记录（2026-09-05）
+
+已检查本地 FM-Eval 源码、文档、Git refs 及 Famou-Bench 文件，未发现可作为 WebAgent
+historical baseline 的 machine-readable 授权导出。开发 canary 报告、token 账单和 case
+`reference_metrics.json` 均不满足该比较边界，因此真实 2×5 深度试验仍等待导出文件。
+
+同时修复了候选物化的极短超时可靠性：`CommandCandidateRunner` 为进程创建和解释器启动保留
+50ms 下限，避免正常候选在启动阶段被误判超时；较长超时预算保持原值。全套测试与构建检查均已通过。
