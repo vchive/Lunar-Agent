@@ -266,7 +266,10 @@ and direct `data/*` inputs. No private source path, evaluator, extractor, ground
 number, or raw data value is copied into the JSON provenance.
 
 Save the matching FM-Eval experiment-results response and convert those per-run results offline.
-The attestation flag labels this comparison as owner-attested and forces formal ineligibility:
+When the export carries adapter metadata, the converter requires consistent `webagent` evidence and
+rejects AgentServer or conflicting evidence before writing a baseline. Adapter-free legacy exports
+remain accepted for compatibility and require separately retained WebAgent provenance. The
+attestation flag labels content equivalence as owner-attested and forces formal ineligibility:
 
 ```bash
 lunar-agent effect-baseline results.json .lunar/famou-kit/suite.json baseline.json \
@@ -301,7 +304,9 @@ breakthrough—not whole-suite parity or statistical superiority. Use `--resume`
 options to preserve completed logical runs after an interruption. Subject/harness separation is a
 bounded request and filesystem-layout contract, not an OS sandbox; use an owner-provided sandbox
 for an untrusted same-user command. Lunar rechecks frozen controls, public sources, and run records
-before writing a successful report. The built-in subject is a fresh attempt-local Agent loop with
+before writing a successful report. Only logical records whose digests are already registered in
+runner-owned state are reused; an unregistered record is independently rescored in a new attempt.
+The built-in subject is a fresh attempt-local Agent loop with
 no memory or transcript reuse. The harness recomputes FM-Eval's canonical CaseRevision content
 digest, matches its public projection, hashes `tests/extractor_agent.py` and
 `tests/evaluator.py`, runs each stage once, and starts the evaluator without inherited
@@ -324,7 +329,7 @@ lunar-agent effect-deep-trial .lunar/famou-kit/suite.json baseline.json \
   --workspace .lunar/deep-effect-trial-001 --json
 ```
 
-Each logical run keeps one attempt workspace but starts a fresh subject process for every round.
+Rounds within one attempt share a subject workspace, and every round starts a fresh subject process.
 The next round receives only the previous round's bounded `RoundFeedback` projection: finite
 scores, generic allowlisted metrics, a hash-only candidate manifest, a best-round pointer, and a
 repair/stagnation directive. It does not receive baseline rows, private harness files, raw process
@@ -333,7 +338,18 @@ output, or credentials. Set `--stagnation-rounds` to control the bounded non-imp
 P50/P90 score and quality distributions, the round-best curve, and safe feedback directives. This
 is an effect-layer comparison, not WebAgent prompt identity, full-suite parity, or a statistically
 powered superiority result. Use `--resume` with the same options after an interruption. The
-`effect-trial` command remains the normal-mode baseline and is unchanged.
+`effect-trial` command remains the normal-mode baseline and follows the same state-registered
+logical-record authority rule.
+
+Resume re-reads every recorded subject telemetry field and harness metric, and verifies recorded
+request digests. A clean incomplete prefix continues in the same attempt; process or boundary
+failures restart in a new attempt while preserving earlier evidence. Reusing an unrecorded subject
+round requires a matching request-bound receipt, while any unrecorded harness result is discarded
+and rescored by the exact private harness. An unregistered logical-run record is also rescored in a
+new attempt. A verified previous-record journal covers interruption between record and state
+replacement by restoring the last state-authorized prefix. Legacy completed records remain readable,
+but an old workspace cannot retroactively prove that pre-hardening code did not register a
+subject-preseeded record; rerun it when the stronger integrity guarantee is required.
 
 Each case report also includes bounded `failure_statistics`: failed logical-run error codes,
 round-level feedback categories, recorded/completed round counts, timeout totals, and a fixed

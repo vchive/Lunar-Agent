@@ -61,8 +61,8 @@ suite parity, statistical superiority, or evidence about deep evolution.
 1. Lunar freezes a state identity before the first subject process starts and atomically records
    each completed logical run.
 2. `--resume` verifies all suite, baseline, command, model, run-count, timeout, and public-source
-   identities, reuses completed records, and creates a new attempt directory for only an
-   interrupted logical run.
+   identities, reuses only records whose digest is already registered in runner-owned state, and
+   creates a new attempt directory for an interrupted or unregistered logical run.
 3. A changed configuration, receipt, staged source, or completed record fails closed.
 
 ## Functional requirements
@@ -88,12 +88,20 @@ suite parity, statistical superiority, or evidence about deep evolution.
   accept a subject-authored score.
 - **FR-4808**: Import a baseline export containing per-run WebAgent receipts rather than a manually
   entered best number, validate all shared identities, and derive the historical best locally.
+  When the FM-Eval export exposes adapter metadata, all experiment and selected-row adapter evidence
+  MUST agree and MUST identify `webagent`; explicit non-WebAgent or conflicting evidence MUST fail
+  before output is written. Adapter-free legacy exports remain readable only with separately
+  retained source provenance.
 - **FR-4809**: Write a path-safe report containing per-run readiness/validity/score/telemetry,
   per-case coverage and aggregates, strict score deltas, milestone state, model evidence,
   descriptive comparability, the baseline's inherited eligibility state, this small trial's fixed
   formal ineligibility, and explicit limitations.
 - **FR-4810**: Persist immutable state and atomic per-run records. Resume MUST be idempotent for
-  completed runs and preserve incomplete attempt directories as recovery evidence.
+  completed state-registered runs and preserve incomplete attempt directories as recovery evidence.
+  An unregistered `record.json` MUST NOT become authoritative and MUST be replaced only after a new
+  independent subject/harness attempt completes. Updating an already registered record MUST retain
+  a previous-record journal until state registers the new digest, so interruption between the two
+  atomic file replacements rolls back to the state-authorized record.
 - **FR-4811**: Keep the existing strategy benchmark, evolution engines, evaluator bundle, SQLite
   task state, runtime adapters, base dependencies, and service-free local default unchanged.
 
@@ -104,10 +112,10 @@ suite parity, statistical superiority, or evidence about deep evolution.
 - **SC-4802**: When a valid Lunar score is `0.81` and the matching baseline's derived best is
   `0.80`, the report marks that case and the user-defined milestone achieved with delta `0.01`.
 - **SC-4803**: Equality, invalid Lunar output, a subject-authored score, harness identity mismatch,
-  changed public bytes, private-file exposure, and incomplete run coverage cannot fabricate a
-  controlled breakthrough conclusion.
+  changed public bytes, private-file exposure, a non-WebAgent baseline export, and incomplete run
+  coverage cannot fabricate a controlled breakthrough conclusion.
 - **SC-4804**: Killing after one recorded run and resuming executes only unfinished logical runs;
-  changing any frozen identity is rejected.
+  changing any frozen identity is rejected, and a subject-preseeded future-run record is rescored.
 - **SC-4805**: Persisted state/report contain no secret values, raw commands, process output,
   absolute source paths, baseline data in subject config, or private harness config in the subject
   tree.

@@ -383,6 +383,27 @@ def _results(experiment_id: str = "fmexp-fixture") -> dict:
     }
 
 
+def _results_with_adapter(adapter: str, *, runtime_adapter: str | None = None) -> dict:
+    payload = _results()
+    payload["experiment"].update(
+        {
+            "adapter_kind": adapter,
+            "request": {"adapter_request": {"kind": adapter}},
+            "configuration": {
+                "adapter": adapter,
+                "adapter_release": {"adapter_kind": adapter},
+            },
+        }
+    )
+    for row in payload["results"]:
+        row["runtime_telemetry"] = {
+            "adapter_request": {
+                "receipt": {"adapter_kind": runtime_adapter or adapter},
+            }
+        }
+    return payload
+
+
 def test_offline_fm_eval_results_convert_to_strict_per_run_baseline(tmp_path: Path) -> None:
     public, private = _make_case(tmp_path)
     suite_path = _write_json(tmp_path / "suite.json", _make_suite(public, private))
@@ -406,6 +427,73 @@ def test_offline_fm_eval_results_convert_to_strict_per_run_baseline(tmp_path: Pa
     assert [run.run_index for run in parsed.cases[0].runs] == [1, 2]
     assert "best" not in output.read_text()
     assert legacy_temporary.read_text(encoding="utf-8") == "owner file"
+
+
+def test_offline_converter_rejects_modern_agentserver_export(tmp_path: Path) -> None:
+    public, private = _make_case(tmp_path)
+    suite_path = _write_json(tmp_path / "suite.json", _make_suite(public, private))
+    results_path = _write_json(
+        tmp_path / "results.json", _results_with_adapter("agentserver")
+    )
+    output = tmp_path / "baseline.json"
+
+    with pytest.raises(EffectAdapterError, match="webagent adapter"):
+        convert_fm_eval_baseline(
+            results_path,
+            suite_path,
+            output,
+            experiment_id="fmexp-fixture",
+            requested_model="gpt-5.6-sol",
+            effective_model="openai/gpt-5.6-sol",
+            model_evidence="not_observable",
+        )
+
+    assert not output.exists()
+
+
+def test_offline_converter_accepts_consistent_webagent_evidence(tmp_path: Path) -> None:
+    public, private = _make_case(tmp_path)
+    suite_path = _write_json(tmp_path / "suite.json", _make_suite(public, private))
+    results_path = _write_json(
+        tmp_path / "results.json", _results_with_adapter("webagent")
+    )
+    output = tmp_path / "baseline.json"
+
+    converted = convert_fm_eval_baseline(
+        results_path,
+        suite_path,
+        output,
+        experiment_id="fmexp-fixture",
+        requested_model="gpt-5.6-sol",
+        effective_model="openai/gpt-5.6-sol",
+        model_evidence="not_observable",
+    )
+
+    assert TrialBaseline.from_dict(converted).cases[0].best() == 0.80
+    assert output.is_file()
+
+
+def test_offline_converter_rejects_conflicting_adapter_evidence(tmp_path: Path) -> None:
+    public, private = _make_case(tmp_path)
+    suite_path = _write_json(tmp_path / "suite.json", _make_suite(public, private))
+    results_path = _write_json(
+        tmp_path / "results.json",
+        _results_with_adapter("webagent", runtime_adapter="agentserver"),
+    )
+    output = tmp_path / "baseline.json"
+
+    with pytest.raises(EffectAdapterError, match="conflicting adapter evidence"):
+        convert_fm_eval_baseline(
+            results_path,
+            suite_path,
+            output,
+            experiment_id="fmexp-fixture",
+            requested_model="gpt-5.6-sol",
+            effective_model="openai/gpt-5.6-sol",
+            model_evidence="not_observable",
+        )
+
+    assert not output.exists()
 
 
 def test_offline_converter_rejects_identity_duplicates_and_overwrite(tmp_path: Path) -> None:

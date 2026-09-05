@@ -669,7 +669,9 @@ class EffectTrialRunner:
     def _prepare_state(self) -> dict[str, Any]:
         identity = self._identity()
         if self.resume:
-            state, _ = _read_json(self._state_path(), "trial state")
+            state_path = self._state_path()
+            _reject_symlink_components(state_path, self.workspace, "trial state path")
+            state, _ = _read_json(state_path, "trial state")
             item = _strict_object(state, {"identity", "records"}, "trial state")
             if item["identity"] != identity:
                 raise EffectTrialError("resume configuration does not match frozen trial identity")
@@ -699,7 +701,9 @@ class EffectTrialRunner:
         return state
 
     def _verify_control_copy(self, name: str, expected: str) -> None:
-        payload, canonical = _read_json(self.workspace / "control" / name, f"frozen {name}")
+        path = self.workspace / "control" / name
+        _reject_symlink_components(path, self.workspace, f"frozen {name} path")
+        payload, canonical = _read_json(path, f"frozen {name}")
         del payload
         if _hash_bytes(canonical) != expected:
             raise EffectTrialError(f"frozen {name} digest does not match trial identity")
@@ -710,23 +714,76 @@ class EffectTrialRunner:
     def _record_path(self, case: TrialCase, run_index: int) -> Path:
         return self.workspace / "cases" / case.key / "runs" / f"{run_index:03d}" / "record.json"
 
+    def _record_backup_path(self, case: TrialCase, run_index: int) -> Path:
+        return self._record_path(case, run_index).with_name("record.previous.json")
+
     def _load_record(self, case: TrialCase, run_index: int, state: dict[str, Any]) -> dict[str, Any] | None:
         path = self._record_path(case, run_index)
         key = self._record_key(case, run_index)
+        _reject_symlink_components(path, self.workspace, "logical run record path")
         if not path.exists():
             if key in state["records"]:
                 raise EffectTrialError(f"logical run record is missing despite frozen state: {key}")
             return None
+        # A record becomes authoritative only when its digest is registered in runner-owned
+        # state. An earlier subject process can reach sibling run directories under the same-user
+        # capability boundary, so adopting an unregistered file would let it skip that run's
+        # independent harness. Execute a new attempt; any earlier attempt directory stays as
+        # evidence when the authoritative record is replaced.
+        if key not in state["records"]:
+            return None
         payload, canonical = _read_json(path, "logical run record", MAX_RECEIPT_BYTES)
-        expected = state["records"].get(key)
+        expected = state["records"][key]
         actual = _hash_bytes(canonical)
-        if expected is not None and actual != expected:
-            raise EffectTrialError(f"logical run record digest mismatch: {key}")
+        if actual != expected:
+            backup = self._record_backup_path(case, run_index)
+            try:
+                previous, previous_canonical = _read_json(
+                    backup, "previous logical run record", MAX_RECEIPT_BYTES
+                )
+            except EffectTrialError as exc:
+                raise EffectTrialError(f"logical run record digest mismatch: {key}") from exc
+            if _hash_bytes(previous_canonical) != expected:
+                raise EffectTrialError(f"logical run record digest mismatch: {key}")
+            self._validate_record(previous, case, run_index)
+            _atomic_json(path, previous, MAX_RECEIPT_BYTES)
+            backup.unlink()
+            return previous
         self._validate_record(payload, case, run_index)
-        if expected is None:
-            state["records"][key] = actual
-            _atomic_json(self._state_path(), state)
         return payload
+
+    def _commit_record(
+        self,
+        case: TrialCase,
+        run_index: int,
+        record: dict[str, Any],
+        state: dict[str, Any],
+    ) -> None:
+        path = self._record_path(case, run_index)
+        _reject_symlink_components(path, self.workspace, "logical run record path")
+        _reject_symlink_components(self._state_path(), self.workspace, "trial state path")
+        key = self._record_key(case, run_index)
+        expected = state["records"].get(key)
+        backup = self._record_backup_path(case, run_index)
+        if expected is not None:
+            previous, previous_canonical = _read_json(
+                path, "logical run record before update", MAX_RECEIPT_BYTES
+            )
+            if _hash_bytes(previous_canonical) != expected:
+                raise EffectTrialError(f"logical run record digest mismatch before update: {key}")
+            _atomic_json(backup, previous, MAX_RECEIPT_BYTES)
+        content = _atomic_json(path, record, MAX_RECEIPT_BYTES)
+        state["records"][key] = _hash_bytes(content)
+        try:
+            _atomic_json(self._state_path(), state)
+        except BaseException:
+            if expected is None:
+                del state["records"][key]
+            else:
+                state["records"][key] = expected
+            raise
+        if backup.exists():
+            backup.unlink()
 
     def _validate_record(self, payload: object, case: TrialCase, run_index: int) -> dict[str, Any]:
         item = _strict_object(
@@ -799,6 +856,7 @@ class EffectTrialRunner:
 
     def _attempt_root(self, case: TrialCase, run_index: int) -> tuple[Path, int]:
         attempts = self._record_path(case, run_index).parent / "attempts"
+        _reject_symlink_components(attempts, self.workspace, "logical run attempts path")
         if attempts.is_symlink():
             raise EffectTrialError("logical run attempts directory must not be a symlink")
         attempts.mkdir(parents=True, exist_ok=True)
@@ -995,9 +1053,7 @@ class EffectTrialRunner:
 
     def _store_record(self, case: TrialCase, run_index: int, record: dict[str, Any], state: dict[str, Any]) -> None:
         self._validate_record(record, case, run_index)
-        content = _atomic_json(self._record_path(case, run_index), record, MAX_RECEIPT_BYTES)
-        state["records"][self._record_key(case, run_index)] = _hash_bytes(content)
-        _atomic_json(self._state_path(), state)
+        self._commit_record(case, run_index, record, state)
 
     def _case_report(self, case: TrialCase, records: list[dict[str, Any]]) -> dict[str, Any]:
         baseline = next(value for value in self.baseline.cases if value.key == case.key)

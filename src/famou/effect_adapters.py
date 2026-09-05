@@ -2,7 +2,7 @@
 
 The module owns no benchmark data or service credentials.  It runs Lunar as a fresh normal
 subject, invokes owner-supplied frozen extractor/evaluator scripts, and converts an authorized
-local FM-Eval results export into the strict Feature 048 baseline schema.
+local FM-Eval WebAgent results export into the strict Feature 048 baseline schema.
 """
 
 from __future__ import annotations
@@ -568,7 +568,16 @@ Case key: {case['key']}
         "usage": _model_usage(result.metadata),
     }
     if mode == "deep_evolution":
-        receipt.update({"round_index": round_index, "outer_rounds": outer_rounds})
+        # Keep the score-free subject receipt bound to the exact request that drove this fresh
+        # round.  The deep runner may reuse a receipt after an interruption, so a round/outer
+        # index alone is insufficient to distinguish a stale receipt from the current request.
+        receipt.update(
+            {
+                "round_index": round_index,
+                "outer_rounds": outer_rounds,
+                "request_sha256": request_digest,
+            }
+        )
     _atomic_json(receipt_path, receipt, overwrite=False)
     return receipt
 
@@ -872,6 +881,38 @@ def _experiment_identity(payload: Mapping[str, object]) -> str | None:
     return None
 
 
+def _fm_eval_adapter_evidence(
+    payload: Mapping[str, object],
+    paths: Sequence[tuple[str, ...]],
+) -> list[tuple[str, str]]:
+    evidence: list[tuple[str, str]] = []
+    for path in paths:
+        current: object = payload
+        for key in path:
+            if not isinstance(current, Mapping) or key not in current:
+                break
+            current = current[key]
+        else:
+            if current is None:
+                continue
+            if not isinstance(current, str) or not current:
+                raise EffectAdapterError(
+                    f"FM-Eval adapter evidence at {'.'.join(path)} must be non-empty text"
+                )
+            evidence.append((".".join(path), current))
+    return evidence
+
+
+def _require_webagent_evidence(evidence: Sequence[tuple[str, str]]) -> None:
+    if not evidence:
+        return
+    kinds = {value for _, value in evidence}
+    if len(kinds) != 1:
+        raise EffectAdapterError("FM-Eval export contains conflicting adapter evidence")
+    if kinds != {"webagent"}:
+        raise EffectAdapterError("FM-Eval baseline must come from the webagent adapter")
+
+
 def _normalized_extraction(value: object) -> str:
     status = str(value or "").lower()
     if status in {"success", "completed", "extracted"}:
@@ -892,7 +933,7 @@ def convert_fm_eval_baseline(
     conclusion_eligibility: str = "ineligible",
     content_equivalence_attested: bool = False,
 ) -> dict[str, object]:
-    """Convert an authorized local FM-Eval results response to a Feature 048 baseline."""
+    """Convert an authorized local FM-Eval WebAgent response to a Feature 048 baseline."""
     results_payload = _read_json(results_path, "FM-Eval results export")
     suite = TrialSuite.from_dict(_read_json(suite_path, "frozen suite"))
     experiment_id = _bounded_text(experiment_id, "experiment id")
@@ -910,6 +951,23 @@ def convert_fm_eval_baseline(
         raise EffectAdapterError("FM-Eval export does not contain an experiment identity")
     if observed_id != experiment_id:
         raise EffectAdapterError("FM-Eval export experiment identity does not match")
+    adapter_evidence = _fm_eval_adapter_evidence(
+        results_payload,
+        (
+            ("adapter",),
+            ("adapter_kind",),
+            ("experiment", "adapter"),
+            ("experiment", "adapter_kind"),
+            ("experiment", "request", "adapter"),
+            ("experiment", "request", "adapter_kind"),
+            ("experiment", "request", "adapter_request", "kind"),
+            ("experiment", "request", "resolved_adapter_release", "adapter_kind"),
+            ("experiment", "configuration", "adapter"),
+            ("experiment", "configuration", "adapter_kind"),
+            ("experiment", "configuration", "adapter_release", "adapter_kind"),
+            ("experiment", "adapter_release", "adapter_kind"),
+        ),
+    )
     model = BaselineModel.from_dict(
         {
             "requested": requested_model,
@@ -927,6 +985,19 @@ def convert_fm_eval_baseline(
         case_key = row.get("case") or row.get("case_key")
         if case_key not in selected:
             continue
+        adapter_evidence.extend(
+            _fm_eval_adapter_evidence(
+                row,
+                (
+                    (
+                        "runtime_telemetry",
+                        "adapter_request",
+                        "receipt",
+                        "adapter_kind",
+                    ),
+                ),
+            )
+        )
         raw_index = row.get("run_index", row.get("run_idx"))
         index = _integer(raw_index, "FM-Eval run index", minimum=0, maximum=1_000_000)
         projection = str(row.get("projection_state") or "").lower()
@@ -953,6 +1024,8 @@ def convert_fm_eval_baseline(
                 "overall_score": overall,
             }
         )
+
+    _require_webagent_evidence(adapter_evidence)
 
     cases: list[dict[str, object]] = []
     for case in suite.cases:

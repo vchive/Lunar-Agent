@@ -250,6 +250,22 @@ against the imported normal WebAgent history. The comparison is descriptive and 
 comparable, but deliberately does not claim WebAgent prompt/role identity, full-suite parity, or
 statistical superiority.
 
+The baseline converter checks every explicit FM-Eval adapter signal available in the experiment and
+selected result receipts. It accepts only consistent `webagent` evidence; an AgentServer export or
+conflicting adapter metadata fails before a baseline is written. Legacy exports with no adapter
+field remain readable for compatibility and depend on separately preserved source provenance.
+
+Resume re-reads every recorded subject telemetry field and harness metric, and verifies recorded
+request digests. A clean incomplete prefix continues in the same attempt; process or boundary
+failures restart in a new attempt while preserving earlier evidence. Reusing an unrecorded subject
+round requires a matching request-bound receipt, while any unrecorded harness result is discarded
+and rescored by the exact private harness. Logical-run records are reused only when their digest is
+already registered in runner-owned state; other records get a new independently scored attempt.
+A previous-record journal covers interruption between record and state replacement by restoring
+only the last prefix whose digest still matches state. Legacy completed records remain readable,
+but their pre-upgrade provenance cannot be strengthened retroactively; a fresh independently scored
+run is required for the new integrity guarantee.
+
 Deep reports also expose a bounded `failure_statistics` projection per case. It separates logical
 run error codes from round feedback categories, records completed versus partial rounds, counts
 timeouts, and emits one entry for every configured outer round. The projection is derived from

@@ -20,3 +20,11 @@
 - [x] T051-10 Add deep-trial quickstart and architecture/report vocabulary.
 - [x] T051-11 Run focused/full tests, lint, compileall, Specify checks, and diff review.
 - [x] T051-12 Mark implemented, commit, and push as `vchive` on `main`.
+- [x] T051-13 Add request-binding and full receipt-field tamper regression tests.
+- [x] T051-14 Reject subject-created harness workspaces and rerun unrecorded harness results.
+- [x] T051-15 Restrict same-attempt resume to clean incomplete prefixes and verify legacy completed
+  records.
+- [x] T051-16 Update recovery contracts and run the full validation checklist.
+- [x] T051-17 Prevent unregistered future-run records from bypassing subject/harness execution.
+- [x] T051-18 Reject symlinks in every ancestor of persisted or resumed attempt artifacts.
+- [x] T051-19 Recover later-round record/state commit-window interruptions with a verified journal.

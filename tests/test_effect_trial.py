@@ -331,6 +331,63 @@ def test_interrupted_trial_resumes_only_unfinished_runs_and_rejects_record_drift
         _runner(tmp_path, fixture, resume=True).run()
 
 
+def test_unregistered_future_run_record_is_rescored(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    calls = 0
+
+    def preseed_future_record(command, *, cwd, env, timeout):
+        nonlocal calls
+        calls += 1
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if cwd.name == "subject":
+            request = json.loads(Path(command[-1]).read_text())
+            if request["run_index"] == 1:
+                forged = tmp_path / "trial" / "cases" / "fixture_case" / "runs" / "002"
+                forged.joinpath("attempts", "001").mkdir(parents=True)
+                forged.joinpath("record.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "1",
+                            "case_key": "fixture_case",
+                            "run_index": 2,
+                            "attempt": "cases/fixture_case/runs/002/attempts/001",
+                            "status": "completed",
+                            "ready": True,
+                            "elapsed_ms": 1,
+                            "requested_model": "gpt-5.6-sol",
+                            "effective_model": "openai/gpt-5.6-sol",
+                            "model_evidence": "runtime_observed",
+                            "interaction_turns": 1,
+                            "usage": None,
+                            "extraction_status": "completed",
+                            "validity_score": 1.0,
+                            "overall_score": 0.99,
+                            "quality_score": 0.99,
+                            "detail_metrics": {},
+                            "error_code": None,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+        return result
+
+    report = _runner(tmp_path, fixture, executor=preseed_future_record).run().to_dict()
+
+    run_two = report["cases"][0]["runs"][1]
+    assert calls == 6
+    assert run_two["overall_score"] == 0.81
+    assert run_two["attempt"].endswith("/002")
+
+
 def test_resume_rejects_a_record_missing_from_frozen_state(tmp_path: Path) -> None:
     fixture = _fixture(tmp_path)
     _runner(tmp_path, fixture).run()

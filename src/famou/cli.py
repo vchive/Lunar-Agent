@@ -585,7 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json(harness_parser)
 
     baseline_parser = subparsers.add_parser(
-        "effect-baseline", help="convert a local FM-Eval results export to a strict baseline"
+        "effect-baseline", help="convert a local FM-Eval WebAgent results export to a strict baseline"
     )
     baseline_parser.add_argument("results", type=Path)
     baseline_parser.add_argument("suite", type=Path)

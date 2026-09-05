@@ -7,11 +7,12 @@
 Feature 048's `EffectTrialRunner` already owns suite/baseline identity checks, safe public staging,
 control copies, command invocation, and exact harness integration. The deep runner subclasses that
 boundary and changes only the logical-run execution, record schema, and report aggregation. The
-normal runner is not parameterized or behaviorally changed.
+normal runner is not parameterized and its score/report schemas remain unchanged; the shared rule
+that only state-registered logical records are authoritative is hardened for both protocols.
 
 The built-in subject adapter accepts a second request mode, `deep_evolution`. It runs one fresh
 repository-owned Agent loop per outer round with the same attempt workspace. This gives the model a
-safe continuation boundary through files and explicit previous-round score feedback while keeping
+safe continuation boundary through files and explicit bounded `RoundFeedback` while keeping
 memory/session history disabled.
 
 ## Decisions
@@ -28,6 +29,20 @@ memory/session history disabled.
    validity/quality are taken from the winning round. Invalid rounds remain in the audit record.
 5. **Reuse exact harness** — the deep protocol passes normal Feature 049 harness requests with a
    round-specific sibling workspace, so digest, credential, and extractor behavior stay identical.
+6. **Durable round authority** — only a persisted round record permits reuse of its harness result.
+   Unrecorded harness output is discarded and rescored by the exact private harness.
+7. **Bound subject continuation** — reusing an unrecorded subject round requires a request-bound
+   receipt. Clean incomplete prefixes continue in place; process and boundary failures retry in a
+   new attempt.
+8. **Full receipt verification** — compare model identity, evidence, turns, usage, extraction
+   status, validity, overall score, quality, and detail metrics against durable round records, and
+   verify recorded harness-request digests.
+9. **Registered logical records** — accept a run record only when runner-owned state already stores
+   its digest. A sibling record created by an earlier subject is ignored and independently rescored
+   in a new attempt.
+10. **Recoverable record commit** — retain the state-authorized record in a previous-record journal
+    until state registers its replacement. A commit-window interruption rolls back to that exact
+    prefix and reruns the uncommitted harness work.
 
 ## Data flow
 

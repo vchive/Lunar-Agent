@@ -154,3 +154,16 @@ The receipt has no score field. Unsupported keys are rejected.
 
 Commands, environment values, stdout/stderr, absolute paths, baseline receipts, and private harness
 configuration are excluded from `report.json`.
+
+## Logical-run authority
+
+`control/state.json` registers the SHA-256 of each authoritative `record.json`. A record present on
+disk without that registration is never adopted, because a subject process from an earlier run can
+reach sibling paths inside the documented same-user capability boundary. Lunar creates a new
+attempt and replaces the logical record only after the independent harness completes; the earlier
+attempt directory remains recovery evidence.
+
+When replacing a state-registered record, Lunar first writes `record.previous.json` with the exact
+state-authorized bytes. It removes the journal only after `control/state.json` registers the new
+record digest. If interruption leaves the two files out of step, resume restores the journal only
+when its digest exactly matches state, then reruns the uncommitted work.

@@ -32,6 +32,7 @@ from .effect_trial import (
 MAX_OUTER_ROUNDS = 20
 _DEEP_PROTOCOL = "famou-bench-deep-evolution-v1"
 _STRATEGY = "loop"
+_SAME_ATTEMPT_RESUME_ERRORS = frozenset({"incomplete_rounds"})
 
 
 @dataclass(frozen=True)
@@ -204,24 +205,36 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "config": self.deep_config.safe_dict(),
         }
 
-    def _subject_receipt(self, path: Path, round_index: int) -> dict[str, Any]:
+    def _subject_receipt(
+        self,
+        path: Path,
+        round_index: int,
+        *,
+        expected_request_sha256: str | None = None,
+        require_request_sha256: bool = False,
+    ) -> dict[str, Any]:
         payload, _ = _normal._read_json(path, "deep subject receipt", _normal.MAX_RECEIPT_BYTES)
-        item = _normal._strict_object(
-            payload,
-            {
-                "schema_version",
-                "mode",
-                "status",
-                "requested_model",
-                "effective_model",
-                "model_evidence",
-                "interaction_turns",
-                "usage",
-                "round_index",
-                "outer_rounds",
-            },
-            "deep subject receipt",
-        )
+        fields = {
+            "schema_version",
+            "mode",
+            "status",
+            "requested_model",
+            "effective_model",
+            "model_evidence",
+            "interaction_turns",
+            "usage",
+            "round_index",
+            "outer_rounds",
+        }
+        # `request_sha256` was added after the initial deep protocol.  Accepting the old shape
+        # keeps completed Feature 051 records readable, while every newly produced built-in
+        # receipt carries the binding and resumed partial rounds require it.
+        if not isinstance(payload, dict) or set(payload) not in (
+            fields,
+            fields | {"request_sha256"},
+        ):
+            raise EffectTrialError("deep subject receipt must contain the expected fields")
+        item = dict(payload)
         receipt_round = _normal._integer(item["round_index"], "deep subject receipt round", 1, MAX_OUTER_ROUNDS)
         receipt_outer = _normal._integer(item["outer_rounds"], "deep subject receipt outer rounds", 1, MAX_OUTER_ROUNDS)
         if (
@@ -238,7 +251,17 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         evidence = _normal._text(item["model_evidence"], "deep subject model evidence", safe_id=True)
         if evidence not in _normal._MODEL_EVIDENCE:
             raise EffectTrialError("deep subject model evidence is unsupported")
-        return {
+        request_sha256 = None
+        if "request_sha256" in item:
+            request_sha256 = _normal._digest(
+                item["request_sha256"], "deep subject request sha256"
+            )
+        if expected_request_sha256 is not None:
+            if request_sha256 is None and require_request_sha256:
+                raise EffectTrialError("deep subject receipt request digest is missing")
+            if request_sha256 is not None and request_sha256 != expected_request_sha256:
+                raise EffectTrialError("deep subject receipt request digest disagrees with request")
+        result = {
             "requested_model": item["requested_model"],
             "effective_model": effective,
             "model_evidence": evidence,
@@ -247,28 +270,41 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             ),
             "usage": self._validate_usage(item["usage"]),
         }
+        if request_sha256 is not None:
+            result["request_sha256"] = request_sha256
+        return result
 
     def _validate_round(self, payload: object, case: _normal.TrialCase, run_index: int, round_index: int) -> dict[str, Any]:
         fields = {
-                "round_index",
-                "status",
-                "ready",
-                "subject_receipt",
-                "harness_receipt",
-                "requested_model",
-                "effective_model",
-                "model_evidence",
-                "interaction_turns",
-                "usage",
-                "extraction_status",
-                "validity_score",
-                "overall_score",
-                "quality_score",
-                "detail_metrics",
-                "error_code",
-            }
-        feedback_fields = fields | {"feedback"}
-        if not isinstance(payload, dict) or (set(payload) != fields and set(payload) != feedback_fields):
+            "round_index",
+            "status",
+            "ready",
+            "subject_receipt",
+            "harness_receipt",
+            "requested_model",
+            "effective_model",
+            "model_evidence",
+            "interaction_turns",
+            "usage",
+            "extraction_status",
+            "validity_score",
+            "overall_score",
+            "quality_score",
+            "detail_metrics",
+            "error_code",
+        }
+        optional_request_fields = (
+            set(),
+            {"request_sha256"},
+            {"harness_request_sha256"},
+            {"request_sha256", "harness_request_sha256"},
+        )
+        allowed = tuple(
+            fields | optional | feedback
+            for optional in optional_request_fields
+            for feedback in (set(), {"feedback"})
+        )
+        if not isinstance(payload, dict) or set(payload) not in allowed:
             raise EffectTrialError("deep round record must contain the expected fields")
         item = dict(payload)
         round_value = _normal._integer(item["round_index"], "deep round index", 1, MAX_OUTER_ROUNDS)
@@ -288,6 +324,10 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             _normal._integer(item["interaction_turns"], "deep round interaction turns", 0, _normal.MAX_TURNS)
         if item["usage"] is not None:
             self._validate_usage(item["usage"])
+        if "request_sha256" in item:
+            _normal._digest(item["request_sha256"], "deep round request sha256")
+        if "harness_request_sha256" in item:
+            _normal._digest(item["harness_request_sha256"], "deep round harness request sha256")
         _normal._validity(item["validity_score"], "deep round validity", nullable=True)
         _normal._number(item["overall_score"], "deep round score", nullable=True)
         _normal._number(item["quality_score"], "deep round quality", nullable=True)
@@ -367,8 +407,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
     def _verify_round_artifacts(self, case: _normal.TrialCase, record: dict[str, Any]) -> None:
         """Re-read receipt files so resume cannot rely on a stale logical record alone."""
         raw_attempt = self.workspace / record["attempt"]
-        if raw_attempt.is_symlink():
-            raise EffectTrialError("deep attempt directory is a symlink")
+        _normal._reject_symlink_components(raw_attempt, self.workspace, "deep attempt path")
         attempt = raw_attempt.resolve(strict=False)
         try:
             attempt.relative_to(self.workspace)
@@ -378,38 +417,97 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             raise EffectTrialError("deep attempt directory is missing or unsafe")
         for round_record in record["rounds"]:
             round_index = int(round_record["round_index"])
-            subject_path = attempt / "subject" / "receipts" / f"{round_index:03d}.json"
-            harness_path = attempt / f"harness-{round_index:03d}" / "receipt.json"
-            subject = self._subject_receipt(subject_path, round_index)
+            subject_root = attempt / "subject"
+            receipts_root = subject_root / "receipts"
+            harness_root = attempt / f"harness-{round_index:03d}"
+            if (
+                subject_root.is_symlink()
+                or not subject_root.is_dir()
+                or receipts_root.is_symlink()
+                or not receipts_root.is_dir()
+                or harness_root.is_symlink()
+                or not harness_root.is_dir()
+            ):
+                raise EffectTrialError("deep round artifact workspace is missing or unsafe")
+            subject_path = receipts_root / f"{round_index:03d}.json"
+            harness_path = harness_root / "receipt.json"
+            subject = self._subject_receipt(
+                subject_path,
+                round_index,
+                expected_request_sha256=round_record.get("request_sha256"),
+                require_request_sha256="request_sha256" in round_record,
+            )
             scored = self._harness_receipt(harness_path, case)
-            if subject["requested_model"] != round_record["requested_model"]:
-                raise EffectTrialError("deep subject receipt disagrees with logical record")
-            if scored["overall_score"] != round_record["overall_score"]:
-                raise EffectTrialError("deep harness receipt disagrees with logical record")
+            harness_request_sha256 = round_record.get("harness_request_sha256")
+            if harness_request_sha256 is not None:
+                harness_request_path = harness_root / "request.json"
+                try:
+                    _, harness_request_bytes = _normal._read_json(
+                        harness_request_path,
+                        "deep harness request",
+                        _normal.MAX_RECEIPT_BYTES,
+                    )
+                except EffectTrialError as exc:
+                    raise EffectTrialError("deep harness request disagrees with logical record") from exc
+                if _normal._hash_bytes(harness_request_bytes) != harness_request_sha256:
+                    raise EffectTrialError("deep harness request disagrees with logical record")
+            for name in (
+                "requested_model",
+                "effective_model",
+                "model_evidence",
+                "interaction_turns",
+                "usage",
+            ):
+                if subject[name] != round_record[name]:
+                    raise EffectTrialError("deep subject receipt disagrees with logical record")
+            for name in (
+                "extraction_status",
+                "validity_score",
+                "overall_score",
+                "quality_score",
+                "detail_metrics",
+            ):
+                if scored[name] != round_record[name]:
+                    raise EffectTrialError("deep harness receipt disagrees with logical record")
 
     def _load_record(self, case: _normal.TrialCase, run_index: int, state: dict[str, Any]) -> dict[str, Any] | None:
         path = self._record_path(case, run_index)
         key = self._record_key(case, run_index)
+        _normal._reject_symlink_components(path, self.workspace, "deep logical run record path")
         if not path.exists():
             if key in state["records"]:
                 raise EffectTrialError(f"logical run record is missing despite frozen state: {key}")
             return None
+        # Only state-registered records are authoritative. A subject can reach sibling run paths
+        # within the documented same-user capability boundary. Execute a new independently scored
+        # attempt; the earlier attempt directory remains as evidence when its record is replaced.
+        if key not in state["records"]:
+            return None
         payload, canonical = _normal._read_json(path, "deep logical run record", _normal.MAX_RECEIPT_BYTES)
-        expected = state["records"].get(key)
+        expected = state["records"][key]
         actual = _normal._hash_bytes(canonical)
-        if expected is not None and actual != expected:
-            raise EffectTrialError(f"logical run record digest mismatch: {key}")
+        if actual != expected:
+            backup = self._record_backup_path(case, run_index)
+            try:
+                previous, previous_canonical = _normal._read_json(
+                    backup,
+                    "previous deep logical run record",
+                    _normal.MAX_RECEIPT_BYTES,
+                )
+            except EffectTrialError as exc:
+                raise EffectTrialError(f"logical run record digest mismatch: {key}") from exc
+            if _normal._hash_bytes(previous_canonical) != expected:
+                raise EffectTrialError(f"logical run record digest mismatch: {key}")
+            parsed = self._validate_deep_record(previous, case, run_index)
+            _normal._atomic_json(path, previous, _normal.MAX_RECEIPT_BYTES)
+            backup.unlink()
+            return parsed
         parsed = self._validate_deep_record(payload, case, run_index)
-        if expected is None:
-            state["records"][key] = actual
-            _normal._atomic_json(self._state_path(), state)
         return parsed
 
     def _store_record(self, case: _normal.TrialCase, run_index: int, record: dict[str, Any], state: dict[str, Any]) -> None:
         self._validate_deep_record(record, case, run_index)
-        content = _normal._atomic_json(self._record_path(case, run_index), record, _normal.MAX_RECEIPT_BYTES)
-        state["records"][self._record_key(case, run_index)] = _normal._hash_bytes(content)
-        _normal._atomic_json(self._state_path(), state)
+        self._commit_record(case, run_index, record, state)
 
     def _failed_deep_record(
         self,
@@ -507,8 +605,9 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             rounds: list[dict[str, Any]] = []
         else:
             raw_attempt = self.workspace / resume_record["attempt"]
-            if raw_attempt.is_symlink():
-                raise EffectTrialError("deep resume attempt directory is a symlink")
+            _normal._reject_symlink_components(
+                raw_attempt, self.workspace, "deep resume attempt path"
+            )
             attempt_path = raw_attempt.resolve(strict=False)
             try:
                 attempt_path.relative_to(self.workspace)
@@ -550,39 +649,60 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 request_sha256 = _normal._hash_bytes(request_bytes)
                 self._verify_staged_case(case, subject_root, request_sha256)
                 subject_receipt_path = subject_root / f"receipts/{round_index:03d}.json"
-                if subject_receipt_path.exists():
+                harness_root = attempt_root / f"harness-{round_index:03d}"
+                # `Path.exists()` is false for a dangling symlink; include `is_symlink()` so a
+                # malicious preseed cannot fall through to an uncaught mkdir error.
+                harness_preexisting = harness_root.exists() or harness_root.is_symlink()
+                subject_receipt_preexisting = (
+                    subject_receipt_path.exists() or subject_receipt_path.is_symlink()
+                )
+                if subject_receipt_preexisting:
                     # A process may have exited after writing its score-free receipt but before
                     # the harness started. Reuse that completed subject round on resume.
-                    subject = self._subject_receipt(subject_receipt_path, round_index)
+                    if resume_record is None:
+                        raise EffectTrialError("deep subject receipt already exists")
+                    if harness_preexisting and (
+                        harness_root.is_symlink() or not harness_root.is_dir()
+                    ):
+                        raise EffectTrialError("deep_resume_artifact_order_invalid")
+                    subject = self._subject_receipt(
+                        subject_receipt_path,
+                        round_index,
+                        expected_request_sha256=request_sha256,
+                        require_request_sha256=True,
+                    )
                 else:
+                    if harness_preexisting:
+                        # A harness request/receipt cannot legitimately precede the score-free
+                        # subject receipt. Invoking the subject here would let it populate a stale
+                        # harness directory and smuggle a score into the resumed round.
+                        code = (
+                            "subject_created_harness_workspace"
+                            if resume_record is None
+                            else "deep_resume_artifact_order_invalid"
+                        )
+                        raise EffectTrialError(code)
                     self._invoke(
                         self.deep_config.base.subject_command,
                         subject_root / "request.json",
                         cwd=subject_root,
                         environment=self.deep_config.base.subject_environment,
                     )
+                    if harness_root.exists() or harness_root.is_symlink():
+                        # The subject may write candidate artifacts only inside its own workspace;
+                        # creating the sibling harness directory is a score-authority violation.
+                        raise EffectTrialError("subject_created_harness_workspace")
                     subject = None
                 self._verify_control_copy("suite.json", self.suite_sha256)
                 self._verify_control_copy("baseline.json", self.baseline_sha256)
                 self._verify_staged_case(case, subject_root, request_sha256)
                 if subject is None:
-                    subject = self._subject_receipt(subject_receipt_path, round_index)
+                    subject = self._subject_receipt(
+                        subject_receipt_path,
+                        round_index,
+                        expected_request_sha256=request_sha256,
+                    )
 
-                harness_root = attempt_root / f"harness-{round_index:03d}"
-                if harness_root.exists():
-                    if harness_root.is_symlink() or not harness_root.is_dir():
-                        raise EffectTrialError("deep harness workspace already exists")
-                    existing_receipt = harness_root / "receipt.json"
-                    if existing_receipt.exists():
-                        scored = self._harness_receipt(existing_receipt, case)
-                        harness_reused = True
-                    else:
-                        shutil.rmtree(harness_root)
-                        harness_root.mkdir()
-                        harness_reused = False
-                else:
-                    harness_root.mkdir()
-                    harness_reused = False
                 harness_request = {
                     "schema_version": "1",
                     "candidate_workspace": "../subject",
@@ -593,19 +713,31 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                     "harness": case.harness.to_dict(),
                     "receipt_path": "receipt.json",
                 }
-                if not harness_reused:
-                    _normal._atomic_json(harness_root / "request.json", harness_request, _normal.MAX_RECEIPT_BYTES)
-                    self._invoke(
-                        self.deep_config.base.harness_command,
-                        harness_root / "request.json",
-                        cwd=harness_root,
-                        environment=self.deep_config.base.harness_environment,
-                    )
+                harness_request_bytes = _normal._canonical_bytes(harness_request)
+                if len(harness_request_bytes) > _normal.MAX_RECEIPT_BYTES:
+                    raise EffectTrialError("harness request exceeds its bounded size")
+                harness_request_sha256 = _normal._hash_bytes(harness_request_bytes)
+                if harness_root.exists() or harness_root.is_symlink():
+                    if harness_root.is_symlink() or not harness_root.is_dir():
+                        raise EffectTrialError("deep_resume_artifact_order_invalid")
+                    # A harness result is authoritative only after its round record is durable.
+                    # If interruption left an unrecorded harness directory, discard it and rerun
+                    # the private harness; otherwise a subject-created receipt could be reused.
+                    shutil.rmtree(harness_root)
+                harness_root.mkdir()
+                _normal._atomic_json(
+                    harness_root / "request.json", harness_request, _normal.MAX_RECEIPT_BYTES
+                )
+                self._invoke(
+                    self.deep_config.base.harness_command,
+                    harness_root / "request.json",
+                    cwd=harness_root,
+                    environment=self.deep_config.base.harness_environment,
+                )
                 self._verify_control_copy("suite.json", self.suite_sha256)
                 self._verify_control_copy("baseline.json", self.baseline_sha256)
                 self._verify_staged_case(case, subject_root, request_sha256)
-                if not harness_reused:
-                    scored = self._harness_receipt(harness_root / "receipt.json", case)
+                scored = self._harness_receipt(harness_root / "receipt.json", case)
                 try:
                     feedback = build_round_feedback(
                         round_index,
@@ -624,6 +756,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                     "harness_receipt": f"cases/{case.key}/runs/{run_index:03d}/attempts/{attempt_index:03d}/harness-{round_index:03d}/receipt.json",
                     **subject,
                     **scored,
+                    "harness_request_sha256": harness_request_sha256,
                     "feedback": feedback,
                     "error_code": None,
                 }
@@ -658,7 +791,8 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 "process_nonzero_exit",
                 "deep subject receipt does not describe the requested round",
                 "deep subject requested model does not match frozen config",
-                "deep harness workspace already exists",
+                "subject_created_harness_workspace",
+                "deep_resume_artifact_order_invalid",
                 "feedback_contract_failed",
             }:
                 code = "deep_trial_boundary_failed"
@@ -814,13 +948,20 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             records: list[dict[str, Any]] = []
             for run_index in range(1, self.config.runs_per_case + 1):
                 record = self._load_record(case, run_index, state)
-                # A failed deep run may have completed only a prefix of its outer rounds.  It is
-                # safe to continue that logical run on resume; completed round receipts remain in
-                # the same attempt and an interrupted process leaves its prefix durable.
+                # A failed deep run may have a durable completed-round prefix. Verify its receipts
+                # before deciding whether the attempt itself is safe to continue.
                 if record is not None and record["status"] == "failed":
                     if record["rounds"]:
                         self._verify_round_artifacts(case, record)
-                    resume_record = record
+                    # Only a cleanly persisted completed-round prefix may reuse an attempt.
+                    # Boundary/process failures can leave subject-controlled sibling artifacts,
+                    # so an explicit resume retries them in a new attempt and preserves the old
+                    # directory as evidence.
+                    resume_record = (
+                        record
+                        if record["error_code"] in _SAME_ATTEMPT_RESUME_ERRORS
+                        else None
+                    )
                     record = None
                 else:
                     resume_record = None

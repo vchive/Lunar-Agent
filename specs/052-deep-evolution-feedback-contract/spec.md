@@ -2,7 +2,7 @@
 
 **Feature Branch**: `main`  
 **Created**: 2026-09-05  
-**Status**: Draft
+**Status**: Implemented
 
 ## Context and scope
 

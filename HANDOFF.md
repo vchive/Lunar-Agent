@@ -8,20 +8,21 @@
 
 ## 1. 当前状态
 
-工作区在本次交接开始时干净，`main` 与 `origin/main` 同步。最近提交：
+本次续接从干净且与 `origin/main` 同步的 `4a61044` 开始。续接开始时的最近提交：
 
 ```text
+4a61044 test: cover nested candidate manifest traversal
+46d576d docs: update handoff for failure statistics
 32561c9 feat: report deep evolution failure statistics
+558f510 docs: record continuation findings
 f633dde fix: allow candidate interpreter startup before timeout
+b3df70e docs: add lunar agent handoff
 edaa4a6 feat: add controlled deep evolution feedback
-22c4e10 chore: close deep trial SDD checklist
-79f1012 feat: add matched deep evolution effect trials
-05c7740 feat: build content-addressed effect kits
-b404671 feat: add executable famou bench adapters
-0d114a5 feat: measure frozen benchmark breakthroughs
 ```
 
-本文件和 Feature 053 的 checklist 更新属于交接收口改动，完成后应再提交、推送，并保持
+本次变更修复普通/深度效果试验的记录权威和深度 round receipt 完整性，更新 Feature
+048/051/052 文档，并补齐官方 FM-Eval AgentServer normal-mode comparator。收口后应提交、
+推送并保持
 `main == origin/main`。
 
 ## 2. 产品目标和设计边界
@@ -139,6 +140,21 @@ specs/047-quality-diversity-population
 - Feature 050：生成 content-addressed effect kit，冻结 suite、case digest、public file ledger、
   evaluator/extractor digest，避免 benchmark 内容漂移。
 
+本地已准备好经过官方 publication 身份校验的 `supply_chain_inventory` kit 和历史 comparator：
+
+```text
+.lunar/famou-kit-real-001/
+```
+
+该目录被 `.gitignore` 忽略。baseline 来自 FM-Eval 只读 Query 的实验
+`fmexp-1fae1f63-b54a-400b-9ca4-118a4c6387f9`，三次历史分数为
+`0.3496 / 0.3496 / 0.2415`，historical best 为 `0.3496`。选中 case 的三条结果都满足
+FM-Eval conclusion eligibility；整个来源实验本身仍保留 `failed/partially_valid` 状态，不能把
+case slice 的可比较性扩张成整个实验成功。该实验的 adapter 是 `agentserver` 且
+`deep_evolution=false`，所以它是官方 FM-Eval AgentServer normal-mode comparator，不能称为
+WebAgent historical baseline；严格的 WebAgent 比较仍需同 publication/case 的
+`adapter=webagent` export。
+
 ### Feature 051：五轮深度演化效果试验
 
 目录：
@@ -159,6 +175,22 @@ lunar-agent effect-deep-trial ...
 每轮执行 exact private harness；每轮原子保存 logical-run record；`--resume` 校验 suite、
 baseline、case、receipt、harness 和配置身份；报告 round curve、best、P50/P90、gain 和
 milestone。
+
+本次进一步加固了效果试验的恢复和评分权威：
+
+- built-in deep subject receipt 用 `request_sha256` 绑定 canonical request；旧的已完成
+  receipt/record 仍可读取，但未登记 subject round 没有绑定摘要就不能复用；
+- 恢复时逐项复核 subject 的模型、evidence、turns、usage，以及 harness 的 extraction、
+  validity、overall、quality、detail metrics 和已记录的 harness request 摘要；
+- 已有 request-bound subject receipt 且 harness 目录安全时，未写入 durable round 的 harness
+  目录会删除并由 private harness 重评分；harness 早于 subject receipt 或路径不安全会 fail
+  closed。未在 state 中登记摘要的普通/深度 `record.json` 也不能自动成为权威记录；
+- 只有 `incomplete_rounds` 可继续原 attempt；进程或边界失败在下一次恢复时创建新 attempt，
+  并保留旧目录作为证据；
+- control、state、record、attempt 路径检查完整祖先 symlink 链；subject 不能预建同级
+  harness workspace；
+- `record.previous.json` journal 覆盖 `record.json` 已替换而 `state.json` 尚未登记新摘要的
+  中断窗口，只允许回滚到与 state 摘要精确匹配的上一版本。
 
 ### Feature 052：受控 RoundFeedback 契约
 
@@ -308,53 +340,77 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：真实深度演化效果闭环
+### P0：补齐 comparator 边界并运行真实 `2 logical runs × 5 rounds`
 
-当前还没有使用真实 FM case + 真实模型完成 `2 logical runs × 5 rounds` 的效果试验。原因是
-本地目前找到的是 Famou-Bench case 和 reference metrics，没有发现已授权的 FM-Eval historical
-results export。不能手工填一个 WebAgent 分数，否则会破坏比较可信度。
+官方 publication kit 和 AgentServer normal-mode historical comparator 已就绪，不需要手填
+历史分数：
 
-需要：
-
-1. 从 FM-Eval 导出一个与选定 case、release、harness 完全匹配的历史结果 JSON。
-2. 用 `effect-kit` 冻结 1 个 case（最多 2 个），再用 `effect-baseline` 转换结果。
-3. 确认 subject endpoint/model 和 extractor 所需的环境变量；密钥只通过显式环境传递，不写
-   入仓库、request、receipt 或 report。
-4. 先跑 1 case、2 runs、5 rounds；检查每轮是否真正改善 `solution.json`、每轮 harness 是否
-   执行、RoundFeedback 指令是否合理、是否超过同 case historical best。
-5. 再考虑扩大到第二个 case或更多 runs。
-
-准备 kit 的模板：
-
-```bash
-cd /Users/liminghan/Documents/lunar_agent
-uv run lunar-agent effect-kit .lunar/famou-kit \
-  --case supply_chain_inventory=/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-bench/03_assignment/supply_chain_inventory \
-  --owner-attested-content-equivalence --json
+```text
+suite:    .lunar/famou-kit-real-001/suite.json
+projection: .lunar/famou-kit-real-001/baseline.json
+raw:      .lunar/famou-kit-real-001/fm-eval-results.json
+case:     supply_chain_inventory
+model:    gpt-5.6-sol
+adapter:  agentserver (deep_evolution=false)
 ```
 
-准备 baseline 的模板：
+关键摘要：
 
-```bash
-uv run lunar-agent effect-baseline /absolute/path/fm-eval-results.json \
-  .lunar/famou-kit/suite.json .lunar/famou-kit/baseline.json \
-  --experiment-id <exact-export-id> \
-  --requested-model <historical-requested-model> \
-  --effective-model <historical-effective-model> \
-  --model-evidence provider_observed --json
+```text
+suite SHA-256:    1701995e8f65d9bd2ba73e840b870c9427fce27107e14048cffb34d594a04e46
+baseline SHA-256: 355a8f1dee33532e720711a9c72988e83f61b4f9af8e4187e51ed3e859579440
+raw SHA-256:      fa41c138ed3c73a50dd17e9e99704b41a079aef15ab45b1a6bdd65c3897c889d
 ```
+
+`provenance.json` 保存只读查询、模型观测和来源实验状态；
+`publication-identity-verification.json` 保存发布期 FM-Eval SDK commit
+`b17023d3f849f3312f8fc79f366b0c18495ee726` 的复算证据。该 projection 是在 WebAgent adapter
+guard 加入前用当时的 converter 生成；重复转换结果与落盘文件逐字节相同。这只证明旧结构转换
+可重复，不能改变 comparator 类型；当前 converter 会按预期拒绝这份 AgentServer raw export。
+
+这个 export 不能闭合 Feature 048 的 WebAgent-specific comparator 要求。若目标是严格比较
+WebAgent，仍需取得相同 publication、CaseRevision 和 harness 身份下 `adapter=webagent` 的
+machine-readable export，再单独生成 baseline。当前 effect protocol 的机器字段固定为
+`webagent_historical_best`，因此不得把这份 AgentServer projection 直接传给
+`effect-trial`/`effect-deep-trial`；否则机器可读报告会错误标注 comparator。
+`effect-baseline` 现在会在写文件前拒绝该 export 的显式 `agentserver` evidence，并拒绝互相
+冲突的 adapter evidence；缺少 adapter metadata 的 legacy export 继续兼容，但必须另外保留
+WebAgent 来源证明。
+
+真实试验尚未运行。除上述 WebAgent-specific export 外，当前还缺显式的执行配置：shell 中没有
+`FAMOU_MODEL_ENDPOINT`、
+`FAMOU_API_KEY`、`FAMOU_MODEL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、
+`ANTHROPIC_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 或 `ANTHROPIC_API_KEY`，项目 venv 也
+没有 `anyio` 和 `claude_agent_sdk`。来源实验的 extractor 冻结为 Anthropic API、模型
+`glm-5.2`，发布期 FM-Eval harness 锁定 `claude-agent-sdk==0.1.81`；exact extractor 必须使用
+包含对应依赖、与冻结身份相符且获授权的运行环境，并显式设置
+`ANTHROPIC_MODEL=glm-5.2`。密钥只通过显式环境传递，不能写入仓库、request、receipt 或
+report，也不能用 Codex/Claude 的本机登录态冒充 extractor 配置。
+
+执行步骤：
+
+1. 先补 `adapter=webagent` export，用 `effect-baseline` 生成新的 WebAgent baseline；当前可访问
+   的 117 条 FM-Eval 实验列表全部是 AgentServer，其中覆盖该 case 的 36 条也没有 WebAgent。
+2. 提供可调用 `gpt-5.6-sol` 的 subject endpoint/model 配置，以及 exact extractor 所需的
+   Anthropic 配置、`glm-5.2` 模型值和发布期依赖环境。
+3. 用下面的冻结 suite/baseline 跑 1 case、2 runs、5 rounds。
+4. 确认十次 private harness 都真实执行，检查每轮 `solution.json`、RoundFeedback、模型身份、
+   failure statistics 和恢复记录，再计算相对 historical best `0.3496` 的 descriptive delta。
+5. 完成单 case 证据后，再决定是否扩展到第二个 case 或更多 runs。
 
 运行深度试验的模板：
 
 ```bash
-uv run lunar-agent effect-deep-trial .lunar/famou-kit/suite.json \
-  .lunar/famou-kit/baseline.json \
-  --case-source supply_chain_inventory=/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-bench/03_assignment/supply_chain_inventory \
-  --subject-command "/absolute/path/lunar-agent effect-subject --model <model> --max-steps 100" \
+export ANTHROPIC_MODEL=glm-5.2
+uv run lunar-agent effect-deep-trial .lunar/famou-kit-real-001/suite.json \
+  /absolute/path/to/verified-webagent-baseline.json \
+  --case-source supply_chain_inventory=.lunar/famou-kit-real-001/cases/supply_chain_inventory \
+  --subject-command "/Users/liminghan/Documents/lunar_agent/.venv/bin/lunar-agent effect-subject --model WEBAGENT_BASELINE_MODEL --max-steps 100" \
   --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
-  --harness-command "/absolute/path/lunar-agent effect-harness --case-root /absolute/path/private-case" \
+  --harness-command "/Users/liminghan/Documents/lunar_agent/.venv/bin/lunar-agent effect-harness --case-root /Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-bench/03_assignment/supply_chain_inventory --python /absolute/path/to/python-with-anyio-and-claude-agent-sdk-0.1.81 --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL --extractor-env ANTHROPIC_MODEL" \
   --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL \
-  --requested-model <model> --runs-per-case 2 --outer-rounds 5 \
+  --harness-env ANTHROPIC_MODEL \
+  --requested-model WEBAGENT_BASELINE_MODEL --runs-per-case 2 --outer-rounds 5 \
   --stagnation-rounds 2 --workspace .lunar/deep-effect-trial-real-001 --json
 ```
 
@@ -384,7 +440,9 @@ uv run lunar-agent effect-deep-trial .lunar/famou-kit/suite.json \
 
 - `model profile`（model、thinking/budget、max steps、timeout）；
 - 每轮 token/cost 预算；
-- parse failure、timeout、invalid candidate 的按轮统计；
+- parse failure 子类、per-round error code/timeout breakdown；
+- 后续支持新版 workload-based export 时，把权威 `experiment.request.workload_ref.kind` 纳入
+  baseline adapter guard，并明确它与 `adapter_request.kind` 的优先级；
 - best-of-run、best-of-round、suite average 的明确区分。
 
 ## 7. 6Astra 模型切换注意事项
@@ -417,7 +475,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/053-deep-effect-failure-statistics
+specs/051-deep-evolution-effect-trial
 ```
 
 后续新功能必须：
@@ -449,21 +507,36 @@ git diff --check
 cd /Users/liminghan/Documents/lunar_agent
 git status --short --branch
 git log --oneline -5
-uv run pytest -q tests/test_deep_feedback.py tests/test_deep_effect_trial.py
+uv run pytest -q tests/test_effect_trial.py tests/test_deep_feedback.py tests/test_deep_effect_trial.py
 ```
 
-接着优先寻找/生成经过授权的 FM-Eval historical results export；在没有真实 baseline 前，
-不要宣称 Lunar 已经打平或超过 WebAgent。
+接着先复核 `.lunar/famou-kit-real-001/` 的 baseline/provenance 摘要和显式 subject/extractor
+执行配置。当前 `baseline.json` 是 AgentServer projection，不能传给现有 WebAgent-specific
+effect protocol。只有另行取得匹配的 `adapter=webagent` export 并生成新 baseline，exact private
+harness 实际完成新的 `2 × 5` 试验后，才可报告该冻结 case 上的 descriptive
+delta/breakthrough；它仍不构成 WebAgent parity、suite parity 或 statistical superiority。历史
+comparator 已就绪本身不代表 Lunar 新结果。
 
 ## 10. 本次续接记录（2026-09-06）
 
-已检查本地 FM-Eval 源码、文档、Git refs 及 Famou-Bench 文件，未发现可作为 WebAgent
-historical baseline 的 machine-readable 授权导出。开发 canary 报告、token 账单和 case
-`reference_metrics.json` 均不满足该比较边界，因此真实 2×5 深度试验仍等待导出文件。
+已通过 FM-Eval 官方只读 Query 取得 machine-readable 历史结果、case catalog 和 publication
+身份，完成 `supply_chain_inventory` 的 official-publication kit、AgentServer normal-mode
+baseline、provenance 和发布期 SDK 身份复算。历史三次分数为
+`0.3496 / 0.3496 / 0.2415`；requested/effective model 都是 `gpt-5.6-sol`，evidence 为
+`runtime_observed`，authority 为 `descriptive`，所选 case slice 的 conclusion eligibility 为
+`eligible`。来源 adapter 是 `agentserver` 且 `deep_evolution=false`，因此不能把它标成 WebAgent
+baseline。严格的 WebAgent comparison 仍缺同身份 `adapter=webagent` export。这些产物位于被
+`.gitignore` 忽略的 `.lunar/famou-kit-real-001/`，不包含凭据。
 
-同时修复了候选物化的极短超时可靠性：`CommandCandidateRunner` 为进程创建和解释器启动保留
-50ms 下限，避免正常候选在启动阶段被误判超时；较长超时预算保持原值。全套测试与构建检查均已通过。
+本次还修复了普通/深度效果试验对未登记 record 的自动采信、深度 receipt/request 绑定、完整
+telemetry/metric 恢复校验、未登记 harness 重评分、失败 attempt 复用边界、subject 越界创建
+harness workspace、祖先 symlink、record/state 提交窗口，以及非 WebAgent baseline export 的
+误接收。`record.previous.json` 只在摘要与 state 当前授权版本精确匹配时用于恢复；伪造或摘要
+不匹配的 journal 会 fail closed。旧的已完成 schema 继续兼容读取，但不能追溯获得新摘要提供
+的完整性保证；需要新证据时必须重新评分。
 
-Feature 053 已实现、测试、构建并推送；本地真实 case 已成功冻结到被 `.gitignore` 忽略的
-`.lunar/famou-kit-real-001/`，其中包含 `supply_chain_inventory` 的 public projection 和
-suite identity。该 kit 没有 baseline 或凭据，不能单独用于宣称效果结论。
+针对性及全仓测试、Ruff、compileall、构建、Feature 048/051 Specify 前置检查和
+`git diff --check` 已通过。真实 `2 × 5` 深度试验尚未运行：当前环境缺少显式 subject endpoint/
+model 凭据、extractor 的 `glm-5.2` 配置和包含 `anyio`、发布期 `claude_agent_sdk` 的运行环境。
+不得把 AgentServer historical baseline 的准备完成误报为 WebAgent baseline 或新的 Lunar
+效果结论。

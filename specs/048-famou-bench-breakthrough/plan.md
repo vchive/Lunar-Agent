@@ -22,7 +22,8 @@ new `famou.effect_trial` module beside `famou.benchmark` and never enters an evo
 1. **Small frozen slice** — require exactly one or two cases and 1–10 Lunar runs per case. This is
    affordable evidence, not a surrogate 20-case suite score.
 2. **Historical best is derived** — ingest per-run FM-Eval receipts and derive WebAgent's best valid
-   score. A caller cannot type only a convenient target number.
+   score. A caller cannot type only a convenient target number. Explicit experiment/release/result
+   adapter evidence must consistently identify `webagent`; a different adapter fails closed.
 3. **Exact identity before score** — benchmark release/publication, evaluation profile, case
    revision/digest, extractor digest, and evaluator digest must agree before any comparison.
 4. **Public projection only** — Lunar places only manifest-ledger public files in the subject tree.
@@ -40,7 +41,10 @@ new `famou.effect_trial` module beside `famou.benchmark` and never enters an evo
 8. **Provider evidence is explicit** — requested/effective model labels and observation level are
    recorded. A matching label with `not_observable` remains descriptive, never provider proof.
 9. **Record then resume** — each completed logical run has one immutable atomic `record.json`.
-   Interrupted attempts remain; resume starts a new attempt only for the unfinished logical run.
+   Only a digest already registered in runner-owned state makes that record authoritative.
+   Interrupted or unregistered attempts remain; resume starts a new independently scored attempt
+   for that logical run. A previous-record journal makes an update recoverable if interruption
+   occurs after replacing the record but before replacing state.
 10. **No service coupling** — suite and baseline are local JSON exports. Lunar does not import
     FM-Eval/WebAgent, use their credentials, or mutate the evaluation service.
 

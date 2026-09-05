@@ -23,3 +23,6 @@
   and evidence limitations in README/quickstart.
 - [x] T048-13 Run focused/full tests, lint, compileall, deterministic quickstart, Specify checks, and
   diff review; mark implemented, commit, and push as `vchive` on `main`.
+- [x] T048-14 Reject unregistered future-run records and rescore them through a new attempt.
+- [x] T048-15 Make registered record replacement recoverable across the record/state commit window.
+- [x] T048-16 Reject FM-Eval exports whose explicit adapter evidence is non-WebAgent or conflicting.
