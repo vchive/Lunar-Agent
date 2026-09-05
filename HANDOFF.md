@@ -1,6 +1,6 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-05  
+更新时间：2026-09-06  
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
@@ -11,6 +11,7 @@
 工作区在本次交接开始时干净，`main` 与 `origin/main` 同步。最近提交：
 
 ```text
+32561c9 feat: report deep evolution failure statistics
 f633dde fix: allow candidate interpreter startup before timeout
 edaa4a6 feat: add controlled deep evolution feedback
 22c4e10 chore: close deep trial SDD checklist
@@ -20,7 +21,7 @@ b404671 feat: add executable famou bench adapters
 0d114a5 feat: measure frozen benchmark breakthroughs
 ```
 
-本文件和 Feature 052 的 checklist 更新属于交接收口改动，完成后应再提交、推送，并保持
+本文件和 Feature 053 的 checklist 更新属于交接收口改动，完成后应再提交、推送，并保持
 `main == origin/main`。
 
 ## 2. 产品目标和设计边界
@@ -454,7 +455,7 @@ uv run pytest -q tests/test_deep_feedback.py tests/test_deep_effect_trial.py
 接着优先寻找/生成经过授权的 FM-Eval historical results export；在没有真实 baseline 前，
 不要宣称 Lunar 已经打平或超过 WebAgent。
 
-## 10. 本次续接记录（2026-09-05）
+## 10. 本次续接记录（2026-09-06）
 
 已检查本地 FM-Eval 源码、文档、Git refs 及 Famou-Bench 文件，未发现可作为 WebAgent
 historical baseline 的 machine-readable 授权导出。开发 canary 报告、token 账单和 case
@@ -462,3 +463,7 @@ historical baseline 的 machine-readable 授权导出。开发 canary 报告、t
 
 同时修复了候选物化的极短超时可靠性：`CommandCandidateRunner` 为进程创建和解释器启动保留
 50ms 下限，避免正常候选在启动阶段被误判超时；较长超时预算保持原值。全套测试与构建检查均已通过。
+
+Feature 053 已实现、测试、构建并推送；本地真实 case 已成功冻结到被 `.gitignore` 忽略的
+`.lunar/famou-kit-real-001/`，其中包含 `supply_chain_inventory` 的 public projection 和
+suite identity。该 kit 没有 baseline 或凭据，不能单独用于宣称效果结论。
