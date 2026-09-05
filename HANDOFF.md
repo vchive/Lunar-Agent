@@ -20,10 +20,9 @@ b3df70e docs: add lunar agent handoff
 edaa4a6 feat: add controlled deep evolution feedback
 ```
 
-本次变更修复普通/深度效果试验的记录权威和深度 round receipt 完整性，更新 Feature
-048/051/052 文档，并补齐官方 FM-Eval AgentServer normal-mode comparator。收口后应提交、
-推送并保持
-`main == origin/main`。
+本次收口已修复普通/深度效果试验的记录权威和深度 round receipt 完整性，更新 Feature
+048/051/052 文档，并补齐官方 FM-Eval AgentServer normal-mode comparator。变更已按指定身份
+提交并推送；完成时保持 `main == origin/main`。
 
 ## 2. 产品目标和设计边界
 
