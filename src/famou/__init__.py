@@ -43,6 +43,12 @@ from .data_profile import (
     profile_sha256,
 )
 from .deep_effect_trial import DeepEffectTrialConfig, DeepEffectTrialRunner
+from .deep_feedback import (
+    FeedbackError,
+    build_candidate_manifest,
+    build_round_feedback,
+    normalize_feedback,
+)
 from .effect_adapters import (
     EffectAdapterError,
     convert_fm_eval_baseline,
@@ -146,6 +152,7 @@ __all__ = [
     "EvolutionError",
     "EvolutionStrategy",
     "ExecutionAwareCandidateEvaluator",
+    "FeedbackError",
     "FrozenEvaluatorBundle",
     "GenerationRequest",
     "LoopStrategy",
@@ -162,8 +169,10 @@ __all__ = [
     "TrialSuite",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
+    "build_candidate_manifest",
     "build_effect_kit",
     "build_private_input_profile",
+    "build_round_feedback",
     "build_strategy",
     "canonical_profile_json",
     "compile_evaluator_bundle",
@@ -172,6 +181,7 @@ __all__ = [
     "convert_fm_eval_baseline",
     "famou_case_content_digest",
     "load_evaluator_bundle",
+    "normalize_feedback",
     "profile_sha256",
     "run_harness_adapter",
     "run_subject_adapter",

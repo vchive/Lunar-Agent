@@ -15,6 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from . import effect_trial as _normal
+from .deep_feedback import (
+    MAX_STAGNATION_ROUNDS,
+    FeedbackError,
+    build_candidate_manifest,
+    build_round_feedback,
+    normalize_feedback,
+)
 from .effect_trial import (
     EffectTrialConfig,
     EffectTrialError,
@@ -34,6 +41,7 @@ class DeepEffectTrialConfig:
     base: EffectTrialConfig
     outer_rounds: int = 5
     strategy: str = _STRATEGY
+    stagnation_rounds: int = 2
 
     def __post_init__(self) -> None:
         if not isinstance(self.base, EffectTrialConfig):
@@ -41,6 +49,7 @@ class DeepEffectTrialConfig:
         _normal._integer(self.outer_rounds, "outer_rounds", 1, MAX_OUTER_ROUNDS)
         if self.strategy != _STRATEGY:
             raise EffectTrialError("deep trial strategy must be loop")
+        _normal._integer(self.stagnation_rounds, "stagnation_rounds", 1, MAX_STAGNATION_ROUNDS)
 
     @property
     def runs_per_case(self) -> int:
@@ -60,6 +69,7 @@ class DeepEffectTrialConfig:
             "mode": "deep_evolution",
             "strategy": self.strategy,
             "outer_rounds": self.outer_rounds,
+            "stagnation_rounds": self.stagnation_rounds,
         }
 
 
@@ -168,9 +178,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         }
 
     def _validate_round(self, payload: object, case: _normal.TrialCase, run_index: int, round_index: int) -> dict[str, Any]:
-        item = _normal._strict_object(
-            payload,
-            {
+        fields = {
                 "round_index",
                 "status",
                 "ready",
@@ -187,9 +195,11 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 "quality_score",
                 "detail_metrics",
                 "error_code",
-            },
-            "deep round record",
-        )
+            }
+        feedback_fields = fields | {"feedback"}
+        if not isinstance(payload, dict) or (set(payload) != fields and set(payload) != feedback_fields):
+            raise EffectTrialError("deep round record must contain the expected fields")
+        item = dict(payload)
         round_value = _normal._integer(item["round_index"], "deep round index", 1, MAX_OUTER_ROUNDS)
         if round_value != round_index or item["status"] not in {"completed", "failed"}:
             raise EffectTrialError("deep round identity or status is invalid")
@@ -212,6 +222,24 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         _normal._number(item["quality_score"], "deep round quality", nullable=True)
         if not isinstance(item["detail_metrics"], dict) or len(_normal._canonical_bytes(item["detail_metrics"])) > 16 * 1024:
             raise EffectTrialError("deep round detail metrics are invalid")
+        if "feedback" in item:
+            try:
+                item["feedback"] = normalize_feedback(item["feedback"], expected_round=round_index)
+            except FeedbackError as exc:
+                raise EffectTrialError(f"deep round feedback is invalid: {exc}") from exc
+        else:
+            try:
+                item["feedback"] = normalize_feedback(
+                    {
+                        "round_index": round_index,
+                        "validity_score": item["validity_score"],
+                        "overall_score": item["overall_score"],
+                        "quality_score": item["quality_score"],
+                    },
+                    expected_round=round_index,
+                )
+            except FeedbackError as exc:
+                raise EffectTrialError(f"deep round legacy feedback is invalid: {exc}") from exc
         del case, run_index
         return item
 
@@ -254,12 +282,15 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         if not isinstance(rounds, list) or not 0 <= len(rounds) <= self.deep_config.outer_rounds:
             raise EffectTrialError("deep logical run rounds are invalid")
         expected = list(range(1, len(rounds) + 1))
+        normalized_rounds: list[dict[str, Any]] = []
         for index, value in enumerate(rounds, start=1):
             parsed = self._validate_round(value, case, run_index, index)
             if parsed["round_index"] != expected[index - 1]:
                 raise EffectTrialError("deep logical run rounds must be ordered")
+            normalized_rounds.append(parsed)
         if item["ready"] and len(rounds) != self.deep_config.outer_rounds:
             raise EffectTrialError("ready deep logical run must contain every outer round")
+        item["rounds"] = normalized_rounds
         return item
 
     def _verify_round_artifacts(self, case: _normal.TrialCase, record: dict[str, Any]) -> None:
@@ -425,12 +456,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         previous: dict[str, object] | None = None
         if rounds:
             latest = rounds[-1]
-            previous = {
-                "round_index": latest["round_index"],
-                "validity_score": latest["validity_score"],
-                "overall_score": latest["overall_score"],
-                "quality_score": latest["quality_score"],
-            }
+            previous = dict(latest["feedback"])
         try:
             if resume_record is None:
                 self._stage_public_case(case, subject_root)
@@ -509,6 +535,16 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 self._verify_staged_case(case, subject_root, request_sha256)
                 if not harness_reused:
                     scored = self._harness_receipt(harness_root / "receipt.json", case)
+                try:
+                    feedback = build_round_feedback(
+                        round_index,
+                        scored,
+                        candidate_manifest=build_candidate_manifest(subject_root),
+                        prior_rounds=rounds,
+                        stagnation_rounds=self.deep_config.stagnation_rounds,
+                    )
+                except FeedbackError as exc:
+                    raise EffectTrialError("feedback_contract_failed") from exc
                 round_record = {
                     "round_index": round_index,
                     "status": "completed",
@@ -517,15 +553,11 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                     "harness_receipt": f"cases/{case.key}/runs/{run_index:03d}/attempts/{attempt_index:03d}/harness-{round_index:03d}/receipt.json",
                     **subject,
                     **scored,
+                    "feedback": feedback,
                     "error_code": None,
                 }
                 rounds.append(round_record)
-                previous = {
-                    "round_index": round_index,
-                    "validity_score": scored["validity_score"],
-                    "overall_score": scored["overall_score"],
-                    "quality_score": scored["quality_score"],
-                }
+                previous = dict(feedback)
                 # Persist a failed/incomplete logical record after every successful round. If the
                 # process is interrupted before the next round, resume can continue from this
                 # prefix while preserving the old attempt directory.
@@ -556,6 +588,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 "deep subject receipt does not describe the requested round",
                 "deep subject requested model does not match frozen config",
                 "deep harness workspace already exists",
+                "feedback_contract_failed",
             }:
                 code = "deep_trial_boundary_failed"
             return self._failed_deep_record(case, run_index, attempt_index, started, rounds, code)
@@ -644,6 +677,14 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                             "overall_score": item["overall_score"],
                             "quality_score": item["quality_score"],
                             "error_code": item["error_code"],
+                            "feedback": {
+                                "directive": item["feedback"]["directive"],
+                                "failure_category": item["feedback"]["failure_category"],
+                                "stagnation": item["feedback"]["stagnation"],
+                                "score_delta": item["feedback"]["score_delta"],
+                                "best_overall_score": item["feedback"]["best_overall_score"],
+                                "best_round_index": item["feedback"]["best_round_index"],
+                            },
                         }
                         for item in value["rounds"]
                     ],
@@ -671,6 +712,21 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "quality_p50": _percentile(quality, 0.50),
             "quality_p90": _percentile(quality, 0.90),
             "gain_from_first_round": gain,
+            "feedback_directives": {
+                directive: sum(
+                    1
+                    for record in records
+                    for item in record["rounds"]
+                    if item["feedback"]["directive"] == directive
+                )
+                for directive in (
+                    "refine_best",
+                    "repair_validity",
+                    "repair_evaluation",
+                    "change_search_strategy",
+                    "preserve_best_and_probe",
+                )
+            },
             "round_curve": curve,
             "runs": projected,
         }

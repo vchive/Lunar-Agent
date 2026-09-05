@@ -321,12 +321,15 @@ lunar-agent effect-deep-trial .lunar/famou-kit/suite.json baseline.json \
 ```
 
 Each logical run keeps one attempt workspace but starts a fresh subject process for every round.
-The next round receives only the previous round's bounded validity/quality/score summary; the
-baseline rows and private harness remain outside the subject boundary. The exact harness runs after
-every round, and the report records the best round, P50/P90 score and quality distributions, and a
-round-best curve. This is an effect-layer comparison, not WebAgent prompt identity, full-suite
-parity, or a statistically powered superiority result. Use `--resume` with the same options after
-an interruption. The `effect-trial` command remains the normal-mode baseline and is unchanged.
+The next round receives only the previous round's bounded `RoundFeedback` projection: finite
+scores, generic allowlisted metrics, a hash-only candidate manifest, a best-round pointer, and a
+repair/stagnation directive. It does not receive baseline rows, private harness files, raw process
+output, or credentials. Set `--stagnation-rounds` to control the bounded non-improvement window
+(default `2`). The exact harness runs after every round, and the report records the best round,
+P50/P90 score and quality distributions, the round-best curve, and safe feedback directives. This
+is an effect-layer comparison, not WebAgent prompt identity, full-suite parity, or a statistically
+powered superiority result. Use `--resume` with the same options after an interruption. The
+`effect-trial` command remains the normal-mode baseline and is unchanged.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

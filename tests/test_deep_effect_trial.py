@@ -219,7 +219,7 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
     )
     config = DeepEffectTrialConfig(
         base=EffectTrialConfig(
-            runs_per_case=1,
+            runs_per_case=2,
             timeout_seconds=10,
             requested_model="model",
             subject_command=subject_script,
@@ -244,7 +244,12 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
     assert case["round_curve"][3]["best"] == 0.60
     assert case["score_p50"] == pytest.approx(0.60)
     assert case["score_p90"] == pytest.approx(0.60)
+    assert case["ready_runs"] == 2
+    assert case["round_curve"][0]["evaluated_runs"] == 2
+    assert case["round_curve"][3]["score_p90"] == pytest.approx(0.60)
     assert case["runs"][0]["rounds"][1]["overall_score"] == 0.55
+    assert case["runs"][0]["rounds"][0]["feedback"]["directive"] == "refine_best"
+    assert case["runs"][0]["rounds"][2]["feedback"]["stagnation"]["consecutive_rounds"] == 1
 
     def no_process(*args, **kwargs):
         raise AssertionError("completed deep trial must not re-invoke a process on resume")
@@ -259,6 +264,23 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
         process_executor=no_process,
     ).run().to_dict()
     assert resumed["cases"][0]["lunar_best"] == 0.60
+
+    record_path = tmp_path / "deep" / "cases" / "case-a" / "runs" / "001" / "record.json"
+    original_record_bytes = record_path.read_bytes()
+    record = json.loads(record_path.read_text())
+    record["rounds"][0]["feedback"]["directive"] = "repair_validity"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(EffectTrialError, match="digest mismatch"):
+        DeepEffectTrialRunner(
+            suite_path,
+            baseline_path,
+            tmp_path / "deep",
+            case_sources={"case-a": public},
+            config=config,
+            resume=True,
+            process_executor=no_process,
+        ).run()
+    record_path.write_bytes(original_record_bytes)
 
     attempt = tmp_path / "deep" / report["cases"][0]["runs"][0]["attempt"]
     harness_receipt = attempt / "harness-001" / "receipt.json"

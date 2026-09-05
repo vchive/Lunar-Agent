@@ -239,12 +239,16 @@ fresh attempt                     fresh attempt
 
 `effect-deep-trial` defaults to the five outer rounds used by WebAgent's no-argument `/evolve`
 source behavior. Every subject invocation is a fresh, stateless repository-owned Agent session;
-continuity comes from the attempt files and a bounded previous-round evaluator summary. The private
+continuity comes from the attempt files and a bounded `RoundFeedback` projection. That projection
+contains only finite scores, generic allowlisted metrics, a hash-only candidate manifest, a
+best-round pointer, and a repair/stagnation directive. Baseline rows, private evaluator files,
+raw process output, and credentials remain outside the subject boundary. The private
 extractor/evaluator remains the only score authority and runs after each round. A run's score is the
 maximum valid round score, while invalid rounds remain in its record. Reports expose per-round best,
-P50/P90, run-level score/validity/quality distributions, and strict deltas against the imported
-normal WebAgent history. The comparison is descriptive and effect-layer comparable, but deliberately
-does not claim WebAgent prompt/role identity, full-suite parity, or statistical superiority.
+P50/P90, run-level score/validity/quality distributions, feedback directives, and strict deltas
+against the imported normal WebAgent history. The comparison is descriptive and effect-layer
+comparable, but deliberately does not claim WebAgent prompt/role identity, full-suite parity, or
+statistical superiority.
 
 The `benchmark` command is a thin orchestration layer above this seam. It validates one canonical
 contract, creates isolated `strategies/<name>` workspaces, and runs the selected native strategies

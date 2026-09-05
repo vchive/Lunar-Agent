@@ -505,6 +505,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help="outer evolution rounds (default: 5, matching WebAgent no-argument /evolve)",
     )
+    deep_effect_parser.add_argument(
+        "--stagnation-rounds",
+        type=int,
+        default=2,
+        help="non-improving rounds before a strategy-change directive (default: 2)",
+    )
     deep_effect_parser.add_argument("--timeout", type=float, default=3600.0)
     deep_effect_parser.add_argument("--workspace", type=Path, required=True, help="trial workspace")
     deep_effect_parser.add_argument(
@@ -2823,7 +2829,11 @@ def _effect_deep_trial(args: argparse.Namespace) -> dict[str, object]:
         subject_environment=_effect_environment(args.subject_env, "subject"),
         harness_environment=_effect_environment(args.harness_env, "harness"),
     )
-    config = DeepEffectTrialConfig(base=base, outer_rounds=args.outer_rounds)
+    config = DeepEffectTrialConfig(
+        base=base,
+        outer_rounds=args.outer_rounds,
+        stagnation_rounds=args.stagnation_rounds,
+    )
     return DeepEffectTrialRunner(
         args.suite,
         args.baseline,

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_loop import AgentLoopRuntime
+from .deep_feedback import FeedbackError, normalize_feedback
 from .effect_trial import (
     BaselineModel,
     BenchmarkIdentity,
@@ -443,19 +444,10 @@ def run_subject_adapter(
             raise EffectAdapterError("subject round index exceeds outer rounds")
         previous = request["previous_evaluation"]
         if previous is not None:
-            previous_item = _strict_object(
-                previous,
-                {"round_index", "validity_score", "overall_score", "quality_score"},
-                "previous evaluation",
-            )
-            previous_round = _integer(
-                previous_item["round_index"], "previous evaluation round", minimum=1, maximum=1000
-            )
-            if previous_round != round_index - 1:
-                raise EffectAdapterError("previous evaluation round does not precede subject round")
-            _finite(previous_item["validity_score"], "previous validity score", nullable=True)
-            _finite(previous_item["overall_score"], "previous overall score", nullable=True)
-            _finite(previous_item["quality_score"], "previous quality score", nullable=True)
+            try:
+                normalize_feedback(previous, expected_round=round_index - 1)
+            except FeedbackError as exc:
+                raise EffectAdapterError(str(exc)) from exc
         elif round_index != 1:
             raise EffectAdapterError("deep subject continuation requires previous evaluation")
     if not isinstance(request["public_files"], list) or not request["public_files"]:
@@ -528,10 +520,14 @@ Case key: {case['key']}
         previous = request["previous_evaluation"]
         feedback = "No previous round exists; establish a correct baseline candidate."
         if isinstance(previous, dict):
+            try:
+                normalized_previous = normalize_feedback(previous, expected_round=round_index - 1)
+            except FeedbackError as exc:
+                raise EffectAdapterError(str(exc)) from exc
             feedback = (
-                "Previous evaluator summary (use only to improve the candidate): "
-                f"round={previous['round_index']}, validity={previous['validity_score']}, "
-                f"overall={previous['overall_score']}, quality={previous['quality_score']}"
+                "Previous evaluator feedback (use only to improve the candidate; it is a bounded "
+                "projection, not private evaluator output):\n"
+                + json.dumps(normalized_previous, ensure_ascii=False, sort_keys=True)
             )
         prompt = f"""You are the deep-evolution subject in outer round {round_index}/{outer_rounds}.
 
