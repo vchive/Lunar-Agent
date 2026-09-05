@@ -17,4 +17,4 @@
 
 - [x] T052-08 Update README and architecture vocabulary.
 - [x] T052-09 Run focused/full tests, lint, compileall, build, Specify checks, and diff review.
-- [ ] T052-10 Mark implemented, commit, and push as `vchive` on `main`.
+- [x] T052-10 Mark implemented, commit, and push as `vchive` on `main`.
