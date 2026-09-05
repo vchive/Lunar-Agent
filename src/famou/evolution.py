@@ -44,6 +44,10 @@ MAX_COMMAND_ARGS = 32
 MAX_EXECUTION_OUTPUT_BYTES = 16 * 1024
 MAX_EXECUTION_ERROR_BYTES = 512
 MAX_EXECUTION_ARTIFACTS = 32
+# Process creation and interpreter startup can consume a few tens of milliseconds even for an
+# empty candidate. A floor prevents a sub-scheduling-quantum budget from timing out before the
+# candidate gets a chance to execute; longer budgets retain the requested value exactly.
+MIN_PROCESS_TIMEOUT_SECONDS = 0.05
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_OUTPUT = re.compile(
@@ -481,6 +485,7 @@ class CommandCandidateRunner:
             or effective_timeout <= 0
         ):
             raise ValueError("candidate runner timeout must be positive")
+        effective_timeout = max(float(effective_timeout), MIN_PROCESS_TIMEOUT_SECONDS)
         workspace.mkdir(parents=True, exist_ok=True)
         started = time.monotonic()
         process: subprocess.Popen[str] | None = None
