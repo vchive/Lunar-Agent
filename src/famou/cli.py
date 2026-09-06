@@ -58,6 +58,7 @@ from .evolution import (
 from .memory import MemoryStore
 from .models import Run
 from .policy import MasterPolicy, PlanDocument, PlanPatch
+from .profiles import ModelProfile
 from .runtime import OpenAICompatibleRuntime, build_runtime
 from .store import Store
 from .tools import LocalToolRegistry
@@ -88,6 +89,11 @@ def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--command", dest="runtime_command", help="explicit subprocess command")
     parser.add_argument("--endpoint", help="OpenAI-compatible chat endpoint URL")
     parser.add_argument("--model", help="model name for the OpenAI-compatible runtime")
+    parser.add_argument(
+        "--model-profile",
+        type=Path,
+        help="bounded JSON ModelProfile for an agent loop (requires --agent-loop)",
+    )
     parser.add_argument(
         "--api-key",
         dest="api_key",
@@ -675,13 +681,60 @@ def _config(args: argparse.Namespace) -> Config:
     return config
 
 
+_MAX_MODEL_PROFILE_BYTES = 64 * 1024
+
+
+def _load_model_profile(path: Path | None) -> ModelProfile | None:
+    """Load one bounded, regular JSON model profile without following a symlink."""
+    if path is None:
+        return None
+    candidate = path.expanduser()
+    if candidate.is_symlink() or not candidate.is_file():
+        raise ValueError("model profile must be a regular file")
+    try:
+        with candidate.open("rb") as stream:
+            content = stream.read(_MAX_MODEL_PROFILE_BYTES + 1)
+        if len(content) > _MAX_MODEL_PROFILE_BYTES:
+            raise ValueError("model profile exceeds 65536 bytes")
+        payload = json.loads(content.decode("utf-8"))
+    except OSError as exc:
+        raise ValueError(f"could not read model profile: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError("model profile must be UTF-8 JSON") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"model profile is not valid JSON: {exc.msg}") from exc
+    try:
+        return ModelProfile.from_dict(payload)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid model profile: {exc}") from exc
+
+
+def _model_profile_digest(profile: ModelProfile | None) -> str | None:
+    if profile is None:
+        return None
+    encoded = json.dumps(
+        profile.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _controller(args: argparse.Namespace, config: Config) -> LocalController:
+    profile = _load_model_profile(getattr(args, "model_profile", None))
+    requested_model = getattr(args, "model", None)
+    if profile is not None and requested_model is not None and requested_model != profile.model:
+        raise ValueError("--model does not match model profile model")
+    if profile is not None and not getattr(args, "agent_loop", False):
+        raise ValueError("--model-profile requires --agent-loop")
+    runtime_model = requested_model or (profile.model if profile is not None else None)
+    if profile is not None:
+        config = replace(config, runtime_timeout=min(config.runtime_timeout, profile.timeout_seconds))
+
     def make_runtime():
         runtime = build_runtime(
             args.runtime,
             getattr(args, "runtime_command", None),
             getattr(args, "endpoint", None),
-            getattr(args, "model", None),
+            runtime_model,
             getattr(args, "api_key", None),
         )
         if getattr(args, "agent_loop", False):
@@ -699,6 +752,7 @@ def _controller(args: argparse.Namespace, config: Config) -> LocalController:
                 max_steps=getattr(args, "max_steps", 40),
                 memory=memory,
                 session_history=getattr(args, "session_history", False),
+                profile=profile,
             )
         return runtime
 
@@ -775,6 +829,8 @@ def _detach(
         command.extend(("--endpoint", args.endpoint))
     if args.model:
         command.extend(("--model", args.model))
+    if getattr(args, "model_profile", None):
+        command.extend(("--model-profile", str(args.model_profile)))
     if args.agent_loop:
         command.append("--agent-loop")
         command.extend(("--max-steps", str(args.max_steps)))
@@ -1166,6 +1222,7 @@ def _runtime_fingerprint(
     loop_allow_exec: bool = False,
     loop_memory: bool = False,
     loop_session_history: bool = False,
+    model_profile: ModelProfile | None = None,
 ) -> str:
     """Return a credential-safe identity for one repository-owned runtime Agent."""
     payload = {
@@ -1178,6 +1235,8 @@ def _runtime_fingerprint(
         "role": role,
         "runtime": runtime_name,
     }
+    if model_profile is not None:
+        payload["model_profile_sha256"] = _model_profile_digest(model_profile)
     if agent_loop:
         payload["agent_loop"] = {
             "allow_exec": loop_allow_exec,
@@ -1261,14 +1320,19 @@ def _candidate_input_artifacts(store: Store, run_id: str) -> tuple[CandidateInpu
 
 def _compiler_fingerprint(runtime: object) -> str:
     """Return a credential-safe identity for the solve contract compiler runtime."""
+    candidate = getattr(runtime, "model", None)
+    provider = runtime if isinstance(candidate, str) else (candidate or runtime)
+    profile = getattr(runtime, "profile", None)
     payload = {
         "kind": "contract-compiler",
         "runtime": getattr(runtime, "name", type(runtime).__name__),
-        "command": list(getattr(runtime, "command", ()) or ()),
-        "endpoint": getattr(runtime, "endpoint", None),
-        "model": getattr(runtime, "model", None),
+        "command": list(getattr(provider, "command", ()) or ()),
+        "endpoint": getattr(provider, "endpoint", None),
+        "model": getattr(provider, "model", None),
         "mode": getattr(runtime, "name", "runtime"),
     }
+    if isinstance(profile, ModelProfile):
+        payload["model_profile_sha256"] = _model_profile_digest(profile)
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
@@ -2078,6 +2142,8 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
         command.extend(("--endpoint", args.endpoint))
     if args.model:
         command.extend(("--model", args.model))
+    if getattr(args, "model_profile", None):
+        command.extend(("--model-profile", str(args.model_profile)))
     if args.agent_loop:
         command.append("--agent-loop")
         command.extend(("--max-steps", str(args.max_steps)))

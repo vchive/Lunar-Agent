@@ -244,6 +244,23 @@ profile，使用 profile 的默认 timeout 和 step 上限，在每轮模型响�
 预算，并在成功结果中报告 profile 名称和可用的 `cost_micros`。没有 profile 的既有调用保持原有
 行为；同一 runtime 复用时账本按 invocation 重置。
 
+### Feature 056：CLI runtime profile provenance
+
+目录：
+
+```text
+specs/056-cli-runtime-model-profile-provenance/
+```
+
+普通 `run`、`solve`、`resume`、`answer` 和 `plan` 的 `--agent-loop` 现在可通过
+`--model-profile PATH` 加载有界 JSON `ModelProfile`。profile 必须是非 symlink 的普通 UTF-8
+JSON 文件，内容经 `ModelProfile.from_dict` 校验；它可提供默认 model，并把 timeout、步数、
+token 和成本限制传入 `HermesSessionRuntime`。没有 `--agent-loop` 时显式 profile 会在运行前
+拒绝。detached 子进程只传播 profile 路径，API key 仍通过环境变量传递。solve 的 compiler
+fingerprint 包含 profile 的 canonical SHA-256，profile 变更会拒绝 conversational resume。
+one-shot runtime、`run_isolated`、effect adapter 和 evolution/benchmark 专用 runtime 参数
+仍未接入该 CLI profile，后续应单独设计。
+
 ## 4. 本地知识库索引
 
 知识库根目录：
@@ -558,4 +575,5 @@ model 凭据、extractor 的 `glm-5.2` 配置和包含 `anyio`、发布期 `clau
 效果结论。
 
 Feature 054/055 已完成并通过全量 pytest、Ruff、compileall、构建、Specify prerequisites 和
-`git diff --check`；Feature 055 的提交会在本次收口后记录在此处。
+`git diff --check`。Feature 056 已完成并通过全量 pytest、Ruff、compileall、构建、Specify
+prerequisites 和 `git diff --check`，尚未提交。

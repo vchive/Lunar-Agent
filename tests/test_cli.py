@@ -7,7 +7,20 @@ from io import StringIO
 from pathlib import Path
 from typing import ClassVar, Self
 
-from famou.cli import _adapter_fingerprint, _portfolio_fingerprint, _runtime_fingerprint, main
+import pytest
+
+from famou.cli import (
+    _adapter_fingerprint,
+    _compiler_fingerprint,
+    _controller,
+    _load_model_profile,
+    _portfolio_fingerprint,
+    _runtime_fingerprint,
+    build_parser,
+    main,
+)
+from famou.config import Config
+from famou.profiles import ModelProfile
 from famou.store import Store
 
 
@@ -1617,6 +1630,189 @@ def test_detached_agent_loop_options_propagate(tmp_path: Path, capsys, monkeypat
     assert command[command.index("--max-steps") + 1] == "7"
     assert "--allow-exec" in command and "--memory" in command
     assert "--session-history" in command
+
+
+def test_detached_agent_loop_model_profile_propagates_without_model_override(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps({"name": "fixture-profile", "model": "profile-model", "max_steps": 3}),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return object()
+
+    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    assert (
+        main(
+            [
+                "run",
+                "profile goal",
+                "--runtime",
+                "openai-compatible",
+                "--endpoint",
+                "http://127.0.0.1:1234/v1",
+                "--model-profile",
+                str(profile),
+                "--agent-loop",
+                "--detach",
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    command = calls[0][0]
+    assert command[command.index("--model-profile") + 1] == str(profile)
+    assert "--model" not in command
+
+
+def test_model_profile_rejects_mismatched_model_and_non_loop_use(tmp_path: Path, capsys) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({"name": "profile", "model": "profile-model"}), encoding="utf-8")
+    assert (
+        main(
+            [
+                "run",
+                "goal",
+                "--runtime",
+                "openai-compatible",
+                "--endpoint",
+                "http://127.0.0.1:1234/v1",
+                "--model",
+                "other-model",
+                "--model-profile",
+                str(profile),
+                "--agent-loop",
+                "--json",
+                "--home",
+                str(tmp_path / "mismatch-home"),
+            ]
+        )
+        == 2
+    )
+    assert "does not match" in json.loads(capsys.readouterr().err)["error"]
+    assert (
+        main(
+            [
+                "run",
+                "goal",
+                "--runtime",
+                "mock",
+                "--model-profile",
+                str(profile),
+                "--json",
+                "--home",
+                str(tmp_path / "non-loop-home"),
+            ]
+        )
+        == 2
+    )
+    assert "requires --agent-loop" in json.loads(capsys.readouterr().err)["error"]
+
+
+def test_cli_model_profile_supplies_model_to_agent_loop(tmp_path: Path, capsys) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps({"name": "profile", "model": "profile-model", "max_steps": 2}),
+        encoding="utf-8",
+    )
+    with BenchmarkModelServer() as server:
+        assert (
+            main(
+                [
+                    "run",
+                    "write a solution",
+                    "--runtime",
+                    "openai-compatible",
+                    "--endpoint",
+                    server.url,
+                    "--agent-loop",
+                    "--model-profile",
+                    str(profile),
+                    "--json",
+                    "--home",
+                    str(tmp_path / "profile-home"),
+                ]
+            )
+            == 0
+        )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "succeeded"
+    assert any(
+        item["body"].get("model") == "profile-model"
+        for item in BenchmarkModelHandler.observed
+    )
+
+
+def test_cli_model_profile_caps_controller_timeout_and_steps(tmp_path: Path) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_text(
+        json.dumps(
+            {"name": "bounded", "model": "fixture", "max_steps": 2, "timeout_seconds": 12}
+        ),
+        encoding="utf-8",
+    )
+    args = build_parser().parse_args(
+        [
+            "run", "goal", "--runtime", "openai-compatible", "--endpoint",
+            "http://127.0.0.1:1", "--agent-loop", "--model-profile", str(profile),
+        ]
+    )
+    controller = _controller(args, Config(tmp_path / "home"))
+    assert controller.config.runtime_timeout == 12
+    assert controller.runtime.max_steps == 2
+    assert controller.runtime.profile.name == "bounded"
+
+
+@pytest.mark.parametrize(
+    "content, message",
+    [
+        (b"not-json", "not valid JSON"),
+        (b'{"name":"bounded","model":"fixture","unknown":1}', "invalid model profile"),
+        (b" " * 65_537, "exceeds 65536 bytes"),
+        (b"\xff", "UTF-8 JSON"),
+    ],
+)
+def test_cli_model_profile_rejects_invalid_files(
+    tmp_path: Path, content: bytes, message: str
+) -> None:
+    profile = tmp_path / "profile.json"
+    profile.write_bytes(content)
+    with pytest.raises(ValueError, match=message):
+        _load_model_profile(profile)
+
+
+def test_model_profile_changes_runtime_and_compiler_fingerprints() -> None:
+    profile = ModelProfile("profile", "fixture")
+    other = ModelProfile("profile", "fixture", max_steps=2)
+    first = _runtime_fingerprint(
+        "openai-compatible", name="solver", role="solver", model_profile=profile
+    )
+    second = _runtime_fingerprint(
+        "openai-compatible", name="solver", role="solver", model_profile=other
+    )
+    assert first != second
+
+    class Provider:
+        name = "openai-compatible"
+        model = "fixture"
+        endpoint = "http://127.0.0.1/v1/chat/completions"
+
+    class Loop:
+        name = "agent-loop"
+
+        def __init__(self, model_profile):
+            self.model = Provider()
+            self.profile = model_profile
+
+    assert _compiler_fingerprint(Loop(profile)) != _compiler_fingerprint(Loop(other))
 
 
 def test_cli_memory_inspection_is_json(tmp_path: Path, capsys) -> None:

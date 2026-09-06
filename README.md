@@ -1113,4 +1113,13 @@ enforce its timeout, step, token, and cost limits while preserving the legacy no
 See
 [`specs/054-model-profiles-cost-control/`](specs/054-model-profiles-cost-control/) for the bounded
 contract and [`specs/055-runtime-model-profile-integration/`](specs/055-runtime-model-profile-integration/)
-for runtime enforcement.
+for runtime enforcement. The ordinary CLI loop can load the same policy from a bounded JSON file:
+
+```bash
+lunar-agent run "continue the task" --runtime openai-compatible --agent-loop \
+  --endpoint "$FAMOU_MODEL_ENDPOINT" --model-profile ./model-profile.json --json
+```
+
+The profile supplies the model when `--model` is omitted; changing it while resuming a
+conversational `solve` run is rejected by the compiler fingerprint. See
+[`specs/056-cli-runtime-model-profile-provenance/`](specs/056-cli-runtime-model-profile-provenance/).
