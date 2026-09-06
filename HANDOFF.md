@@ -227,6 +227,23 @@ specs/053-deep-effect-failure-statistics
 本次还修复了候选物化的极短超时可靠性：候选解释器启动保留 50ms 下限，避免正常候选在
 启动阶段被误判超时；较长预算保持原值。
 
+### Feature 054–055：模型 profile、成本控制与 runtime 集成
+
+目录：
+
+```text
+specs/054-model-profiles-cost-control/
+specs/055-runtime-model-profile-integration/
+src/famou/profiles.py
+src/famou/model_profile.py
+```
+
+`ModelProfile` 提供无凭据的模型身份、thinking budget、步数/超时、token 和 micro-USD 成本
+上限；`UsageLedger` 对每轮规范化用量做整数计费并在超限前拒绝。`AgentLoopRuntime` 可选接入
+profile，使用 profile 的默认 timeout 和 step 上限，在每轮模型响应进入工具动作前校验 token/cost
+预算，并在成功结果中报告 profile 名称和可用的 `cost_micros`。没有 profile 的既有调用保持原有
+行为；同一 runtime 复用时账本按 invocation 重置。
+
 ## 4. 本地知识库索引
 
 知识库根目录：
@@ -474,7 +491,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/051-deep-evolution-effect-trial
+specs/055-runtime-model-profile-integration
 ```
 
 后续新功能必须：
@@ -539,3 +556,6 @@ harness workspace、祖先 symlink、record/state 提交窗口，以及非 WebAg
 model 凭据、extractor 的 `glm-5.2` 配置和包含 `anyio`、发布期 `claude_agent_sdk` 的运行环境。
 不得把 AgentServer historical baseline 的准备完成误报为 WebAgent baseline 或新的 Lunar
 效果结论。
+
+Feature 054/055 已完成并通过全量 pytest、Ruff、compileall、构建、Specify prerequisites 和
+`git diff --check`；Feature 055 的提交会在本次收口后记录在此处。

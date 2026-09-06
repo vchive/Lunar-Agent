@@ -1108,7 +1108,9 @@ The effect-layer design and WebAgent branch comparison are documented in
 Model selection and local spend policy can be represented without provider credentials using
 `famou.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,
 `total_tokens`) to `famou.UsageLedger` to enforce a token ceiling; provide integer micro-USD rates
-and a cost ceiling when a cost estimate is available. See
+and a cost ceiling when a cost estimate is available. `AgentLoopRuntime` accepts the profile to
+enforce its timeout, step, token, and cost limits while preserving the legacy no-profile behavior.
+See
 [`specs/054-model-profiles-cost-control/`](specs/054-model-profiles-cost-control/) for the bounded
-contract. Existing runtime and effect commands continue to emit their current telemetry until a
-future integration opts into a profile.
+contract and [`specs/055-runtime-model-profile-integration/`](specs/055-runtime-model-profile-integration/)
+for runtime enforcement.

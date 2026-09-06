@@ -1,7 +1,10 @@
 from pathlib import Path
 
+import pytest
+
 from famou.agent_loop import AgentLoopRuntime
 from famou.memory import MemoryStore
+from famou.profiles import ModelProfile
 from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
 from famou.tools import LocalToolRegistry
 
@@ -12,9 +15,10 @@ class FixtureModel:
     def __init__(self, turns: list[ModelTurn]) -> None:
         self.turns = list(turns)
         self.requests: list[tuple[list[dict[str, object]], tuple[dict[str, object], ...]]] = []
+        self.timeouts: list[float | None] = []
 
     def complete(self, messages, tools=(), timeout=None):
-        del timeout
+        self.timeouts.append(timeout)
         self.requests.append((messages, tools))
         return self.turns.pop(0)
 
@@ -160,3 +164,106 @@ def test_agent_loop_does_not_invent_partial_provider_telemetry(tmp_path: Path) -
 
     assert "response_model" not in result.metadata
     assert "total_tokens" not in result.metadata
+
+
+def test_agent_loop_enforces_model_profile_token_budget(tmp_path: Path) -> None:
+    model = FixtureModel(
+        [
+            ModelTurn(
+                "",
+                (ToolCall("1", "list_dir", {"path": "."}),),
+                usage={"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+            ),
+            ModelTurn(
+                "done",
+                usage={"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+            ),
+        ]
+    )
+    runtime = AgentLoopRuntime(
+        model,
+        profile=ModelProfile("bounded", "fixture-model", max_total_tokens=10),
+    )
+
+    with pytest.raises(RuntimeExecutionError, match="model profile budget"):
+        runtime.run("solve", tmp_path)
+    assert len(model.requests) == 2
+
+
+def test_agent_loop_profile_cost_telemetry_is_reported(tmp_path: Path) -> None:
+    model = FixtureModel(
+        [
+            ModelTurn(
+                "done",
+                response_model="provider/model-a",
+                usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+            )
+        ]
+    )
+    runtime = AgentLoopRuntime(
+        model,
+        profile=ModelProfile(
+            "priced", "fixture-model", input_cost_per_1k_micros=1_000,
+            output_cost_per_1k_micros=2_000,
+        ),
+    )
+
+    result = runtime.run("solve", tmp_path)
+
+    assert result.metadata["profile"] == "priced"
+    assert result.metadata["cost_micros"] == "20"
+
+
+def test_agent_loop_profile_budget_resets_for_reused_runtime(tmp_path: Path) -> None:
+    model = FixtureModel(
+        [
+            ModelTurn(
+                "first",
+                usage={"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+            ),
+            ModelTurn(
+                "second",
+                usage={"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+            ),
+        ]
+    )
+    runtime = AgentLoopRuntime(
+        model,
+        profile=ModelProfile("per-run", "fixture-model", max_total_tokens=10),
+    )
+
+    first = runtime.run("first task", tmp_path / "first")
+    second = runtime.run("second task", tmp_path / "second")
+
+    assert first.metadata["total_tokens"] == "6"
+    assert second.metadata["total_tokens"] == "6"
+
+
+def test_agent_loop_profile_supplies_default_timeout(tmp_path: Path) -> None:
+    model = FixtureModel([ModelTurn("done")])
+    runtime = AgentLoopRuntime(
+        model,
+        profile=ModelProfile("timed", "fixture-model", timeout_seconds=12),
+    )
+
+    runtime.run("timed task", tmp_path)
+
+    assert model.timeouts[0] is not None
+    assert 0 < model.timeouts[0] <= 12
+
+
+def test_agent_loop_profile_caps_configured_step_limit(tmp_path: Path) -> None:
+    model = FixtureModel(
+        [
+            ModelTurn("", (ToolCall("1", "list_dir", {"path": "."}),)),
+            ModelTurn("", (ToolCall("2", "list_dir", {"path": "."}),)),
+        ]
+    )
+    runtime = AgentLoopRuntime(
+        model,
+        max_steps=4,
+        profile=ModelProfile("stepped", "fixture-model", max_steps=1),
+    )
+
+    with pytest.raises(RuntimeExecutionError, match="max steps"):
+        runtime.run("step task", tmp_path)

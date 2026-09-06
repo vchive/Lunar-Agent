@@ -12,7 +12,10 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from .budget import BudgetExceeded
 from .memory import MemoryStore
+from .model_profile import UsageLedger
+from .profiles import ModelProfile
 from .runtime import ModelTurn, OpenAICompatibleRuntime, RuntimeExecutionError, RuntimeResult
 from .tools import LocalToolRegistry
 from .transcript import SessionTranscript
@@ -71,6 +74,7 @@ class AgentLoopRuntime:
         memory: MemoryStore | None = None,
         session_history: bool = False,
         transcript: SessionTranscript | None = None,
+        profile: ModelProfile | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
@@ -83,6 +87,12 @@ class AgentLoopRuntime:
         if isinstance(api_key, str) and api_key and api_key not in self.tools.redactions:
             self.tools.redactions = (*self.tools.redactions, api_key)
         self.max_steps = max_steps
+        if profile is not None and not isinstance(profile, ModelProfile):
+            raise TypeError("profile must be a ModelProfile")
+        self.profile = profile
+        self._usage_ledger = UsageLedger(profile) if profile is not None else None
+        if profile is not None:
+            self.max_steps = min(self.max_steps, profile.max_steps)
         self.system_prompt = system_prompt
         self.session_history = session_history or transcript is not None
         self._transcript = transcript
@@ -122,6 +132,9 @@ class AgentLoopRuntime:
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
         workspace.mkdir(parents=True, exist_ok=True)
+        # A runtime can be reused for independent tasks; budget accounting is per invocation.
+        if self.profile is not None:
+            self._usage_ledger = UsageLedger(self.profile)
         messages = self._initial_messages(prompt)
         # Memory is exposed through explicit model tool calls. We do not inject local notes into a
         # request implicitly: sending durable user context to a configured endpoint must remain an
@@ -132,8 +145,11 @@ class AgentLoopRuntime:
         tool_steps = 0
         response_models: list[str | None] = []
         usages: list[dict[str, int] | None] = []
+        effective_timeout = timeout if timeout is not None else (
+            self.profile.timeout_seconds if self.profile is not None else None
+        )
         while True:
-            remaining = self._remaining_timeout(started, timeout)
+            remaining = self._remaining_timeout(started, effective_timeout)
             try:
                 turn = self.model.complete(messages, self.tools.schemas(), remaining)
             except AgentInputRequired:
@@ -147,6 +163,15 @@ class AgentLoopRuntime:
             model_turns += 1
             response_models.append(turn.response_model)
             usages.append(turn.usage)
+            if turn.usage is not None and self._usage_ledger is not None:
+                try:
+                    self._usage_ledger.record(turn.usage)
+                except BudgetExceeded as exc:
+                    raise RuntimeExecutionError(
+                        f"model profile budget exceeded: {exc.limit}"
+                    ) from exc
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeExecutionError("model profile usage is invalid") from exc
             self._emit(
                 "agent_model_turn",
                 {
@@ -172,6 +197,12 @@ class AgentLoopRuntime:
                 if usages and all(value is not None for value in usages):
                     for key in ("input_tokens", "output_tokens", "total_tokens"):
                         metadata[key] = str(sum(value[key] for value in usages if value is not None))
+                if self.profile is not None:
+                    metadata["profile"] = self.profile.name
+                    if usages and all(value is not None for value in usages):
+                        snapshot = self._usage_ledger.snapshot
+                        if snapshot.cost_micros is not None:
+                            metadata["cost_micros"] = str(snapshot.cost_micros)
                 return RuntimeResult(
                     text=turn.text,
                     artifacts=tuple(dict.fromkeys(artifacts)),
