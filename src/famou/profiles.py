@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -49,6 +50,105 @@ class EvaluatorProfile:
 
     def create(self) -> Evaluator:
         return self.factory()
+
+
+@dataclass(frozen=True)
+class ModelProfile:
+    """Bounded model execution and spend policy.
+
+    The profile is deliberately provider-neutral: ``model`` is an opaque endpoint model id and
+    prices are optional micro-USD per 1,000 tokens.  A profile can therefore be used with a local
+    endpoint (without prices) while still enforcing a hard token ceiling.
+    """
+
+    name: str
+    model: str
+    thinking_budget: int = 0
+    max_steps: int = 40
+    timeout_seconds: float = 900.0
+    max_total_tokens: int | None = None
+    max_cost_micros: int | None = None
+    input_cost_per_1k_micros: int | None = None
+    output_cost_per_1k_micros: int | None = None
+
+    def __post_init__(self) -> None:
+        _profile_text(self.name, "model profile name")
+        _profile_text(self.model, "model profile model")
+        if (
+            isinstance(self.thinking_budget, bool)
+            or not isinstance(self.thinking_budget, int)
+            or not 0 <= self.thinking_budget <= 1_000_000
+        ):
+            raise ValueError("thinking_budget must be an integer between 0 and 1000000")
+        if (
+            isinstance(self.max_steps, bool)
+            or not isinstance(self.max_steps, int)
+            or not 1 <= self.max_steps <= 200
+        ):
+            raise ValueError("max_steps must be between 1 and 200")
+        if (
+            isinstance(self.timeout_seconds, bool)
+            or not isinstance(self.timeout_seconds, (int, float))
+            or not math.isfinite(float(self.timeout_seconds))
+            or not 0 < self.timeout_seconds <= 86_400
+        ):
+            raise ValueError("timeout_seconds must be finite and between 0 and 86400")
+        for field_name in (
+            "max_total_tokens",
+            "max_cost_micros",
+            "input_cost_per_1k_micros",
+            "output_cost_per_1k_micros",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                raise ValueError(f"{field_name} must be a non-negative integer or null")
+        if (self.input_cost_per_1k_micros is None) != (self.output_cost_per_1k_micros is None):
+            raise ValueError("input and output token prices must be supplied together")
+        if self.max_cost_micros is not None and self.input_cost_per_1k_micros is None:
+            raise ValueError("max_cost_micros requires input and output token prices")
+        if self.max_total_tokens == 0 or self.max_cost_micros == 0:
+            raise ValueError("token and cost ceilings must be positive when supplied")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "model": self.model,
+            "thinking_budget": self.thinking_budget,
+            "max_steps": self.max_steps,
+            "timeout_seconds": float(self.timeout_seconds),
+            "max_total_tokens": self.max_total_tokens,
+            "max_cost_micros": self.max_cost_micros,
+            "input_cost_per_1k_micros": self.input_cost_per_1k_micros,
+            "output_cost_per_1k_micros": self.output_cost_per_1k_micros,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> ModelProfile:
+        if not isinstance(value, dict):
+            raise TypeError("model profile must be an object")
+        required = {"name", "model"}
+        missing = required - set(value)
+        if missing:
+            raise ValueError(
+                f"model profile is missing required fields: {', '.join(sorted(missing))}"
+            )
+        allowed = {
+            "name",
+            "model",
+            "thinking_budget",
+            "max_steps",
+            "timeout_seconds",
+            "max_total_tokens",
+            "max_cost_micros",
+            "input_cost_per_1k_micros",
+            "output_cost_per_1k_micros",
+        }
+        unknown = set(value) - allowed
+        if unknown:
+            raise ValueError(f"unknown model profile fields: {', '.join(sorted(unknown))}")
+        defaults = cls("default", "local").to_dict()
+        defaults.update(value)
+        return cls(**defaults)
 
 
 class ProfileRegistry:

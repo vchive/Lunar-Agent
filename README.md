@@ -1104,3 +1104,11 @@ an adapter.
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
 [`specs/046-contract-driven-algorithm-playbooks/`](specs/046-contract-driven-algorithm-playbooks/).
+
+Model selection and local spend policy can be represented without provider credentials using
+`famou.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,
+`total_tokens`) to `famou.UsageLedger` to enforce a token ceiling; provide integer micro-USD rates
+and a cost ceiling when a cost estimate is available. See
+[`specs/054-model-profiles-cost-control/`](specs/054-model-profiles-cost-control/) for the bounded
+contract. Existing runtime and effect commands continue to emit their current telemetry until a
+future integration opts into a profile.

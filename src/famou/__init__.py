@@ -100,6 +100,8 @@ from .evolution import (
     contract_candidate_runner_fingerprint,
     stage_candidate_inputs,
 )
+from .model_profile import UsageLedger, UsageSnapshot
+from .profiles import EvaluatorProfile, ModelProfile, ProfileRegistry, SolverProfile
 
 __version__ = "0.1.0"
 
@@ -147,6 +149,7 @@ __all__ = [
     "EffectTrialReport",
     "EffectTrialRunner",
     "EvaluatorBundleError",
+    "EvaluatorProfile",
     "EvolutionConfig",
     "EvolutionContext",
     "EvolutionError",
@@ -156,17 +159,22 @@ __all__ = [
     "FrozenEvaluatorBundle",
     "GenerationRequest",
     "LoopStrategy",
+    "ModelProfile",
     "OpenEvolveStrategy",
     "OutputSpec",
     "PopulationConfig",
     "PopulationState",
     "PopulationStrategy",
+    "ProfileRegistry",
     "RuntimeAgentAdapter",
     "RuntimeContractCompiler",
+    "SolverProfile",
     "SolverScoringContract",
     "StrategyResult",
     "TrialBaseline",
     "TrialSuite",
+    "UsageLedger",
+    "UsageSnapshot",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_candidate_manifest",
