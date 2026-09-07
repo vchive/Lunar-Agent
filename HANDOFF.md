@@ -508,7 +508,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/056-cli-runtime-model-profile-provenance
+specs/057-effect-subject-model-profile-provenance
 ```
 
 后续新功能必须：
@@ -577,3 +577,15 @@ model 凭据、extractor 的 `glm-5.2` 配置和包含 `anyio`、发布期 `clau
 Feature 054/055 已完成并通过全量 pytest、Ruff、compileall、构建、Specify prerequisites 和
 `git diff --check`。Feature 056 已完成并通过全量 pytest、Ruff、compileall、构建、Specify
 prerequisites 和 `git diff --check`，提交于 `8c00edd`。
+
+## 11. Feature 057（2026-09-07）
+
+Feature 057 已完成实现：`effect-subject` 支持受限 `ModelProfile`，并在不暴露凭据或分数的
+前提下输出 profile digest、token usage 和 cost telemetry。普通/深度 effect trial 的请求、
+receipt、logical record、report 和 resume identity 均绑定 profile digest；profile 文件被修改、
+缺失或与请求模型不一致时 fail closed。无 profile 的旧请求和历史 record 继续兼容读取。
+
+已通过全量 pytest、Ruff、compileall、`uv build`、Feature 057 Specify prerequisites 和
+`git diff --check`。真实效果试验仍未运行，原因与上节相同：缺少匹配的 WebAgent baseline、
+subject endpoint/model 凭据及 exact extractor 运行环境；不得据此声称 WebAgent parity 或
+新的效果结论。

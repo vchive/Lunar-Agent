@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .profiles import ModelProfile
+
 MAX_CASES = 2
 MAX_RUNS_PER_CASE = 10
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
@@ -30,8 +32,12 @@ MAX_PATH_BYTES = 1024
 MAX_COMMAND_ARGS = 32
 MAX_TEXT_BYTES = 512
 MAX_TOKENS = 100_000_000_000
+# Cost is expressed in integer micro-USD. Keep this bound independent from token counts: a
+# provider price can legitimately make a bounded token sample cost more than MAX_TOKENS.
+MAX_COST_MICROS = 1_000_000_000_000_000_000
 MAX_TURNS = 100_000
 MAX_TIMEOUT_SECONDS = 86_400.0
+MAX_MODEL_PROFILE_BYTES = 64 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _OBJECT_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -150,6 +156,27 @@ def _hash_command(command: Sequence[str]) -> str:
                     hasher.update(chunk)
             file_identities.append({"argument_index": index, "size": size, "sha256": hasher.hexdigest()})
     return _hash_bytes(_canonical_bytes({"arguments": list(command), "files": file_identities}))
+
+
+def _profile_digest(profile: ModelProfile) -> str:
+    encoded = json.dumps(
+        profile.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_profile_file(path: Path) -> tuple[ModelProfile, str]:
+    try:
+        content = path.read_bytes()
+        if not content or len(content) > MAX_MODEL_PROFILE_BYTES:
+            raise EffectTrialError("model profile exceeds its bounded size")
+        payload = json.loads(content.decode("utf-8"))
+        profile = ModelProfile.from_dict(payload)
+    except EffectTrialError:
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise EffectTrialError("model profile is not valid bounded UTF-8 JSON") from exc
+    return profile, _profile_digest(profile)
 
 
 def _read_json(path: Path, label: str, maximum: int = MAX_MANIFEST_BYTES) -> tuple[dict[str, Any], bytes]:
@@ -480,12 +507,30 @@ class EffectTrialConfig:
     harness_command: tuple[str, ...] = ()
     subject_environment: Mapping[str, str] = field(default_factory=dict)
     harness_environment: Mapping[str, str] = field(default_factory=dict)
+    model_profile_sha256: str | None = None
+    subject_model_profile_path: Path | None = None
 
     def __post_init__(self) -> None:
         _integer(self.runs_per_case, "runs_per_case", 1, MAX_RUNS_PER_CASE)
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)) or not math.isfinite(self.timeout_seconds) or not 0 < self.timeout_seconds <= MAX_TIMEOUT_SECONDS:
             raise EffectTrialError("timeout_seconds must be finite and within one day")
         _text(self.requested_model, "requested_model")
+        if self.model_profile_sha256 is not None and not _SHA256.fullmatch(self.model_profile_sha256):
+            raise EffectTrialError("model_profile_sha256 must be a lowercase SHA-256 digest or null")
+        if self.subject_model_profile_path is not None:
+            profile_path = Path(self.subject_model_profile_path).expanduser()
+            if not profile_path.is_absolute() or profile_path.is_symlink() or not profile_path.is_file():
+                raise EffectTrialError(
+                    "subject model profile path must be an absolute regular non-symlink file"
+                )
+            profile_path = profile_path.resolve()
+            profile, profile_digest = _load_profile_file(profile_path)
+            if profile.model != self.requested_model:
+                raise EffectTrialError("model profile model does not match requested_model")
+            if self.model_profile_sha256 is not None and self.model_profile_sha256 != profile_digest:
+                raise EffectTrialError("model profile digest does not match profile file")
+            object.__setattr__(self, "subject_model_profile_path", profile_path)
+            object.__setattr__(self, "model_profile_sha256", profile_digest)
         for label, command in (("subject", self.subject_command), ("harness", self.harness_command)):
             if isinstance(command, (str, bytes)):
                 raise EffectTrialError(f"{label} command must be an argument sequence")
@@ -495,6 +540,13 @@ class EffectTrialConfig:
                 for value in normalized
             ):
                 raise EffectTrialError(f"{label} command must be a bounded argument sequence")
+            if label == "subject" and self.subject_model_profile_path is not None and any(
+                value == "--model-profile" or value.startswith("--model-profile=")
+                for value in normalized[1:]
+            ):
+                raise EffectTrialError(
+                    "subject command must not provide --model-profile; trial config injects it"
+                )
             executable = Path(normalized[0])
             if not executable.is_absolute() or executable.is_symlink() or not executable.is_file():
                 raise EffectTrialError(f"{label} command executable must be an absolute regular non-symlink file")
@@ -516,6 +568,7 @@ class EffectTrialConfig:
             "runs_per_case": self.runs_per_case,
             "timeout_seconds": float(self.timeout_seconds),
             "requested_model": self.requested_model,
+            "model_profile_sha256": self.model_profile_sha256,
             "subject_command_sha256": _hash_command(self.subject_command),
             "harness_command_sha256": _hash_command(self.harness_command),
             "subject_env_names": sorted(self.subject_environment),
@@ -588,6 +641,15 @@ class EffectTrialRunner:
         self.baseline_sha256 = _hash_bytes(baseline_bytes)
         self.workspace = Path(workspace).expanduser().resolve(strict=False)
         self.config = config
+        if self.config.subject_model_profile_path is not None:
+            profile_path = self.config.subject_model_profile_path
+            if profile_path.is_symlink() or not profile_path.is_file():
+                raise EffectTrialError("subject model profile path is missing or unsafe")
+            profile, profile_digest = _load_profile_file(profile_path)
+            if profile.model != self.config.requested_model:
+                raise EffectTrialError("model profile model does not match requested_model")
+            if profile_digest != self.config.model_profile_sha256:
+                raise EffectTrialError("model profile file changed after configuration")
         self.resume = resume
         self.process_executor = process_executor or _default_executor
         self._started = False
@@ -673,7 +735,46 @@ class EffectTrialRunner:
             _reject_symlink_components(state_path, self.workspace, "trial state path")
             state, _ = _read_json(state_path, "trial state")
             item = _strict_object(state, {"identity", "records"}, "trial state")
-            if item["identity"] != identity:
+            stored_identity = item["identity"]
+            identity_matches = stored_identity == identity
+            # Feature 057 added an explicit null profile marker to safe_dict(). Preserve resume
+            # compatibility with older no-profile states whose config predates that field, while
+            # still rejecting any profile-enabled state that omits or changes its digest.
+            if (
+                not identity_matches
+                and self.config.model_profile_sha256 is None
+                and isinstance(stored_identity, dict)
+                and isinstance(identity, dict)
+            ):
+                stored_config = stored_identity.get("config")
+                expected_config = identity.get("config")
+                if isinstance(stored_config, dict) and isinstance(expected_config, dict):
+                    stored_marker = stored_config.get("model_profile_sha256", None)
+                    if stored_marker is None:
+                        legacy_expected = {
+                            key: value
+                            for key, value in expected_config.items()
+                            if key != "model_profile_sha256"
+                        }
+                        legacy_stored = {
+                            key: value
+                            for key, value in stored_config.items()
+                            if key != "model_profile_sha256"
+                        }
+                        identity_matches = (
+                            legacy_stored == legacy_expected
+                            and {
+                                key: value
+                                for key, value in stored_identity.items()
+                                if key != "config"
+                            }
+                            == {
+                                key: value
+                                for key, value in identity.items()
+                                if key != "config"
+                            }
+                        )
+            if not identity_matches:
                 raise EffectTrialError("resume configuration does not match frozen trial identity")
             records = item["records"]
             if not isinstance(records, dict) or any(
@@ -786,16 +887,25 @@ class EffectTrialRunner:
             backup.unlink()
 
     def _validate_record(self, payload: object, case: TrialCase, run_index: int) -> dict[str, Any]:
-        item = _strict_object(
-            payload,
-            {
+        required = {
                 "schema_version", "case_key", "run_index", "attempt", "status", "ready",
                 "elapsed_ms", "requested_model", "effective_model", "model_evidence",
                 "interaction_turns", "usage", "extraction_status", "validity_score",
                 "overall_score", "quality_score", "detail_metrics", "error_code",
-            },
-            "logical run record",
-        )
+            }
+        profile_digest_fields = required | {"model_profile_sha256"}
+        profile_required = profile_digest_fields | {"cost_micros"}
+        if not isinstance(payload, dict) or set(payload) not in (
+            required,
+            profile_digest_fields,
+            profile_required,
+        ):
+            raise EffectTrialError("logical run record must contain the expected fields")
+        if self.config.model_profile_sha256 is not None and "model_profile_sha256" not in payload:
+            raise EffectTrialError("logical run is missing model profile provenance")
+        item = dict(payload)
+        item.setdefault("model_profile_sha256", None)
+        item.setdefault("cost_micros", None)
         if item["schema_version"] != "1" or item["case_key"] != case.key or item["run_index"] != run_index:
             raise EffectTrialError("logical run record identity mismatch")
         _relative_path(item["attempt"], "logical run attempt")
@@ -806,6 +916,13 @@ class EffectTrialRunner:
             value = item[name]
             if value is not None:
                 _text(value, f"logical run {name}", safe_id=name in {"model_evidence", "extraction_status", "error_code"})
+        profile_digest = item["model_profile_sha256"]
+        if profile_digest is not None and not _SHA256.fullmatch(profile_digest):
+            raise EffectTrialError("logical run model profile digest is invalid")
+        if profile_digest != self.config.model_profile_sha256:
+            raise EffectTrialError("logical run model profile identity mismatch")
+        if item["cost_micros"] is not None:
+            _integer(item["cost_micros"], "logical run cost_micros", 0, MAX_COST_MICROS)
         if item["interaction_turns"] is not None:
             _integer(item["interaction_turns"], "logical run interaction_turns", 0, MAX_TURNS)
         if item["usage"] is not None:
@@ -869,10 +986,21 @@ class EffectTrialRunner:
         root.mkdir()
         return root, attempt_index
 
-    def _invoke(self, command: tuple[str, ...], config_path: Path, *, cwd: Path, environment: Mapping[str, str]) -> None:
+    def _invoke(
+        self,
+        command: tuple[str, ...],
+        config_path: Path,
+        *,
+        cwd: Path,
+        environment: Mapping[str, str],
+        subject: bool = False,
+    ) -> None:
         try:
+            invocation = command
+            if self.config.subject_model_profile_path is not None and subject:
+                invocation = (*command, "--model-profile", str(self.config.subject_model_profile_path))
             result = self.process_executor(
-                (*command, str(config_path)),
+                (*invocation, str(config_path)),
                 cwd=cwd,
                 env=self._environment(environment),
                 timeout=float(self.config.timeout_seconds),
@@ -898,11 +1026,19 @@ class EffectTrialRunner:
 
     def _subject_receipt(self, path: Path) -> dict[str, Any]:
         payload, _ = _read_json(path, "subject receipt", MAX_RECEIPT_BYTES)
-        item = _strict_object(
-            payload,
-            {"schema_version", "mode", "status", "requested_model", "effective_model", "model_evidence", "interaction_turns", "usage"},
-            "subject receipt",
-        )
+        required = {
+            "schema_version", "mode", "status", "requested_model", "effective_model",
+            "model_evidence", "interaction_turns", "usage",
+        }
+        profile_digest_fields = required | {"model_profile_sha256"}
+        profile_fields = profile_digest_fields | {"cost_micros"}
+        if not isinstance(payload, dict) or set(payload) not in (
+            required,
+            profile_digest_fields,
+            profile_fields,
+        ):
+            raise EffectTrialError("subject receipt must contain the expected fields")
+        item = dict(payload)
         if item["schema_version"] != "1" or item["mode"] != "normal" or item["status"] != "completed":
             raise EffectTrialError("subject receipt does not describe a completed normal run")
         if item["requested_model"] != self.config.requested_model:
@@ -911,10 +1047,22 @@ class EffectTrialRunner:
         evidence = _text(item["model_evidence"], "subject model evidence", safe_id=True)
         if evidence not in _MODEL_EVIDENCE:
             raise EffectTrialError("subject model evidence is unsupported")
+        profile_digest = item.get("model_profile_sha256")
+        if profile_digest is not None and not _SHA256.fullmatch(profile_digest):
+            raise EffectTrialError("subject model profile digest is invalid")
+        if profile_digest != self.config.model_profile_sha256:
+            raise EffectTrialError("subject model profile identity mismatch")
+        cost = item.get("cost_micros")
+        if cost is not None:
+            _integer(cost, "subject cost_micros", 0, MAX_COST_MICROS)
+            if profile_digest is None:
+                raise EffectTrialError("subject cost telemetry requires a model profile")
         return {
             "requested_model": item["requested_model"],
             "effective_model": effective,
             "model_evidence": evidence,
+            "model_profile_sha256": profile_digest,
+            "cost_micros": cost,
             "interaction_turns": _integer(item["interaction_turns"], "subject interaction turns", 0, MAX_TURNS),
             "usage": self._validate_usage(item["usage"]),
         }
@@ -970,7 +1118,8 @@ class EffectTrialRunner:
             "attempt": f"cases/{case.key}/runs/{run_index:03d}/attempts/{attempt_index:03d}",
             "status": "failed", "ready": False, "elapsed_ms": self._elapsed(started),
             "requested_model": self.config.requested_model, "effective_model": None,
-            "model_evidence": None, "interaction_turns": None, "usage": None,
+            "model_evidence": None, "model_profile_sha256": self.config.model_profile_sha256,
+            "cost_micros": None, "interaction_turns": None, "usage": None,
             "extraction_status": None, "validity_score": None, "overall_score": None,
             "quality_score": None, "detail_metrics": {}, "error_code": code,
         }
@@ -991,6 +1140,7 @@ class EffectTrialRunner:
                 "schema_version": "1", "mode": "normal",
                 "benchmark": self.suite.benchmark.to_dict(), "case": case.public_identity(),
                 "run_index": run_index, "requested_model": self.config.requested_model,
+                "model_profile_sha256": self.config.model_profile_sha256,
                 "entrypoint": case.entrypoint,
                 "public_files": [value.to_dict() for value in case.public_files],
                 "receipt_path": "receipt.json",
@@ -1002,6 +1152,7 @@ class EffectTrialRunner:
                 subject_root / "request.json",
                 cwd=subject_root,
                 environment=self.config.subject_environment,
+                subject=True,
             )
             self._verify_control_copy("suite.json", self.suite_sha256)
             self._verify_control_copy("baseline.json", self.baseline_sha256)
@@ -1080,6 +1231,7 @@ class EffectTrialRunner:
                 "run_index": value["run_index"], "status": value["status"], "ready": value["ready"],
                 "elapsed_ms": value["elapsed_ms"], "requested_model": value["requested_model"],
                 "effective_model": value["effective_model"], "model_evidence": value["model_evidence"],
+                "model_profile_sha256": value["model_profile_sha256"], "cost_micros": value["cost_micros"],
                 "interaction_turns": value["interaction_turns"], "usage": value["usage"],
                 "extraction_status": value["extraction_status"], "validity_score": value["validity_score"],
                 "overall_score": value["overall_score"], "quality_score": value["quality_score"],
@@ -1174,6 +1326,7 @@ class EffectTrialRunner:
 
 
 __all__ = [
+    "MAX_COST_MICROS",
     "EffectTrialConfig", "EffectTrialError", "EffectTrialReport", "EffectTrialRunner",
     "TrialBaseline", "TrialSuite",
 ]

@@ -18,6 +18,7 @@ from famou.effect_adapters import (
     run_subject_adapter,
 )
 from famou.effect_trial import EffectTrialConfig, EffectTrialRunner, TrialBaseline
+from famou.profiles import ModelProfile
 from famou.runtime import ModelTurn, ToolCall
 
 
@@ -221,6 +222,57 @@ def test_builtin_subject_runs_fresh_agent_and_writes_score_free_receipt(tmp_path
     }
     assert "score" not in json.dumps(receipt)
     assert json.loads((request.parent / "receipt.json").read_text()) == receipt
+
+
+def test_builtin_subject_profile_emits_credential_free_provenance(tmp_path: Path) -> None:
+    request = _subject_request(tmp_path / "subject")
+    profile = ModelProfile(
+        name="fixture-profile",
+        model="gpt-5.6-sol",
+        max_steps=4,
+        timeout_seconds=10,
+        max_total_tokens=200,
+        input_cost_per_1k_micros=100,
+        output_cost_per_1k_micros=100,
+    )
+    profile_digest = hashlib.sha256(
+        json.dumps(profile.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    payload = json.loads(request.read_text(encoding="utf-8"))
+    payload["model_profile_sha256"] = profile_digest
+    request.write_text(json.dumps(payload), encoding="utf-8")
+
+    receipt = run_subject_adapter(
+        request,
+        model_runtime=SubjectModel(),
+        max_steps=8,
+        model_profile=profile,
+    )
+
+    assert receipt["model_profile_sha256"] == profile_digest
+    assert receipt["cost_micros"] == 18
+    assert "score" not in json.dumps(receipt)
+    assert "api_key" not in json.dumps(receipt).lower()
+
+
+def test_builtin_subject_profile_digest_mismatch_fails_closed(tmp_path: Path) -> None:
+    request = _subject_request(tmp_path / "subject")
+    profile = ModelProfile(name="fixture-profile", model="gpt-5.6-sol")
+    payload = json.loads(request.read_text(encoding="utf-8"))
+    payload["model_profile_sha256"] = "0" * 64
+    request.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(EffectAdapterError, match="profile digest"):
+        run_subject_adapter(request, model_runtime=SubjectModel(), model_profile=profile)
+
+
+def test_builtin_subject_rejects_uppercase_profile_digest(tmp_path: Path) -> None:
+    request = _subject_request(tmp_path / "subject")
+    profile = ModelProfile(name="fixture-profile", model="gpt-5.6-sol")
+    payload = json.loads(request.read_text(encoding="utf-8"))
+    payload["model_profile_sha256"] = "A" * 64
+    request.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(EffectAdapterError, match="profile digest"):
+        run_subject_adapter(request, model_runtime=SubjectModel(), model_profile=profile)
 
 
 def test_builtin_subject_rejects_unsafe_or_mismatched_request(tmp_path: Path) -> None:

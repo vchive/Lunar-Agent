@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -24,6 +25,7 @@ from typing import Any
 from .agent_loop import AgentLoopRuntime
 from .deep_feedback import FeedbackError, normalize_feedback
 from .effect_trial import (
+    MAX_COST_MICROS,
     BaselineModel,
     BenchmarkIdentity,
     EvaluationProfileIdentity,
@@ -32,6 +34,7 @@ from .effect_trial import (
     TrialBaseline,
     TrialSuite,
 )
+from .profiles import ModelProfile
 from .runtime import OpenAICompatibleRuntime
 from .tools import LocalToolRegistry
 
@@ -383,6 +386,24 @@ def _model_usage(metadata: Mapping[str, str]) -> dict[str, int] | None:
     return usage
 
 
+def _model_profile_digest(profile: ModelProfile | None) -> str | None:
+    """Return the credential-free canonical identity of a model profile."""
+    if profile is None:
+        return None
+    canonical = json.dumps(
+        profile.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _profile_digest(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise EffectAdapterError("subject model profile digest must be a SHA-256 hex string")
+    return value
+
+
 def run_subject_adapter(
     request_path: str | Path,
     *,
@@ -393,6 +414,7 @@ def run_subject_adapter(
     allow_exec: bool = True,
     timeout: float | None = None,
     model_runtime: object | None = None,
+    model_profile: ModelProfile | None = None,
 ) -> dict[str, object]:
     """Run one fresh Lunar Agent session for a normal or deep subject request.
 
@@ -414,15 +436,27 @@ def run_subject_adapter(
         "public_files",
         "receipt_path",
     }
+    # Profile provenance was added after the initial effect protocol.  Keep requests produced by
+    # older kits readable while accepting the bound digest on all newly generated requests.
+    profile_fields = normal_fields | {"model_profile_sha256"}
     deep_fields = normal_fields | {
         "round_index",
         "outer_rounds",
         "previous_evaluation",
     }
+    deep_profile_fields = deep_fields | {"model_profile_sha256"}
     if mode == "normal":
-        request = _strict_object(raw_request, normal_fields, "subject request")
+        if set(raw_request) not in (normal_fields, profile_fields):
+            raise EffectAdapterError(
+                f"subject request must contain exactly: {', '.join(sorted(normal_fields))}"
+            )
+        request = dict(raw_request)
     elif mode == "deep_evolution":
-        request = _strict_object(raw_request, deep_fields, "deep subject request")
+        if set(raw_request) not in (deep_fields, deep_profile_fields):
+            raise EffectAdapterError(
+                f"deep subject request must contain exactly: {', '.join(sorted(deep_fields))}"
+            )
+        request = dict(raw_request)
     else:
         raise EffectAdapterError("subject request must describe schema v1 normal or deep_evolution mode")
     if request["schema_version"] != "1":
@@ -433,6 +467,14 @@ def run_subject_adapter(
         _bounded_text(value, f"subject case {key}")
     _integer(request["run_index"], "subject run index", minimum=1, maximum=1_000_000)
     requested_model = _bounded_text(request["requested_model"], "subject requested model")
+    profile_digest = _profile_digest(request.get("model_profile_sha256"))
+    expected_profile_digest = _model_profile_digest(model_profile)
+    if model_profile is not None and model_profile.model != requested_model:
+        raise EffectAdapterError("subject model profile model does not match the requested model")
+    if "model_profile_sha256" in request and profile_digest != expected_profile_digest:
+        raise EffectAdapterError("subject model profile digest does not match the supplied profile")
+    if model_profile is not None and "model_profile_sha256" not in request:
+        raise EffectAdapterError("subject request is missing model profile digest")
     entrypoint = _relative_path(request["entrypoint"], "subject entrypoint")
     receipt_relative = _relative_path(request["receipt_path"], "subject receipt path")
     round_index: int | None = None
@@ -491,16 +533,28 @@ def run_subject_adapter(
     runtime_api_key = getattr(runtime, "api_key", None)
     redactions = (runtime_api_key,) if isinstance(runtime_api_key, str) and runtime_api_key else ()
     _verify_public_projection(workspace, descriptors, request_digest)
+    effective_max_steps = min(max_steps, model_profile.max_steps) if model_profile else max_steps
+    effective_timeout = timeout
+    if model_profile is not None:
+        effective_timeout = min(
+            model_profile.timeout_seconds,
+            timeout if timeout is not None else model_profile.timeout_seconds,
+        )
     tools = LocalToolRegistry(
         allow_exec=allow_exec,
-        command_timeout=min(float(timeout or 300.0), 300.0),
+        command_timeout=min(float(effective_timeout or 300.0), 300.0),
         redactions=redactions,
         command_environment={
             **_BASE_ENVIRONMENT,
             "PATH": os.environ.get("PATH", os.defpath),
         },
     )
-    agent = AgentLoopRuntime(runtime, tools=tools, max_steps=max_steps)
+    agent = AgentLoopRuntime(
+        runtime,
+        tools=tools,
+        max_steps=effective_max_steps,
+        profile=model_profile,
+    )
     if mode == "normal":
         prompt = f"""You are the normal-mode subject under an external Famou-Bench evaluation.
 
@@ -545,7 +599,7 @@ Case key: {case['key']}
 --- end instruction ---
 """
     try:
-        result = agent.run(prompt, workspace, timeout=timeout)
+        result = agent.run(prompt, workspace, timeout=effective_timeout)
     except Exception as exc:
         raise EffectAdapterError(f"subject runtime failed: {type(exc).__name__}") from exc
     _verify_public_projection(workspace, descriptors, request_digest)
@@ -567,6 +621,18 @@ Case key: {case['key']}
         "interaction_turns": turns,
         "usage": _model_usage(result.metadata),
     }
+    if model_profile is not None:
+        receipt["model_profile_sha256"] = expected_profile_digest
+        receipt["cost_micros"] = (
+            _integer(
+                int(result.metadata["cost_micros"]),
+                "subject cost micros",
+                minimum=0,
+                maximum=MAX_COST_MICROS,
+            )
+            if "cost_micros" in result.metadata
+            else None
+        )
     if mode == "deep_evolution":
         # Keep the score-free subject receipt bound to the exact request that drove this fresh
         # round.  The deep runner may reuse a receipt after an interruption, so a round/outer

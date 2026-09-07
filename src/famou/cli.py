@@ -468,6 +468,10 @@ def build_parser() -> argparse.ArgumentParser:
     effect_parser.add_argument("--subject-command", required=True, help="explicit normal-Agent command")
     effect_parser.add_argument("--harness-command", required=True, help="explicit exact-harness command")
     effect_parser.add_argument("--requested-model", required=True, help="requested model identity")
+    effect_parser.add_argument(
+        "--model-profile", type=Path,
+        help="bounded JSON ModelProfile for the isolated subject runtime",
+    )
     effect_parser.add_argument("--runs-per-case", type=int, default=3)
     effect_parser.add_argument("--timeout", type=float, default=3600.0)
     effect_parser.add_argument("--workspace", type=Path, required=True, help="trial workspace")
@@ -504,6 +508,10 @@ def build_parser() -> argparse.ArgumentParser:
     deep_effect_parser.add_argument("--subject-command", required=True, help="explicit deep subject command")
     deep_effect_parser.add_argument("--harness-command", required=True, help="explicit exact-harness command")
     deep_effect_parser.add_argument("--requested-model", required=True, help="requested model identity")
+    deep_effect_parser.add_argument(
+        "--model-profile", type=Path,
+        help="bounded JSON ModelProfile for the isolated subject runtime",
+    )
     deep_effect_parser.add_argument("--runs-per-case", type=int, default=2)
     deep_effect_parser.add_argument(
         "--outer-rounds",
@@ -564,6 +572,11 @@ def build_parser() -> argparse.ArgumentParser:
     subject_parser.add_argument("request", type=Path, help="generated subject request JSON")
     subject_parser.add_argument("--endpoint", help="OpenAI-compatible chat endpoint URL")
     subject_parser.add_argument("--model", help="model name (must match the generated request)")
+    subject_parser.add_argument(
+        "--model-profile",
+        type=Path,
+        help="bounded JSON ModelProfile for the isolated subject runtime",
+    )
     subject_parser.add_argument(
         "--api-key", help="optional model API key (prefer FAMOU_API_KEY)"
     )
@@ -2866,6 +2879,9 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
 
 
 def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
+    profile = _load_model_profile(getattr(args, "model_profile", None))
+    if profile is not None and profile.model != args.requested_model:
+        raise ValueError("--requested-model does not match model profile model")
     trial_config = EffectTrialConfig(
         runs_per_case=args.runs_per_case,
         timeout_seconds=args.timeout,
@@ -2874,6 +2890,10 @@ def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
         harness_command=_parse_command(args.harness_command, "--harness-command"),
         subject_environment=_effect_environment(args.subject_env, "subject"),
         harness_environment=_effect_environment(args.harness_env, "harness"),
+        model_profile_sha256=_model_profile_digest(profile),
+        subject_model_profile_path=(
+            args.model_profile.expanduser().resolve() if profile is not None else None
+        ),
     )
     return EffectTrialRunner(
         args.suite,
@@ -2886,6 +2906,9 @@ def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _effect_deep_trial(args: argparse.Namespace) -> dict[str, object]:
+    profile = _load_model_profile(getattr(args, "model_profile", None))
+    if profile is not None and profile.model != args.requested_model:
+        raise ValueError("--requested-model does not match model profile model")
     base = EffectTrialConfig(
         runs_per_case=args.runs_per_case,
         timeout_seconds=args.timeout,
@@ -2894,6 +2917,10 @@ def _effect_deep_trial(args: argparse.Namespace) -> dict[str, object]:
         harness_command=_parse_command(args.harness_command, "--harness-command"),
         subject_environment=_effect_environment(args.subject_env, "subject"),
         harness_environment=_effect_environment(args.harness_env, "harness"),
+        model_profile_sha256=_model_profile_digest(profile),
+        subject_model_profile_path=(
+            args.model_profile.expanduser().resolve() if profile is not None else None
+        ),
     )
     config = DeepEffectTrialConfig(
         base=base,
@@ -2922,6 +2949,9 @@ def _effect_kit(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _effect_subject(args: argparse.Namespace) -> dict[str, object]:
+    profile = _load_model_profile(getattr(args, "model_profile", None))
+    if profile is not None and args.model is not None and args.model != profile.model:
+        raise ValueError("--model does not match model profile model")
     return run_subject_adapter(
         args.request,
         endpoint=args.endpoint,
@@ -2930,6 +2960,7 @@ def _effect_subject(args: argparse.Namespace) -> dict[str, object]:
         max_steps=args.max_steps,
         allow_exec=not args.no_exec,
         timeout=args.timeout,
+        model_profile=profile,
     )
 
 

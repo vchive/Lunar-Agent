@@ -6,8 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from famou.cli import main
-from famou.effect_trial import EffectTrialConfig, EffectTrialError, EffectTrialRunner
+from famou.cli import _model_profile_digest, main
+from famou.effect_trial import (
+    MAX_COST_MICROS,
+    MAX_TOKENS,
+    EffectTrialConfig,
+    EffectTrialError,
+    EffectTrialRunner,
+)
+from famou.profiles import ModelProfile
 
 HEX_A = "a" * 64
 HEX_B = "b" * 64
@@ -490,3 +497,120 @@ def test_resume_rejects_changed_command_file_identity(tmp_path: Path) -> None:
     Path(fixture[3][1]).write_text("raise SystemExit(99)\n", encoding="utf-8")
     with pytest.raises(EffectTrialError, match="frozen trial identity"):
         _runner(tmp_path, fixture, resume=True).run()
+
+
+def test_resume_accepts_legacy_no_profile_state_identity(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    runner = _runner(tmp_path, fixture)
+    runner.run()
+    state_path = tmp_path / "trial" / "control" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["identity"]["config"].pop("model_profile_sha256")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    resumed = _runner(tmp_path, fixture, resume=True).run().to_dict()
+    assert resumed["cases"][0]["ready_runs"] == 3
+
+
+def test_subject_command_cannot_override_injected_model_profile(tmp_path: Path) -> None:
+    profile = ModelProfile("fixture-profile", "gpt-5.6-sol")
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
+    fixture = _fixture(tmp_path)
+    _suite, _baseline, _case_root, subject, harness = fixture
+    with pytest.raises(EffectTrialError, match="must not provide --model-profile"):
+        EffectTrialConfig(
+            requested_model="gpt-5.6-sol",
+            subject_command=(*subject, "--model-profile", str(profile_path)),
+            harness_command=harness,
+            subject_model_profile_path=profile_path,
+        )
+
+
+def test_profile_cost_telemetry_uses_cost_bound_not_token_bound(tmp_path: Path) -> None:
+    profile = ModelProfile(
+        "fixture-profile",
+        "gpt-5.6-sol",
+        input_cost_per_1k_micros=1_000_000_000_000,
+        output_cost_per_1k_micros=1_000_000_000_000,
+    )
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
+    digest = _model_profile_digest(profile)
+    fixture = _fixture(
+        tmp_path,
+        subject_extra=f"r['model_profile_sha256']={digest!r}; r['cost_micros']={MAX_TOKENS + 1}",
+    )
+    suite, baseline, case_root, subject, harness = fixture
+    config = EffectTrialConfig(
+        runs_per_case=3,
+        timeout_seconds=10,
+        requested_model="gpt-5.6-sol",
+        subject_command=subject,
+        harness_command=harness,
+        subject_model_profile_path=profile_path,
+    )
+    report = EffectTrialRunner(
+        suite,
+        baseline,
+        tmp_path / "cost-trial",
+        case_sources={"fixture_case": case_root},
+        config=config,
+    ).run().to_dict()
+    assert report["cases"][0]["runs"][0]["cost_micros"] == MAX_TOKENS + 1
+    assert MAX_COST_MICROS > MAX_TOKENS
+
+
+def test_model_profile_provenance_is_bound_to_request_receipt_and_resume(tmp_path: Path) -> None:
+    profile = ModelProfile(
+        "fixture-profile",
+        "gpt-5.6-sol",
+        max_steps=8,
+        max_total_tokens=1000,
+        input_cost_per_1k_micros=100,
+        output_cost_per_1k_micros=200,
+    )
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
+    digest = _model_profile_digest(profile)
+    fixture = _fixture(
+        tmp_path,
+        subject_extra=f"r['model_profile_sha256']={digest!r}; r['cost_micros']=7",
+    )
+    suite, baseline, case_root, subject, harness = fixture
+    config = EffectTrialConfig(
+        runs_per_case=3,
+        timeout_seconds=10,
+        requested_model="gpt-5.6-sol",
+        subject_command=subject,
+        harness_command=harness,
+        model_profile_sha256=digest,
+        subject_model_profile_path=profile_path,
+    )
+    report = EffectTrialRunner(
+        suite,
+        baseline,
+        tmp_path / "profiled-trial",
+        case_sources={"fixture_case": case_root},
+        config=config,
+    ).run().to_dict()
+    run = report["cases"][0]["runs"][0]
+    assert run["model_profile_sha256"] == digest
+    assert run["cost_micros"] == 7
+    request = json.loads(
+        (tmp_path / "profiled-trial" / "cases" / "fixture_case" / "runs" / "001" / "attempts" / "001" / "subject" / "request.json").read_text()
+    )
+    assert request["model_profile_sha256"] == digest
+
+    changed = profile.to_dict()
+    changed["max_steps"] = 9
+    profile_path.write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(EffectTrialError, match="model profile file changed"):
+        EffectTrialRunner(
+            suite,
+            baseline,
+            tmp_path / "profiled-trial",
+            case_sources={"fixture_case": case_root},
+            config=config,
+            resume=True,
+        ).run()

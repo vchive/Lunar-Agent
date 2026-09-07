@@ -30,6 +30,8 @@ from .effect_trial import (
 )
 
 MAX_OUTER_ROUNDS = 20
+# A deep logical run aggregates one bounded receipt per outer round.
+MAX_DEEP_COST_MICROS = _normal.MAX_COST_MICROS * MAX_OUTER_ROUNDS
 _DEEP_PROTOCOL = "famou-bench-deep-evolution-v1"
 _STRATEGY = "loop"
 _SAME_ATTEMPT_RESUME_ERRORS = frozenset({"incomplete_rounds"})
@@ -63,6 +65,10 @@ class DeepEffectTrialConfig:
     @property
     def requested_model(self) -> str:
         return self.base.requested_model
+
+    @property
+    def model_profile_sha256(self) -> str | None:
+        return self.base.model_profile_sha256
 
     def safe_dict(self) -> dict[str, object]:
         return {
@@ -229,11 +235,17 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         # `request_sha256` was added after the initial deep protocol.  Accepting the old shape
         # keeps completed Feature 051 records readable, while every newly produced built-in
         # receipt carries the binding and resumed partial rounds require it.
-        if not isinstance(payload, dict) or set(payload) not in (
-            fields,
-            fields | {"request_sha256"},
-        ):
+        profile_digest_fields = fields | {"model_profile_sha256"}
+        profile_fields = profile_digest_fields | {"cost_micros"}
+        allowed = tuple(
+            base | optional
+            for base in (fields, profile_digest_fields, profile_fields)
+            for optional in (set(), {"request_sha256"})
+        )
+        if not isinstance(payload, dict) or set(payload) not in allowed:
             raise EffectTrialError("deep subject receipt must contain the expected fields")
+        if self.deep_config.model_profile_sha256 is not None and "model_profile_sha256" not in payload:
+            raise EffectTrialError("deep subject receipt is missing model profile provenance")
         item = dict(payload)
         receipt_round = _normal._integer(item["round_index"], "deep subject receipt round", 1, MAX_OUTER_ROUNDS)
         receipt_outer = _normal._integer(item["outer_rounds"], "deep subject receipt outer rounds", 1, MAX_OUTER_ROUNDS)
@@ -251,6 +263,16 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         evidence = _normal._text(item["model_evidence"], "deep subject model evidence", safe_id=True)
         if evidence not in _normal._MODEL_EVIDENCE:
             raise EffectTrialError("deep subject model evidence is unsupported")
+        profile_digest = item.get("model_profile_sha256")
+        if profile_digest is not None and not _normal._SHA256.fullmatch(profile_digest):
+            raise EffectTrialError("deep subject model profile digest is invalid")
+        if profile_digest != self.deep_config.model_profile_sha256:
+            raise EffectTrialError("deep subject model profile identity mismatch")
+        cost = item.get("cost_micros")
+        if cost is not None:
+            _normal._integer(cost, "deep subject cost_micros", 0, _normal.MAX_COST_MICROS)
+            if profile_digest is None:
+                raise EffectTrialError("deep subject cost telemetry requires a model profile")
         request_sha256 = None
         if "request_sha256" in item:
             request_sha256 = _normal._digest(
@@ -265,6 +287,8 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "requested_model": item["requested_model"],
             "effective_model": effective,
             "model_evidence": evidence,
+            "model_profile_sha256": profile_digest,
+            "cost_micros": cost,
             "interaction_turns": _normal._integer(
                 item["interaction_turns"], "deep subject interaction turns", 0, _normal.MAX_TURNS
             ),
@@ -300,13 +324,18 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             {"request_sha256", "harness_request_sha256"},
         )
         allowed = tuple(
-            fields | optional | feedback
+            fields | optional | profile | feedback
             for optional in optional_request_fields
+            for profile in (set(), {"model_profile_sha256"}, {"model_profile_sha256", "cost_micros"})
             for feedback in (set(), {"feedback"})
         )
         if not isinstance(payload, dict) or set(payload) not in allowed:
             raise EffectTrialError("deep round record must contain the expected fields")
+        if self.deep_config.model_profile_sha256 is not None and "model_profile_sha256" not in payload:
+            raise EffectTrialError("deep round is missing model profile provenance")
         item = dict(payload)
+        item.setdefault("model_profile_sha256", None)
+        item.setdefault("cost_micros", None)
         round_value = _normal._integer(item["round_index"], "deep round index", 1, MAX_OUTER_ROUNDS)
         if round_value != round_index or item["status"] not in {"completed", "failed"}:
             raise EffectTrialError("deep round identity or status is invalid")
@@ -320,6 +349,13 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             value = item[name]
             if value is not None:
                 _normal._text(value, f"deep round {name}", safe_id=name in {"model_evidence", "extraction_status", "error_code"})
+        profile_digest = item.get("model_profile_sha256")
+        if profile_digest is not None and not _normal._SHA256.fullmatch(profile_digest):
+            raise EffectTrialError("deep round model profile digest is invalid")
+        if profile_digest != self.deep_config.model_profile_sha256:
+            raise EffectTrialError("deep round model profile identity mismatch")
+        if item.get("cost_micros") is not None:
+            _normal._integer(item["cost_micros"], "deep round cost_micros", 0, _normal.MAX_COST_MICROS)
         if item["interaction_turns"] is not None:
             _normal._integer(item["interaction_turns"], "deep round interaction turns", 0, _normal.MAX_TURNS)
         if item["usage"] is not None:
@@ -355,17 +391,26 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         return item
 
     def _validate_deep_record(self, payload: object, case: _normal.TrialCase, run_index: int) -> dict[str, Any]:
-        item = _normal._strict_object(
-            payload,
-            {
+        required = {
                 "schema_version", "case_key", "run_index", "attempt", "status", "ready",
                 "elapsed_ms", "requested_model", "effective_model", "model_evidence",
                 "interaction_turns", "usage", "extraction_status", "validity_score",
                 "overall_score", "quality_score", "detail_metrics", "error_code",
                 "outer_rounds", "rounds",
-            },
-            "deep logical run record",
-        )
+            }
+        profile_digest_fields = required | {"model_profile_sha256"}
+        profile_required = profile_digest_fields | {"cost_micros"}
+        if not isinstance(payload, dict) or set(payload) not in (
+            required,
+            profile_digest_fields,
+            profile_required,
+        ):
+            raise EffectTrialError("deep logical run record must contain the expected fields")
+        if self.deep_config.model_profile_sha256 is not None and "model_profile_sha256" not in payload:
+            raise EffectTrialError("deep logical run is missing model profile provenance")
+        item = dict(payload)
+        item.setdefault("model_profile_sha256", None)
+        item.setdefault("cost_micros", None)
         if item["schema_version"] != "1" or item["case_key"] != case.key or item["run_index"] != run_index:
             raise EffectTrialError("deep logical run identity mismatch")
         outer_rounds = _normal._integer(item["outer_rounds"], "deep logical run outer rounds", 1, MAX_OUTER_ROUNDS)
@@ -381,6 +426,13 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             value = item[name]
             if value is not None:
                 _normal._text(value, f"deep logical run {name}", safe_id=name in {"model_evidence", "extraction_status", "error_code"})
+        profile_digest = item["model_profile_sha256"]
+        if profile_digest is not None and not _normal._SHA256.fullmatch(profile_digest):
+            raise EffectTrialError("deep logical run model profile digest is invalid")
+        if profile_digest != self.deep_config.model_profile_sha256:
+            raise EffectTrialError("deep logical run model profile identity mismatch")
+        if item["cost_micros"] is not None:
+            _normal._integer(item["cost_micros"], "deep logical run cost_micros", 0, MAX_DEEP_COST_MICROS)
         if item["interaction_turns"] is not None:
             _normal._integer(item["interaction_turns"], "deep logical run interaction turns", 0, _normal.MAX_TURNS)
         if item["usage"] is not None:
@@ -455,6 +507,8 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 "requested_model",
                 "effective_model",
                 "model_evidence",
+                "model_profile_sha256",
+                "cost_micros",
                 "interaction_turns",
                 "usage",
             ):
@@ -529,6 +583,8 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "requested_model": self.deep_config.requested_model,
             "effective_model": None,
             "model_evidence": None,
+            "model_profile_sha256": self.deep_config.model_profile_sha256,
+            "cost_micros": None,
             "interaction_turns": None,
             "usage": None,
             "extraction_status": None,
@@ -561,6 +617,8 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         )
         effective_models = [value["effective_model"] for value in rounds]
         evidences = [value["model_evidence"] for value in rounds]
+        profile_digests = [value.get("model_profile_sha256") for value in rounds]
+        costs = [value.get("cost_micros") for value in rounds]
         interactions = [value["interaction_turns"] for value in rounds]
         usages = [value["usage"] for value in rounds]
         usage = None
@@ -580,6 +638,8 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "requested_model": self.deep_config.requested_model,
             "effective_model": effective_models[0] if effective_models and len(set(effective_models)) == 1 else None,
             "model_evidence": evidences[0] if evidences and len(set(evidences)) == 1 else None,
+            "model_profile_sha256": profile_digests[0] if profile_digests and len(set(profile_digests)) == 1 else self.deep_config.model_profile_sha256,
+            "cost_micros": sum(int(value) for value in costs) if costs and all(value is not None for value in costs) else None,
             "interaction_turns": sum(interactions) if interactions and all(value is not None for value in interactions) else None,
             "usage": usage,
             "extraction_status": winner["extraction_status"] if winner else None,
@@ -640,6 +700,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                     "round_index": round_index,
                     "outer_rounds": self.deep_config.outer_rounds,
                     "requested_model": self.deep_config.requested_model,
+                    "model_profile_sha256": self.deep_config.model_profile_sha256,
                     "entrypoint": case.entrypoint,
                     "public_files": [value.to_dict() for value in case.public_files],
                     "previous_evaluation": previous,
@@ -687,6 +748,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                         subject_root / "request.json",
                         cwd=subject_root,
                         environment=self.deep_config.base.subject_environment,
+                        subject=True,
                     )
                     if harness_root.exists() or harness_root.is_symlink():
                         # The subject may write candidate artifacts only inside its own workspace;
@@ -1034,4 +1096,9 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         return EffectTrialReport(report_payload)
 
 
-__all__ = ["MAX_OUTER_ROUNDS", "DeepEffectTrialConfig", "DeepEffectTrialRunner"]
+__all__ = [
+    "MAX_DEEP_COST_MICROS",
+    "MAX_OUTER_ROUNDS",
+    "DeepEffectTrialConfig",
+    "DeepEffectTrialRunner",
+]
