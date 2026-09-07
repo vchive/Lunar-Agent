@@ -508,7 +508,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/055-runtime-model-profile-integration
+specs/056-cli-runtime-model-profile-provenance
 ```
 
 后续新功能必须：
@@ -576,4 +576,4 @@ model 凭据、extractor 的 `glm-5.2` 配置和包含 `anyio`、发布期 `clau
 
 Feature 054/055 已完成并通过全量 pytest、Ruff、compileall、构建、Specify prerequisites 和
 `git diff --check`。Feature 056 已完成并通过全量 pytest、Ruff、compileall、构建、Specify
-prerequisites 和 `git diff --check`，尚未提交。
+prerequisites 和 `git diff --check`，提交于 `8c00edd`。
