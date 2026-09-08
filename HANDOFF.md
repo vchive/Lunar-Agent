@@ -15,7 +15,9 @@ Feature 059 已提交于 `503fe0a`。Feature 060 已提交并推送于 `f4b7ba9`
 用户再次确认现有实验数据已足够；不运行 WebAgent，不再要求补 WebAgent 数据。
 2026-09-08 用户进一步要求推进真实 Lunar 评测：当前优先级已切换为运行首个真实 trial，
 不再以新功能开发作为前置条件。下文旧轮次的“本轮不启动真实 trial”仅是历史记录。
-先跑 `supply_chain_inventory` 的 1 run × 1 round，确认链路后在新目录跑 2 runs × 5 rounds。
+已通过用户授权的 CC Switch 接通模型，完成 `supply_chain_inventory` 的首个真实 1 run ×
+1 round：有效性 `1.0`、得分 `0.2079`，历史最佳 `0.3496`。独立的 2 runs × 5 rounds
+试验已结束，但两个 run 均在首轮 subject 退出、未进入评分；最新证据与待修复项见第 16 节。
 
 以下保留 2026-09-06 续接时的历史提交记录：
 
@@ -423,7 +425,7 @@ effect protocol 的规范机器字段是 `baseline_historical_best`；显式 Web
 `baseline-agentserver.json`。冲突的 adapter evidence 仍会被拒绝；缺少 adapter metadata 的
 legacy export 继续兼容，但必须另外保留来源证明。
 
-真实试验尚未运行；2026-09-08 再次检查仍缺显式执行配置，当前 shell 中没有
+2026-09-08 初次检查时，普通 shell 中没有
 `FAMOU_MODEL_ENDPOINT`、
 `FAMOU_API_KEY`、`FAMOU_MODEL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、
 `ANTHROPIC_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 或 `ANTHROPIC_API_KEY`。本轮已另行创建
@@ -432,9 +434,11 @@ legacy export 继续兼容，但必须另外保留来源证明。
 `glm-5.2`，发布期 FM-Eval harness 锁定 `claude-agent-sdk==0.1.81`；exact extractor 必须使用
 包含对应依赖、与冻结身份相符且获授权的运行环境，并显式设置
 `ANTHROPIC_MODEL=glm-5.2`。密钥只通过显式环境传递，不能写入仓库、request、receipt 或
-report，也不能用 Codex/Claude 的本机登录态冒充 extractor 配置。
+report，也不能用 Codex/Claude 的本机登录态冒充 extractor 配置。随后用户明确授权复用
+CC Switch 当前 provider 的 API 配置；第 16 节记录了只读接入、显式环境注入及首轮真实结果。
+普通 shell 中没有这些变量已不再是启动阻塞。
 
-当前执行步骤（无需继续增加功能）：
+当前执行步骤（第 1–4 步的首轮已完成；再次执行 deep 前先修复第 16 节的失败诊断缺口）：
 
 1. 使用带来源的 `baseline-agentserver.json`，保留 `failed/partially_valid` 来源实验状态，
    只采信所选 case 的 eligible rows；不得把整个 60-trial 实验描述为成功。
@@ -566,7 +570,7 @@ uv run pytest -q tests/test_effect_trial.py tests/test_deep_feedback.py tests/te
 ```
 
 接着复核 `.lunar/famou-kit-real-001/` 的 `baseline-agentserver.json` 和 provenance 摘要，
-直接推进 Lunar 真实评测；运行脚本及最新环境状态见第 15 节。当前不运行 WebAgent；已有 AgentServer
+直接推进 Lunar 真实评测；运行脚本及最新环境状态见第 15–16 节。当前不运行 WebAgent；已有 AgentServer
 历史 comparator 可用于描述性对照，且不要求额外 WebAgent export。只有 exact private harness
 实际完成新的试验后，才可报告该冻结 case 上的 descriptive delta/breakthrough；它仍不构成
 WebAgent parity、suite parity 或 statistical superiority。历史数据就绪不代表 Lunar 新结果。
@@ -703,7 +707,7 @@ OutputSpec，并保留 `output_valid` 叶子诊断用于重试反馈。可选输
   通过后才启动 trial；拒绝缺失或空的四个连接变量。Bash 3.2 语法检查及缺省/空值退出检查
   通过，未创建 smoke/deep trial 目录。
 
-当前唯一已知启动阻塞是缺少以下连接配置：
+本节准备阶段的启动阻塞曾是缺少以下连接配置，现已通过第 16 节的用户授权 CC Switch 接入解决：
 
 ```text
 FAMOU_MODEL_ENDPOINT
@@ -722,6 +726,76 @@ bash /Users/liminghan/Documents/lunar_agent/.lunar/real-eval-20260908/run.sh dee
 ```
 
 `run.sh` 每次都会重新预检；`smoke --resume` 或 `deep --resume` 只恢复各自冻结的配置。
-当前 `readiness.json` 是缺配置状态记录，不是成功预检报告；没有模型调用、私有 harness
-执行或新的 Lunar 分数。本轮仅更新交接文档和本地实验准备文件，没有修改产品实现，未重跑
+当时 `readiness.json` 是缺配置状态记录，没有模型调用、私有 harness 执行或新的 Lunar 分数；
+该文件现已更新为第 16 节的实际运行状态。本次准备仅更新交接文档和本地实验文件，没有修改产品实现，未重跑
 已通过的 566 项全仓测试。
+
+## 16. CC Switch 接入与首轮真实结果（2026-09-08）
+
+用户明确授权使用本机 CC Switch，若不能接入再提供 key。已只读接入 CC Switch `3.19.2`
+的当前 Codex/Claude provider；没有修改 app 设置或开启代理。辅助脚本
+`.lunar/real-eval-20260908/ccswitch.py` 只读 settings 与 SQLite，将 API 配置仅通过进程环境
+交给现有 `run.sh`，不输出或复制密钥。CC Switch 当前 Codex 默认模型虽然是 `gpt-6-astra`，
+本次实验仍固定为 `gpt-5.6-sol`，未改变历史比较的模型名。
+
+实际连接证据：
+
+- 两组当前接口的模型列表都包含 `gpt-5.6-sol` 和 `glm-5.2`。
+- 现有 Lunar Chat Completions runtime 的最小工具往返通过，两次响应均报告
+  `gpt-5.6-sol`，探测共 205 tokens；没有执行本地工具。
+- SDK `0.1.81` 在隔离临时目录用 `glm-5.2` 完成一轮无工具 query，报告模型相符。
+- 完整 `effect-preflight` 通过，见 `ccswitch-preflight.json`。
+
+首轮真实结果位于 `.lunar/real-eval-20260908/smoke/`：
+
+| 项目 | 结果 |
+| --- | --- |
+| case / 配置 | supply_chain_inventory / 1 run × 1 round |
+| 模式 | deep_evolution / loop 的第一轮 |
+| overall / quality | 0.2079 |
+| validity | 1.0 |
+| 历史最佳 / 差值 | 0.3496 / −0.1417 |
+| 用时 | 351.715 秒 |
+| Lunar 模型交互 | 15 次 |
+| Lunar 输入 / 输出 / 总 token | 95,723 / 4,383 / 100,106 |
+| 实际响应模型 | gpt-5.6-sol，provider_observed |
+
+首轮真实求解、原始私有 extractor/evaluator 和 receipt 链已完成；没有超越历史最佳。
+独立只读审计 16 项证据一致性通过，包括 state 授权 record 摘要、request/receipt、公开输入、
+solution manifest、实际 private case 和评分脚本摘要。`smoke --resume` 快速完成且返回报告
+与原报告完全相同，没有新建 attempt。
+
+这些用量仅属于 Lunar subject，不包括 extractor；harness receipt 未保存实评 extractor
+的返回模型、usage 或完整成本。归一化中间文件和 SDK transcript 仍是临时产物，因此保留
+证据支持 receipt 一致性审计，不能仅凭该目录离线重算评分。比较仍仅为本 case 的描述性
+对照，baseline 的模型身份仅有 `runtime_observed`，不能升级为两侧 provider 证明。
+
+后续独立 `deep/` workspace 的 2 runs × 5 rounds 已实际执行并结束，运行命令为：
+
+```bash
+uv run python .lunar/real-eval-20260908/ccswitch.py deep
+```
+
+两次逻辑 run 都在首轮 subject 以 `process_nonzero_exit` 退出，分别耗时 495.668 秒和
+75.177 秒；没有 subject receipt/harness workspace，没有完成评分的 round，`lunar_best`
+为 null。不能将这两次失败解释为质量分 0 或零模型消耗。首轮 smoke 的独立结果仍有效，
+但本次没有得到演化提升证据。
+
+事后纯本地复核发现 run 1 的原始公开文件未变，但新增了 `subject/case/solve.py`，违反
+冻结 public projection 的文件集合；run 2 的同项检查通过。新增文件若走后验校验必被拒绝，
+但由于检查在 `agent.run()` 返回后，无法仅凭当前文件断言它就是历史退出的直接原因。
+失败后再次极小模型请求成功，响应仍为 `gpt-5.6-sol`；这只证明当前连接可用，不能排除
+历史瞬时接口故障。独立只读审查确认以上证据边界。
+
+当前诊断缺口已由真实失败暴露：`effect_trial._default_executor` 将 stdout/stderr 送入
+DEVNULL，`_invoke` 统一记录 `process_nonzero_exit`，`run_subject_adapter` 又将 runtime
+异常压成类型名。下一项 SDD 应补充 score-free、有界、白名单字段的 subject 失败诊断，
+保存失败阶段/安全错误类别/退出状态；不要直接保存可能包含凭据的原始 stdout/stderr。
+同时明确整个 `case/` 目录不可新增文件，求解代码和产物写在 attempt 根目录或其他允许目录。
+先用本地回归区分 public projection 与 runtime/模型失败，再修复并恢复真实试验；保留原始
+失败 attempts，不盲目重复消耗调用。此轮没有修改产品实现，仍以 `790c086` 对应实现开展
+试验；新增内容仅是本机接入/状态脚本、结果记录和本文档。
+
+汇总说明位于 `.lunar/real-eval-20260908/results.md`。每次新启动/恢复会读取届时 CC Switch
+的当前 provider；已经运行的进程环境不受之后全局切换影响。新结果只从实际登记的 round
+及最终 report 派生，不改基线、不手填分数、不向 subject 提供私有评分内容。
