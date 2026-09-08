@@ -10,10 +10,12 @@
 
 Feature 058 已提交并推送于 `1ae1893`，新增只读预检及公司平台 baseline 来源记录。
 Feature 059 已完成普通求解和 isolated compiler/audit 调用的模型预算、超时边界修复。
-Feature 059 已提交于 `503fe0a`。本次 Feature 060 修复结构化输出验收绕过，统一普通/委派
-Solver、候选程序执行和最终产物生成的独立输出校验。
+Feature 059 已提交于 `503fe0a`。Feature 060 已提交并推送于 `f4b7ba9`，修复结构化输出验收
+绕过，统一普通/委派 Solver、候选程序执行和最终产物生成的独立输出校验。
 用户再次确认现有实验数据已足够；不运行 WebAgent，不再要求补 WebAgent 数据。
-本轮只做 SDD 开发与本地 fixture 验证，不启动真实 Lunar trial。
+2026-09-08 用户进一步要求推进真实 Lunar 评测：当前优先级已切换为运行首个真实 trial，
+不再以新功能开发作为前置条件。下文旧轮次的“本轮不启动真实 trial”仅是历史记录。
+先跑 `supply_chain_inventory` 的 1 run × 1 round，确认链路后在新目录跑 2 runs × 5 rounds。
 
 以下保留 2026-09-06 续接时的历史提交记录：
 
@@ -380,7 +382,7 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：复用公司平台 baseline，完成离线接入和运行预检
+### P0：复用公司平台 baseline，启动 Lunar 自身的真实评测
 
 官方 publication kit 和 AgentServer normal-mode historical comparator 已就绪，不需要手填
 历史分数：
@@ -421,17 +423,18 @@ effect protocol 的规范机器字段是 `baseline_historical_best`；显式 Web
 `baseline-agentserver.json`。冲突的 adapter evidence 仍会被拒绝；缺少 adapter metadata 的
 legacy export 继续兼容，但必须另外保留来源证明。
 
-真实试验尚未运行，本轮仅进行软件开发与离线数据接入。此前检查发现还缺显式执行配置：shell 中没有
+真实试验尚未运行；2026-09-08 再次检查仍缺显式执行配置，当前 shell 中没有
 `FAMOU_MODEL_ENDPOINT`、
 `FAMOU_API_KEY`、`FAMOU_MODEL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、
-`ANTHROPIC_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 或 `ANTHROPIC_API_KEY`，项目 venv 也
-没有 `anyio` 和 `claude_agent_sdk`。来源实验的 extractor 冻结为 Anthropic API、模型
+`ANTHROPIC_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 或 `ANTHROPIC_API_KEY`。本轮已另行创建
+专用 `.lunar/harness-venv-sdk-0.1.81/` 并安装、验证评分依赖，见第 15 节；无需在项目 venv 中
+重复安装。来源实验的 extractor 冻结为 Anthropic API、模型
 `glm-5.2`，发布期 FM-Eval harness 锁定 `claude-agent-sdk==0.1.81`；exact extractor 必须使用
 包含对应依赖、与冻结身份相符且获授权的运行环境，并显式设置
 `ANTHROPIC_MODEL=glm-5.2`。密钥只通过显式环境传递，不能写入仓库、request、receipt 或
 report，也不能用 Codex/Claude 的本机登录态冒充 extractor 配置。
 
-后续开发步骤（真实试验模板仅供以后使用）：
+当前执行步骤（无需继续增加功能）：
 
 1. 使用带来源的 `baseline-agentserver.json`，保留 `failed/partially_valid` 来源实验状态，
    只采信所选 case 的 eligible rows；不得把整个 60-trial 实验描述为成功。
@@ -441,7 +444,8 @@ report，也不能用 Codex/Claude 的本机登录态冒充 extractor 配置。
    也不构成效果结果；trial 开始时仍会重新验证输入。
 3. 提供可调用 `gpt-5.6-sol` 的 subject endpoint/model 配置，以及 exact extractor 所需的
    Anthropic 配置、`glm-5.2` 模型值和发布期依赖环境。
-4. 后续实际开展效果试验时，用下面的冻结 suite/baseline 跑 1 case、2 runs、5 rounds。
+4. 连接配置到位后立即用冻结 suite/baseline 跑 1 case、1 run、1 round；确认 subject、
+   extraction、evaluator 和模型身份贯通后，在新 workspace 跑 2 runs、5 rounds。
 5. 确认十次 private harness 都真实执行，检查每轮 `solution.json`、RoundFeedback、模型身份、
    failure statistics 和恢复记录，再计算相对 historical best `0.3496` 的 descriptive delta。
 6. 完成单 case 证据后，再决定是否扩展到第二个 case 或更多 runs。
@@ -562,7 +566,7 @@ uv run pytest -q tests/test_effect_trial.py tests/test_deep_feedback.py tests/te
 ```
 
 接着复核 `.lunar/famou-kit-real-001/` 的 `baseline-agentserver.json` 和 provenance 摘要，
-继续 SDD 开发和离线评测接入。当前不运行 WebAgent 或真实 Lunar trial；已有 AgentServer
+直接推进 Lunar 真实评测；运行脚本及最新环境状态见第 15 节。当前不运行 WebAgent；已有 AgentServer
 历史 comparator 可用于描述性对照，且不要求额外 WebAgent export。只有 exact private harness
 实际完成新的试验后，才可报告该冻结 case 上的 descriptive delta/breakthrough；它仍不构成
 WebAgent parity、suite parity 或 statistical superiority。历史数据就绪不代表 Lunar 新结果。
@@ -664,3 +668,60 @@ OutputSpec，并保留 `output_valid` 叶子诊断用于重试反馈。可选输
 
 全仓 566 项 pytest、Ruff、compileall、`uv build`、Feature 060 Specify prerequisites 和
 `git diff --check` 均通过；独立审查未发现阻塞问题。
+
+## 15. 首次真实评测准备（2026-09-08）
+
+用户要求继续并追问何时真实评测 Lunar。当前优先执行真实试验；无需等待下一项 feature，
+也不再寻找 WebAgent 基线。首轮为 `supply_chain_inventory` 的 1 run × 1 round，通过后在
+新 workspace 扩展为 2 runs × 5 rounds。沿用既有 company-platform/AgentServer baseline，
+历史最佳 `0.3496`，保持单 case 描述性对照的证据边界。
+
+本机准备产物（全部位于忽略目录，无凭据）：
+
+```text
+.lunar/real-eval-20260908/README.md
+.lunar/real-eval-20260908/run.sh
+.lunar/real-eval-20260908/input-checks.json
+.lunar/real-eval-20260908/harness-environment.json
+.lunar/real-eval-20260908/harness-requirements.lock
+.lunar/real-eval-20260908/sdk-wheel-verification.json
+.lunar/real-eval-20260908/readiness.json
+.lunar/harness-venv-sdk-0.1.81/
+```
+
+准备结果：
+
+- suite、baseline、raw export、完整 private case、extractor、evaluator 和公开文件摘要均
+  已复核，baseline 的 benchmark/evaluation profile 与 suite 一致。
+- 专用 Python `3.13.12` 使用 `venv --copies` 创建，可执行文件非 symlink。已安装
+  `claude-agent-sdk==0.1.81`、`anyio==4.15.1`、`mcp==2.2.0`；extractor 所需 SDK 符号实际
+  import 和 `pip check` 均通过。发布期仅锁定 SDK，传递依赖没有完整历史锁；本次实际版本
+  单独记录，不能声称重建了发布期的完整依赖环境。
+- PyPI 直连下载较慢，改用清华镜像获取 macOS arm64 SDK wheel，并核对官方 PyPI SHA-256：
+  `e4bc8797cc2bc882031cf6b287a550ae2bb38a3822aa081e9ffc81bb4bed51da`。
+- 启动脚本固定 subject `gpt-5.6-sol`、extractor `glm-5.2`，分别显式传递环境。每次先预检，
+  通过后才启动 trial；拒绝缺失或空的四个连接变量。Bash 3.2 语法检查及缺省/空值退出检查
+  通过，未创建 smoke/deep trial 目录。
+
+当前唯一已知启动阻塞是缺少以下连接配置：
+
+```text
+FAMOU_MODEL_ENDPOINT
+FAMOU_API_KEY
+ANTHROPIC_BASE_URL
+ANTHROPIC_AUTH_TOKEN
+```
+
+已向用户请求现有环境配置文件路径或本机环境注入，不要求在聊天中发送密钥。不要搜索其他
+应用的登录态来代替配置。配置到位后在同一进程环境中执行：
+
+```bash
+bash /Users/liminghan/Documents/lunar_agent/.lunar/real-eval-20260908/run.sh smoke
+# 首轮真实链路完成并核对后：
+bash /Users/liminghan/Documents/lunar_agent/.lunar/real-eval-20260908/run.sh deep
+```
+
+`run.sh` 每次都会重新预检；`smoke --resume` 或 `deep --resume` 只恢复各自冻结的配置。
+当前 `readiness.json` 是缺配置状态记录，不是成功预检报告；没有模型调用、私有 harness
+执行或新的 Lunar 分数。本轮仅更新交接文档和本地实验准备文件，没有修改产品实现，未重跑
+已通过的 566 项全仓测试。
