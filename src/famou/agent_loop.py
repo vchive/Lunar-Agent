@@ -7,6 +7,7 @@ scheduling and recovery; this runtime owns one conversational session, local too
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from collections.abc import Callable
@@ -90,7 +91,6 @@ class AgentLoopRuntime:
         if profile is not None and not isinstance(profile, ModelProfile):
             raise TypeError("profile must be a ModelProfile")
         self.profile = profile
-        self._usage_ledger = UsageLedger(profile) if profile is not None else None
         if profile is not None:
             self.max_steps = min(self.max_steps, profile.max_steps)
         self.system_prompt = system_prompt
@@ -131,10 +131,10 @@ class AgentLoopRuntime:
         self.model.cancel()
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
+        effective_timeout = self._profile_timeout(timeout)
         workspace.mkdir(parents=True, exist_ok=True)
         # A runtime can be reused for independent tasks; budget accounting is per invocation.
-        if self.profile is not None:
-            self._usage_ledger = UsageLedger(self.profile)
+        ledger = UsageLedger(self.profile) if self.profile is not None else None
         messages = self._initial_messages(prompt)
         # Memory is exposed through explicit model tool calls. We do not inject local notes into a
         # request implicitly: sending durable user context to a configured endpoint must remain an
@@ -145,9 +145,6 @@ class AgentLoopRuntime:
         tool_steps = 0
         response_models: list[str | None] = []
         usages: list[dict[str, int] | None] = []
-        effective_timeout = timeout if timeout is not None else (
-            self.profile.timeout_seconds if self.profile is not None else None
-        )
         while True:
             remaining = self._remaining_timeout(started, effective_timeout)
             try:
@@ -160,18 +157,12 @@ class AgentLoopRuntime:
                     {"phase": "model_turn", "error": _bounded_runtime_error(exc)},
                 )
                 raise
+            if self.profile is not None:
+                self._remaining_timeout(started, effective_timeout)
             model_turns += 1
             response_models.append(turn.response_model)
             usages.append(turn.usage)
-            if turn.usage is not None and self._usage_ledger is not None:
-                try:
-                    self._usage_ledger.record(turn.usage)
-                except BudgetExceeded as exc:
-                    raise RuntimeExecutionError(
-                        f"model profile budget exceeded: {exc.limit}"
-                    ) from exc
-                except (TypeError, ValueError) as exc:
-                    raise RuntimeExecutionError("model profile usage is invalid") from exc
+            self._record_profile_usage(turn, ledger)
             self._emit(
                 "agent_model_turn",
                 {
@@ -181,6 +172,8 @@ class AgentLoopRuntime:
                     "tool_steps": tool_steps,
                 },
             )
+            if self.profile is not None:
+                self._remaining_timeout(started, effective_timeout)
             if not turn.tool_calls:
                 if not turn.text:
                     raise RuntimeExecutionError("agent loop ended without a final text result")
@@ -191,18 +184,8 @@ class AgentLoopRuntime:
                     "mode": "agent-loop",
                     "turns": str(model_turns),
                     "session_history": str(self.session_history).lower(),
+                    **self._telemetry_metadata(response_models, usages, ledger),
                 }
-                if response_models and all(response_models) and len(set(response_models)) == 1:
-                    metadata["response_model"] = str(response_models[0])
-                if usages and all(value is not None for value in usages):
-                    for key in ("input_tokens", "output_tokens", "total_tokens"):
-                        metadata[key] = str(sum(value[key] for value in usages if value is not None))
-                if self.profile is not None:
-                    metadata["profile"] = self.profile.name
-                    if usages and all(value is not None for value in usages):
-                        snapshot = self._usage_ledger.snapshot
-                        if snapshot.cost_micros is not None:
-                            metadata["cost_micros"] = str(snapshot.cost_micros)
                 return RuntimeResult(
                     text=turn.text,
                     artifacts=tuple(dict.fromkeys(artifacts)),
@@ -217,6 +200,8 @@ class AgentLoopRuntime:
             messages.append(self._assistant_message(turn))
             self._append_transcript(messages[-1])
             for call in turn.tool_calls:
+                if self.profile is not None:
+                    self._remaining_timeout(started, effective_timeout)
                 try:
                     result = self.tools.execute(call.name, call.arguments, workspace)
                 except Exception as exc:
@@ -225,6 +210,8 @@ class AgentLoopRuntime:
                         {"phase": "tool", "tool": call.name, "error": _bounded_runtime_error(exc)},
                     )
                     raise
+                if self.profile is not None:
+                    self._remaining_timeout(started, effective_timeout)
                 tool_steps += 1
                 artifacts.extend(result.artifacts)
                 self._emit(
@@ -260,15 +247,22 @@ class AgentLoopRuntime:
         memory tools, or a previous compiler response. Keeping this primitive on the repository-
         owned loop lets protocol code request that boundary without depending on model internals.
         """
+        effective_timeout = self._profile_timeout(timeout)
         workspace.mkdir(parents=True, exist_ok=True)
+        ledger = UsageLedger(self.profile) if self.profile is not None else None
+        started = time.monotonic()
         turn = self.model.complete(
             [
                 {"role": "system", "content": ISOLATED_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             (),
-            timeout,
+            self._remaining_timeout(started, effective_timeout)
+            if self.profile is not None else timeout,
         )
+        if self.profile is not None:
+            self._remaining_timeout(started, effective_timeout)
+        self._record_profile_usage(turn, ledger)
         if turn.tool_calls:
             raise RuntimeExecutionError("isolated agent turn returned tool calls")
         if not turn.text:
@@ -279,8 +273,71 @@ class AgentLoopRuntime:
                 "provider": "openai-compatible",
                 "mode": "agent-loop-isolated",
                 "session_history": "false",
+                **(
+                    self._telemetry_metadata([turn.response_model], [turn.usage], ledger)
+                    if ledger is not None else {}
+                ),
             },
         )
+
+    def _profile_timeout(self, timeout: float | None) -> float | None:
+        if self.profile is None:
+            return timeout
+        if timeout is None:
+            return self.profile.timeout_seconds
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise RuntimeExecutionError("model profile timeout must be finite and positive")
+        return min(timeout, self.profile.timeout_seconds)
+
+    @staticmethod
+    def _record_profile_usage(turn: ModelTurn, ledger: UsageLedger | None) -> None:
+        if ledger is None:
+            return
+        profile = ledger.profile
+        if turn.usage is None:
+            if profile.max_total_tokens is not None or profile.max_cost_micros is not None:
+                raise RuntimeExecutionError("model profile usage is required for token/cost ceilings")
+            return
+        try:
+            snapshot = ledger.record(turn.usage)
+        except BudgetExceeded as exc:
+            raise RuntimeExecutionError(f"model profile budget exceeded: {exc.limit}") from exc
+        except (TypeError, ValueError) as exc:
+            raise RuntimeExecutionError("model profile usage is invalid") from exc
+        # Equality is valid for a final answer, but tool calls require another model turn to
+        # finish. Stop before tool side effects when the accepted response has used the ceiling.
+        if turn.tool_calls:
+            for name, actual, maximum in (
+                ("max_total_tokens", snapshot.total_tokens, profile.max_total_tokens),
+                ("max_cost_micros", snapshot.cost_micros, profile.max_cost_micros),
+            ):
+                if maximum is not None and actual is not None and actual >= maximum:
+                    raise RuntimeExecutionError(f"model profile budget exhausted: {name}")
+
+    @staticmethod
+    def _telemetry_metadata(
+        response_models: list[str | None],
+        usages: list[dict[str, int] | None],
+        ledger: UsageLedger | None,
+    ) -> dict[str, str]:
+        metadata: dict[str, str] = {}
+        if response_models and all(response_models) and len(set(response_models)) == 1:
+            metadata["response_model"] = str(response_models[0])
+        complete_usage = bool(usages) and all(value is not None for value in usages)
+        if complete_usage:
+            for key in ("input_tokens", "output_tokens", "total_tokens"):
+                metadata[key] = str(sum(value[key] for value in usages if value is not None))
+        if ledger is not None:
+            metadata["profile"] = ledger.profile.name
+            snapshot = ledger.snapshot
+            if complete_usage and snapshot.cost_micros is not None:
+                metadata["cost_micros"] = str(snapshot.cost_micros)
+        return metadata
 
     @staticmethod
     def _remaining_timeout(started: float, timeout: float | None) -> float | None:

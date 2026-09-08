@@ -265,6 +265,40 @@ def test_builtin_subject_profile_digest_mismatch_fails_closed(tmp_path: Path) ->
         run_subject_adapter(request, model_runtime=SubjectModel(), model_profile=profile)
 
 
+@pytest.mark.parametrize("mode", ["normal", "deep_evolution"])
+@pytest.mark.parametrize("usage", [None, {"input_tokens": 8, "output_tokens": 2, "total_tokens": 10}])
+def test_subject_budget_rejects_unaccounted_or_exhausted_tool_turn_before_receipt(
+    tmp_path: Path, mode: str, usage: dict[str, int] | None
+) -> None:
+    request = _subject_request(tmp_path / "subject")
+    profile = ModelProfile("bounded", "gpt-5.6-sol", max_total_tokens=10)
+    payload = json.loads(request.read_text())
+    payload["model_profile_sha256"] = hashlib.sha256(
+        json.dumps(profile.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if mode == "deep_evolution":
+        payload.update(mode=mode, round_index=1, outer_rounds=5, previous_evaluation=None)
+    _write_json(request, payload)
+
+    class UnaccountedSubject(SubjectModel):
+        def complete(self, messages, tools=(), timeout=None):
+            self.turn += 1
+            if self.turn > 1:
+                return ModelTurn("done", usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+            return ModelTurn(
+                "",
+                (ToolCall("write", "write_file", {"path": "solution.json", "content": "{}"}),),
+                usage=usage,
+            )
+
+    model = UnaccountedSubject()
+    with pytest.raises(EffectAdapterError, match="subject runtime failed"):
+        run_subject_adapter(request, model_runtime=model, model_profile=profile)
+    assert model.turn == 1
+    assert not (request.parent / "solution.json").exists()
+    assert not (request.parent / payload["receipt_path"]).exists()
+
+
 def test_builtin_subject_rejects_uppercase_profile_digest(tmp_path: Path) -> None:
     request = _subject_request(tmp_path / "subject")
     profile = ModelProfile(name="fixture-profile", model="gpt-5.6-sol")

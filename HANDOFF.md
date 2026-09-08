@@ -8,9 +8,10 @@
 
 ## 1. 当前状态
 
-截至本次续接，Feature 057 已提交于 `9e08129`。Feature 058 新增只读预检，并支持记录公司
-平台 baseline 的真实来源；实现及验收已完成。公司平台只用于查看和导入
-历史数据，本轮不运行 WebAgent 或真实 Lunar trial。
+Feature 058 已提交并推送于 `1ae1893`，新增只读预检及公司平台 baseline 来源记录。
+Feature 059 已完成普通求解和 isolated compiler/audit 调用的模型预算、超时边界修复。
+用户再次确认现有实验数据已足够；不运行 WebAgent，不再要求补 WebAgent 数据。
+本轮只做 SDD 开发与本地 fixture 验证，不启动真实 Lunar trial。
 
 以下保留 2026-09-06 续接时的历史提交记录：
 
@@ -481,11 +482,14 @@ uv run lunar-agent effect-deep-trial .lunar/famou-kit-real-001/suite.json \
 
 ### P2：模型 profile 和成本控制
 
-从知识库评测看，深度演化模型需要同时看质量、时延、token 和格式失败率。后续可增加：
+从知识库评测看，深度演化模型需要同时看质量、时延、token 和格式失败率。现有进度：
 
-- `model profile`（model、thinking/budget、max steps、timeout）；
-- 每轮 token/cost 预算；
-- parse failure 子类、per-round error code/timeout breakdown；
+- Feature 054–057 已提供 `ModelProfile`、max steps/timeout、每次调用的 token/cost 预算和
+  telemetry；深度试验的每个 fresh subject round 分别应用预算。
+- Feature 059 补齐 missing usage、isolated 调用、显式 timeout 和精确预算耗尽时的行为。
+- Feature 053 已提供 per-round error code/timeout breakdown；更细 parse failure 分类待需要时扩展。
+- 跨所有 outer rounds 的总预算仍是后续工作；`thinking_budget` 当前只保存配置，未映射到
+  provider 请求参数，不应声称它已经限制了推理 token。
 - 后续支持新版 workload-based export 时，把权威 `experiment.request.workload_ref.kind` 纳入
   baseline adapter guard，并明确它与 `adapter_request.kind` 的优先级；
 - best-of-run、best-of-round、suite average 的明确区分。
@@ -520,7 +524,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/058-effect-trial-preflight
+specs/059-model-profile-execution-boundaries
 ```
 
 后续新功能必须：
@@ -614,3 +618,25 @@ prerequisites 以及 `git diff --check` 均已通过。已从本地 raw export �
 本轮没有运行 WebAgent 或真实 Lunar trial。未来真实试验需要显式 subject endpoint/model
 凭据，以及包含 `anyio` 和发布期 `claude_agent_sdk==0.1.81`、并配置 `ANTHROPIC_MODEL=glm-5.2`
 的 exact harness 环境。预检通过也不构成新的 Lunar 效果结论。
+
+## 13. Feature 059（2026-09-08）
+
+Feature 059 统一 `AgentLoopRuntime.run` 和 `run_isolated` 的模型执行约束。有 token/cost
+上限时，每个返回的响应必须具备合法 usage；缺失、格式错误或超限会在执行工具、保存成功
+响应或生成 subject completed receipt 前失败。用量刚好达到上限的最终文本可成功；同样
+用量的工具请求会在副作用发生前停止，不再发起下一次模型调用。
+
+显式 timeout 只能收紧 profile 上限。模型返回和各工具执行前后检查剩余时间，过期响应
+不得成为成功结果或触发下一步。账本改为每次调用独立；isolated 仍只有 system/user 输入、
+空工具集，不读写 transcript/memory，无 profile 的旧路径保持兼容。
+
+先验证 69 项新增 runtime 回归中 42 项失败、27 项通过，及 4 项 subject adapter 回归全部
+失败，再实现修复；实现后 126 项聚焦测试通过。费用依据响应后 usage 计算，不能撤销已计费
+请求或保证单次请求绝不超支；运行中的模型/工具仍负责自身取消。跨整个深度试验的总预算
+尚未实现，当前预算粒度是一轮 fresh subject invocation。
+
+全仓 532 项 pytest、Ruff、compileall、`uv build`、Feature 059 Specify prerequisites 和
+`git diff --check` 均通过；独立审查未发现阻塞问题。
+
+继续使用已有 `baseline-agentserver.json`，不重新运行 WebAgent，也不要求新的平台实验数据。
+后续优先按实际需求完善求解产物和演化流程；不在没有真实效果证据时抽象统一反馈接口。

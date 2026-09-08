@@ -1138,7 +1138,7 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/046-contract-driven-algorithm-playbooks/`](specs/046-contract-driven-algorithm-playbooks/).
+[`specs/059-model-profile-execution-boundaries/`](specs/059-model-profile-execution-boundaries/).
 
 Model selection and local spend policy can be represented without provider credentials using
 `famou.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,
@@ -1158,3 +1158,18 @@ lunar-agent run "continue the task" --runtime openai-compatible --agent-loop \
 The profile supplies the model when `--model` is omitted; changing it while resuming a
 conversational `solve` run is rejected by the compiler fingerprint. See
 [`specs/056-cli-runtime-model-profile-provenance/`](specs/056-cli-runtime-model-profile-provenance/).
+
+Normal sessions and isolated compiler/audit calls each apply the profile's timeout and usage
+policy. An explicit timeout can tighten the profile limit. If a token or cost ceiling is set,
+every model response must include valid usage; missing usage stops the invocation before its
+tools or a successful result. A final answer exactly at the ceiling succeeds, while a tool
+continuation at the ceiling stops before executing tools or requesting another model turn.
+Profiles without spend ceilings keep optional usage telemetry.
+
+Usage accounting resets for each invocation, including each fresh deep-evolution subject round.
+Provider usage is observed after a response, so the limit stops continuation but cannot undo
+already billed tokens or guarantee that an in-flight call cannot overshoot. Deadline checks also
+reject late responses and stop further tools; in-flight model/tool cancellation remains the
+responsibility of that implementation. `thinking_budget` is recorded in the profile but is not
+currently sent as a provider request parameter. See the
+[execution contract](specs/059-model-profile-execution-boundaries/spec.md).
