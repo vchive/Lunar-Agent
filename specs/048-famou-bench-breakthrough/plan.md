@@ -21,9 +21,10 @@ new `famou.effect_trial` module beside `famou.benchmark` and never enters an evo
 
 1. **Small frozen slice** — require exactly one or two cases and 1–10 Lunar runs per case. This is
    affordable evidence, not a surrogate 20-case suite score.
-2. **Historical best is derived** — ingest per-run FM-Eval receipts and derive WebAgent's best valid
-   score. A caller cannot type only a convenient target number. Explicit experiment/release/result
-   adapter evidence must consistently identify `webagent`; a different adapter fails closed.
+2. **Historical best is derived** — ingest per-run baseline receipts and derive the comparator's
+   best valid score. A caller cannot type only a convenient target number. Explicit
+   experiment/release/result adapter evidence must be consistent and use an allowlisted adapter;
+   the baseline source and provenance remain visible in the report.
 3. **Exact identity before score** — benchmark release/publication, evaluation profile, case
    revision/digest, extractor digest, and evaluator digest must agree before any comparison.
 4. **Public projection only** — Lunar places only manifest-ledger public files in the subject tree.
@@ -90,8 +91,10 @@ For each case:
 
 - `valid_rate = mean(validity_score for scored Lunar runs)`;
 - `lunar_best = max(overall_score where validity_score != 0)`;
-- `webagent_historical_best` is derived the same way from imported runs;
-- `score_delta = lunar_best - webagent_historical_best`;
+- `baseline_historical_best` is derived the same way from imported runs;
+- `score_delta = lunar_best - baseline_historical_best`;
+- `webagent_historical_best` is emitted as a legacy alias for explicit WebAgent provenance or
+  historical `fm-eval` baselines without provenance;
 - `score_breakthrough = score_delta > 0`;
 - `milestone_achieved = score_breakthrough AND full Lunar run coverage AND shared identities AND
   matching requested/effective model labels`.

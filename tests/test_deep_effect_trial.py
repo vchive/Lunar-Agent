@@ -296,6 +296,8 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
     assert report["mode"] == "deep_evolution"
     assert report["outer_rounds"] == 5
     assert case["lunar_best"] == 0.60
+    assert case["baseline_historical_best"] == 0.50
+    assert case["webagent_historical_best"] == 0.50
     assert case["score_delta"] == pytest.approx(0.10)
     assert case["round_curve"][0]["best"] == 0.40
     assert case["round_curve"][3]["best"] == 0.60
@@ -373,6 +375,34 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
             resume=True,
             process_executor=no_process,
         ).run()
+
+
+def test_deep_trial_uses_generic_baseline_field_for_company_platform(tmp_path: Path) -> None:
+    public, suite = _make_case(tmp_path)
+    suite_path = _write_json(tmp_path / "suite.json", suite)
+    baseline_path = _write_baseline(tmp_path, suite)
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline["source"] = "company-platform"
+    baseline["provenance"] = {"source": "company-platform", "adapter": "company-platform"}
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    subject_script = _make_bound_subject_script(tmp_path / "subject.py")
+    harness_script = _make_constant_harness_script(tmp_path / "harness.py")
+    report = DeepEffectTrialRunner(
+        suite_path,
+        baseline_path,
+        tmp_path / "deep-company",
+        case_sources={"case-a": public},
+        config=_deep_config(subject_script, harness_script, outer_rounds=2),
+    ).run().to_dict()
+
+    case = report["cases"][0]
+    assert case["baseline_historical_best"] == 0.50
+    assert "webagent_historical_best" not in case
+    assert report["baseline"]["provenance"] == {
+        "source": "company-platform",
+        "adapter": "company-platform",
+    }
+    assert report["comparability"]["baseline_adapter"] == "company-platform"
 
 
 def test_deep_resume_rejects_non_score_receipt_drift(tmp_path: Path) -> None:

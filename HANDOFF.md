@@ -1,6 +1,6 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-06  
+更新时间：2026-09-08
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
@@ -8,7 +8,11 @@
 
 ## 1. 当前状态
 
-本次续接从干净且与 `origin/main` 同步的 `4a61044` 开始。续接开始时的最近提交：
+截至本次续接，Feature 057 已提交于 `9e08129`。Feature 058 新增只读预检，并支持记录公司
+平台 baseline 的真实来源；实现及验收已完成。公司平台只用于查看和导入
+历史数据，本轮不运行 WebAgent 或真实 Lunar trial。
+
+以下保留 2026-09-06 续接时的历史提交记录：
 
 ```text
 4a61044 test: cover nested candidate manifest traversal
@@ -20,7 +24,7 @@ b3df70e docs: add lunar agent handoff
 edaa4a6 feat: add controlled deep evolution feedback
 ```
 
-本次收口已修复普通/深度效果试验的记录权威和深度 round receipt 完整性，更新 Feature
+此前收口已修复普通/深度效果试验的记录权威和深度 round receipt 完整性，更新 Feature
 048/051/052 文档，并补齐官方 FM-Eval AgentServer normal-mode comparator。变更已按指定身份
 提交并推送；完成时保持 `main == origin/main`。
 
@@ -132,7 +136,7 @@ specs/047-quality-diversity-population
 
 ### Feature 048–050：Famou-Bench 效果层
 
-- Feature 048：导入 FM-Eval 历史结果，比较单 case 的 Lunar best 与 WebAgent historical best，
+- Feature 048：导入历史结果，比较单 case 的 Lunar best 与通用 baseline historical best，
   只允许独立 harness 提供分数。
 - Feature 049：加入可执行的 subject/harness adapter，支持 public projection、private
   extractor/evaluator、receipt 和环境隔离边界。
@@ -373,14 +377,14 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：补齐 comparator 边界并运行真实 `2 logical runs × 5 rounds`
+### P0：复用公司平台 baseline，完成离线接入和运行预检
 
 官方 publication kit 和 AgentServer normal-mode historical comparator 已就绪，不需要手填
 历史分数：
 
 ```text
 suite:    .lunar/famou-kit-real-001/suite.json
-projection: .lunar/famou-kit-real-001/baseline.json
+projection: .lunar/famou-kit-real-001/baseline-agentserver.json
 raw:      .lunar/famou-kit-real-001/fm-eval-results.json
 case:     supply_chain_inventory
 model:    gpt-5.6-sol
@@ -391,26 +395,30 @@ adapter:  agentserver (deep_evolution=false)
 
 ```text
 suite SHA-256:    1701995e8f65d9bd2ba73e840b870c9427fce27107e14048cffb34d594a04e46
-baseline SHA-256: 355a8f1dee33532e720711a9c72988e83f61b4f9af8e4187e51ed3e859579440
+baseline SHA-256: 17e308b4eca5cdc1ebf334daf9c8956fe8871230c1ddcd38872d56f66466a34b
 raw SHA-256:      fa41c138ed3c73a50dd17e9e99704b41a079aef15ab45b1a6bdd65c3897c889d
 ```
 
 `provenance.json` 保存只读查询、模型观测和来源实验状态；
 `publication-identity-verification.json` 保存发布期 FM-Eval SDK commit
-`b17023d3f849f3312f8fc79f366b0c18495ee726` 的复算证据。该 projection 是在 WebAgent adapter
-guard 加入前用当时的 converter 生成；重复转换结果与落盘文件逐字节相同。这只证明旧结构转换
-可重复，不能改变 comparator 类型；当前 converter 会按预期拒绝这份 AgentServer raw export。
+`b17023d3f849f3312f8fc79f366b0c18495ee726` 的复算证据。旧 `baseline.json` 没有内嵌 adapter
+provenance，保留作历史审计，SHA-256 为
+`355a8f1dee33532e720711a9c72988e83f61b4f9af8e4187e51ed3e859579440`。Feature 058 从同一 raw
+export 离线生成 `baseline-agentserver.json`，明确保存 `source=company-platform` 和
+`adapter=agentserver`；除来源字段外，模型、case 身份和全部 per-run 值与旧 projection 一致。
+`baseline-agentserver-provenance.json` 记录本次输入/输出摘要和一致性复核。
 
-这个 export 不能闭合 Feature 048 的 WebAgent-specific comparator 要求。若目标是严格比较
-WebAgent，仍需取得相同 publication、CaseRevision 和 harness 身份下 `adapter=webagent` 的
-machine-readable export，再单独生成 baseline。当前 effect protocol 的机器字段固定为
-`webagent_historical_best`，因此不得把这份 AgentServer projection 直接传给
-`effect-trial`/`effect-deep-trial`；否则机器可读报告会错误标注 comparator。
-`effect-baseline` 现在会在写文件前拒绝该 export 的显式 `agentserver` evidence，并拒绝互相
-冲突的 adapter evidence；缺少 adapter metadata 的 legacy export 继续兼容，但必须另外保留
-WebAgent 来源证明。
+当前任务复用已有 AgentServer baseline，不需要补跑 WebAgent 或搜集新的 WebAgent export。
+effect protocol 的规范机器字段是 `baseline_historical_best`；显式 WebAgent provenance 或
+旧 `fm-eval` 无 provenance 的兼容路径还会输出 `webagent_historical_best` 别名。因此当前
+示例使用带明确来源的新 projection。只有将来另行要求 WebAgent-specific 比较时，才需要
+取得相同 publication、CaseRevision 和 harness 身份下 `adapter=webagent` 的 export。
+`effect-baseline` 在默认 `webagent` 模式下会拒绝该 export 的显式 `agentserver` evidence；使用
+`--adapter-kind agentserver --baseline-source company-platform` 可离线生成带明确来源的
+`baseline-agentserver.json`。冲突的 adapter evidence 仍会被拒绝；缺少 adapter metadata 的
+legacy export 继续兼容，但必须另外保留来源证明。
 
-真实试验尚未运行。除上述 WebAgent-specific export 外，当前还缺显式的执行配置：shell 中没有
+真实试验尚未运行，本轮仅进行软件开发与离线数据接入。此前检查发现还缺显式执行配置：shell 中没有
 `FAMOU_MODEL_ENDPOINT`、
 `FAMOU_API_KEY`、`FAMOU_MODEL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、
 `ANTHROPIC_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 或 `ANTHROPIC_API_KEY`，项目 venv 也
@@ -420,30 +428,34 @@ WebAgent 来源证明。
 `ANTHROPIC_MODEL=glm-5.2`。密钥只通过显式环境传递，不能写入仓库、request、receipt 或
 report，也不能用 Codex/Claude 的本机登录态冒充 extractor 配置。
 
-执行步骤：
+后续开发步骤（真实试验模板仅供以后使用）：
 
-1. 先补 `adapter=webagent` export，用 `effect-baseline` 生成新的 WebAgent baseline；当前可访问
-   的 117 条 FM-Eval 实验列表全部是 AgentServer，其中覆盖该 case 的 36 条也没有 WebAgent。
-2. 提供可调用 `gpt-5.6-sol` 的 subject endpoint/model 配置，以及 exact extractor 所需的
+1. 使用带来源的 `baseline-agentserver.json`，保留 `failed/partially_valid` 来源实验状态，
+   只采信所选 case 的 eligible rows；不得把整个 60-trial 实验描述为成功。
+2. 配置准备好后执行 Feature 058 `effect-preflight`，在不启动 subject/harness 的情况下确认冻结 suite、
+   baseline、public case、命令可执行文件、显式环境变量、model profile digest，以及 exact
+   harness Python 的 `anyio`/`claude_agent_sdk` 依赖。预检报告只记录身份和版本，不保存密钥，
+   也不构成效果结果；trial 开始时仍会重新验证输入。
+3. 提供可调用 `gpt-5.6-sol` 的 subject endpoint/model 配置，以及 exact extractor 所需的
    Anthropic 配置、`glm-5.2` 模型值和发布期依赖环境。
-3. 用下面的冻结 suite/baseline 跑 1 case、2 runs、5 rounds。
-4. 确认十次 private harness 都真实执行，检查每轮 `solution.json`、RoundFeedback、模型身份、
+4. 后续实际开展效果试验时，用下面的冻结 suite/baseline 跑 1 case、2 runs、5 rounds。
+5. 确认十次 private harness 都真实执行，检查每轮 `solution.json`、RoundFeedback、模型身份、
    failure statistics 和恢复记录，再计算相对 historical best `0.3496` 的 descriptive delta。
-5. 完成单 case 证据后，再决定是否扩展到第二个 case 或更多 runs。
+6. 完成单 case 证据后，再决定是否扩展到第二个 case 或更多 runs。
 
 运行深度试验的模板：
 
 ```bash
 export ANTHROPIC_MODEL=glm-5.2
 uv run lunar-agent effect-deep-trial .lunar/famou-kit-real-001/suite.json \
-  /absolute/path/to/verified-webagent-baseline.json \
+  .lunar/famou-kit-real-001/baseline-agentserver.json \
   --case-source supply_chain_inventory=.lunar/famou-kit-real-001/cases/supply_chain_inventory \
-  --subject-command "/Users/liminghan/Documents/lunar_agent/.venv/bin/lunar-agent effect-subject --model WEBAGENT_BASELINE_MODEL --max-steps 100" \
+  --subject-command "/Users/liminghan/Documents/lunar_agent/.venv/bin/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
   --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
   --harness-command "/Users/liminghan/Documents/lunar_agent/.venv/bin/lunar-agent effect-harness --case-root /Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-bench/03_assignment/supply_chain_inventory --python /absolute/path/to/python-with-anyio-and-claude-agent-sdk-0.1.81 --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL --extractor-env ANTHROPIC_MODEL" \
   --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL \
   --harness-env ANTHROPIC_MODEL \
-  --requested-model WEBAGENT_BASELINE_MODEL --runs-per-case 2 --outer-rounds 5 \
+  --requested-model gpt-5.6-sol --runs-per-case 2 --outer-rounds 5 \
   --stagnation-rounds 2 --workspace .lunar/deep-effect-trial-real-001 --json
 ```
 
@@ -508,7 +520,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/057-effect-subject-model-profile-provenance
+specs/058-effect-trial-preflight
 ```
 
 后续新功能必须：
@@ -543,12 +555,11 @@ git log --oneline -5
 uv run pytest -q tests/test_effect_trial.py tests/test_deep_feedback.py tests/test_deep_effect_trial.py
 ```
 
-接着先复核 `.lunar/famou-kit-real-001/` 的 baseline/provenance 摘要和显式 subject/extractor
-执行配置。当前 `baseline.json` 是 AgentServer projection，不能传给现有 WebAgent-specific
-effect protocol。只有另行取得匹配的 `adapter=webagent` export 并生成新 baseline，exact private
-harness 实际完成新的 `2 × 5` 试验后，才可报告该冻结 case 上的 descriptive
-delta/breakthrough；它仍不构成 WebAgent parity、suite parity 或 statistical superiority。历史
-comparator 已就绪本身不代表 Lunar 新结果。
+接着复核 `.lunar/famou-kit-real-001/` 的 `baseline-agentserver.json` 和 provenance 摘要，
+继续 SDD 开发和离线评测接入。当前不运行 WebAgent 或真实 Lunar trial；已有 AgentServer
+历史 comparator 可用于描述性对照，且不要求额外 WebAgent export。只有 exact private harness
+实际完成新的试验后，才可报告该冻结 case 上的 descriptive delta/breakthrough；它仍不构成
+WebAgent parity、suite parity 或 statistical superiority。历史数据就绪不代表 Lunar 新结果。
 
 ## 10. 本次续接记录（2026-09-06）
 
@@ -586,6 +597,20 @@ receipt、logical record、report 和 resume identity 均绑定 profile digest�
 缺失或与请求模型不一致时 fail closed。无 profile 的旧请求和历史 record 继续兼容读取。
 
 已通过全量 pytest、Ruff、compileall、`uv build`、Feature 057 Specify prerequisites 和
-`git diff --check`。真实效果试验仍未运行，原因与上节相同：缺少匹配的 WebAgent baseline、
-subject endpoint/model 凭据及 exact extractor 运行环境；不得据此声称 WebAgent parity 或
-新的效果结论。
+`git diff --check`，提交于 `9e08129`。真实效果试验仍未运行，subject endpoint/model 凭据及
+exact extractor 运行环境待配置；不得据此声称 WebAgent parity 或新的效果结论。
+
+## 12. Feature 058（2026-09-08）
+
+Feature 058 已完成实现：新增只读 `effect-preflight`，在不启动 subject、exact harness 或
+模型请求的情况下，复核冻结 suite/baseline、public case、命令可执行文件、显式环境变量、
+model profile digest，以及 exact harness Python 的 import/distribution 能力。预检报告只保留
+身份、哈希、版本和环境变量名称，不写入凭据、私有路径、命令原文、分数或 extractor/evaluator
+输出；可选 JSON 文件使用新路径原子写入并拒绝 symlink/覆盖。
+
+Feature 058 的聚焦测试和全量 pytest、Ruff、compileall、`uv build`、Feature 058 Specify
+prerequisites 以及 `git diff --check` 均已通过。已从本地 raw export 生成带 `agentserver` 来源的
+`baseline-agentserver.json`，历史最佳仍为 `0.3496`，仅用于所选 case 的描述性历史对照。
+本轮没有运行 WebAgent 或真实 Lunar trial。未来真实试验需要显式 subject endpoint/model
+凭据，以及包含 `anyio` 和发布期 `claude_agent_sdk==0.1.81`、并配置 `ANTHROPIC_MODEL=glm-5.2`
+的 exact harness 环境。预检通过也不构成新的 Lunar 效果结论。

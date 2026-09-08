@@ -42,6 +42,7 @@ from .effect_adapters import (
     run_subject_adapter,
 )
 from .effect_kit import EffectKitError, build_effect_kit
+from .effect_preflight import run_effect_preflight
 from .effect_trial import EffectTrialConfig, EffectTrialError, EffectTrialRunner
 from .evaluator_bundle import SolverScoringContract, compile_evaluator_bundle
 from .evolution import (
@@ -492,6 +493,59 @@ def build_parser() -> argparse.ArgumentParser:
     effect_parser.add_argument("--resume", action="store_true", help="resume the frozen trial")
     _add_json(effect_parser)
 
+    preflight_parser = subparsers.add_parser(
+        "effect-preflight",
+        help="validate a frozen effect trial and exact harness without running either process",
+    )
+    preflight_parser.add_argument("suite", type=Path, help="frozen one/two-case suite JSON")
+    preflight_parser.add_argument("baseline", type=Path, help="FM-Eval per-run baseline export JSON")
+    preflight_parser.add_argument(
+        "--case-source",
+        action="append",
+        default=[],
+        metavar="KEY=PATH",
+        help="map one selected case key to its local public source root; repeat per case",
+    )
+    preflight_parser.add_argument("--subject-command", required=True, help="explicit normal-Agent command")
+    preflight_parser.add_argument("--harness-command", required=True, help="explicit exact-harness command")
+    preflight_parser.add_argument("--requested-model", required=True, help="requested model identity")
+    preflight_parser.add_argument(
+        "--model-profile", type=Path, help="bounded JSON ModelProfile for the isolated subject runtime"
+    )
+    preflight_parser.add_argument("--harness-python", required=True, help="exact extractor Python interpreter")
+    preflight_parser.add_argument(
+        "--harness-import",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help="module to probe with the exact harness Python; repeat as needed",
+    )
+    preflight_parser.add_argument(
+        "--harness-package",
+        action="append",
+        default=[],
+        metavar="DIST[==VERSION]",
+        help="distribution to probe with the exact harness Python; repeat as needed",
+    )
+    preflight_parser.add_argument("--runs-per-case", type=int, default=1)
+    preflight_parser.add_argument("--timeout", type=float, default=3600.0)
+    preflight_parser.add_argument(
+        "--subject-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="pass one explicitly named existing environment variable to the subject",
+    )
+    preflight_parser.add_argument(
+        "--harness-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="pass one explicitly named existing environment variable to the harness",
+    )
+    preflight_parser.add_argument("--output", type=Path, help="optional atomic JSON report destination")
+    _add_json(preflight_parser)
+
     deep_effect_parser = subparsers.add_parser(
         "effect-deep-trial",
         help="run a bounded five-round deep-evolution trial against exported Famou-Bench history",
@@ -604,7 +658,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json(harness_parser)
 
     baseline_parser = subparsers.add_parser(
-        "effect-baseline", help="convert a local FM-Eval WebAgent results export to a strict baseline"
+        "effect-baseline", help="convert a local evaluation results export to a strict baseline"
     )
     baseline_parser.add_argument("results", type=Path)
     baseline_parser.add_argument("suite", type=Path)
@@ -625,6 +679,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--owner-attested-content-equivalence",
         action="store_true",
         help="label historical/local content equivalence as owner-attested and formally ineligible",
+    )
+    baseline_parser.add_argument(
+        "--adapter-kind",
+        choices=("webagent", "agentserver", "company-platform"),
+        default="webagent",
+        help="source adapter identity carried by the export (default: webagent)",
+    )
+    baseline_parser.add_argument(
+        "--baseline-source",
+        default="fm-eval",
+        help="safe baseline source identifier recorded in provenance (default: fm-eval)",
     )
     _add_json(baseline_parser)
 
@@ -2905,6 +2970,32 @@ def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
     ).run().to_dict()
 
 
+def _effect_preflight(args: argparse.Namespace) -> dict[str, object]:
+    profile = _load_model_profile(getattr(args, "model_profile", None))
+    if profile is not None and profile.model != args.requested_model:
+        raise ValueError("--requested-model does not match model profile model")
+    return run_effect_preflight(
+        args.suite,
+        args.baseline,
+        case_sources=_effect_mapping(args.case_source, "--case-source"),
+        subject_command=_parse_command(args.subject_command, "--subject-command"),
+        harness_command=_parse_command(args.harness_command, "--harness-command"),
+        requested_model=args.requested_model,
+        harness_python=args.harness_python,
+        harness_imports=args.harness_import,
+        harness_packages=args.harness_package,
+        subject_environment=_effect_environment(args.subject_env, "subject"),
+        harness_environment=_effect_environment(args.harness_env, "harness"),
+        model_profile_sha256=_model_profile_digest(profile),
+        subject_model_profile_path=(
+            args.model_profile.expanduser().resolve() if profile is not None else None
+        ),
+        runs_per_case=args.runs_per_case,
+        timeout_seconds=args.timeout,
+        output=args.output,
+    )
+
+
 def _effect_deep_trial(args: argparse.Namespace) -> dict[str, object]:
     profile = _load_model_profile(getattr(args, "model_profile", None))
     if profile is not None and profile.model != args.requested_model:
@@ -2986,6 +3077,8 @@ def _effect_baseline(args: argparse.Namespace) -> dict[str, object]:
         authority=args.authority,
         conclusion_eligibility=args.conclusion_eligibility,
         content_equivalence_attested=args.owner_attested_content_equivalence,
+        adapter_kind=args.adapter_kind,
+        baseline_source=args.baseline_source,
     )
 
 
@@ -3359,6 +3452,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "effect-trial":
             payload = _effect_trial(args)
+            _emit(payload, args.json)
+            return 0
+        if args.command == "effect-preflight":
+            payload = _effect_preflight(args)
             _emit(payload, args.json)
             return 0
         if args.command == "effect-deep-trial":

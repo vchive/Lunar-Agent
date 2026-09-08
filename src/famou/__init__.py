@@ -57,7 +57,14 @@ from .effect_adapters import (
     run_subject_adapter,
 )
 from .effect_kit import EffectKitError, build_effect_kit
+from .effect_preflight import (
+    EffectPreflightError,
+    EffectPreflightReport,
+    EffectPreflightRunner,
+    run_effect_preflight,
+)
 from .effect_trial import (
+    BaselineProvenance,
     EffectTrialConfig,
     EffectTrialError,
     EffectTrialReport,
@@ -118,6 +125,7 @@ __all__ = [
     "AgentRequest",
     "AgentResult",
     "AgentSelectionError",
+    "BaselineProvenance",
     "BenchmarkConfig",
     "BenchmarkError",
     "BenchmarkReport",
@@ -144,6 +152,9 @@ __all__ = [
     "DeepEffectTrialRunner",
     "EffectAdapterError",
     "EffectKitError",
+    "EffectPreflightError",
+    "EffectPreflightReport",
+    "EffectPreflightRunner",
     "EffectTrialConfig",
     "EffectTrialError",
     "EffectTrialReport",
@@ -191,6 +202,7 @@ __all__ = [
     "load_evaluator_bundle",
     "normalize_feedback",
     "profile_sha256",
+    "run_effect_preflight",
     "run_harness_adapter",
     "run_subject_adapter",
     "stage_candidate_inputs",

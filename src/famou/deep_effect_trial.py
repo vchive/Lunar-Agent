@@ -882,6 +882,9 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         historical_best = baseline.best()
         delta = lunar_best - historical_best if lunar_best is not None and historical_best is not None else None
         breakthrough = delta is not None and delta > 0
+        legacy_webagent = self.baseline.provenance is None and self.baseline.source == "fm-eval"
+        if self.baseline.provenance is not None:
+            legacy_webagent = self.baseline.provenance.adapter == "webagent"
         model_match = bool(ready) and all(
             value["requested_model"] == self.baseline.model.requested
             and value["effective_model"] == self.baseline.model.effective
@@ -957,7 +960,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                     ],
                 }
             )
-        return {
+        report = {
             "key": case.key,
             "revision_id": case.revision_id,
             "digest": case.digest,
@@ -967,7 +970,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "valid_runs": len(valid),
             "valid_rate": len(valid) / len(ready) if ready else None,
             "lunar_best": lunar_best,
-            "webagent_historical_best": historical_best,
+            "baseline_historical_best": historical_best,
             "score_delta": delta,
             "score_breakthrough": breakthrough,
             "model_identity_match": model_match,
@@ -998,6 +1001,9 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "round_curve": curve,
             "runs": projected,
         }
+        if legacy_webagent:
+            report["webagent_historical_best"] = historical_best
+        return report
 
     def run(self) -> EffectTrialReport:
         if self._started:
@@ -1060,7 +1066,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
         limitations = [
             "selected_cases_do_not_establish_suite_parity",
             "best_of_n_is_not_a_statistical_superiority_test",
-            "five_round_local_loop_is_not_webagent_prompt_identity",
+            "deep_evolution_is_not_baseline_prompt_identity",
             "process_capability_separation_is_not_an_os_sandbox",
         ]
         report_payload = {
@@ -1069,7 +1075,7 @@ class DeepEffectTrialRunner(EffectTrialRunner):
             "mode": "deep_evolution",
             "strategy": self.deep_config.strategy,
             "outer_rounds": self.deep_config.outer_rounds,
-            "webagent_source_default_outer_rounds": 5,
+            "default_outer_rounds": 5,
             "suite_sha256": self.suite_sha256,
             "baseline_sha256": self.baseline_sha256,
             "benchmark": self.suite.benchmark.to_dict(),
@@ -1078,6 +1084,11 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 "source": self.baseline.source,
                 "experiment_id": self.baseline.experiment_id,
                 "authority": self.baseline.authority,
+                "provenance": (
+                    self.baseline.provenance.to_dict()
+                    if self.baseline.provenance is not None
+                    else None
+                ),
                 "mode": "normal",
                 "model": self.baseline.model.to_dict(),
             },
@@ -1089,6 +1100,12 @@ class DeepEffectTrialRunner(EffectTrialRunner):
                 "model_identity_evidence": "provider_observed" if provider_observed else "not_provider_observed",
                 "formal_conclusion_eligibility": "ineligible",
                 "baseline_conclusion_eligibility": self.baseline.conclusion_eligibility,
+                "baseline_source": self.baseline.source,
+                "baseline_adapter": (
+                    self.baseline.provenance.adapter
+                    if self.baseline.provenance is not None
+                    else None
+                ),
                 "limitations": limitations,
             },
         }

@@ -245,10 +245,10 @@ therefore a search descriptor only: evaluator validity and score still own final
 
 ## Small Famou-Bench effect trials
 
-The available FM-Eval WebAgent history for `famou-bench 1.10.6` is a normal-Agent experiment, not
-a deep-evolution experiment. Its model/tool interactions are turns inside one solution attempt.
-WebAgent deep evolution is activated separately by `/evolve`; the checked-in source defaults to
-five outer iterations when no numeric budget is supplied.
+The available historical result for `famou-bench 1.10.6` is an AgentServer/company-platform
+normal-Agent experiment, not a WebAgent or deep-evolution experiment. Its model/tool interactions
+are turns inside one solution attempt. WebAgent deep evolution is activated separately by `/evolve`;
+the checked-in source defaults to five outer iterations when no numeric budget is supplied.
 
 For an affordable first effect milestone, build a deterministic public-only kit from one or two
 local private case trees. When the owner has established that the selected historical and current
@@ -265,10 +265,10 @@ harness identities from bytes. The generated `cases/<key>/` tree contains only `
 and direct `data/*` inputs. No private source path, evaluator, extractor, ground truth, release
 number, or raw data value is copied into the JSON provenance.
 
-Save the matching FM-Eval experiment-results response and convert those per-run results offline.
-When the export carries adapter metadata, the converter requires consistent `webagent` evidence and
-rejects AgentServer or conflicting evidence before writing a baseline. Adapter-free legacy exports
-remain accepted for compatibility and require separately retained WebAgent provenance. The
+Save the matching comparator experiment-results response and convert those per-run results offline.
+When the export carries adapter metadata, the converter requires consistent allowlisted evidence and
+rejects unsupported or conflicting sources before writing a baseline. Adapter-free legacy exports
+remain accepted only through the compatibility path. The
 attestation flag labels content equivalence as owner-attested and forces formal ineligibility:
 
 ```bash
@@ -277,10 +277,45 @@ lunar-agent effect-baseline results.json .lunar/famou-kit/suite.json baseline.js
   --requested-model gpt-5.6-sol \
   --effective-model openai/gpt-5.6-sol \
   --model-evidence not_observable \
+  --adapter-kind agentserver --baseline-source company-platform \
   --owner-attested-content-equivalence --json
 ```
 
-Then run Lunar repeatedly in normal mode using the built-in adapters:
+Use the adapter identity observed in the export: `agentserver`, `company-platform`, or `webagent`.
+The default remains `webagent` for compatibility and rejects explicit AgentServer evidence.
+
+Before spending model or extractor credentials, run the read-only preflight. It rechecks the
+selected suite, baseline, public projection, command executables, explicitly allowlisted
+environment names, model-profile digest, and the exact Python environment used by the harness.
+The dependency probe only checks import resolution and installed metadata; it does not run either
+private script or call a model. Values of the named environment variables are never written to the
+report:
+
+```bash
+lunar-agent effect-preflight .lunar/famou-kit-real-001/suite.json \
+  .lunar/famou-kit-real-001/baseline-agentserver.json \
+  --case-source supply_chain_inventory=.lunar/famou-kit-real-001/cases/supply_chain_inventory \
+  --subject-command "/absolute/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
+  --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
+  --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case --python /absolute/harness-venv/bin/python --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL --extractor-env ANTHROPIC_MODEL" \
+  --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL --harness-env ANTHROPIC_MODEL \
+  --harness-python /absolute/harness-venv/bin/python \
+  --harness-import anyio --harness-import claude_agent_sdk \
+  --harness-package claude-agent-sdk==0.1.81 \
+  --requested-model gpt-5.6-sol \
+  --output .lunar/effect-preflight-real-001.json --json
+```
+
+The current `.lunar/famou-kit-real-001/baseline-agentserver.json` is an AgentServer/company-platform
+historical projection. It is suitable for descriptive comparison only and does not establish
+WebAgent parity, suite parity, or statistical superiority. A matching WebAgent export must be
+converted separately before making a WebAgent-specific comparison. The preflight report is
+point-in-time evidence. `effect-trial` and `effect-deep-trial` still perform their own validation
+when they start and do not treat a stale report as permission to run.
+The kit and historical exports are local ignored files. The old `baseline.json` is retained for
+audit; new examples use `baseline-agentserver.json` to avoid the legacy WebAgent alias.
+
+When ready to conduct a trial, use the built-in adapters in normal mode:
 
 ```bash
 lunar-agent effect-trial .lunar/famou-kit/suite.json baseline.json \
@@ -295,11 +330,11 @@ lunar-agent effect-trial .lunar/famou-kit/suite.json baseline.json \
 ```
 
 The suite freezes the benchmark publication, evaluation profile, CaseRevision, public-file ledger,
-and extractor/evaluator digests. The baseline contains individual FM-Eval results; Lunar derives
+and extractor/evaluator digests. The baseline contains individual comparator results; Lunar derives
 the historical best locally and does not accept a manually entered target score. Only the separate
 harness command may provide validity and score. A case milestone is achieved when all planned
 Lunar runs finish, model identities match, and at least one evaluator-valid Lunar score is strictly
-higher than that case's evaluator-valid WebAgent historical best. This is a single-case
+higher than that case's evaluator-valid baseline historical best. This is a single-case
 breakthrough—not whole-suite parity or statistical superiority. Use `--resume` with the same
 options to preserve completed logical runs after an interruption. Subject/harness separation is a
 bounded request and filesystem-layout contract, not an OS sandbox; use an owner-provided sandbox

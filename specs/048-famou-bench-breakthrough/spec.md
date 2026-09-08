@@ -16,9 +16,10 @@ available.
 Running all 60 trials is too expensive for Lunar's first effect check. This feature therefore adds
 a bounded local trial for one or two frozen `famou-bench 1.10.6` cases. Each selected case is run
 repeatedly in normal, non-evolution Lunar mode and scored through an explicit adapter to the exact
-Famou extractor/evaluator harness. A separately exported FM-Eval baseline supplies the historical
-WebAgent runs. Lunar reports whether any evaluator-valid Lunar run strictly exceeds that case's
-historical WebAgent best score. This is a user-defined single-case breakthrough milestone, not
+Famou extractor/evaluator harness. A separately exported baseline supplies the historical
+comparator runs. Lunar records the baseline source and provenance, then reports whether any
+evaluator-valid Lunar run strictly exceeds that case's historical best score. This is a
+user-defined single-case breakthrough milestone, not
 suite parity, statistical superiority, or evidence about deep evolution.
 
 ## User stories and acceptance scenarios
@@ -49,7 +50,9 @@ suite parity, statistical superiority, or evidence about deep evolution.
 1. Lunar validates that the imported baseline covers the same benchmark publication, selected case
    revisions/digests, evaluation profile, and exact harness identities.
 2. For each case, Lunar compares the best evaluator-valid score on each side and marks breakthrough
-   only when `lunar_best > webagent_historical_best`.
+   only when `lunar_best > baseline_historical_best`. The generic field is normative for every
+   baseline source; WebAgent reports may additionally expose `webagent_historical_best` as a legacy
+   compatibility alias.
 3. The report separately states descriptive comparability, formal conclusion eligibility, model
    evidence, run coverage, and the limitations that one/two selected cases cannot establish suite
    parity and normal-mode evidence says nothing about deep evolution.
@@ -86,12 +89,12 @@ suite parity, statistical superiority, or evidence about deep evolution.
 - **FR-4807**: Require the harness receipt to echo all frozen case/harness identities and contain
   extraction status, validity, overall score, and optional quality/detail metrics. Lunar MUST never
   accept a subject-authored score.
-- **FR-4808**: Import a baseline export containing per-run WebAgent receipts rather than a manually
-  entered best number, validate all shared identities, and derive the historical best locally.
-  When the FM-Eval export exposes adapter metadata, all experiment and selected-row adapter evidence
-  MUST agree and MUST identify `webagent`; explicit non-WebAgent or conflicting evidence MUST fail
-  before output is written. Adapter-free legacy exports remain readable only with separately
-  retained source provenance.
+- **FR-4808**: Import a baseline export containing per-run receipts rather than a manually entered
+  best number, validate all shared identities, and derive the historical best locally. When the
+  export exposes adapter metadata, experiment and selected-row evidence MUST agree; unsupported or
+  conflicting evidence MUST fail before output is written. The baseline's `source` and optional
+  `provenance` (`source`, `adapter`) are preserved in the report. Adapter-free legacy FM-Eval
+  exports remain readable only through the documented compatibility path.
 - **FR-4809**: Write a path-safe report containing per-run readiness/validity/score/telemetry,
   per-case coverage and aggregates, strict score deltas, milestone state, model evidence,
   descriptive comparability, the baseline's inherited eligibility state, this small trial's fixed

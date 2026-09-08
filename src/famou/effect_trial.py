@@ -393,6 +393,29 @@ class BaselineModel:
 
 
 @dataclass(frozen=True)
+class BaselineProvenance:
+    """Credential-free identity for the owner-supplied historical comparator."""
+
+    source: str
+    adapter: str
+
+    @classmethod
+    def from_dict(cls, payload: object) -> BaselineProvenance:
+        item = _strict_object(payload, {"source", "adapter"}, "baseline provenance")
+        source = _text(item["source"], "baseline provenance source", safe_id=True)
+        adapter = _text(item["adapter"], "baseline provenance adapter", safe_id=True)
+        if adapter not in {"agentserver", "company-platform", "webagent"}:
+            raise EffectTrialError("baseline provenance adapter is unsupported")
+        return cls(
+            source,
+            adapter,
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {"source": self.source, "adapter": self.adapter}
+
+
+@dataclass(frozen=True)
 class BaselineRun:
     run_index: int
     ready: bool
@@ -463,19 +486,37 @@ class TrialBaseline:
     evaluation_profile: EvaluationProfileIdentity
     model: BaselineModel
     cases: tuple[BaselineCase, ...]
+    provenance: BaselineProvenance | None = None
 
     @classmethod
     def from_dict(cls, payload: object) -> TrialBaseline:
-        item = _strict_object(
-            payload,
-            {
-                "schema_version", "source", "experiment_id", "authority",
-                "conclusion_eligibility", "benchmark", "evaluation_profile", "model", "cases",
-            },
-            "baseline export",
+        required = {
+            "schema_version", "source", "experiment_id", "authority",
+            "conclusion_eligibility", "benchmark", "evaluation_profile", "model", "cases",
+        }
+        if not isinstance(payload, dict):
+            raise EffectTrialError("baseline export must be an object")
+        item = payload
+        missing = required - set(item)
+        extra = set(item) - (required | {"provenance"})
+        if missing:
+            raise EffectTrialError(
+                "baseline export is missing required fields: " + ", ".join(sorted(missing))
+            )
+        if extra:
+            raise EffectTrialError(
+                "baseline export contains unsupported fields: " + ", ".join(sorted(extra))
+            )
+        provenance = (
+            BaselineProvenance.from_dict(item["provenance"])
+            if "provenance" in item
+            else None
         )
-        if item["schema_version"] != "1" or item["source"] != "fm-eval":
-            raise EffectTrialError("baseline must be a schema v1 fm-eval export")
+        if item["schema_version"] != "1":
+            raise EffectTrialError("baseline must use schema version 1")
+        source = _text(item["source"], "baseline source", safe_id=True)
+        if provenance is not None and provenance.source != source:
+            raise EffectTrialError("baseline provenance source must match baseline source")
         authority = _text(item["authority"], "baseline authority", safe_id=True)
         eligibility = _text(item["conclusion_eligibility"], "baseline conclusion eligibility", safe_id=True)
         if eligibility not in {"eligible", "ineligible"}:
@@ -487,7 +528,7 @@ class TrialBaseline:
         if len({value.key for value in cases}) != len(cases):
             raise EffectTrialError("baseline case keys must be unique")
         return cls(
-            source="fm-eval",
+            source=source,
             experiment_id=_text(item["experiment_id"], "baseline experiment id", safe_id=True),
             authority=authority,
             conclusion_eligibility=eligibility,
@@ -495,6 +536,7 @@ class TrialBaseline:
             evaluation_profile=EvaluationProfileIdentity.from_dict(item["evaluation_profile"]),
             model=BaselineModel.from_dict(item["model"]),
             cases=cases,
+            provenance=provenance,
         )
 
 
@@ -1220,6 +1262,9 @@ class EffectTrialRunner:
         historical_best = baseline.best()
         delta = lunar_best - historical_best if lunar_best is not None and historical_best is not None else None
         breakthrough = delta is not None and delta > 0
+        legacy_webagent = self.baseline.provenance is None and self.baseline.source == "fm-eval"
+        if self.baseline.provenance is not None:
+            legacy_webagent = self.baseline.provenance.adapter == "webagent"
         model_match = bool(ready) and all(
             value["requested_model"] == self.baseline.model.requested
             and value["effective_model"] == self.baseline.model.effective
@@ -1240,16 +1285,19 @@ class EffectTrialRunner:
             }
             for value in records
         ]
-        return {
+        report = {
             "key": case.key, "revision_id": case.revision_id, "digest": case.digest,
             "harness": case.harness.to_dict(),
             "planned_runs": self.config.runs_per_case, "ready_runs": len(ready),
             "valid_runs": len(valid), "valid_rate": sum(validity) / len(validity) if validity else None,
-            "lunar_best": lunar_best, "webagent_historical_best": historical_best,
+            "lunar_best": lunar_best, "baseline_historical_best": historical_best,
             "score_delta": delta, "score_breakthrough": breakthrough,
             "model_identity_match": model_match, "milestone_achieved": milestone,
             "runs": projected_runs,
         }
+        if legacy_webagent:
+            report["webagent_historical_best"] = historical_best
+        return report
 
     def _verify_registered_records(self, state: dict[str, Any]) -> None:
         expected = {
@@ -1305,6 +1353,11 @@ class EffectTrialRunner:
                 "source": self.baseline.source,
                 "experiment_id": self.baseline.experiment_id,
                 "authority": self.baseline.authority,
+                "provenance": (
+                    self.baseline.provenance.to_dict()
+                    if self.baseline.provenance is not None
+                    else None
+                ),
                 "model": self.baseline.model.to_dict(),
             },
             "config": self.config.safe_dict(), "cases": case_reports,
@@ -1318,6 +1371,12 @@ class EffectTrialRunner:
                 "model_identity_evidence": "provider_observed" if provider_observed else "not_provider_observed",
                 "formal_conclusion_eligibility": "ineligible",
                 "baseline_conclusion_eligibility": self.baseline.conclusion_eligibility,
+                "baseline_source": self.baseline.source,
+                "baseline_adapter": (
+                    self.baseline.provenance.adapter
+                    if self.baseline.provenance is not None
+                    else None
+                ),
                 "limitations": limitations,
             },
         }
@@ -1327,6 +1386,6 @@ class EffectTrialRunner:
 
 __all__ = [
     "MAX_COST_MICROS",
-    "EffectTrialConfig", "EffectTrialError", "EffectTrialReport", "EffectTrialRunner",
-    "TrialBaseline", "TrialSuite",
+    "BaselineProvenance", "EffectTrialConfig", "EffectTrialError", "EffectTrialReport",
+    "EffectTrialRunner", "TrialBaseline", "TrialSuite",
 ]

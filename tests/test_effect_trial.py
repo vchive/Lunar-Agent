@@ -13,6 +13,7 @@ from famou.effect_trial import (
     EffectTrialConfig,
     EffectTrialError,
     EffectTrialRunner,
+    TrialBaseline,
 )
 from famou.profiles import ModelProfile
 
@@ -196,6 +197,26 @@ def test_trial_derives_historical_best_and_marks_strict_breakthrough(tmp_path: P
     persisted = (tmp_path / "trial" / "report.json").read_text(encoding="utf-8")
     assert str(tmp_path) not in persisted
     assert _fixture.__name__ not in persisted
+
+
+def test_trial_accepts_company_platform_baseline_without_webagent_alias(tmp_path: Path) -> None:
+    suite, baseline, case_root, subject, harness = _fixture(tmp_path)
+    payload = json.loads(baseline.read_text(encoding="utf-8"))
+    payload["source"] = "company-platform"
+    payload["provenance"] = {"source": "company-platform", "adapter": "company-platform"}
+    baseline.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = _runner(tmp_path, (suite, baseline, case_root, subject, harness)).run().to_dict()
+    case = report["cases"][0]
+    assert case["baseline_historical_best"] == 0.80
+    assert "webagent_historical_best" not in case
+    assert report["baseline"]["source"] == "company-platform"
+    assert report["baseline"]["provenance"] == {
+        "source": "company-platform",
+        "adapter": "company-platform",
+    }
+    assert report["comparability"]["baseline_source"] == "company-platform"
+    assert report["comparability"]["baseline_adapter"] == "company-platform"
 
 
 def test_equal_or_invalid_scores_do_not_achieve_milestone(tmp_path: Path) -> None:
@@ -614,3 +635,15 @@ def test_model_profile_provenance_is_bound_to_request_receipt_and_resume(tmp_pat
             config=config,
             resume=True,
         ).run()
+
+
+def test_baseline_provenance_must_match_source_and_allowlisted_adapter(tmp_path: Path) -> None:
+    _, baseline_path, _, _, _ = _fixture(tmp_path)
+    payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    payload["provenance"] = {"source": "other-source", "adapter": "company-platform"}
+    with pytest.raises(EffectTrialError, match="provenance source must match"):
+        TrialBaseline.from_dict(payload)
+
+    payload["provenance"] = {"source": "fm-eval", "adapter": "untrusted-adapter"}
+    with pytest.raises(EffectTrialError, match="provenance adapter is unsupported"):
+        TrialBaseline.from_dict(payload)

@@ -525,6 +525,36 @@ def test_offline_converter_accepts_consistent_webagent_evidence(tmp_path: Path) 
     assert output.is_file()
 
 
+def test_offline_converter_accepts_explicit_company_platform_evidence(tmp_path: Path) -> None:
+    public, private = _make_case(tmp_path)
+    suite_path = _write_json(tmp_path / "suite.json", _make_suite(public, private))
+    results_path = _write_json(
+        tmp_path / "results.json", _results_with_adapter("company-platform")
+    )
+    output = tmp_path / "baseline.json"
+
+    converted = convert_fm_eval_baseline(
+        results_path,
+        suite_path,
+        output,
+        experiment_id="fmexp-fixture",
+        requested_model="gpt-5.6-sol",
+        effective_model="openai/gpt-5.6-sol",
+        model_evidence="not_observable",
+        adapter_kind="company-platform",
+        baseline_source="company-platform",
+    )
+
+    parsed = TrialBaseline.from_dict(converted)
+    assert parsed.source == "company-platform"
+    assert parsed.provenance is not None
+    assert parsed.provenance.to_dict() == {
+        "source": "company-platform",
+        "adapter": "company-platform",
+    }
+    assert parsed.cases[0].best() == 0.80
+
+
 def test_offline_converter_rejects_conflicting_adapter_evidence(tmp_path: Path) -> None:
     public, private = _make_case(tmp_path)
     suite_path = _write_json(tmp_path / "suite.json", _make_suite(public, private))
@@ -636,6 +666,46 @@ def test_effect_baseline_cli_converts_local_results(tmp_path: Path, capsys) -> N
     assert status == 0
     assert json.loads(capsys.readouterr().out)["experiment_id"] == "fmexp-fixture"
     assert TrialBaseline.from_dict(json.loads(output.read_text())).cases[0].best() == 0.80
+
+
+def test_effect_baseline_cli_converts_company_platform_results(
+    tmp_path: Path, capsys
+) -> None:
+    public, private = _make_case(tmp_path)
+    suite_path = _write_json(tmp_path / "suite.json", _make_suite(public, private))
+    results_path = _write_json(
+        tmp_path / "results.json", _results_with_adapter("company-platform")
+    )
+    output = tmp_path / "company-baseline.json"
+
+    status = main(
+        [
+            "effect-baseline",
+            str(results_path),
+            str(suite_path),
+            str(output),
+            "--experiment-id",
+            "fmexp-fixture",
+            "--requested-model",
+            "gpt-5.6-sol",
+            "--effective-model",
+            "openai/gpt-5.6-sol",
+            "--model-evidence",
+            "not_observable",
+            "--adapter-kind",
+            "company-platform",
+            "--baseline-source",
+            "company-platform",
+            "--json",
+        ]
+    )
+
+    assert status == 0
+    assert json.loads(capsys.readouterr().out)["source"] == "company-platform"
+    parsed = TrialBaseline.from_dict(json.loads(output.read_text(encoding="utf-8")))
+    assert parsed.provenance is not None
+    assert parsed.provenance.source == "company-platform"
+    assert parsed.provenance.adapter == "company-platform"
 
 
 def test_effect_trial_accepts_nullable_subject_usage(tmp_path: Path) -> None:

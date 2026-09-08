@@ -27,6 +27,7 @@ from .deep_feedback import FeedbackError, normalize_feedback
 from .effect_trial import (
     MAX_COST_MICROS,
     BaselineModel,
+    BaselineProvenance,
     BenchmarkIdentity,
     EvaluationProfileIdentity,
     HarnessIdentity,
@@ -90,6 +91,8 @@ _MEDIA_TYPES = {
     ".yml": "application/yaml",
     ".zip": "application/zip",
 }
+_BASELINE_ADAPTERS = {"agentserver", "company-platform", "webagent"}
+_SAFE_BASELINE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
 class EffectAdapterError(ValueError):
@@ -969,14 +972,20 @@ def _fm_eval_adapter_evidence(
     return evidence
 
 
-def _require_webagent_evidence(evidence: Sequence[tuple[str, str]]) -> None:
+def _require_adapter_evidence(
+    evidence: Sequence[tuple[str, str]], expected: str, *, allow_legacy_missing: bool
+) -> None:
+    if not _SAFE_BASELINE_ID.fullmatch(expected) or expected not in _BASELINE_ADAPTERS:
+        raise EffectAdapterError("baseline adapter kind is not allowlisted")
     if not evidence:
-        return
+        if allow_legacy_missing:
+            return
+        raise EffectAdapterError("FM-Eval export is missing explicit adapter evidence")
     kinds = {value for _, value in evidence}
     if len(kinds) != 1:
         raise EffectAdapterError("FM-Eval export contains conflicting adapter evidence")
-    if kinds != {"webagent"}:
-        raise EffectAdapterError("FM-Eval baseline must come from the webagent adapter")
+    if kinds != {expected}:
+        raise EffectAdapterError(f"FM-Eval baseline must come from the {expected} adapter")
 
 
 def _normalized_extraction(value: object) -> str:
@@ -998,11 +1007,17 @@ def convert_fm_eval_baseline(
     authority: str = "descriptive",
     conclusion_eligibility: str = "ineligible",
     content_equivalence_attested: bool = False,
+    adapter_kind: str = "webagent",
+    baseline_source: str = "fm-eval",
 ) -> dict[str, object]:
-    """Convert an authorized local FM-Eval WebAgent response to a Feature 048 baseline."""
+    """Convert an authorized local evaluation export to a strict per-run baseline."""
     results_payload = _read_json(results_path, "FM-Eval results export")
     suite = TrialSuite.from_dict(_read_json(suite_path, "frozen suite"))
     experiment_id = _bounded_text(experiment_id, "experiment id")
+    if not _SAFE_BASELINE_ID.fullmatch(baseline_source):
+        raise EffectAdapterError("baseline source must be a bounded safe identifier")
+    if adapter_kind not in _BASELINE_ADAPTERS:
+        raise EffectAdapterError("baseline adapter kind is not allowlisted")
     if not isinstance(content_equivalence_attested, bool):
         raise EffectAdapterError("content-equivalence attestation must be boolean")
     if content_equivalence_attested:
@@ -1091,7 +1106,11 @@ def convert_fm_eval_baseline(
             }
         )
 
-    _require_webagent_evidence(adapter_evidence)
+    _require_adapter_evidence(
+        adapter_evidence,
+        adapter_kind,
+        allow_legacy_missing=adapter_kind == "webagent",
+    )
 
     cases: list[dict[str, object]] = []
     for case in suite.cases:
@@ -1123,13 +1142,14 @@ def convert_fm_eval_baseline(
         )
     baseline: dict[str, object] = {
         "schema_version": "1",
-        "source": "fm-eval",
+        "source": baseline_source,
         "experiment_id": experiment_id,
         "authority": authority,
         "conclusion_eligibility": conclusion_eligibility,
         "benchmark": suite.benchmark.to_dict(),
         "evaluation_profile": suite.evaluation_profile.to_dict(),
         "model": model.to_dict(),
+        "provenance": BaselineProvenance(baseline_source, adapter_kind).to_dict(),
         "cases": cases,
     }
     TrialBaseline.from_dict(baseline)

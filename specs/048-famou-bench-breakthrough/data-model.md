@@ -130,7 +130,7 @@ The receipt has no score field. Unsupported keys are rejected.
     "valid_runs": 2,
     "valid_rate": 0.6666666667,
     "lunar_best": 0.81,
-    "webagent_historical_best": 0.80,
+    "baseline_historical_best": 0.80,
     "score_delta": 0.01,
     "score_breakthrough": true,
     "milestone_achieved": true,
@@ -154,6 +154,12 @@ The receipt has no score field. Unsupported keys are rejected.
 
 Commands, environment values, stdout/stderr, absolute paths, baseline receipts, and private harness
 configuration are excluded from `report.json`.
+
+`baseline_historical_best` is the normative comparator field for every baseline source. A
+`webagent_historical_best` field may appear as a compatibility alias for explicit WebAgent
+provenance or legacy `fm-eval` baselines without provenance; other sources must not emit it. The top-level
+`baseline` and `comparability` objects carry the validated source and optional provenance so a
+comparator cannot be mistaken for WebAgent data.
 
 ## Logical-run authority
 
