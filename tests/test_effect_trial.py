@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,81 @@ OBJECT_B = f"sha256:{HEX_B}"
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_failed_subject_diagnostic_is_collected_without_harness_or_score(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    calls = []
+
+    def executor(command, *, cwd, env, timeout):
+        calls.append(command)
+        request_path = Path(command[-1])
+        request = json.loads(request_path.read_text())
+        assert request["mode"] == "normal", "harness must not run after subject failure"
+        diagnostic = {
+            "schema_version": "1", "kind": "subject_failure", "mode": "normal",
+            "request_sha256": _sha(request_path), "run_index": request["run_index"],
+            "round_index": None, "stage": "model", "code": "model_http_failed",
+            "model_turns": 0, "tool_steps": 0, "http_status": 429,
+        }
+        (cwd / "receipt.failure.json").write_text(json.dumps(diagnostic))
+        # Collection must use the pre-call identity, not this changed request.
+        request_path.write_text("{}")
+        return subprocess.CompletedProcess(command, 2)
+
+    report = _runner(tmp_path, fixture, executor=executor).run().to_dict()
+    assert len(calls) == 3
+    for run in report["cases"][0]["runs"]:
+        assert run["error_code"] == "process_nonzero_exit"
+        assert run["ready"] is False and run["overall_score"] is None
+        diagnostic = json.loads((
+            tmp_path / "trial" / run["attempt"] / "diagnostics" / "subject-failure.json"
+        ).read_text())
+        assert diagnostic["code"] == "model_http_failed"
+        assert diagnostic["run_index"] == run["run_index"]
+
+
+@pytest.mark.parametrize("invalid", ["missing", "json", "oversized", "score", "stale", "symlink", "fifo", "destination"])
+def test_bad_diagnostics_preserve_process_failure_and_score_boundary(tmp_path: Path, invalid: str) -> None:
+    fixture = _fixture(tmp_path)
+    calls = []
+
+    def executor(command, *, cwd, env, timeout):
+        calls.append(command)
+        request_path = Path(command[-1])
+        request = json.loads(request_path.read_text())
+        assert request["mode"] == "normal"
+        payload = {
+            "schema_version": "1", "kind": "subject_failure", "mode": "normal",
+            "request_sha256": _sha(request_path), "run_index": request["run_index"],
+            "round_index": None, "stage": "model", "code": "model_failed",
+            "model_turns": 0, "tool_steps": 0, "http_status": None,
+        }
+        sidecar = cwd / "receipt.failure.json"
+        if invalid == "missing":
+            pass
+        elif invalid == "symlink":
+            sidecar.symlink_to(request_path)
+        elif invalid == "fifo":
+            os.mkfifo(sidecar)
+        elif invalid in {"json", "oversized"}:
+            sidecar.write_text("{" if invalid == "json" else " " * 4097)
+        else:
+            if invalid == "score":
+                payload["overall_score"] = 999
+            elif invalid == "stale":
+                payload["request_sha256"] = "0" * 64
+            elif invalid == "destination":
+                (cwd.parent / "diagnostics").symlink_to(tmp_path, target_is_directory=True)
+            sidecar.write_text(json.dumps(payload))
+        return subprocess.CompletedProcess(command, 2)
+
+    report = _runner(tmp_path, fixture, executor=executor).run().to_dict()
+    assert len(calls) == 3
+    for run in report["cases"][0]["runs"]:
+        assert run["error_code"] == "process_nonzero_exit"
+        assert run["ready"] is False and run["overall_score"] is None
+        assert not (tmp_path / "trial" / run["attempt"] / "diagnostics/subject-failure.json").exists()
 
 
 def _fixture(

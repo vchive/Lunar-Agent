@@ -37,6 +37,7 @@ from .effect_trial import (
 )
 from .profiles import ModelProfile
 from .runtime import OpenAICompatibleRuntime
+from .subject_diagnostics import SubjectDiagnosticContext, SubjectDiagnosticObserver
 from .tools import LocalToolRegistry
 
 MAX_JSON_BYTES = 2 * 1024 * 1024
@@ -97,6 +98,10 @@ _SAFE_BASELINE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 class EffectAdapterError(ValueError):
     """A built-in effect adapter request or external result is invalid."""
+
+    def __init__(self, message: str, *, diagnostic_code: str | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic_code = diagnostic_code
 
 
 def _strict_object(value: object, fields: set[str], label: str) -> dict[str, Any]:
@@ -351,17 +356,17 @@ def _verify_public_projection(
 ) -> None:
     request_file = workspace / "request.json"
     if request_file.is_symlink() or not request_file.is_file() or _sha256(request_file) != request_digest:
-        raise EffectAdapterError("subject changed the frozen request")
+        raise EffectAdapterError("subject changed the frozen request", diagnostic_code="frozen_request_changed")
     case_root = (workspace / "case").resolve()
     expected = {descriptor.path for descriptor in descriptors}
     actual: set[str] = set()
     for path in case_root.rglob("*"):
         if path.is_symlink():
-            raise EffectAdapterError("subject public projection contains a symlink")
+            raise EffectAdapterError("subject public projection contains a symlink", diagnostic_code="public_symlink")
         if path.is_file():
             actual.add(path.relative_to(case_root).as_posix())
     if actual != expected:
-        raise EffectAdapterError("subject changed the public projection file set")
+        raise EffectAdapterError("subject changed the public projection file set", diagnostic_code="public_file_set_changed")
     for descriptor in descriptors:
         path = _confined(case_root, descriptor.path, "subject public file")
         if (
@@ -370,7 +375,7 @@ def _verify_public_projection(
             or path.stat().st_size != descriptor.size
             or _sha256(path) != descriptor.sha256
         ):
-            raise EffectAdapterError("subject changed a frozen public file")
+            raise EffectAdapterError("subject changed a frozen public file", diagnostic_code="public_file_changed")
 
 
 def _model_usage(metadata: Mapping[str, str]) -> dict[str, int] | None:
@@ -516,55 +521,64 @@ def run_subject_adapter(
     if receipt_path.exists() or receipt_path.is_symlink():
         raise EffectAdapterError("subject receipt already exists or is unsafe")
 
-    runtime = model_runtime
-    if runtime is None:
-        runtime = OpenAICompatibleRuntime(endpoint=endpoint, model=model, api_key=api_key)
-    configured_model = getattr(runtime, "model", None)
-    effective_configured = model or configured_model
-    if not isinstance(effective_configured, str) or effective_configured != requested_model:
-        raise EffectAdapterError("subject runtime model does not match the requested model")
-    if not 1 <= max_steps <= 10_000:
-        raise EffectAdapterError("subject max_steps must be between 1 and 10000")
-    if timeout is not None and (
-        isinstance(timeout, bool)
-        or not isinstance(timeout, (int, float))
-        or not math.isfinite(timeout)
-        or not 0 < timeout <= MAX_TIMEOUT_SECONDS
-    ):
-        raise EffectAdapterError("subject timeout must be finite and within one day")
+    diagnostic_context = SubjectDiagnosticContext.from_request(workspace, request, request_digest)
+    diagnostic_observer = SubjectDiagnosticObserver()
+    try:
+        runtime = model_runtime
+        if runtime is None:
+            runtime = OpenAICompatibleRuntime(endpoint=endpoint, model=model, api_key=api_key)
+        configured_model = getattr(runtime, "model", None)
+        effective_configured = model or configured_model
+        if not isinstance(effective_configured, str) or effective_configured != requested_model:
+            raise EffectAdapterError("subject runtime model does not match the requested model")
+        if not 1 <= max_steps <= 10_000:
+            raise EffectAdapterError("subject max_steps must be between 1 and 10000")
+        if timeout is not None and (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or not 0 < timeout <= MAX_TIMEOUT_SECONDS
+        ):
+            raise EffectAdapterError("subject timeout must be finite and within one day")
 
-    runtime_api_key = getattr(runtime, "api_key", None)
-    redactions = (runtime_api_key,) if isinstance(runtime_api_key, str) and runtime_api_key else ()
-    _verify_public_projection(workspace, descriptors, request_digest)
-    effective_max_steps = min(max_steps, model_profile.max_steps) if model_profile else max_steps
-    effective_timeout = timeout
-    if model_profile is not None:
-        effective_timeout = min(
-            model_profile.timeout_seconds,
-            timeout if timeout is not None else model_profile.timeout_seconds,
+        runtime_api_key = getattr(runtime, "api_key", None)
+        redactions = (runtime_api_key,) if isinstance(runtime_api_key, str) and runtime_api_key else ()
+        diagnostic_observer.stage, diagnostic_observer.code = "public_projection", "public_projection_failed"
+        _verify_public_projection(workspace, descriptors, request_digest)
+        diagnostic_observer.stage, diagnostic_observer.code = "runtime", "runtime_failed"
+        effective_max_steps = min(max_steps, model_profile.max_steps) if model_profile else max_steps
+        effective_timeout = timeout
+        if model_profile is not None:
+            effective_timeout = min(
+                model_profile.timeout_seconds,
+                timeout if timeout is not None else model_profile.timeout_seconds,
+            )
+        tools = LocalToolRegistry(
+            allow_exec=allow_exec,
+            command_timeout=min(float(effective_timeout or 300.0), 300.0),
+            redactions=redactions,
+            command_environment={
+                **_BASE_ENVIRONMENT,
+                "PATH": os.environ.get("PATH", os.defpath),
+            },
         )
-    tools = LocalToolRegistry(
-        allow_exec=allow_exec,
-        command_timeout=min(float(effective_timeout or 300.0), 300.0),
-        redactions=redactions,
-        command_environment={
-            **_BASE_ENVIRONMENT,
-            "PATH": os.environ.get("PATH", os.defpath),
-        },
-    )
-    agent = AgentLoopRuntime(
-        runtime,
-        tools=tools,
-        max_steps=effective_max_steps,
-        profile=model_profile,
-    )
-    if mode == "normal":
-        prompt = f"""You are the normal-mode subject under an external Famou-Bench evaluation.
+        agent = AgentLoopRuntime(
+            runtime,
+            tools=tools,
+            max_steps=effective_max_steps,
+            profile=model_profile,
+        )
+        agent.set_event_sink(diagnostic_observer.event)
+        if mode == "normal":
+            prompt = f"""You are the normal-mode subject under an external Famou-Bench evaluation.
 
 Solve the public task below and create the requested concrete data/solution files inside this
 attempt workspace. Inspect `case/` as needed. Use `_agent_summary.md` to identify your final answer
 file for the independent extractor. Do not score, evaluate, or claim a benchmark result yourself;
 a separate private harness does that after you finish. Do not modify `request.json` or public files.
+The entire `case/` tree is read-only: do not create scripts/caches, edit, delete, or rename any
+file or directory within it. Write code and outputs elsewhere in this workspace, for example
+`solve.py` and `output/`, and reference input files through `case/data/...`.
 
 Public entrypoint: case/{entrypoint}
 Case key: {case['key']}
@@ -573,25 +587,28 @@ Case key: {case['key']}
 {instruction}
 --- end instruction ---
 """
-    else:
-        previous = request["previous_evaluation"]
-        feedback = "No previous round exists; establish a correct baseline candidate."
-        if isinstance(previous, dict):
-            try:
-                normalized_previous = normalize_feedback(previous, expected_round=round_index - 1)
-            except FeedbackError as exc:
-                raise EffectAdapterError(str(exc)) from exc
-            feedback = (
-                "Previous evaluator feedback (use only to improve the candidate; it is a bounded "
-                "projection, not private evaluator output):\n"
-                + json.dumps(normalized_previous, ensure_ascii=False, sort_keys=True)
-            )
-        prompt = f"""You are the deep-evolution subject in outer round {round_index}/{outer_rounds}.
+        else:
+            previous = request["previous_evaluation"]
+            feedback = "No previous round exists; establish a correct baseline candidate."
+            if isinstance(previous, dict):
+                try:
+                    normalized_previous = normalize_feedback(previous, expected_round=round_index - 1)
+                except FeedbackError as exc:
+                    raise EffectAdapterError(str(exc)) from exc
+                feedback = (
+                    "Previous evaluator feedback (use only to improve the candidate; it is a bounded "
+                    "projection, not private evaluator output):\n"
+                    + json.dumps(normalized_previous, ensure_ascii=False, sort_keys=True)
+                )
+            prompt = f"""You are the deep-evolution subject in outer round {round_index}/{outer_rounds}.
 
 Start a fresh bounded Agent session, but continue from the candidate artifacts already present in
 this attempt workspace. Improve the concrete solution for the public task and preserve any valid
 work while fixing weaknesses. The independent private harness will score this round after you
 finish; never write a score or claim benchmark results. Do not modify request.json or public files.
+The entire `case/` tree is read-only: do not create scripts/caches, edit, delete, or rename any
+file or directory within it. Write code and outputs elsewhere in this workspace, for example
+`solve.py` and `output/`, and reference input files through `case/data/...`.
 
 {feedback}
 Public entrypoint: case/{entrypoint}
@@ -601,54 +618,61 @@ Case key: {case['key']}
 {instruction}
 --- end instruction ---
 """
-    try:
-        result = agent.run(prompt, workspace, timeout=effective_timeout)
-    except Exception as exc:
-        raise EffectAdapterError(f"subject runtime failed: {type(exc).__name__}") from exc
-    _verify_public_projection(workspace, descriptors, request_digest)
-    turns = _integer(int(result.metadata.get("turns", "0")), "subject interaction turns")
-    response_model = result.metadata.get("response_model")
-    if response_model:
-        effective_model = _bounded_text(response_model, "subject response model")
-        model_evidence = "provider_observed"
-    else:
-        effective_model = requested_model
-        model_evidence = "runtime_observed"
-    receipt: dict[str, object] = {
-        "schema_version": "1",
-        "mode": mode,
-        "status": "completed",
-        "requested_model": requested_model,
-        "effective_model": effective_model,
-        "model_evidence": model_evidence,
-        "interaction_turns": turns,
-        "usage": _model_usage(result.metadata),
-    }
-    if model_profile is not None:
-        receipt["model_profile_sha256"] = expected_profile_digest
-        receipt["cost_micros"] = (
-            _integer(
-                int(result.metadata["cost_micros"]),
-                "subject cost micros",
-                minimum=0,
-                maximum=MAX_COST_MICROS,
+        diagnostic_observer.stage, diagnostic_observer.code = "runtime", "runtime_failed"
+        try:
+            result = agent.run(prompt, workspace, timeout=effective_timeout)
+        except Exception as exc:
+            raise EffectAdapterError(f"subject runtime failed: {type(exc).__name__}") from exc
+        diagnostic_observer.stage, diagnostic_observer.code = "public_projection", "public_projection_failed"
+        _verify_public_projection(workspace, descriptors, request_digest)
+        diagnostic_observer.stage, diagnostic_observer.code = "receipt", "receipt_invalid"
+        turns = _integer(int(result.metadata.get("turns", "0")), "subject interaction turns")
+        response_model = result.metadata.get("response_model")
+        if response_model:
+            effective_model = _bounded_text(response_model, "subject response model")
+            model_evidence = "provider_observed"
+        else:
+            effective_model = requested_model
+            model_evidence = "runtime_observed"
+        receipt: dict[str, object] = {
+            "schema_version": "1",
+            "mode": mode,
+            "status": "completed",
+            "requested_model": requested_model,
+            "effective_model": effective_model,
+            "model_evidence": model_evidence,
+            "interaction_turns": turns,
+            "usage": _model_usage(result.metadata),
+        }
+        if model_profile is not None:
+            receipt["model_profile_sha256"] = expected_profile_digest
+            receipt["cost_micros"] = (
+                _integer(
+                    int(result.metadata["cost_micros"]),
+                    "subject cost micros",
+                    minimum=0,
+                    maximum=MAX_COST_MICROS,
+                )
+                if "cost_micros" in result.metadata
+                else None
             )
-            if "cost_micros" in result.metadata
-            else None
-        )
-    if mode == "deep_evolution":
-        # Keep the score-free subject receipt bound to the exact request that drove this fresh
-        # round.  The deep runner may reuse a receipt after an interruption, so a round/outer
-        # index alone is insufficient to distinguish a stale receipt from the current request.
-        receipt.update(
-            {
-                "round_index": round_index,
-                "outer_rounds": outer_rounds,
-                "request_sha256": request_digest,
-            }
-        )
-    _atomic_json(receipt_path, receipt, overwrite=False)
-    return receipt
+        if mode == "deep_evolution":
+            # Keep the score-free subject receipt bound to the exact request that drove this fresh
+            # round.  The deep runner may reuse a receipt after an interruption, so a round/outer
+            # index alone is insufficient to distinguish a stale receipt from the current request.
+            receipt.update(
+                {
+                    "round_index": round_index,
+                    "outer_rounds": outer_rounds,
+                    "request_sha256": request_digest,
+                }
+            )
+        _atomic_json(receipt_path, receipt, overwrite=False)
+        return receipt
+    except Exception as exc:
+        code = exc.diagnostic_code if isinstance(exc, EffectAdapterError) else None
+        diagnostic_observer.emit_failure(diagnostic_context, exc, code=code)
+        raise
 
 
 def _parse_process_json(content: bytes, label: str) -> dict[str, Any]:

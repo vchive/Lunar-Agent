@@ -265,6 +265,12 @@ harness identities from bytes. The generated `cases/<key>/` tree contains only `
 and direct `data/*` inputs. No private source path, evaluator, extractor, ground truth, release
 number, or raw data value is copied into the JSON provenance.
 
+The current local Lunar evaluation uses `glm-5.1`, selected from existing WebAgent experiment
+records. The GPT commands here describe the retained comparator workflow; its baseline cannot be
+relabeled for GLM. The GLM run uses the existing subject and exact harness adapters for an independent
+case score, with comparisons disabled. Current local results and configuration are recorded in
+[`HANDOFF.md`](HANDOFF.md).
+
 Save the matching comparator experiment-results response and convert those per-run results offline.
 When the export carries adapter metadata, the converter requires consistent allowlisted evidence and
 rejects unsupported or conflicting sources before writing a baseline. Adapter-free legacy exports
@@ -315,7 +321,7 @@ when they start and do not treat a stale report as permission to run.
 The kit and historical exports are local ignored files. The old `baseline.json` is retained for
 audit; new examples use `baseline-agentserver.json` to avoid the legacy WebAgent alias.
 
-When ready to conduct a trial, use the built-in adapters in normal mode:
+For a matching-model comparator trial, use the built-in adapters in normal mode:
 
 ```bash
 lunar-agent effect-trial .lunar/famou-kit/suite.json baseline.json \
@@ -390,6 +396,16 @@ Each case report also includes bounded `failure_statistics`: failed logical-run 
 round-level feedback categories, recorded/completed round counts, timeout totals, and a fixed
 per-round ledger (including empty rounds). These counters are operational projections of validated
 receipts; they do not create scores or change the private harness's score authority.
+
+Failed built-in subjects can also leave a score-free diagnostic sidecar: `receipt.failure.json`
+in normal mode or `receipts/001.failure.json` for a deep round. The runner validates its original
+request identity and copies the fixed-field projection into the attempt's `diagnostics/` directory.
+It records a bounded stage/error code, observed model/tool counters and optional numeric HTTP
+status; raw process output, exception text, tool content and credentials remain discarded. Missing
+or invalid diagnostics preserve the original process failure. These optional subject claims cannot
+authorize a score, successful receipt, or resume. The entire public `case/` tree is read-only;
+solver scripts and outputs belong elsewhere in the subject workspace. See
+[Feature 061](specs/061-subject-failure-diagnostics/spec.md).
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
@@ -1146,7 +1162,7 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/060-mandatory-output-validation/`](specs/060-mandatory-output-validation/).
+[`specs/061-subject-failure-diagnostics/`](specs/061-subject-failure-diagnostics/).
 
 Model selection and local spend policy can be represented without provider credentials using
 `famou.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,

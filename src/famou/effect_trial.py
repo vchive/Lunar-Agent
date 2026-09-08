@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .profiles import ModelProfile
+from .subject_diagnostics import capture_subject_diagnostic_context
 
 MAX_CASES = 2
 MAX_RUNS_PER_CASE = 10
@@ -1037,24 +1038,33 @@ class EffectTrialRunner:
         environment: Mapping[str, str],
         subject: bool = False,
     ) -> None:
+        diagnostic_context = (
+            capture_subject_diagnostic_context(cwd, config_path.name) if subject else None
+        )
+        succeeded = False
         try:
-            invocation = command
-            if self.config.subject_model_profile_path is not None and subject:
-                invocation = (*command, "--model-profile", str(self.config.subject_model_profile_path))
-            result = self.process_executor(
-                (*invocation, str(config_path)),
-                cwd=cwd,
-                env=self._environment(environment),
-                timeout=float(self.config.timeout_seconds),
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise EffectTrialError("process_timeout") from exc
-        except OSError as exc:
-            raise EffectTrialError("process_start_failed") from exc
-        if not isinstance(result, subprocess.CompletedProcess) and not hasattr(result, "returncode"):
-            raise EffectTrialError("process_result_invalid")
-        if result.returncode != 0:
-            raise EffectTrialError("process_nonzero_exit")
+            try:
+                invocation = command
+                if self.config.subject_model_profile_path is not None and subject:
+                    invocation = (*command, "--model-profile", str(self.config.subject_model_profile_path))
+                result = self.process_executor(
+                    (*invocation, str(config_path)),
+                    cwd=cwd,
+                    env=self._environment(environment),
+                    timeout=float(self.config.timeout_seconds),
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise EffectTrialError("process_timeout") from exc
+            except OSError as exc:
+                raise EffectTrialError("process_start_failed") from exc
+            if not isinstance(result, subprocess.CompletedProcess) and not hasattr(result, "returncode"):
+                raise EffectTrialError("process_result_invalid")
+            if result.returncode != 0:
+                raise EffectTrialError("process_nonzero_exit")
+            succeeded = True
+        finally:
+            if not succeeded and diagnostic_context is not None:
+                diagnostic_context.collect()
 
     @staticmethod
     def _validate_usage(payload: object) -> dict[str, int] | None:

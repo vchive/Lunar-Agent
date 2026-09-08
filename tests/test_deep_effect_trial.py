@@ -230,6 +230,54 @@ def _deep_config(
     )
 
 
+def test_deep_second_round_failure_collects_diagnostic_and_preserves_prior_score(tmp_path: Path) -> None:
+    public, suite = _make_case(tmp_path)
+    suite_path = _write_json(tmp_path / "suite.json", suite)
+    baseline_path = _write_baseline(tmp_path, suite)
+    subject_command = _make_bound_subject_script(tmp_path / "subject.py")
+    harness_command = _make_constant_harness_script(tmp_path / "harness.py")
+    harness_calls = []
+
+    def executor(command, *, cwd, env, timeout):
+        request_path = Path(command[-1])
+        request = json.loads(request_path.read_text())
+        if "candidate_workspace" in request:
+            harness_calls.append(request)
+        elif request["round_index"] == 2:
+            failure = {
+                "schema_version": "1", "kind": "subject_failure", "mode": "deep_evolution",
+                "request_sha256": hashlib.sha256(request_path.read_bytes()).hexdigest(),
+                "run_index": 1, "round_index": 2, "stage": "runtime", "code": "step_limit",
+                "model_turns": 5, "tool_steps": 4, "http_status": None,
+            }
+            (cwd / "receipts/002.failure.json").write_text(json.dumps(failure))
+            return subprocess.CompletedProcess(command, 2)
+        return subprocess.run(command, cwd=cwd, env=env, timeout=timeout, check=False, capture_output=True)
+
+    runner = DeepEffectTrialRunner(
+        suite_path, baseline_path, tmp_path / "trial", case_sources={"case-a": public},
+        config=_deep_config(subject_command, harness_command, outer_rounds=2),
+        process_executor=executor,
+    )
+    report = runner.run().to_dict()
+    run = report["cases"][0]["runs"][0]
+    assert len(harness_calls) == 1
+    assert run["error_code"] == "process_nonzero_exit" and run["ready"] is False
+    assert len(run["rounds"]) == 1 and run["rounds"][0]["overall_score"] == 0.5
+    diagnostic = json.loads((
+        tmp_path / "trial" / run["attempt"] / "diagnostics/subject-002-failure.json"
+    ).read_text())
+    assert diagnostic["round_index"] == 2 and diagnostic["code"] == "step_limit"
+
+    # A failed round's sidecar does not authorize a receipt and does not block a later success.
+    resumed = DeepEffectTrialRunner(
+        suite_path, baseline_path, tmp_path / "trial", case_sources={"case-a": public},
+        config=_deep_config(subject_command, harness_command, outer_rounds=2), resume=True,
+    ).run().to_dict()["cases"][0]["runs"][0]
+    assert resumed["ready"] is True and len(resumed["rounds"]) == 2
+    assert resumed["rounds"][0]["overall_score"] == 0.5
+
+
 def _make_command_script(path: Path, source: str) -> tuple[str, ...]:
     path.write_text(source, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)

@@ -6,6 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar, Self
+from urllib.error import HTTPError
 
 import pytest
 
@@ -19,7 +20,128 @@ from famou.effect_adapters import (
 )
 from famou.effect_trial import EffectTrialConfig, EffectTrialRunner, TrialBaseline
 from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, ToolCall
+from famou.runtime import ModelTurn, RuntimeExecutionError, RuntimeResult, ToolCall
+
+
+@pytest.mark.parametrize("mode", ["normal", "deep_evolution"])
+@pytest.mark.parametrize("failure", ["public", "http", "runtime", "steps"])
+def test_subject_failures_leave_bound_safe_diagnostics(
+    tmp_path: Path, mode: str, failure: str
+) -> None:
+    request = _subject_request(tmp_path / "subject")
+    payload = json.loads(request.read_text())
+    if mode == "deep_evolution":
+        payload.update(
+            mode=mode, round_index=1, outer_rounds=5, previous_evaluation=None,
+            receipt_path="receipts/001.json",
+        )
+        _write_json(request, payload)
+    sentinel = "PRIVATE-CREDENTIAL-PROMPT-BODY-SENTINEL"
+    observed_prompts = []
+
+    class FailingSubject(SubjectModel):
+        def complete(self, messages, tools=(), timeout=None):
+            observed_prompts.append(str(messages))
+            self.turn += 1
+            if failure == "http":
+                raise RuntimeExecutionError(sentinel) from HTTPError(
+                    "https://private.invalid/", 429, sentinel, {}, None,
+                )
+            if failure == "runtime":
+                raise RuntimeError(sentinel)
+            if failure == "public" and self.turn == 2:
+                return ModelTurn("done")
+            return ModelTurn("", (ToolCall(
+                "private-call", "write_file",
+                {"path": "case/solve.py" if failure == "public" else "solve.py",
+                 "content": sentinel},
+            ),))
+
+    with pytest.raises(EffectAdapterError):
+        run_subject_adapter(request, model_runtime=FailingSubject(), max_steps=1)
+
+    diagnostic_path = (request.parent / payload["receipt_path"]).with_suffix(".failure.json")
+    encoded = diagnostic_path.read_bytes()
+    diagnostic = json.loads(encoded)
+    assert len(encoded) <= 4096
+    assert sentinel.encode() not in encoded
+    assert b"private.invalid" not in encoded and b"private-call" not in encoded
+    assert "score" not in diagnostic and not (request.parent / payload["receipt_path"]).exists()
+    assert diagnostic["request_sha256"] == _sha(request)
+    assert diagnostic["mode"] == mode
+    assert diagnostic["run_index"] == 1
+    assert diagnostic["round_index"] == (1 if mode == "deep_evolution" else None)
+    assert diagnostic["code"] == {
+        "public": "public_file_set_changed", "http": "model_http_failed",
+        "runtime": "model_failed", "steps": "step_limit",
+    }[failure]
+    assert diagnostic["http_status"] == (429 if failure == "http" else None)
+    assert diagnostic["model_turns"] == (2 if failure in {"public", "steps"} else 0)
+    assert diagnostic["tool_steps"] == (1 if failure in {"public", "steps"} else 0)
+    assert "entire `case/` tree is read-only" in observed_prompts[0]
+    assert "solve.py" in observed_prompts[0] and "case/data/" in observed_prompts[0]
+
+
+@pytest.mark.parametrize("failure", ["tool", "timeout", "receipt"])
+def test_subject_diagnostic_classifies_additional_failure_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    from famou.agent_loop import AgentLoopRuntime
+    from famou.tools import LocalToolRegistry
+
+    request = _subject_request(tmp_path / "subject")
+    secret = "SECRET-PRIVATE-ERROR-SENTINEL"
+
+    def fail_tool(*args, **kwargs):
+        raise RuntimeError(secret)
+
+    class TimeoutSubject(SubjectModel):
+        def complete(self, messages, tools=(), timeout=None):
+            raise TimeoutError(secret)
+
+    if failure == "tool":
+        monkeypatch.setattr(LocalToolRegistry, "execute", fail_tool)
+    elif failure == "receipt":
+        monkeypatch.setattr(
+            AgentLoopRuntime, "run",
+            lambda *args, **kwargs: RuntimeResult("done", metadata={"turns": secret}),
+        )
+    with pytest.raises((EffectAdapterError, ValueError)):
+        run_subject_adapter(
+            request, model_runtime=TimeoutSubject() if failure == "timeout" else SubjectModel(),
+        )
+    content = (request.parent / "receipt.failure.json").read_bytes()
+    diagnostic = json.loads(content)
+    assert secret.encode() not in content
+    assert diagnostic["stage"] == {"tool": "tool", "timeout": "model", "receipt": "receipt"}[failure]
+    assert diagnostic["code"] == {"tool": "tool_failed", "timeout": "timeout", "receipt": "receipt_invalid"}[failure]
+    assert not (request.parent / "receipt.json").exists()
+
+
+@pytest.mark.parametrize("stage", ["classification", "publication"])
+def test_diagnostic_failure_preserves_original_subject_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    import famou.subject_diagnostics as diagnostics
+
+    request = _subject_request(tmp_path / "subject")
+    original = RuntimeError("original private failure")
+
+    class FailingSubject(SubjectModel):
+        def complete(self, messages, tools=(), timeout=None):
+            raise original
+
+    def fail_publication(*args, **kwargs):
+        raise OSError("publication denied")
+
+    if stage == "publication":
+        monkeypatch.setattr(diagnostics, "publish_diagnostic", fail_publication)
+    else:
+        monkeypatch.setattr(diagnostics.SubjectDiagnosticObserver, "failure", fail_publication)
+    with pytest.raises(EffectAdapterError, match="subject runtime failed") as caught:
+        run_subject_adapter(request, model_runtime=FailingSubject())
+    assert caught.value.__cause__ is original
+    assert not (request.parent / "receipt.json").exists()
 
 
 def _write_json(path: Path, value: object) -> Path:

@@ -18,6 +18,10 @@ Feature 059 已提交于 `503fe0a`。Feature 060 已提交并推送于 `f4b7ba9`
 已通过用户授权的 CC Switch 接通模型，完成 `supply_chain_inventory` 的首个真实 1 run ×
 1 round：有效性 `1.0`、得分 `0.2079`，历史最佳 `0.3496`。独立的 2 runs × 5 rounds
 试验已结束，但两个 run 均在首轮 subject 退出、未进入评分；最新证据与待修复项见第 16 节。
+用户随后要求改用 WebAgent 已有记录中的较弱求解模型：已选定并实际验证 `glm-5.1`，
+后续不再启动 `gpt-5.6-sol` 求解。Feature 061 已补齐此前失败暴露的安全诊断缺口；
+GLM 独立单 case 实评已执行，在 900 秒预算内未产出候选、没有进入评分，安全诊断为
+model timeout。当前模型选择、结果与证据边界见第 17–18 节。
 
 以下保留 2026-09-06 续接时的历史提交记录：
 
@@ -384,7 +388,7 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：复用公司平台 baseline，启动 Lunar 自身的真实评测
+### P0：复用冻结 suite/harness，完成 GLM 的真实评测
 
 官方 publication kit 和 AgentServer normal-mode historical comparator 已就绪，不需要手填
 历史分数：
@@ -394,7 +398,8 @@ suite:    .lunar/famou-kit-real-001/suite.json
 projection: .lunar/famou-kit-real-001/baseline-agentserver.json
 raw:      .lunar/famou-kit-real-001/fm-eval-results.json
 case:     supply_chain_inventory
-model:    gpt-5.6-sol
+baseline model (historical): gpt-5.6-sol
+current Lunar solver:        glm-5.1
 adapter:  agentserver (deep_evolution=false)
 ```
 
@@ -415,7 +420,10 @@ export 离线生成 `baseline-agentserver.json`，明确保存 `source=company-p
 `adapter=agentserver`；除来源字段外，模型、case 身份和全部 per-run 值与旧 projection 一致。
 `baseline-agentserver-provenance.json` 记录本次输入/输出摘要和一致性复核。
 
-当前任务复用已有 AgentServer baseline，不需要补跑 WebAgent 或搜集新的 WebAgent export。
+当前任务复用冻结 suite/harness，已有 AgentServer baseline 仅保留审计；不补跑 WebAgent 或搜集新的 WebAgent export。
+用户最新模型要求优先：已有单 case baseline 的模型是 GPT，与新选 GLM 不同；旧 baseline
+保留作历史证据，不传入 GLM 的同模型比较、不改写模型标签。离线 WebAgent 报告足以确认
+GLM 求解模型选择，但其中跨 case 聚合值不能伪造成此 case 的 per-run baseline。
 effect protocol 的规范机器字段是 `baseline_historical_best`；显式 WebAgent provenance 或
 旧 `fm-eval` 无 provenance 的兼容路径还会输出 `webagent_historical_best` 别名。因此当前
 示例使用带明确来源的新 projection。只有将来另行要求 WebAgent-specific 比较时，才需要
@@ -438,37 +446,19 @@ report，也不能用 Codex/Claude 的本机登录态冒充 extractor 配置。�
 CC Switch 当前 provider 的 API 配置；第 16 节记录了只读接入、显式环境注入及首轮真实结果。
 普通 shell 中没有这些变量已不再是启动阻塞。
 
-当前执行步骤（第 1–4 步的首轮已完成；再次执行 deep 前先修复第 16 节的失败诊断缺口）：
+当前执行步骤：
 
-1. 使用带来源的 `baseline-agentserver.json`，保留 `failed/partially_valid` 来源实验状态，
-   只采信所选 case 的 eligible rows；不得把整个 60-trial 实验描述为成功。
-2. 配置准备好后执行 Feature 058 `effect-preflight`，在不启动 subject/harness 的情况下确认冻结 suite、
-   baseline、public case、命令可执行文件、显式环境变量、model profile digest，以及 exact
-   harness Python 的 `anyio`/`claude_agent_sdk` 依赖。预检报告只记录身份和版本，不保存密钥，
-   也不构成效果结果；trial 开始时仍会重新验证输入。
-3. 提供可调用 `gpt-5.6-sol` 的 subject endpoint/model 配置，以及 exact extractor 所需的
-   Anthropic 配置、`glm-5.2` 模型值和发布期依赖环境。
-4. 连接配置到位后立即用冻结 suite/baseline 跑 1 case、1 run、1 round；确认 subject、
-   extraction、evaluator 和模型身份贯通后，在新 workspace 跑 2 runs、5 rounds。
-5. 确认十次 private harness 都真实执行，检查每轮 `solution.json`、RoundFeedback、模型身份、
-   failure statistics 和恢复记录，再计算相对 historical best `0.3496` 的 descriptive delta。
-6. 完成单 case 证据后，再决定是否扩展到第二个 case 或更多 runs。
-
-运行深度试验的模板：
-
-```bash
-export ANTHROPIC_MODEL=glm-5.2
-uv run lunar-agent effect-deep-trial .lunar/famou-kit-real-001/suite.json \
-  .lunar/famou-kit-real-001/baseline-agentserver.json \
-  --case-source supply_chain_inventory=.lunar/famou-kit-real-001/cases/supply_chain_inventory \
-  --subject-command "/Users/liminghan/Documents/lunar_agent/.venv/bin/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
-  --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
-  --harness-command "/Users/liminghan/Documents/lunar_agent/.venv/bin/lunar-agent effect-harness --case-root /Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-bench/03_assignment/supply_chain_inventory --python /absolute/path/to/python-with-anyio-and-claude-agent-sdk-0.1.81 --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL --extractor-env ANTHROPIC_MODEL" \
-  --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL \
-  --harness-env ANTHROPIC_MODEL \
-  --requested-model gpt-5.6-sol --runs-per-case 2 --outer-rounds 5 \
-  --stagnation-rounds 2 --workspace .lunar/deep-effect-trial-real-001 --json
-```
+1. 先读第 17 节，检查 `.lunar/real-eval-glm-5.1-20260908/started.json`、`report.json`
+   和 `attempt-001/diagnostics/`，保留已运行 attempts；不要重复启动已消费的实验目录。
+2. 当前 solver 只用 `glm-5.1`，extractor 保持 `glm-5.2` 与 SDK `0.1.81`，继续通过
+   已授权的 CC Switch 只读加载连接环境，不再运行旧 GPT 脚本。
+3. 单 case 实评由本机 `run_single.py` 调用已有 subject/exact harness adapters，预先验证
+   冻结输入，成功后检查实际 receipt 与模型身份。只有 private harness 的实际结果可评分。
+4. 本次没有 GLM per-run baseline，仅报告独立分数、用时与可观测用量；不计算匹配模型的
+   delta/breakthrough，不用跨 case 聚合分代替单 case 历史结果。
+5. 若失败，先读 Feature 061 的有界诊断，确定可修复原因再安排新 attempt；若成功，再按
+   实际数据决定是否扩展重复 runs 或多轮演化。未来 baseline-free 批量协议应单独做 SDD，
+   不放宽现有 comparative runner 的模型一致性 guard。
 
 ### P1：修复真实 case 适配差距
 
@@ -534,7 +524,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/060-mandatory-output-validation
+specs/061-subject-failure-diagnostics
 ```
 
 后续新功能必须：
@@ -569,11 +559,11 @@ git log --oneline -5
 uv run pytest -q tests/test_effect_trial.py tests/test_deep_feedback.py tests/test_deep_effect_trial.py
 ```
 
-接着复核 `.lunar/famou-kit-real-001/` 的 `baseline-agentserver.json` 和 provenance 摘要，
-直接推进 Lunar 真实评测；运行脚本及最新环境状态见第 15–16 节。当前不运行 WebAgent；已有 AgentServer
-历史 comparator 可用于描述性对照，且不要求额外 WebAgent export。只有 exact private harness
-实际完成新的试验后，才可报告该冻结 case 上的 descriptive delta/breakthrough；它仍不构成
-WebAgent parity、suite parity 或 statistical superiority。历史数据就绪不代表 Lunar 新结果。
+接着阅读第 17 节并检查 GLM 实验的 started/report/diagnostics；当前 solver 是 `glm-5.1`。
+复用冻结 suite 与 exact private harness，已有 GPT baseline 和第 15–16 节的 GPT 脚本仅用于
+历史审计。不要重复运行 WebAgent、要求补数据或把 GLM 实评伪装成匹配模型的历史对照。
+只有 exact harness 实际完成后才能报告新的独立分数；没有同模型 per-run baseline 时不计算
+breakthrough，也不声称 WebAgent parity、suite parity 或 statistical superiority。
 
 ## 10. 本次续接记录（2026-09-06）
 
@@ -799,3 +789,57 @@ DEVNULL，`_invoke` 统一记录 `process_nonzero_exit`，`run_subject_adapter` 
 汇总说明位于 `.lunar/real-eval-20260908/results.md`。每次新启动/恢复会读取届时 CC Switch
 的当前 provider；已经运行的进程环境不受之后全局切换影响。新结果只从实际登记的 round
 及最终 report 派生，不改基线、不手填分数、不向 subject 提供私有评分内容。
+
+## 17. WebAgent 记录模型与 GLM 实评（2026-09-08）
+
+用户明确要求“别用这么好的模型，用 WebAgent 已有记录的模型”。选择 `glm-5.1`：离线
+报告 `qx9kRYpa6zTQmP` 的 C/E 组明确记载 `webagent loop / glm-5.1`。报告属于 20 case、
+12 小时、每组 3 次的聚合实验，不能作为当前单 case 的同模型 baseline。无需再运行 WebAgent、
+索取新实验数据或修改已有 GPT baseline。旧 `ccswitch.py smoke/deep` 与 `run.sh` 固定 GPT，
+保留供审计，后续不得误用它们启动新的求解。
+
+经用户授权继续只读使用本机 CC Switch。虽然当前 provider 的模型列表没有列出 `glm-5.1`，
+实际文本调用与两轮 function-call probe 都成功，响应模型均为 `glm-5.1`；工具探测共 403
+tokens。冻结 extractor 仍为 `glm-5.2`，SDK 仍为 `claude-agent-sdk==0.1.81`。
+
+本机忽略目录 `.lunar/real-eval-glm-5.1-20260908/` 保存连接证据、模型选择、profile、冻结
+suite、单 case 请求和 `run_single.py`。该脚本只导入旧 CC Switch 脚本的环境加载函数，
+不会调用旧 GPT 启动入口。新求解预算为 40 个工具 steps、900 秒、200,000 tokens；无已核实单价，
+不编造美元成本或设置虚假的费用估计。Profile canonical SHA-256：
+`b2589138335badc4b9ff0fbb27f20f4235b397844e65e122b54b9150d9e587fc`。
+
+现有 `EffectTrialRunner` 要求 requested model 与 baseline model 一致，本次保留该 guard。
+独立实评调用现有 `effect-subject` 与 exact `effect-harness`，报告标注
+`kind=lunar_single_case_evaluation`、`comparisons_disabled=true`、
+`same_model_baseline_available=false`；不是普通/深度 comparative trial 的替代 schema。
+subject 成功后才运行原始私有 extractor/evaluator，分数只取自其实际 receipt。
+
+实际 GLM 运行已结束：subject 耗时 900.333 秒、退出码 2，总用时 900.334 秒。
+规范诊断为 `stage=model`、`code=timeout`、`http_status=null`，记录到 12 次模型响应事件、
+13 次工具结果事件。工具计数包含失败结果的可能性，不能说 13 次工具操作均成功。
+没有候选文件、成功 subject receipt 或 harness 目录，0 次评分；质量分未知，不能记为 0。
+失败调用用量与返回模型链不完整；连接探测确认同名模型，但不能据此补造本次运行的
+provider_observed 成功回执、token 数或费用。
+
+事后复核 request/public projection、sidecar 与采集副本、启动时所有产品 Python 源文件
+SHA 均一致，原 GPT baseline 未改动。工具执行已开启，最小环境中的 `python3` 可正常
+启动；没有证据断言具体工具错误、provider 断线或某次读取导致了超时。过程不保存原始
+模型/工具正文，因此不能重建前 13 次工具操作。结果与本地核验分别在 `results.md`、
+`report.json`、`postmortem-checks.json`；`started.json` 拒绝对已启动目录重复执行。
+
+当前目标是先让 GLM 在明确预算内交付首个可评分候选，再做重复 runs 与多轮演化。
+下一轮应根据本次超时制定候选尽早落盘的求解策略与时间预算，开新 attempt，保留本次
+证据；不要直接盲目重跑，也不要把新功能完成或模型连接成功当成求解效果提升。
+
+## 18. Feature 061 安全失败诊断（2026-09-08）
+
+新增 4096 字节上限的严格 score-free sidecar，绑定执行前 request SHA、normal/deep 模式、
+run/round，保留固定阶段/错误码、有限模型/工具计数和可选 HTTP 整数。normal/deep runner
+只在 subject 失败时验证并采集到 attempt 的 `diagnostics/`；缺失、伪造、超大、陈旧、
+symlink/FIFO/其他不安全文件均不改变原 process 错误。分类或发布自身失败也保留原异常。
+没有保存原始 stdout/stderr、异常正文、模型/工具内容或密钥；评分、成功 receipt、记录与
+resume schema 保持兼容。两种 subject prompt 明确整个 `case/` 树不可新增、修改或删除。
+
+原始 HEAD 上新增 9 项回归全部先失败；最终全仓 634 项测试、Ruff、compileall、build、
+Feature 061 Specify prerequisites、diff 检查通过。独立代码审查无阻塞问题；真实 GLM
+超时也成功生成并采集规范诊断。诊断不保存完整失败用量，计数只代表可观测事件。
