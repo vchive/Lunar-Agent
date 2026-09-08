@@ -42,7 +42,13 @@ from .conversational import (
     ContractCompiler,
     build_algorithm_plan,
 )
-from .evaluator import MAX_ARTIFACT_BYTES, Evaluation, Evaluator, acceptance_evaluator
+from .evaluator import (
+    MAX_ARTIFACT_BYTES,
+    Evaluation,
+    Evaluator,
+    acceptance_evaluator,
+    evaluate_output_contract,
+)
 from .evolution import (
     CandidateEvaluator,
     CandidateExecution,
@@ -836,32 +842,7 @@ class LocalController:
     def _evaluate_evolved_outputs(
         specs: tuple[OutputSpec, ...], workspace: Path
     ) -> Evaluation:
-        rules = [
-            {
-                "output_valid": {
-                    "path": output.path,
-                    "format": output.format,
-                    "fields": list(output.fields),
-                }
-            }
-            for output in specs
-            if output.required
-            or (workspace / output.path).exists()
-            or (workspace / output.path).is_symlink()
-        ]
-        if not rules:
-            return Evaluation(
-                True,
-                ("no optional output was produced",),
-                "no optional output required validation",
-                {"kind": "output_contract", "checks": []},
-            )
-        evaluator = acceptance_evaluator(
-            rules[0] if len(rules) == 1 else {"all": rules}
-        )
-        if evaluator is None:  # pragma: no cover - rules above are canonical
-            raise EvolutionError("could not construct evolved output evaluator")
-        return evaluator.evaluate("", workspace)
+        return evaluate_output_contract(specs, workspace)
 
     def _promote_evolved_outputs(
         self,
@@ -2373,69 +2354,16 @@ class LocalController:
             raise ArtifactError("algorithm output path must name a file")
         return resolved
 
-    @staticmethod
-    def _acceptance_output_specs(value: object) -> dict[str, tuple[str, tuple[str, ...]]]:
-        specs: dict[str, tuple[str, tuple[str, ...]]] = {}
-        if isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except (TypeError, json.JSONDecodeError):
-                return specs
-        if isinstance(value, dict):
-            if set(value) == {"output_valid"} and isinstance(value["output_valid"], dict):
-                payload = value["output_valid"]
-                path = payload.get("path")
-                output_format = payload.get("format")
-                fields = payload.get("fields")
-                if (
-                    isinstance(path, str)
-                    and isinstance(output_format, str)
-                    and isinstance(fields, list)
-                    and all(isinstance(field, str) for field in fields)
-                ):
-                    specs[path] = (output_format, tuple(fields))
-            for child in value.values():
-                specs.update(LocalController._acceptance_output_specs(child))
-        elif isinstance(value, list):
-            for child in value:
-                specs.update(LocalController._acceptance_output_specs(child))
-        return specs
-
     def _evaluate(self, run: Run, task: Any, result: str, workspace: Path) -> Evaluation:
         evaluator = self.evaluator or self.profiles.evaluator(run.evaluator_profile or "general")
         base = evaluator.evaluate(result, workspace)
         criterion = acceptance_evaluator(task.acceptance)
         output_specs = self._task_output_specs(run, task)
-        declared_in_acceptance = self._acceptance_output_specs(task.acceptance)
-        output_specs_to_check = tuple(
-            output
-            for output in output_specs
-            if declared_in_acceptance.get(output.path)
-            != (output.format, tuple(output.fields))
-            and (
-                output.required
-                or self._confined_regular_file(workspace, output.path) is not None
-            )
-        )
-        output_criterion = None
-        if output_specs_to_check:
-            output_rules = [
-                {
-                    "output_valid": {
-                        "path": output.path,
-                        "format": output.format,
-                        "fields": list(output.fields),
-                    }
-                }
-                for output in output_specs_to_check
-            ]
-            output_criterion = acceptance_evaluator(
-                output_rules[0] if len(output_rules) == 1 else {"all": output_rules}
-            )
-        if criterion is None and output_criterion is None:
+        if criterion is None and not output_specs:
             return base
         acceptance = criterion.evaluate(result, workspace) if criterion is not None else None
-        outputs = output_criterion.evaluate(result, workspace) if output_criterion is not None else None
+        # Custom alternatives cannot waive the algorithm's declared output contract.
+        outputs = evaluate_output_contract(output_specs, workspace) if output_specs else None
         checks = [item for item in (acceptance, outputs) if item is not None]
         evidence = tuple(base.evidence) + tuple(
             evidence_item for item in checks for evidence_item in item.evidence

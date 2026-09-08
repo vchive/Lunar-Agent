@@ -10,6 +10,8 @@
 
 Feature 058 已提交并推送于 `1ae1893`，新增只读预检及公司平台 baseline 来源记录。
 Feature 059 已完成普通求解和 isolated compiler/audit 调用的模型预算、超时边界修复。
+Feature 059 已提交于 `503fe0a`。本次 Feature 060 修复结构化输出验收绕过，统一普通/委派
+Solver、候选程序执行和最终产物生成的独立输出校验。
 用户再次确认现有实验数据已足够；不运行 WebAgent，不再要求补 WebAgent 数据。
 本轮只做 SDD 开发与本地 fixture 验证，不启动真实 Lunar trial。
 
@@ -524,7 +526,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/059-model-profile-execution-boundaries
+specs/060-mandatory-output-validation
 ```
 
 后续新功能必须：
@@ -640,3 +642,25 @@ Feature 059 统一 `AgentLoopRuntime.run` 和 `run_isolated` 的模型执行约�
 
 继续使用已有 `baseline-agentserver.json`，不重新运行 WebAgent，也不要求新的平台实验数据。
 后续优先按实际需求完善求解产物和演化流程；不在没有真实效果证据时抽象统一反馈接口。
+
+## 14. Feature 060（2026-09-08）
+
+已修复自定义 acceptance 的 `any` 分支可以绕过必需 OutputSpec 的问题。此前，缺少字段的
+CSV 可能因为另一条文字条件通过而被提升并交付；现在声明输出始终与 base evaluator、task
+acceptance 共同作为必过条件。删除了仅因 output_valid 出现在规则树中就跳过校验的优化。
+
+`evaluate_output_contract` 复用既有格式、字段、大小与安全路径检查，独立处理最多 32 个
+OutputSpec，并保留 `output_valid` 叶子诊断用于重试反馈。可选输出只有真正缺省才跳过；
+已存在的目录、直接/断开/循环软链接、软链接祖先和非目录祖先都不能被当作缺省。
+普通/委派 Solver、ContractCandidateRunner、最终 materialization 均使用该函数。
+
+先确认 controller 17 项新增回归中 9 项失败、8 项通过，候选/最终产物的 4 项路径阻塞回归
+全部失败；实现后 93 项聚焦测试通过。测试覆盖缺字段后重试修复、只提升正确产物并校验
+交付摘要。旧 materialization 恢复证据无需迁移，但本次不会追溯重新评价已完成的历史 run。
+
+现有通用 acceptance 语法仍保留自身 32-rule 上限；独立输出检查不消耗该表达式的规则额度。
+本轮没有改变 CSV/JSON 内容格式规则、promotion 事务或 evaluator 评分权威。继续使用既有
+实验数据，没有运行 WebAgent、真实 Lunar trial、平台查询或新的模型调用。
+
+全仓 566 项 pytest、Ruff、compileall、`uv build`、Feature 060 Specify prerequisites 和
+`git diff --check` 均通过；独立审查未发现阻塞问题。

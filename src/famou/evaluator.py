@@ -6,9 +6,13 @@ import csv
 import io
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from .algorithm import OutputSpec
 
 MAX_CONTRACT_BYTES = 20_000
 MAX_RULES = 32
@@ -252,7 +256,7 @@ def _workspace_path(workspace: Path, relative_path: str) -> Path:
 def _raw_path_has_symlink(root: Path, path: Path) -> bool:
     current = path
     while True:
-        if current.exists() and current.is_symlink():
+        if current.is_symlink():
             return True
         if current == root:
             return False
@@ -266,8 +270,10 @@ def _artifact_file(workspace: Path, relative_path: str) -> tuple[Path | None, st
         path = _workspace_path(workspace, relative_path)
     except ValueError as exc:
         return None, str(exc)
-    root = workspace.resolve(strict=False)
-    if _raw_path_has_symlink(root, workspace / relative_path):
+    except (OSError, RuntimeError):
+        # A cyclic link or obstructed path is a failed check, never a read of its target.
+        return None, "artifact path cannot be resolved safely"
+    if _raw_path_has_symlink(workspace, workspace / relative_path):
         return None, "artifact path contains a symlink"
     if not path.is_file():
         return None, "artifact does not exist as a regular file"
@@ -630,3 +636,59 @@ def acceptance_evaluator(value: str | dict[str, Any] | None) -> AcceptanceEvalua
     """
     contract = compile_acceptance(value)
     return AcceptanceEvaluator(contract) if contract is not None else None
+
+
+def _optional_output_needs_check(workspace: Path, relative_path: str) -> bool:
+    """Only an absent path beneath ordinary directories counts as optional omission."""
+    root = workspace.absolute()
+    target = root / relative_path
+    current = target
+    while True:
+        if current.is_symlink():
+            return True
+        if current.exists() and (current == target or not current.is_dir()):
+            return True
+        if current == root:
+            return False
+        current = current.parent
+
+
+def evaluate_output_contract(outputs: Sequence[OutputSpec], workspace: Path) -> Evaluation:
+    """Validate declared files independently from a task's custom acceptance expression."""
+    from .algorithm import MAX_OUTPUTS, OutputSpec
+
+    if not isinstance(outputs, Sequence) or isinstance(outputs, (str, bytes)):
+        raise TypeError("outputs must be an OutputSpec sequence")
+    if len(outputs) > MAX_OUTPUTS:
+        raise ValueError("outputs exceed the bounded declaration limit")
+    specs = tuple(outputs)
+    if any(not isinstance(output, OutputSpec) for output in specs):
+        raise TypeError("outputs must contain OutputSpec records")
+    if len({output.path for output in specs}) != len(specs):
+        raise ValueError("output paths must be unique")
+    checks: list[Evaluation] = []
+    for output in specs:
+        if not output.required and not _optional_output_needs_check(workspace, output.path):
+            continue
+        # Compile each bounded leaf separately. The 32-output contract has its own bound and
+        # does not spend one of the generic acceptance grammar's 32 rules on an AND wrapper.
+        validator = acceptance_evaluator({
+            "output_valid": {
+                "path": output.path, "format": output.format, "fields": list(output.fields),
+            },
+        })
+        assert validator is not None
+        checks.append(validator.evaluate("", workspace))
+    failed = [check for check in checks if not check.passed]
+    if failed:
+        reason = f"output contract failed: {failed[0].reason}"
+    elif checks:
+        reason = f"all {len(checks)} declared output checks passed"
+    else:
+        reason = "no declared output requires validation"
+    return Evaluation(
+        not failed,
+        tuple(evidence for check in checks for evidence in check.evidence),
+        reason,
+        {"kind": "output_contract", "checks": [check.details["check"] for check in checks]},
+    )

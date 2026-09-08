@@ -466,6 +466,14 @@ If a required output is missing or malformed, a convincing chat response cannot 
 succeed. Contracts written before the optional `outputs` field remain fully compatible and keep
 the existing result/runtime delivery behavior.
 
+Declared outputs are mandatory even when a custom task acceptance expression uses `any`. For
+example, a matching “solver completed” text branch cannot waive missing CSV fields. An optional
+output may be absent, but a present invalid file, directory, symlink or obstructed parent path
+fails the same independent checks. Ordinary and delegated Solvers, contract candidate execution
+and final evolved-output materialization share this validator. Failed checks feed the existing
+repair/retry flow, and only passing outputs are promoted for delivery. See
+[Feature 060](specs/060-mandatory-output-validation/spec.md).
+
 ## Bootstrap
 
 Using [uv](https://docs.astral.sh/uv/):
@@ -1138,7 +1146,7 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/059-model-profile-execution-boundaries/`](specs/059-model-profile-execution-boundaries/).
+[`specs/060-mandatory-output-validation/`](specs/060-mandatory-output-validation/).
 
 Model selection and local spend policy can be represented without provider credentials using
 `famou.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,

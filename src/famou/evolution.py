@@ -32,7 +32,7 @@ from .algorithm import (
     EvaluationReport,
     OutputSpec,
 )
-from .evaluator import acceptance_evaluator
+from .evaluator import evaluate_output_contract
 
 MAX_SOURCE_BYTES = 512 * 1024
 MAX_METADATA_BYTES = 8 * 1024
@@ -628,41 +628,22 @@ class ContractCandidateRunner:
             _write_execution_evidence(workspace, normalized)
             return normalized
 
-        rules = [
-            {
-                "output_valid": {
-                    "path": output.path,
-                    "format": output.format,
-                    "fields": list(output.fields),
-                }
-            }
-            for output in self.outputs
-            if output.required
-            or (Path(workspace) / output.path).exists()
-            or (Path(workspace) / output.path).is_symlink()
-        ]
-        if rules:
-            evaluator = acceptance_evaluator(
-                rules[0] if len(rules) == 1 else {"all": rules}
+        validation = evaluate_output_contract(self.outputs, Path(workspace))
+        if not validation.passed:
+            stderr = "\n".join(
+                value for value in (execution.stderr, validation.reason) if value
             )
-            if evaluator is None:  # pragma: no cover - rules are canonical OutputSpec values
-                raise EvolutionError("could not construct candidate output evaluator")
-            validation = evaluator.evaluate("", Path(workspace))
-            if not validation.passed:
-                stderr = "\n".join(
-                    value for value in (execution.stderr, validation.reason) if value
-                )
-                failed = CandidateExecution(
-                    status="failed",
-                    exit_code=execution.exit_code,
-                    duration_ms=execution.duration_ms,
-                    stdout=execution.stdout,
-                    stderr=_bounded_output(stderr, MAX_EXECUTION_OUTPUT_BYTES),
-                    error="output_contract_invalid",
-                    artifacts=(),
-                )
-                _write_execution_evidence(workspace, failed)
-                return failed
+            failed = CandidateExecution(
+                status="failed",
+                exit_code=execution.exit_code,
+                duration_ms=execution.duration_ms,
+                stdout=execution.stdout,
+                stderr=_bounded_output(stderr, MAX_EXECUTION_OUTPUT_BYTES),
+                error="output_contract_invalid",
+                artifacts=(),
+            )
+            _write_execution_evidence(workspace, failed)
+            return failed
 
         artifacts = tuple(
             output.path

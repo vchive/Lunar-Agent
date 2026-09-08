@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
+from famou.algorithm import AlgorithmProblemContract, EvaluationReport, OutputSpec
 from famou.cli import main
 from famou.evolution import (
     CandidateExecution,
@@ -177,6 +177,31 @@ def test_conversational_evolution_executes_and_gates_each_native_candidate(
     assert final_attempt != child / "evolution" / "candidates" / "candidate-0002"
     assert (final_attempt / "execution.json").is_file()
     assert (Path(payload["workspace"]) / "output" / "routes.csv").is_file()
+
+
+@pytest.mark.parametrize("obstruction", ["symlink", "file"])
+def test_contract_candidate_runner_rejects_obstructed_optional_output_ancestors(
+    tmp_path: Path, obstruction: str,
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    candidate = workspace / "candidate.py"
+    candidate.write_text(
+        "from pathlib import Path\n"
+        "Path('output').mkdir()\n"
+        + (
+            "Path('output/extra').symlink_to('missing-directory')\n"
+            if obstruction == "symlink" else "Path('output/extra').write_text('obstruction')\n"
+        ),
+        encoding="utf-8",
+    )
+    output = OutputSpec("output/extra/summary.json", "json", required=False)
+    execution = ContractCandidateRunner(tmp_path, (), (output,), timeout_seconds=2).run(
+        candidate, workspace,
+    )
+    assert execution.status == "failed"
+    assert execution.error == "output_contract_invalid"
+    assert execution.artifacts == ()
 
 
 def test_contract_candidate_runner_stages_input_and_validates_outputs(tmp_path: Path) -> None:

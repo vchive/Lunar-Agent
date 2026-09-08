@@ -55,10 +55,11 @@ def _valid_report() -> EvaluationReport:
 
 
 def _evolution_fixture(
-    tmp_path: Path, source: str, *, filename: str = "candidate.py"
+    tmp_path: Path, source: str, *, filename: str = "candidate.py",
+    contract: AlgorithmProblemContract | None = None,
 ) -> tuple[LocalController, object, object, object]:
     controller = LocalController(Config(tmp_path / "home"), MockRuntime())
-    contract = _contract()
+    contract = contract or _contract()
     parent = controller.create_conversational_run("optimize routes")
     controller.store.attach_plan_to_run(parent.id, build_algorithm_plan(parent.goal, contract))
     child = controller.create_evolution_run(contract, workspace=tmp_path / "evolution-run")
@@ -303,6 +304,33 @@ def test_materialization_rejects_symlink_oversize_and_parent_conflict(tmp_path: 
     assert failed["status"] == "failed"
     assert "different data" in failed["error"]
     assert target.read_text(encoding="utf-8") == "do not overwrite\n"
+
+
+@pytest.mark.parametrize("obstruction", ["symlink", "file"])
+def test_materialization_rejects_obstructed_optional_output_ancestors(
+    tmp_path: Path, obstruction: str,
+) -> None:
+    payload = _contract().to_dict()
+    payload["outputs"].append({
+        "path": "output/extra/summary.json", "format": "json", "required": False,
+    })
+    contract = AlgorithmProblemContract.from_dict(payload)
+    source = (
+        "from pathlib import Path\n"
+        "Path('output').mkdir()\n"
+        "Path('output/routes.csv').write_text('item_id,route_id\\n1,A\\n')\n"
+        + (
+            "Path('output/extra').symlink_to('missing-directory')\n"
+            if obstruction == "symlink" else "Path('output/extra').write_text('obstruction')\n"
+        )
+    )
+    controller, parent, child, result = _evolution_fixture(tmp_path, source, contract=contract)
+    failed = controller.materialize_evolved_outputs(
+        parent.id, child.id, contract, result, timeout_seconds=2,
+    )
+    assert failed["status"] == "failed"
+    assert not (parent.workspace / "output/routes.csv").exists()
+    assert not any(item["kind"] == "output" for item in controller.store.list_artifacts(parent.id))
 
 
 def test_materialization_terminal_results_are_idempotent_and_tamper_evident(
