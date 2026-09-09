@@ -1162,7 +1162,7 @@ an adapter.
 
 The effect-layer design and WebAgent branch comparison are documented in
 [`docs/architecture.md`](docs/architecture.md), with the active SDD feature in
-[`specs/061-subject-failure-diagnostics/`](specs/061-subject-failure-diagnostics/).
+[`specs/062-fixed-budget-independent-measurement/`](specs/062-fixed-budget-independent-measurement/).
 
 Model selection and local spend policy can be represented without provider credentials using
 `famou.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,

@@ -456,9 +456,8 @@ CC Switch 当前 provider 的 API 配置；第 16 节记录了只读接入、显
    冻结输入，成功后检查实际 receipt 与模型身份。只有 private harness 的实际结果可评分。
 4. 本次没有 GLM per-run baseline，仅报告独立分数、用时与可观测用量；不计算匹配模型的
    delta/breakthrough，不用跨 case 聚合分代替单 case 历史结果。
-5. 若失败，先读 Feature 061 的有界诊断，确定可修复原因再安排新 attempt；若成功，再按
-   实际数据决定是否扩展重复 runs 或多轮演化。未来 baseline-free 批量协议应单独做 SDD，
-   不放宽现有 comparative runner 的模型一致性 guard。
+5. 这两个冻结 slot 已完成；按第 20 节汇总失败与分母。未来新的 baseline-free 批量测量
+   必须单独冻结 manifest 和 SDD，不放宽现有 comparative runner 的模型一致性 guard。
 
 ### P1：修复真实 case 适配差距
 
@@ -833,7 +832,7 @@ SHA 均一致，原 GPT baseline 未改动。工具执行已开启，最小环�
 配置与尝试次数，同时保留全部成功/失败；把进程完成、extractor 完成、evaluator validity、
 质量分与用量分别统计。变更 prompt、工具能力或预算时，另立明确的变体和假设，不把“不断
 重跑直到成功”的 best result 代替总体表现。只对确定性复现的缺陷做修复；早落盘、预算提示
-和更长 timeout 目前都只是待验证假设。本轮没有新模型调用。
+和更长 timeout 目前都只是待验证假设。本轮已完成两次预先冻结的新 attempt，结果见第 20 节。
 
 ## 19. 按真实历史数据解释无解（2026-09-09）
 
@@ -851,6 +850,29 @@ Lunar 应有表现；尤其不能为了贴近 E 组而把私有评估器内容�
 本次应记为一个在指定预算内未完成的真实样本，尚无证据表明它是实现缺陷、模型不可用或
 框架劣势。无解不写成成功，也不当成质量零分或代码 bug。结构化复核在本机
 `.lunar/real-eval-glm-5.1-20260908/historical-context.json`。
+
+## 20. 两槽固定预算测量结果（2026-09-09）
+
+为避免“重跑到成功”，新建了独立 campaign
+`.lunar/real-eval-glm-5.1-20260909/`，预先冻结两个 normal slot：同一
+`glm-5.1`、profile、公开 case、prompt/adapter、40 tool steps、900 秒和 200,000 token ceiling。
+2026-09-08 的单次 exploratory pilot 不进入这两个 slot 的分母。两个 slot 并行执行，使用同一
+授权 provider 配置；并发限制已写入 summary，不能把它们解释为完全独立的时序重复。
+
+两个 slot 均在 subject 阶段退出码 2，耗时分别约 310.289 秒和 250.987 秒；Feature 061
+诊断均为 `stage=runtime`、`code=budget_exceeded`，各观察到 14 次模型响应事件和 15 次工具
+结果事件。这个诊断不说明具体是哪次工具、是否为 provider 故障或是否触发 token ceiling。
+两个 slot 都没有 subject receipt、候选文件、harness 目录或评分。
+
+固定分母汇总为：planned 2、terminated 2、process success 0、subject receipt 0、harness
+started 0、scored 0、valid 0、failed 2、unresolved 0；`valid_solution_rate=0/2` 是完成率
+统计，不是质量分 0。overall/quality 的 `n=0` 且值为 null，usage known 为 0，不能声称
+token 消耗或费用为零。结构化汇总为
+`.lunar/real-eval-glm-5.1-20260909/summary.json`。
+
+这批结果仍不能证明 Lunar 框架劣势：样本只有两个、subject 是冷启动、历史 WebAgent
+实验条件不同，而且本次没有进入 evaluator。后续若继续，应先重新冻结新的变体和样本数；
+不能在同一 campaign 中改 prompt、预算、工具后补位，也不能把成功样本挑出来替代失败样本。
 
 ## 18. Feature 061 安全失败诊断（2026-09-08）
 
