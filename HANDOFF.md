@@ -9,10 +9,13 @@
 ## 1. 当前状态
 
 2026-09-09 最新转向：用户要求优先在 WebAgent 稳定高分的 case 上真实测量 Lunar。
-Feature 068 正在准备两例对照：sheet_metal_nesting、china_post_pickup_optimization；来自
+Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_optimization；来自
 平台 WebAgent/AgentServer（OpenCode）的同一 GLM-5.2 normal 实验，均三次有效且均分最高。
 本次明确用 GLM-5.2，每例固定一次，5400 秒 / 200 工具 / 8000000 tokens；两个 case
-已复算匹配官方 1.10.6。独立评分环境补齐钣金 evaluator 所需 pandas；预注册完成后启动。
+已复算匹配官方 1.10.6。独立评分环境补齐钣金 evaluator 所需 pandas。钣金套料完成并
+由 exact harness 判定 validity=1、overall=0.999999、quality=0.999999；邮政揽收优化
+运行至 5400 秒超时，79 model turns/80 tool steps，无 subject receipt/harness/分数。
+固定分母 valid=1/2，完成率 0.5；不同 case 不合并均分。结果、审计和 SHA 见 Feature 068。
 暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
 
 Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
@@ -1100,3 +1103,7 @@ Audit SHA：`1d19768cabe8d9e9cca229f19447894842e80f7cc1c69056425ebb68a5ac1674`�
 完整结果、汇总、审计和派生算术分别位于本机 campaign 的 `results.md`、`summary.json`、
 `audit.json`、`budget-analysis.json`。`summarize.py --check-only` 为只读复核；启动器有
 started marker，不能再执行。未来代码变化不应导致改写本批 manifest 或历史源码锚点。
+已完成：独立预启动审计通过，两个槽各启动一次。钣金案例约 49.1 分钟完成并评分
+0.999999；邮政案例约 90 分钟仍未提交有效回执，最终按预注册超时失败保留。该结果
+说明“WebAgent 高分 case”在 Lunar 充足预算下可以做出至少一个有效解，但不保证每个
+case 都在一次 bounded run 内完成。旧 GLM-5.1 失败 campaign 未改写、不补跑。
