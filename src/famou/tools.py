@@ -66,27 +66,70 @@ class LocalToolRegistry:
             self._schema(
                 "read_file",
                 "Read a UTF-8 text file from the task workspace.",
-                {"path": {"type": "string"}},
+                {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Path to a UTF-8 text file inside the task workspace; prefer a relative "
+                            f"path. Preview uses at most the first {self.max_output_bytes} bytes, "
+                            "plus a truncation marker if larger. UTF-8 decoding can fail at the "
+                            "cutoff. Repeating a call does not retrieve another page."
+                        ),
+                    }
+                },
                 ["path"],
             ),
             self._schema(
                 "write_file",
                 "Write UTF-8 text to a file in the task workspace and return its artifact path.",
-                {"path": {"type": "string"}, "content": {"type": "string"}},
+                {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Destination inside the task workspace; prefer a relative path. "
+                            "Creates missing parent directories and replaces any existing file."
+                        ),
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Complete replacement text, at most 1,000,000 UTF-8 bytes.",
+                    },
+                },
                 ["path", "content"],
             ),
             self._schema(
                 "list_dir",
                 "List entries in a task workspace directory.",
-                {"path": {"type": "string"}},
+                {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Directory inside the task workspace. Omit or use . for its root; "
+                            "lists immediate entries only."
+                        ),
+                    }
+                },
                 [],
             ),
             self._schema(
                 "ask_user",
                 "Pause this session and ask the user or parent Agent for a bounded answer.",
                 {
-                    "question": {"type": "string"},
-                    "options": {"type": "array", "items": {"type": "string"}},
+                    "question": {
+                        "type": "string",
+                        "description": (
+                            "Non-empty question for the user or parent Agent, at most 8,000 "
+                            "UTF-8 bytes. Pauses the session until an answer is supplied."
+                        ),
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional answer choices: at most 10 non-empty strings, each at most "
+                            "200 UTF-8 bytes. Omit for a free-text question."
+                        ),
+                    },
                 },
                 ["question"],
             ),
@@ -98,8 +141,19 @@ class LocalToolRegistry:
                         "recall_memory",
                         "Recall relevant durable notes from this agent's local memory.",
                         {
-                            "query": {"type": "string"},
-                            "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                            "query": {
+                                "type": "string",
+                                "description": (
+                                    "Search words for notes in the active scope and global scope. "
+                                    "An empty string retrieves recent notes."
+                                ),
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 20,
+                                "description": "Maximum notes to return, from 1 through 20; default 8.",
+                            },
                         },
                         ["query"],
                     ),
@@ -107,10 +161,30 @@ class LocalToolRegistry:
                         "remember_memory",
                         "Store a concise fact, preference, decision, or progress note for later runs.",
                         {
-                            "content": {"type": "string"},
-                            "kind": {"type": "string"},
-                            "tags": {"type": "array", "items": {"type": "string"}},
-                            "scope": {"type": "string"},
+                            "content": {
+                                "type": "string",
+                                "description": (
+                                    "Non-empty durable fact, preference, decision, or progress note, "
+                                    "at most 20,000 UTF-8 bytes. Do not include credentials."
+                                ),
+                            },
+                            "kind": {
+                                "type": "string",
+                                "description": "Short note category; defaults to note.",
+                            },
+                            "tags": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Optional string tags used for bounded lexical recall.",
+                            },
+                            "scope": {
+                                "type": "string",
+                                "description": (
+                                    "Omit to use the active scope (the run when attached, otherwise "
+                                    "global). Use global explicitly to share across runs. Other "
+                                    "scopes outside global or the active run are rejected."
+                                ),
+                            },
                         },
                         ["content"],
                     ),
@@ -126,8 +200,14 @@ class LocalToolRegistry:
                             "oneOf": [
                                 {"type": "string"},
                                 {"type": "array", "items": {"type": "string"}},
-                            ]
-                        }
+                            ],
+                            "description": (
+                                "Runs without a shell in the task workspace. Prefer an argv array, "
+                                'e.g. ["python3", "-u", "solve.py"]. A string is split into arguments; '
+                                "pipes, redirects, wildcards and environment variables are not expanded. "
+                                f"Timeout: {self.command_timeout:g} seconds; output is captured until exit."
+                            ),
+                        },
                     },
                     ["command"],
                 )

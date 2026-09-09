@@ -8,10 +8,12 @@ from typing import ClassVar, Self
 
 import pytest
 
+from famou.agent_loop import AgentLoopRuntime
 from famou.algorithm import AlgorithmProblemContract
 from famou.artifacts import ArtifactError, ArtifactStore
 from famou.config import Config
 from famou.controller import LocalController
+from famou.memory import MemoryStore
 from famou.policy import PlanDocument, PlanTask
 from famou.runtime import (
     MockRuntime,
@@ -21,6 +23,7 @@ from famou.runtime import (
     SubprocessRuntime,
 )
 from famou.store import Store
+from famou.tools import LocalToolRegistry
 
 
 def test_mock_runtime_is_deterministic_without_external_environment(tmp_path: Path) -> None:
@@ -113,6 +116,50 @@ def test_openai_compatible_runtime_calls_explicit_endpoint(tmp_path: Path) -> No
         "messages": [{"role": "user", "content": "hello model"}],
         "stream": False,
     }
+
+
+@pytest.mark.parametrize("allow_exec", [False, True])
+@pytest.mark.parametrize("enable_memory", [False, True])
+def test_tool_parameter_descriptions_reach_provider_request(
+    tmp_path: Path, allow_exec: bool, enable_memory: bool
+) -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.response_body = b'{"choices":[{"message":{"content":"model result"}}]}'
+    ModelHandler.delay = 0.0
+    memory = MemoryStore(tmp_path / "memory.db") if enable_memory else None
+    registry = LocalToolRegistry(
+        allow_exec=allow_exec, memory=memory, command_timeout=7.5, max_output_bytes=127
+    )
+    schemas = registry.schemas()
+    with ModelServer(ModelHandler) as server:
+        AgentLoopRuntime(
+            OpenAICompatibleRuntime(server.url, "fixture-model"), tools=registry
+        ).run("inspect", tmp_path / "workspace", timeout=2)
+
+    sent = ModelHandler.observed["body"]["tools"]
+    assert sent == list(schemas)
+    names = {tool["function"]["name"] for tool in sent}
+    assert ("run_command" in names) is allow_exec
+    assert ("remember_memory" in names) is enable_memory
+    assert ("recall_memory" in names) is enable_memory
+    properties_by_name = {}
+    for tool in sent:
+        properties = tool["function"]["parameters"]["properties"]
+        properties_by_name[tool["function"]["name"]] = properties
+        assert properties
+        for value in properties.values():
+            description = value.get("description")
+            assert isinstance(description, str) and description.strip()
+            assert len(description.encode("utf-8")) <= 512
+    if allow_exec:
+        command = properties_by_name["run_command"]["command"]["description"]
+        assert "without a shell" in command
+        assert "7.5 seconds" in command
+    assert "127 bytes" in properties_by_name["read_file"]["path"]["description"]
+    if enable_memory:
+        scope = properties_by_name["remember_memory"]["scope"]["description"]
+        assert "global" in scope and "active run" in scope
+        assert "rejected" in scope
 
 
 def test_openai_compatible_runtime_redacts_http_errors(tmp_path: Path) -> None:

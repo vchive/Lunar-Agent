@@ -8,6 +8,11 @@
 
 ## 1. 当前状态
 
+2026-09-09 最新：已拉取并审阅 WebAgent v2.5/base `e24df25`、memory_card 和
+layered-compaction 等分支。Feature 063 已补齐模型可见的工具参数说明及 HTTP 传输测试；
+没有启动新实评或修改现有 campaign。当前后续方向是预算提示/增量 checkpoint 的独立 SDD，
+来源、移植取舍及验证见第 21 节和 `docs/webagent-v25-review-20260909.md`。
+
 Feature 058 已提交并推送于 `1ae1893`，新增只读预检及公司平台 baseline 来源记录。
 Feature 059 已完成普通求解和 isolated compiler/audit 调用的模型预算、超时边界修复。
 Feature 059 已提交于 `503fe0a`。Feature 060 已提交并推送于 `f4b7ba9`，修复结构化输出验收
@@ -388,7 +393,14 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：结合历史数据解释 GLM 结果，冻结后续测量方案
+### P0：吸收分支审查结果，设计下一项可验证的改进
+
+第 19–20 节的历史解释和固定两槽测量已完成，失败就是该配置下的正式结果。当前按
+第 21 节推进 WebAgent 设计借鉴：Feature 063 已完成工具参数契约，下一项优先设计整轮/
+单命令预算提示和增量 checkpoint；大文件分页、上下文归档按独立问题后续设计。
+不修改原 campaign，不为了得到成功而补位重跑，不依赖新的 WebAgent 数据。
+
+以下保留既有测量所用的冻结来源与执行边界：
 
 官方 publication kit 和 AgentServer normal-mode historical comparator 已就绪，不需要手填
 历史分数：
@@ -523,7 +535,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/061-subject-failure-diagnostics
+specs/063-tool-parameter-contract
 ```
 
 后续新功能必须：
@@ -886,3 +898,30 @@ resume schema 保持兼容。两种 subject prompt 明确整个 `case/` 树不�
 原始 HEAD 上新增 9 项回归全部先失败；最终全仓 634 项测试、Ruff、compileall、build、
 Feature 061 Specify prerequisites、diff 检查通过。独立代码审查无阻塞问题；真实 GLM
 超时也成功生成并采集规范诊断。诊断不保存完整失败用量，计数只代表可观测事件。
+
+## 21. WebAgent 分支审查与 Feature 063（2026-09-09）
+
+已 fetch WebAgent，`famou-v2.5/base` 从 `465af9d` 更新至当天 `e24df25`。盘点全部远端分支，
+深入检查 base、memory_card `865a270`、layered-compaction `5197081` 及演化/角色分支。
+完整结论见 [分支审查文档](docs/webagent-v25-review-20260909.md)。
+
+本轮实际移植为 Feature 063：从 v2.5 的参数说明丢失修复吸收“验证最终模型请求”的原则。
+Lunar 不使用 Zod，只在既有 `LocalToolRegistry` schema 上补齐参数描述：工作区路径、
+有界文件预览、完整覆盖写入、无 shell argv、实际单命令 timeout、用户问题限制、记忆作用域。
+没有改变执行参数、权限、工具开关、评分或恢复 schema。明确 `read_file` 没有分页，且
+旧实现截断 UTF-8 字符时可能解码失败；后续可在分页功能中单独复现和修复。
+
+4 项 provider HTTP 边界回归在旧实现全部失败；实现后 40 项聚焦测试和 638 项全仓测试通过，
+Ruff、compileall、build、Specify 和 diff 检查通过。测试覆盖 command/memory 四种开关组合
+与最终请求中的描述；随后用非默认 timeout/output limit 检查实际配置文案。独立审查未发现
+阻断问题。本轮模型响应来自本地 HTTP fixture，没有真实模型调用或新评分。
+
+下一步优先做整轮/单命令预算及增量 checkpoint 的 SDD。普通 registry 默认 30 秒，但 effect
+subject 实际是最多 300 秒，不能把 WebAgent skill 的固定 10 秒余量照搬。Lunar 命令结果
+当前非流式，也不保证 SIGTERM 宽限。checkpoint 不等于成功 receipt，更不能自动补分。
+上下文压缩、稳定 project memory scope 和输出尾部预览有价值，分别按后续需求设计。
+WebAgent LC 的原生工具配对和迁移后测试尚不充分；result store 注释的不可覆盖也不是其
+普通 writeFile 的文件系统保证。不要照搬这些实现或把分支设计表述成已验证效果。
+
+Feature 063 改变了模型可见上下文，未来实评必须新建并冻结变体、attempt 数和统计口径。
+仍使用用户选定的 `glm-5.1` 和现有 exact harness；已记录的失败不补位、不改成零质量分。
