@@ -8,7 +8,14 @@
 
 ## 1. 当前状态
 
-2026-09-09 最新：Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
+2026-09-09 最新转向：用户要求优先在 WebAgent 稳定高分的 case 上真实测量 Lunar。
+Feature 068 正在准备两例对照：sheet_metal_nesting、china_post_pickup_optimization；来自
+平台 WebAgent/AgentServer（OpenCode）的同一 GLM-5.2 normal 实验，均三次有效且均分最高。
+本次明确用 GLM-5.2，每例固定一次，5400 秒 / 200 工具 / 8000000 tokens；两个 case
+已复算匹配官方 1.10.6。独立评分环境补齐钣金 evaluator 所需 pandas；预注册完成后启动。
+暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
+
+Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
 200000 token ceiling，subject 耗时 488.371 / 522.781 秒，valid=0/2、scored=0，完整失败
 usage 和分数仍为 null。新诊断与独立审计均通过，详见第 25 节；没有补位或回填历史。
 Feature 066 已补齐后续预算失败的具体触发项与有界部分用量证据，保持
@@ -401,7 +408,15 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：围绕已观测的输入预算压力，审查并设计最小上下文改动
+### P0：完成 Feature 068 的高分案例真实测量
+
+用户要求先选 WebAgent 稳定高分 case 验证 Lunar 能力。已只读查询既有平台逐次记录，
+在最新选中的 GLM-5.2 normal 实验中按三次均有效/eligible、均分降序选定钣金套料和
+邮政揽收优化。两例各运行一次 Lunar，预注册更接近历史资源规模的有界预算，全部结果
+保留。详细协议在 `specs/068-high-score-case-measurement/`；不把 AgentServer/OpenCode
+部署身份说成已核实的 v2.5 commit，不把 provider/工具/缓存/未知配置差异说成完全公平复现。
+
+### P1（已暂停）：围绕已观测的输入预算压力，审查并设计最小上下文改动
 
 第 19–20 节的历史解释和固定两槽测量已完成，失败就是该配置下的正式结果。当前按
 第 21–23 节完成 WebAgent 设计借鉴及其实评：Feature 063/064 的两槽新变体仍未完成，
