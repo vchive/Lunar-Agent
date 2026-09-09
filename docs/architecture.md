@@ -415,6 +415,18 @@ The transcript is an ordinary run-relative artifact and is never used as evaluat
 Changing loop settings changes the runtime fingerprint, so detached resume cannot silently combine
 one-shot and tool-capable sessions.
 
+Profiled normal loops now augment a copy of the current system message with invocation-local budget
+facts. The original message list and persisted transcript remain unchanged. Remaining spend is derived
+from accepted usage in `UsageLedger`; command limits use the invocation's monotonic deadline in a
+`ContextVar` scope, recalculated immediately before subprocess launch. This scope restores on failure
+and preserves the existing tool execute signature. No-profile and isolated model context are unchanged.
+
+`write_file` writes to a unique sibling temporary file, flushes/fsyncs it and atomically replaces the
+destination. It preserves existing permission bits (new files use 0600) and reports an artifact only
+after publication. This preserves an incumbent through handled pre-publication failure, not through a
+multi-file transaction or arbitrary power loss. Subject failure still prevents receipt acceptance and
+harness invocation even when candidate files survive. No automatic checkpoint promotion is added.
+
 ## Recovery and migration
 
 SQLite uses WAL mode. The controller recovers an interrupted `running` task as `uncertain`, then

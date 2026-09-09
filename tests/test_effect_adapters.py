@@ -1070,3 +1070,63 @@ def test_all_builtin_adapters_complete_effect_trial_end_to_end(tmp_path: Path) -
         "output_tokens": 4,
         "total_tokens": 24,
     }
+
+
+def test_profile_failure_preserves_candidate_without_receipt_harness_or_score(tmp_path: Path) -> None:
+    public, private = _make_case(tmp_path)
+    suite = _make_suite(public, private)
+    suite_path = _write_json(tmp_path / "suite.json", suite)
+    results_path = _write_json(tmp_path / "results.json", _results())
+    baseline_path = tmp_path / "baseline.json"
+    convert_fm_eval_baseline(
+        results_path, suite_path, baseline_path, experiment_id="fmexp-fixture",
+        requested_model="gpt-5.6-sol", effective_model="openai/gpt-5.6-sol",
+        model_evidence="not_observable",
+    )
+    profile = ModelProfile(
+        "bounded-candidate", "gpt-5.6-sol", timeout_seconds=10, max_steps=4,
+        max_total_tokens=20,
+    )
+    profile_path = _write_json(tmp_path / "profile.json", profile.to_dict())
+    harness_marker = tmp_path / "harness-was-invoked"
+    trial = tmp_path / "trial-preserved-candidate"
+    lunar = Path(sys.executable).parent / "lunar-agent"
+
+    # The HTTP fixture writes candidate files using 12 tokens, then returns a final response
+    # costing another 12. A retained candidate cannot authorize scoring after that overshoot.
+    with EffectModelServer() as server:
+        report = EffectTrialRunner(
+            suite_path, baseline_path, trial,
+            case_sources={"case-a": public},
+            config=EffectTrialConfig(
+                runs_per_case=1, timeout_seconds=10, requested_model="gpt-5.6-sol",
+                subject_model_profile_path=profile_path,
+                subject_command=(
+                    str(lunar), "effect-subject", "--endpoint", server.url,
+                    "--model", "gpt-5.6-sol", "--max-steps", "4",
+                ),
+                harness_command=(
+                    str(Path(sys.executable).resolve()), "-c",
+                    "import sys; from pathlib import Path; Path(sys.argv[1]).write_text('unexpected')",
+                    str(harness_marker),
+                ),
+            ),
+        ).run().to_dict()
+
+    assert EffectModelHandler.requests == 2
+    case = report["cases"][0]
+    run = case["runs"][0]
+    attempt = trial / run["attempt"]
+    assert json.loads((attempt / "subject" / "solution.json").read_text()) == {"answer": 42}
+    assert (attempt / "subject" / "_agent_summary.md").read_text() == "Final: solution.json"
+    assert not (attempt / "subject" / "receipt.json").exists()
+    assert not (attempt / "harness").exists()
+    assert not harness_marker.exists()
+    assert run["status"] == "failed" and run["ready"] is False
+    assert case["lunar_best"] is None
+    for field in ("validity_score", "overall_score", "quality_score", "usage", "cost_micros"):
+        assert run[field] is None
+    diagnostic = json.loads((attempt / "diagnostics" / "subject-failure.json").read_text())
+    assert diagnostic["stage"] == "runtime"
+    assert diagnostic["code"] == "budget_exceeded"
+    assert "score" not in json.dumps(diagnostic)

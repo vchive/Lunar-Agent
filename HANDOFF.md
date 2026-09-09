@@ -8,10 +8,10 @@
 
 ## 1. 当前状态
 
-2026-09-09 最新：已拉取并审阅 WebAgent v2.5/base `e24df25`、memory_card 和
-layered-compaction 等分支。Feature 063 已补齐模型可见的工具参数说明及 HTTP 传输测试；
-没有启动新实评或修改现有 campaign。当前后续方向是预算提示/增量 checkpoint 的独立 SDD，
-来源、移植取舍及验证见第 21 节和 `docs/webagent-v25-review-20260909.md`。
+2026-09-09 最新：Feature 064 已完成 profile 预算提示、命令剩余时间收紧、write_file 原子
+替换和超时单流输出修复，667 项测试通过，详见第 22 节。没有启动新实评或修改现有 campaign。
+此前 Feature 063 已提交并推送于 `fef89a8`，吸收 WebAgent v2.5/base `e24df25` 的工具参数
+契约思路；分支审查见第 21 节和 `docs/webagent-v25-review-20260909.md`。
 
 Feature 058 已提交并推送于 `1ae1893`，新增只读预检及公司平台 baseline 来源记录。
 Feature 059 已完成普通求解和 isolated compiler/audit 调用的模型预算、超时边界修复。
@@ -393,12 +393,15 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：吸收分支审查结果，设计下一项可验证的改进
+### P0：冻结新变体，验证预算提示与候选保存的实际效果
 
 第 19–20 节的历史解释和固定两槽测量已完成，失败就是该配置下的正式结果。当前按
-第 21 节推进 WebAgent 设计借鉴：Feature 063 已完成工具参数契约，下一项优先设计整轮/
-单命令预算提示和增量 checkpoint；大文件分页、上下文归档按独立问题后续设计。
-不修改原 campaign，不为了得到成功而补位重跑，不依赖新的 WebAgent 数据。
+第 21–22 节推进 WebAgent 设计借鉴：Feature 063/064 已完成工具参数说明、profile 预算提示、
+命令时间收紧和单文件候选原子保存。下一步先冻结一个包含这些改动的新变体及固定 attempts，
+继续使用 `glm-5.1` 与已冻结 harness 进行独立测量；不能宣称单个改动的因果效果。大文件
+分页、UTF-8 截断和上下文归档留作后续独立问题，不作为运行新实评的前置条件。
+不修改原 campaign，不为了得到成功而补位重跑，不依赖新的 WebAgent 数据。当前原失败的
+具体预算原因仍未知；不要因为保留了文件就把 subject 失败标成成功。
 
 以下保留既有测量所用的冻结来源与执行边界：
 
@@ -535,7 +538,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/063-tool-parameter-contract
+specs/064-budget-aware-candidate-preservation
 ```
 
 后续新功能必须：
@@ -925,3 +928,35 @@ WebAgent LC 的原生工具配对和迁移后测试尚不充分；result store �
 
 Feature 063 改变了模型可见上下文，未来实评必须新建并冻结变体、attempt 数和统计口径。
 仍使用用户选定的 `glm-5.1` 和现有 exact harness；已记录的失败不补位、不改成零质量分。
+
+## 22. Feature 064 预算感知与候选保存（2026-09-09）
+
+`AgentLoopRuntime.run` 使用 model profile 时，每次模型请求会在复制的 system 消息里生成
+当前预算提示：本轮剩余秒数、可用工具调用数、已配置的累计 token/cost 余量，以及当时可用
+的单命令上限。未配置的花费上限和未开放的命令分别为 null，不编造缺失 usage 或价格。
+提示不追加进历史、transcript 或 memory；isolated 和无 profile 的模型上下文保持原样。
+
+命令执行通过 context-local deadline scope 使用本轮绝对 monotonic 截止时间，每次启动前
+重新计算 `min(command_timeout, remaining)`；嵌套只能收紧，异常退出恢复，不改 registry
+本身的固定 timeout，保留旧 execute 三参数接口。全局调用仍有原来的前后 profile 检查。
+这属于协作式 timeout，不保证进程树取消、SIGTERM 宽限、流式输出或精确墙钟强制中止。
+
+共同的 `write_file` 改为同目录唯一临时文件 → 完整写入/flush/fsync → 原子替换。失败时
+保留旧候选且不报告 artifact，尽力清理临时文件；强制杀进程可能留下未登记临时文件。
+已有文件保留权限，新文件为 0600；原子替换只改变该路径，其他硬链接仍指向旧内容。
+这不是自动多文件 checkpoint，生成的长脚本仍须主动实现自己的增量保存。
+
+同时本地确定性复现并修复 `_run_command` 的超时输出类型 bug：TimeoutExpired 中只有
+stdout 或 stderr 为 bytes 时，原本与空字符串拼接产生 TypeError，丢掉已有输出；现在
+先分别解码再组合，仍返回失败工具结果。没有扩张 Feature 061 sidecar 保存内容，既有
+字符计数截断器、read_file 分页/UTF-8 截断问题本轮没有修改。
+
+失败测试先验证 12 项预算/命令测试中 10 失败、2 通过；首批 8 项原子写测试中 5 失败、
+3 通过；2 项普通 profile HTTP 测试在提示缺失时失败，4 项兼容用例通过。另补 2 项部分
+写入中断测试及 1 项端到端失败候选测试，共新增 29 项。170 项聚焦测试及全仓 667 项测试
+通过，Ruff、compileall、build、Specify 和 diff 检查通过；独立审查无阻断问题。
+
+端到端 fixture 在第二次模型响应累计 token 超限前已保存候选和摘要，验证文件保留、
+subject receipt 缺失、harness 未调用、逻辑 run 失败、分数/usage 为 null，诊断仍为
+runtime/budget_exceeded。所有模型返回来自本机 HTTP fixture，没有外部模型调用、WebAgent
+执行、公司平台查询或新真实评分。2026-09-08/09 的 campaign 和统计分母保持不变。

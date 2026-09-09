@@ -7,9 +7,17 @@ is resolved and checked before it is performed; command execution is opt-in and 
 from __future__ import annotations
 
 import json
+import math
+import os
 import shlex
 import sqlite3
+import stat
 import subprocess
+import tempfile
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,6 +64,24 @@ class LocalToolRegistry:
         self.command_environment = (
             None if command_environment is None else dict(command_environment)
         )
+        self._execution_deadline: ContextVar[float | None] = ContextVar(
+            "lunar_tool_execution_deadline", default=None
+        )
+
+    @contextmanager
+    def execution_deadline(self, deadline: float) -> Iterator[None]:
+        """Bind an internal invocation deadline without mutating registry configuration."""
+        if (
+            isinstance(deadline, bool) or not isinstance(deadline, (int, float))
+            or not math.isfinite(deadline)
+        ):
+            raise ValueError("execution deadline must be finite")
+        current = self._execution_deadline.get()
+        token = self._execution_deadline.set(min(current, deadline) if current is not None else deadline)
+        try:
+            yield
+        finally:
+            self._execution_deadline.reset(token)
 
     def set_memory_scope(self, scope: str) -> None:
         """Set the default scope used by memory tools for the active task."""
@@ -87,7 +113,8 @@ class LocalToolRegistry:
                         "type": "string",
                         "description": (
                             "Destination inside the task workspace; prefer a relative path. "
-                            "Creates missing parent directories and replaces any existing file."
+                            "Creates missing parent directories and atomically replaces one file "
+                            "after writing complete content."
                         ),
                     },
                     "content": {
@@ -205,7 +232,8 @@ class LocalToolRegistry:
                                 "Runs without a shell in the task workspace. Prefer an argv array, "
                                 'e.g. ["python3", "-u", "solve.py"]. A string is split into arguments; '
                                 "pipes, redirects, wildcards and environment variables are not expanded. "
-                                f"Timeout: {self.command_timeout:g} seconds; output is captured until exit."
+                                f"Timeout: at most {self.command_timeout:g} seconds, further limited "
+                                "by a profiled invocation's remaining time; output is captured until exit."
                             ),
                         },
                     },
@@ -282,10 +310,31 @@ class LocalToolRegistry:
         content = arguments.get("content")
         if not isinstance(content, str):
             raise ToolError("content must be a string")
-        if len(content.encode("utf-8")) > 1_000_000:
+        encoded = content.encode("utf-8")
+        if len(encoded) > 1_000_000:
             raise ToolError("content exceeds 1 MiB")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        mode = stat.S_IMODE(path.stat().st_mode) if path.is_file() else None
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=path.parent, prefix=".lunar-write-", suffix=".tmp", delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(encoded)
+                stream.flush()
+                if mode is not None:
+                    temporary.chmod(mode)
+                os.fsync(stream.fileno())
+            # Publish only complete content; a failed write must leave the incumbent intact.
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    # Cleanup failure must not obscure the original publication failure.
+                    pass
         relative = path.relative_to(workspace.resolve()).as_posix()
         return ToolResult(output=f"wrote {relative}", artifacts=(relative,))
 
@@ -387,6 +436,13 @@ class LocalToolRegistry:
             command = shlex.split(command)
         if not isinstance(command, list) or not command or any(not isinstance(item, str) for item in command):
             raise ToolError("command must be a non-empty string or string array")
+        timeout = self.command_timeout
+        deadline = self._execution_deadline.get()
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ToolError("command deadline expired before launch")
+            timeout = min(timeout, remaining)
         try:
             completed = subprocess.run(
                 command,
@@ -395,13 +451,17 @@ class LocalToolRegistry:
                 shell=False,
                 text=True,
                 capture_output=True,
-                timeout=self.command_timeout,
+                timeout=timeout,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            output = self._bounded_text((exc.stdout or "") + (exc.stderr or ""))
+            streams = [
+                part.decode("utf-8", errors="replace") if isinstance(part, bytes) else part or ""
+                for part in (exc.stdout, exc.stderr)
+            ]
+            output = self._bounded_text("".join(streams))
             return ToolResult(
-                output=f"command timed out after {self.command_timeout}s\n{output}",
+                output=f"command timed out after {timeout:g}s\n{output}",
                 success=False,
             )
         stdout = self._bounded_text(completed.stdout)

@@ -15,6 +15,7 @@ from famou.config import Config
 from famou.controller import LocalController
 from famou.memory import MemoryStore
 from famou.policy import PlanDocument, PlanTask
+from famou.profiles import ModelProfile
 from famou.runtime import (
     MockRuntime,
     ModelTurn,
@@ -160,6 +161,63 @@ def test_tool_parameter_descriptions_reach_provider_request(
         scope = properties_by_name["remember_memory"]["scope"]["description"]
         assert "global" in scope and "active run" in scope
         assert "rejected" in scope
+
+
+@pytest.mark.parametrize("mode,with_profile", [("run", True), ("run", False), ("run_isolated", True)])
+@pytest.mark.parametrize("allow_exec", [False, True])
+def test_current_profile_budget_reaches_http_request_only_for_normal_profiled_loop(
+    tmp_path: Path, mode: str, with_profile: bool, allow_exec: bool,
+) -> None:
+    ModelHandler.response_status = 200
+    ModelHandler.response_body = json.dumps({
+        "choices": [{"message": {"content": "model result"}}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+    }).encode()
+    ModelHandler.delay = 0.0
+    profile = ModelProfile(
+        "fixture-budget", "fixture-model", timeout_seconds=5, max_steps=8,
+        max_total_tokens=100, max_cost_micros=200,
+        input_cost_per_1k_micros=1_000, output_cost_per_1k_micros=1_000,
+    ) if with_profile else None
+    registry = LocalToolRegistry(allow_exec=allow_exec, command_timeout=7.5)
+    secret = "HTTP-BUDGET-SECRET-SENTINEL"
+    with ModelServer(ModelHandler) as server:
+        runtime = AgentLoopRuntime(
+            OpenAICompatibleRuntime(server.url, "fixture-model", secret),
+            tools=registry, profile=profile,
+        )
+        result = getattr(runtime, mode)("inspect", tmp_path / "workspace", timeout=2)
+
+    assert result.text == "model result"
+    messages = ModelHandler.observed["body"]["messages"]
+    assert [message["role"] for message in messages] == ["system", "user"]
+    assert messages[1] == {"role": "user", "content": "inspect"}
+    assert secret not in json.dumps(ModelHandler.observed["body"])
+    system = messages[0]["content"]
+    opening, closing = "<lunar_runtime_budget>\n", "\n</lunar_runtime_budget>"
+    if mode != "run" or not with_profile:
+        assert "lunar_runtime_budget" not in system
+        return
+
+    assert system.count(opening) == system.count(closing) == 1
+    snapshot = json.loads(system.split(opening, 1)[1].split(closing, 1)[0])
+    fields = {
+        "remaining_seconds", "tool_steps_remaining", "command_timeout_seconds",
+        "tokens_remaining", "cost_micros_remaining",
+    }
+    assert fields <= snapshot.keys()
+    assert all(
+        snapshot[key] is None or type(snapshot[key]) in {int, float}
+        for key in fields
+    )
+    assert 0 < snapshot["remaining_seconds"] <= 2
+    assert snapshot["tool_steps_remaining"] == 8
+    assert snapshot["tokens_remaining"] == 100
+    assert snapshot["cost_micros_remaining"] == 200
+    if allow_exec:
+        assert 0 < snapshot["command_timeout_seconds"] <= snapshot["remaining_seconds"]
+    else:
+        assert snapshot["command_timeout_seconds"] is None
 
 
 def test_openai_compatible_runtime_redacts_http_errors(tmp_path: Path) -> None:

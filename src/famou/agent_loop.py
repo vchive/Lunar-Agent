@@ -11,6 +11,7 @@ import math
 import re
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 
 from .budget import BudgetExceeded
@@ -147,8 +148,9 @@ class AgentLoopRuntime:
         usages: list[dict[str, int] | None] = []
         while True:
             remaining = self._remaining_timeout(started, effective_timeout)
+            request_messages = self._budget_messages(messages, remaining, tool_steps, ledger)
             try:
-                turn = self.model.complete(messages, self.tools.schemas(), remaining)
+                turn = self.model.complete(request_messages, self.tools.schemas(), remaining)
             except AgentInputRequired:
                 raise
             except Exception as exc:
@@ -203,7 +205,13 @@ class AgentLoopRuntime:
                 if self.profile is not None:
                     self._remaining_timeout(started, effective_timeout)
                 try:
-                    result = self.tools.execute(call.name, call.arguments, workspace)
+                    deadline_scope = (
+                        self.tools.execution_deadline(started + effective_timeout)
+                        if self.profile is not None and effective_timeout is not None
+                        else nullcontext()
+                    )
+                    with deadline_scope:
+                        result = self.tools.execute(call.name, call.arguments, workspace)
                 except Exception as exc:
                     self._emit(
                         "agent_runtime_failure",
@@ -237,6 +245,56 @@ class AgentLoopRuntime:
                     raise AgentInputRequired(
                         result.input_question or result.output[:8_000], result.input_options
                     )
+
+    def _budget_messages(
+        self, messages: list[dict[str, object]], remaining: float | None,
+        tool_steps: int, ledger: UsageLedger | None,
+    ) -> list[dict[str, object]]:
+        """Refresh advisory budget facts on a request copy, never on replayable history."""
+        if ledger is None:
+            return messages
+        profile = ledger.profile
+        usage = ledger.snapshot
+        command_timeout = (
+            min(self.tools.command_timeout, remaining)
+            if self.tools.allow_exec and remaining is not None else None
+        )
+        snapshot = {
+            "schema_version": "1",
+            "remaining_seconds": math.floor(remaining * 1000) / 1000 if remaining is not None else None,
+            "tool_steps_remaining": max(0, self.max_steps - tool_steps),
+            "command_timeout_seconds": (
+                math.floor(command_timeout * 1000) / 1000 if command_timeout is not None else None
+            ),
+            "tokens_remaining": (
+                profile.max_total_tokens - usage.total_tokens
+                if profile.max_total_tokens is not None else None
+            ),
+            "cost_micros_remaining": (
+                profile.max_cost_micros - usage.cost_micros
+                if profile.max_cost_micros is not None and usage.cost_micros is not None else None
+            ),
+        }
+        guidance = (
+            "\n\n<lunar_runtime_budget>\n" + json.dumps(snapshot, sort_keys=True)
+            + "\n</lunar_runtime_budget>\n"
+            "Advisory snapshot before this request: model and tool time reduces these windows. "
+            "Spend allowances count accepted prior responses; this request also consumes them. "
+            "Null spend means no configured ceiling; null command time means execution is unavailable. "
+            "Tool steps count individual calls, not model turns. If solving for files, save a complete "
+            "candidate before expensive refinement and preserve it while improving. write_file publishes "
+            "one complete replacement atomically. Generated scripts must save their own incremental "
+            "outputs atomically (temporary file then replace), profile expensive work, and use an internal "
+            "soft deadline below the remaining command window, leaving time to save and finish. "
+            "No complete candidate may exist; do not present partial/empty output as a valid solution. "
+            "Saved files still require independent verification."
+        )
+        copied = list(messages)
+        for index, message in enumerate(copied):
+            if message.get("role") == "system":
+                copied[index] = {**message, "content": str(message.get("content") or "") + guidance}
+                break
+        return copied
 
     def run_isolated(
         self, prompt: str, workspace: Path, timeout: float | None = None

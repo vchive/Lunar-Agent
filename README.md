@@ -1000,6 +1000,17 @@ lunar-agent run "Continue the migration" \
 Session history is separate from durable memory. It is opt-in and retains only recent messages; use
 `remember_memory` for concise facts that should outlive a session.
 
+For loops using a model profile, each request includes a fresh advisory snapshot of remaining time,
+tool calls, and configured cumulative token/cost allowances. It encourages preserving a complete
+candidate before expensive refinement. This snapshot is not saved in session history, and isolated
+protocol calls do not receive it. Command timeouts are tightened to the invocation's remaining time;
+scripts should stop earlier to leave time to save their output. Cancellation remains cooperative.
+
+The `write_file` tool publishes a complete single-file replacement atomically. Failed writes preserve
+the previous file; existing permissions are retained and new files use owner-only permissions. Scripts
+launched with `run_command` must implement their own incremental saving. Files left by a failed run
+remain unverified: they do not create a completed receipt or authorize scoring.
+
 ### Optional durable memory
 
 Memory is explicitly opt-in because recalled local notes may be sent to the configured model
