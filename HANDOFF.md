@@ -1,6 +1,6 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-08
+更新时间：2026-09-09
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
@@ -388,7 +388,7 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：复用冻结 suite/harness，完成 GLM 的真实评测
+### P0：结合历史数据解释 GLM 结果，冻结后续测量方案
 
 官方 publication kit 和 AgentServer normal-mode historical comparator 已就绪，不需要手填
 历史分数：
@@ -827,9 +827,30 @@ SHA 均一致，原 GPT baseline 未改动。工具执行已开启，最小环�
 模型/工具正文，因此不能重建前 13 次工具操作。结果与本地核验分别在 `results.md`、
 `report.json`、`postmortem-checks.json`；`started.json` 拒绝对已启动目录重复执行。
 
-当前目标是先让 GLM 在明确预算内交付首个可评分候选，再做重复 runs 与多轮演化。
-下一轮应根据本次超时制定候选尽早落盘的求解策略与时间预算，开新 attempt，保留本次
-证据；不要直接盲目重跑，也不要把新功能完成或模型连接成功当成求解效果提升。
+2026-09-09 用户纠正了此前“先取得正常解”的优先级：未产生正常解可能是合理的测量结果，
+应结合已有真实评测数据判断。当前目标改为在明确、冻结的预算下测量 Lunar 的完成率、
+有效解比例和质量，允许失败成为正式样本；不以取得成功为停止条件。下一批应预先冻结
+配置与尝试次数，同时保留全部成功/失败；把进程完成、extractor 完成、evaluator validity、
+质量分与用量分别统计。变更 prompt、工具能力或预算时，另立明确的变体和假设，不把“不断
+重跑直到成功”的 best result 代替总体表现。只对确定性复现的缺陷做修复；早落盘、预算提示
+和更长 timeout 目前都只是待验证假设。本轮没有新模型调用。
+
+## 19. 按真实历史数据解释无解（2026-09-09）
+
+重新复核已有离线报告 `qx9kRYpa6zTQmP`，其中 `webagent loop / glm-5.1` 的 C 组有效解
+比例为 57.9%，E 组为 93.0%；表中平均分分别为 0.478、0.854。这个数据证明 WebAgent
+也并非始终取得有效解。报告没有提供该指标的超时、运行错误或格式错误细分，不能把有效解
+比例的补数称作超时率，也不能推断当前 `supply_chain_inventory` 的失败概率或历史结果。
+
+两组均为 20 case、每组 3 次取平均、12 小时演化，并从 agent build 产物开始；E 组还在
+演化期间使用真值评估器。单解“评估”上限为 10800 秒，不等同于 subject 求解预算。
+Lunar 本次是从公开输入冷启动的 normal subject，整轮预算为 900 秒，harness 尚未运行。
+因此既不能拿 57.9%/93.0% 作为当前单 case 的匹配成功率，也不能通过简单时长比例推定
+Lunar 应有表现；尤其不能为了贴近 E 组而把私有评估器内容交给 subject。
+
+本次应记为一个在指定预算内未完成的真实样本，尚无证据表明它是实现缺陷、模型不可用或
+框架劣势。无解不写成成功，也不当成质量零分或代码 bug。结构化复核在本机
+`.lunar/real-eval-glm-5.1-20260908/historical-context.json`。
 
 ## 18. Feature 061 安全失败诊断（2026-09-08）
 
