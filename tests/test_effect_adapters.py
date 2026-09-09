@@ -1127,6 +1127,24 @@ def test_profile_failure_preserves_candidate_without_receipt_harness_or_score(tm
     for field in ("validity_score", "overall_score", "quality_score", "usage", "cost_micros"):
         assert run[field] is None
     diagnostic = json.loads((attempt / "diagnostics" / "subject-failure.json").read_text())
+    assert diagnostic["schema_version"] == "2"
     assert diagnostic["stage"] == "runtime"
     assert diagnostic["code"] == "budget_exceeded"
+    assert diagnostic["budget"] == {
+        "limit": "max_total_tokens",
+        "state": "exceeded",
+        "maximum": 20,
+        "accepted_usage": {
+            "input_tokens": 10, "output_tokens": 2, "total_tokens": 12,
+            "cost_micros": None, "rounds": 1,
+        },
+        "observed_usage": {
+            "input_tokens": 20, "output_tokens": 4, "total_tokens": 24,
+            "cost_micros": None, "rounds": 2,
+        },
+        "trigger_recorded": False,
+        "usage_completeness": "partial",
+    }
+    # Counters remain emitted events; the rejected response is only in observed_usage.
+    assert diagnostic["model_turns"] == 1 and diagnostic["tool_steps"] == 2
     assert "score" not in json.dumps(diagnostic)

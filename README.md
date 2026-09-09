@@ -407,6 +407,16 @@ authorize a score, successful receipt, or resume. The entire public `case/` tree
 solver scripts and outputs belong elsewhere in the subject workspace. See
 [Feature 061](specs/061-subject-failure-diagnostics/spec.md).
 
+Typed profile budget failures use diagnostic version 2, with the token/cost limit, configured
+maximum, exceeded/exhausted state, and separate accepted and observed usage snapshots. An exceeded
+response appears only in observed usage; an exact-ceiling tool response is already accepted but
+cannot execute tools. Both snapshots describe partial reported usage, never complete failed-run
+consumption or provider billing; cost uses the configured profile prices. Numbers outside the
+diagnostic cap (10^15, or 10^6 rounds) become null at the maximum/snapshot boundary, without changing
+budget enforcement. Version 1 remains readable and is still used for other failures. Historical
+diagnostics, successful receipts and report usage are not backfilled. See
+[Feature 066](specs/066-budget-failure-evidence/spec.md).
+
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded
 output. Its exact source is visible to compiled-evaluator solvers as read-only scoring guidance,

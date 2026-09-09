@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from .budget import BudgetExceeded
 from .profiles import ModelProfile
@@ -27,6 +28,38 @@ class UsageSnapshot:
             "cost_micros": self.cost_micros,
             "rounds": self.rounds,
         }
+
+
+@dataclass(frozen=True)
+class BudgetFailureEvidence:
+    """Failure-local reported usage; never a claim of complete provider consumption.
+
+    ``accepted_usage`` is the ledger at failure. ``observed_usage`` additionally includes a
+    rejected triggering response, or equals the accepted ledger when that response exhausted
+    the ceiling exactly. Diagnostic projection applies its own bounds without changing these
+    execution values.
+    """
+
+    limit: Literal["max_total_tokens", "max_cost_micros"]
+    state: Literal["exceeded", "exhausted"]
+    maximum: int
+    accepted_usage: UsageSnapshot
+    observed_usage: UsageSnapshot
+    trigger_recorded: bool
+
+
+class ProfileBudgetExceeded(BudgetExceeded):
+    """A profile ceiling rejection with immutable accepted and observed usage."""
+
+    def __init__(self, evidence: BudgetFailureEvidence) -> None:
+        self.evidence = evidence
+        actual = (
+            evidence.observed_usage.total_tokens
+            if evidence.limit == "max_total_tokens" else evidence.observed_usage.cost_micros
+        )
+        if actual is None:
+            raise ValueError("profile budget failure requires an observed limit value")
+        super().__init__(evidence.limit, actual, evidence.maximum)
 
 
 class UsageLedger:
@@ -54,8 +87,8 @@ class UsageLedger:
         """Record one normalized ``input_tokens/output_tokens/total_tokens`` sample.
 
         The counters are unchanged when a sample is malformed or would exceed a configured
-        ceiling.  This makes it safe for callers to turn a ``BudgetExceeded`` into a bounded
-        round failure without accidentally charging the rejected sample.
+        ceiling. A budget rejection reports the observed response separately from the accepted
+        ledger; rejection does not imply that the provider did not charge for that response.
         """
 
         if not isinstance(usage, Mapping):
@@ -74,15 +107,23 @@ class UsageLedger:
         new_input = self._input_tokens + values["input_tokens"]
         new_output = self._output_tokens + values["output_tokens"]
         new_total = new_input + new_output
-        if self.profile.max_total_tokens is not None and new_total > self.profile.max_total_tokens:
-            raise BudgetExceeded("max_total_tokens", new_total, self.profile.max_total_tokens)
         new_cost = self._cost(new_input, new_output)
+        accepted = self.snapshot
+        observed = UsageSnapshot(new_input, new_output, new_total, new_cost, self._rounds + 1)
+        if self.profile.max_total_tokens is not None and new_total > self.profile.max_total_tokens:
+            raise ProfileBudgetExceeded(BudgetFailureEvidence(
+                limit="max_total_tokens", state="exceeded", maximum=self.profile.max_total_tokens,
+                accepted_usage=accepted, observed_usage=observed, trigger_recorded=False,
+            ))
         if (
             self.profile.max_cost_micros is not None
             and new_cost is not None
             and new_cost > self.profile.max_cost_micros
         ):
-            raise BudgetExceeded("max_cost_micros", new_cost, self.profile.max_cost_micros)
+            raise ProfileBudgetExceeded(BudgetFailureEvidence(
+                limit="max_cost_micros", state="exceeded", maximum=self.profile.max_cost_micros,
+                accepted_usage=accepted, observed_usage=observed, trigger_recorded=False,
+            ))
         self._input_tokens, self._output_tokens = new_input, new_output
         self._rounds += 1
         return self.snapshot
@@ -100,4 +141,4 @@ class UsageLedger:
         )
 
 
-__all__ = ["UsageLedger", "UsageSnapshot"]
+__all__ = ["BudgetFailureEvidence", "ProfileBudgetExceeded", "UsageLedger", "UsageSnapshot"]

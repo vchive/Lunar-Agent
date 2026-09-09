@@ -8,7 +8,10 @@
 
 ## 1. 当前状态
 
-2026-09-09 最新：Feature 065 已完成 Feature 063/064 新变体的两槽真实 GLM 实评。两次均在
+2026-09-09 最新：Feature 066 已补齐后续预算失败的具体触发项与有界部分用量证据，保持
+旧版诊断、成功回执和评分/恢复边界兼容；全仓 726 项测试及独立审查通过，详见第 24 节。
+本轮没有真实模型调用，没有回填旧记录。此前 Feature 065 已完成 Feature 063/064 新变体
+的两槽真实 GLM 实评。两次均在
 subject 阶段 runtime/budget_exceeded，无产物、receipt 或评分；valid=0/2，评分和未知
 usage 为 null。已独立核验并保留负结果，详见第 23 节。Feature 064 代码为 `6189e50`，
 profile 预算提示、命令剩余时间收紧、write_file 原子替换和超时输出修复已通过 667 项测试。
@@ -395,16 +398,18 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：保留新变体负结果，补足可用于决策的预算诊断
+### P0：用新的独立测量确认预算触发项，再决定求解变体
 
 第 19–20 节的历史解释和固定两槽测量已完成，失败就是该配置下的正式结果。当前按
 第 21–23 节完成 WebAgent 设计借鉴及其实评：Feature 063/064 的两槽新变体仍未完成，
-没有观察到本批完成率改善；不能宣称其中某个改动的因果效果。继续时优先以小型 SDD
-补充预算失败的明确触发项与有界数值证据（不保存原始模型/工具正文，也不将部分账本
-冒充完整消耗），再决定是否有依据做下一项求解变体。大文件分页、UTF-8 截断和上下文
-归档仍是独立候选，不能当作本次失败的已证实原因。
+没有观察到本批完成率改善；不能宣称其中某个改动的因果效果。Feature 066 已用 SDD
+补齐预算失败的明确触发项与有界部分用量证据（第 24 节），但还没有携带新版诊断的真实
+观测。继续实评时先预注册独立 campaign、固定尝试数并冻结新源码，保持 `glm-5.1` 及原
+预算以观测触发项，再决定是否有依据调整预算或求解策略。诊断代码不改变 prompt/工具
+能力，不预设失败一定是 token ceiling。大文件分页、UTF-8 截断和上下文归档仍是独立
+候选，不能当作本次失败的已证实原因。
 不追加本 campaign 的第三次尝试，不为了成功而补位，不修改历史结果，不再运行 WebAgent
-或索要数据。当前具体预算触发项和失败完整用量仍未被 sidecar 记录。
+或索要数据。历史失败的具体预算触发项仍未知，完整失败消耗仍不能由部分观测推定。
 
 以下保留既有测量所用的冻结来源与执行边界：
 
@@ -999,3 +1004,32 @@ summary SHA：`7dec7eef0b97bba8547c1ef44535259f648439a4a4884f9991311d22f5db9c9a`
 本批没有观察到新工具说明和预算提示改善完成率。这只有两个并发样本，包含多个改动，
 且没有进入 evaluator，不能推出整体框架劣势、某项改动无效或已定位 provider 故障。
 前批 0/2 与本批 0/2 是两个独立配置的分母，不合并、不挑成功、不重跑到成功为止。
+
+## 24. Feature 066：有界预算失败证据（2026-09-09）
+
+UsageLedger 在 token/cost 超限前生成不可变 accepted/observed 快照，经专用异常传到
+AgentLoop 和 subject observer。超限仍拒绝入账，observed 包含触发响应；恰好达到上限
+的工具响应已入账但停止执行，两个快照相同。最终文本恰好上限仍允许成功。原先 token
+优先顺序、累计费用分方向向上取整、账本提交时机和模型/工具事件计数均保持。
+
+仅类型化预算失败发 sidecar v2：保留原 v1 字段，新增严格 budget 对象，记录 limit、state、
+maximum、accepted_usage、observed_usage、trigger_recorded 和固定 usage_completeness=partial。
+每个快照含 input/output/total tokens、可选 profile cost_micros 与 rounds。数值上限为
+10^15，rounds 为 10^6；无法表示的上限或整份快照为 null，不裁剪成伪精确数字，也不限制
+运行时原有整数算术。费用是配置价格的推算，不是 provider 账单；部分响应观测不是完整
+失败用量。缺失/无效 usage 不生成预算数值，异常文本与任意附加属性不能冒充类型化证据。
+
+v1 继续严格读取、原样采集，其他失败继续使用 v1。v2 校验精确字段、整数范围、累计关系、
+触发状态及上限关系，沿用 4096 bytes、安全排他发布和执行前身份绑定。非权威诊断不改变
+process 失败、receipt、harness、score、resume 或 promotion。normal 本机 HTTP 回归验证
+候选保留但没有 receipt/harness/评分，完整 usage/cost 仍为 null；deep 验证第二轮失败
+仍保留前轮分数，恢复使用新 attempt，旧诊断字节不变。
+
+失败先行：首批诊断测试 10 failed / 36 passed，账本新增测试 5 failed / 11 passed，
+集成目标 2 failed / 1 passed。最后共新增 59 项用例，全仓 726 passed（30.35 秒），
+Ruff、compileall、build、Feature 066 Specify 和 diff 检查通过；独立审查无阻断问题，
+另跑相关 229 项测试通过。规格、方案和验收见 `specs/066-budget-failure-evidence/`。
+
+本轮没有真实模型调用、WebAgent 执行、公司平台查询或历史结果回填。没有新的测量结论，
+Feature 065 的 0/2 与 null 分数仍原样保留。旧 campaign 的源码 SHA 审计针对其冻结版本，
+当前实现已经变化，不能为通过旧脚本的当前源码检查而改写 manifest 或历史 summary。

@@ -13,11 +13,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError
 
-from .agent_loop import AgentInputRequired
+from .agent_loop import AgentInputRequired, ProfileBudgetFailure
+from .model_profile import BudgetFailureEvidence, UsageSnapshot
 from .runtime import RuntimeExecutionError
 
 MAX_DIAGNOSTIC_BYTES = 4096
 MAX_COUNTER = 1_000_000
+MAX_BUDGET_VALUE = 10**15
 _STAGES = {"runtime", "model", "tool", "public_projection", "receipt"}
 _CODES = {
     "runtime_failed", "model_failed", "model_http_failed", "tool_failed", "step_limit",
@@ -29,18 +31,123 @@ _FIELDS = {
     "schema_version", "kind", "mode", "request_sha256", "run_index", "round_index",
     "stage", "code", "model_turns", "tool_steps", "http_status",
 }
+_BUDGET_FIELDS = {
+    "limit", "state", "maximum", "accepted_usage", "observed_usage",
+    "trigger_recorded", "usage_completeness",
+}
+_USAGE_FIELDS = {"input_tokens", "output_tokens", "total_tokens", "cost_micros", "rounds"}
 
 
 def _integer(value: object, minimum: int, maximum: int) -> bool:
     return type(value) is int and minimum <= value <= maximum
 
 
+def _normalize_usage(value: object) -> dict[str, int | None]:
+    if not isinstance(value, dict) or set(value) != _USAGE_FIELDS:
+        raise ValueError("invalid diagnostic usage fields")
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        if not _integer(value[key], 0, MAX_BUDGET_VALUE):
+            raise ValueError("invalid diagnostic usage counter")
+    if not _integer(value["rounds"], 0, MAX_COUNTER):
+        raise ValueError("invalid diagnostic usage rounds")
+    if value["cost_micros"] is not None and not _integer(value["cost_micros"], 0, MAX_BUDGET_VALUE):
+        raise ValueError("invalid diagnostic usage cost")
+    if value["input_tokens"] + value["output_tokens"] != value["total_tokens"]:
+        raise ValueError("inconsistent diagnostic usage total")
+    if value["rounds"] == 0 and (value["total_tokens"] != 0 or value["cost_micros"] not in (None, 0)):
+        raise ValueError("inconsistent empty diagnostic ledger")
+    return dict(value)
+
+
+def _normalize_budget(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != _BUDGET_FIELDS:
+        raise ValueError("invalid diagnostic budget fields")
+    if type(value["limit"]) is not str or value["limit"] not in {"max_total_tokens", "max_cost_micros"}:
+        raise ValueError("invalid diagnostic budget limit")
+    if type(value["state"]) is not str or value["state"] not in {"exceeded", "exhausted"}:
+        raise ValueError("invalid diagnostic budget state")
+    exhausted = value["state"] == "exhausted"
+    if type(value["trigger_recorded"]) is not bool or value["trigger_recorded"] != exhausted:
+        raise ValueError("inconsistent diagnostic trigger accounting")
+    if value["usage_completeness"] != "partial":
+        raise ValueError("invalid diagnostic usage completeness")
+    maximum = value["maximum"]
+    if maximum is not None and not _integer(maximum, 1, MAX_BUDGET_VALUE):
+        raise ValueError("invalid diagnostic budget maximum")
+    accepted = _normalize_usage(value["accepted_usage"]) if value["accepted_usage"] is not None else None
+    observed = _normalize_usage(value["observed_usage"]) if value["observed_usage"] is not None else None
+    selected = "total_tokens" if value["limit"] == "max_total_tokens" else "cost_micros"
+    for usage in (accepted, observed):
+        if usage is not None and usage[selected] is None:
+            raise ValueError("missing diagnostic usage for selected budget")
+    if observed is not None:
+        if observed["rounds"] == 0:
+            raise ValueError("diagnostic trigger requires an observed response")
+        actual = observed[selected]
+        if maximum is not None and (actual != maximum if exhausted else actual <= maximum):
+            raise ValueError("inconsistent diagnostic budget trigger")
+    if accepted is not None:
+        if exhausted and accepted["rounds"] == 0:
+            raise ValueError("recorded diagnostic trigger requires an accepted response")
+        actual = accepted[selected]
+        if maximum is not None and (actual != maximum if exhausted else actual > maximum):
+            raise ValueError("inconsistent diagnostic accepted budget")
+    if accepted is not None and observed is not None:
+        if exhausted:
+            if accepted != observed:
+                raise ValueError("recorded diagnostic trigger must match accepted ledger")
+        else:
+            if observed["rounds"] != accepted["rounds"] + 1:
+                raise ValueError("inconsistent diagnostic trigger rounds")
+            for key in ("input_tokens", "output_tokens", "total_tokens", "cost_micros"):
+                before, after = accepted[key], observed[key]
+                if (before is None) != (after is None) or (before is not None and after < before):
+                    raise ValueError("inconsistent diagnostic cumulative usage")
+    return {**value, "accepted_usage": accepted, "observed_usage": observed}
+
+
+def _project_usage(snapshot: UsageSnapshot) -> dict[str, int | None] | None:
+    if type(snapshot) is not UsageSnapshot:
+        raise ValueError("invalid typed diagnostic snapshot")
+    values = snapshot.to_dict()
+    for key, value in values.items():
+        if key == "cost_micros" and value is None:
+            continue
+        if type(value) is not int or value < 0:
+            raise ValueError("invalid typed diagnostic number")
+    if any(
+        value is not None and value > (MAX_COUNTER if key == "rounds" else MAX_BUDGET_VALUE)
+        for key, value in values.items()
+    ):
+        return None
+    return _normalize_usage(values)
+
+
+def _project_budget(evidence: BudgetFailureEvidence) -> dict[str, object]:
+    if type(evidence) is not BudgetFailureEvidence:
+        raise ValueError("invalid typed diagnostic evidence")
+    if type(evidence.maximum) is not int or evidence.maximum < 1:
+        raise ValueError("invalid typed diagnostic maximum")
+    return _normalize_budget({
+        "limit": evidence.limit, "state": evidence.state,
+        "maximum": evidence.maximum if evidence.maximum <= MAX_BUDGET_VALUE else None,
+        "accepted_usage": _project_usage(evidence.accepted_usage),
+        "observed_usage": _project_usage(evidence.observed_usage),
+        "trigger_recorded": evidence.trigger_recorded, "usage_completeness": "partial",
+    })
+
+
 def normalize_diagnostic(value: object) -> dict[str, object]:
     """Accept only the fixed score-free vocabulary, without arbitrary error strings."""
-    if not isinstance(value, dict) or set(value) != _FIELDS:
+    if not isinstance(value, dict) or "schema_version" not in value:
         raise ValueError("invalid diagnostic fields")
-    if value["schema_version"] != "1" or value["kind"] != "subject_failure":
-        raise ValueError("invalid diagnostic version or kind")
+    version = value.get("schema_version")
+    if type(version) is not str or version not in {"1", "2"}:
+        raise ValueError("invalid diagnostic version")
+    if set(value) != (_FIELDS | {"budget"} if version == "2" else _FIELDS):
+        raise ValueError("invalid diagnostic fields")
+    if value["kind"] != "subject_failure":
+        raise ValueError("invalid diagnostic kind")
     if value["mode"] not in {"normal", "deep_evolution"}:
         raise ValueError("invalid diagnostic mode")
     digest = value["request_sha256"]
@@ -59,6 +166,10 @@ def normalize_diagnostic(value: object) -> dict[str, object]:
         raise ValueError("invalid diagnostic counters")
     if value["http_status"] is not None and not _integer(value["http_status"], 100, 599):
         raise ValueError("invalid diagnostic HTTP status")
+    if version == "2":
+        if (value["stage"], value["code"], value["http_status"]) != ("runtime", "budget_exceeded", None):
+            raise ValueError("invalid diagnostic budget classification")
+        return {**value, "budget": _normalize_budget(value["budget"])}
     return dict(value)
 
 
@@ -246,6 +357,7 @@ class SubjectDiagnosticObserver:
         self, context: SubjectDiagnosticContext, error: Exception, *, code: str | None = None,
     ) -> dict[str, object]:
         http_status = None
+        budget = None
         current: BaseException | None = error
         seen: set[int] = set()
         for _ in range(8):
@@ -261,6 +373,13 @@ class SubjectDiagnosticObserver:
                 code = "timeout"
             if isinstance(current, AgentInputRequired):
                 code = "input_required"
+            elif type(current) is ProfileBudgetFailure and self.stage == "runtime":
+                code = "budget_exceeded"
+                try:
+                    budget = _project_budget(current.evidence)
+                except (TypeError, ValueError, AttributeError):
+                    # Invalid evidence must still leave the original bounded v1 classification.
+                    budget = None
             elif type(current) is RuntimeExecutionError and self.stage == "runtime":
                 # Match only repository-owned fixed messages, never provider/model prose.
                 message = str(current)
@@ -278,6 +397,9 @@ class SubjectDiagnosticObserver:
                 }:
                     code = "budget_exceeded"
             current = current.__cause__
-        return context.payload(
+        payload = context.payload(
             self.stage, code or self.code, self.model_turns, self.tool_steps, http_status,
         )
+        if budget is not None and code == "budget_exceeded" and http_status is None:
+            return {**payload, "schema_version": "2", "budget": budget}
+        return payload

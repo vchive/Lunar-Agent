@@ -230,13 +230,17 @@ def _deep_config(
     )
 
 
-def test_deep_second_round_failure_collects_diagnostic_and_preserves_prior_score(tmp_path: Path) -> None:
+@pytest.mark.parametrize("schema_version", ["1", "2"])
+def test_deep_second_round_failure_collects_diagnostic_and_preserves_prior_score(
+    tmp_path: Path, schema_version: str,
+) -> None:
     public, suite = _make_case(tmp_path)
     suite_path = _write_json(tmp_path / "suite.json", suite)
     baseline_path = _write_baseline(tmp_path, suite)
     subject_command = _make_bound_subject_script(tmp_path / "subject.py")
     harness_command = _make_constant_harness_script(tmp_path / "harness.py")
     harness_calls = []
+    emitted_failures = []
 
     def executor(command, *, cwd, env, timeout):
         request_path = Path(command[-1])
@@ -245,11 +249,26 @@ def test_deep_second_round_failure_collects_diagnostic_and_preserves_prior_score
             harness_calls.append(request)
         elif request["round_index"] == 2:
             failure = {
-                "schema_version": "1", "kind": "subject_failure", "mode": "deep_evolution",
+                "schema_version": schema_version, "kind": "subject_failure", "mode": "deep_evolution",
                 "request_sha256": hashlib.sha256(request_path.read_bytes()).hexdigest(),
                 "run_index": 1, "round_index": 2, "stage": "runtime", "code": "step_limit",
                 "model_turns": 5, "tool_steps": 4, "http_status": None,
             }
+            if schema_version == "2":
+                failure["code"] = "budget_exceeded"
+                failure["budget"] = {
+                    "limit": "max_total_tokens", "state": "exceeded", "maximum": 20,
+                    "accepted_usage": {
+                        "input_tokens": 10, "output_tokens": 2, "total_tokens": 12,
+                        "cost_micros": None, "rounds": 1,
+                    },
+                    "observed_usage": {
+                        "input_tokens": 20, "output_tokens": 4, "total_tokens": 24,
+                        "cost_micros": None, "rounds": 2,
+                    },
+                    "trigger_recorded": False, "usage_completeness": "partial",
+                }
+            emitted_failures.append(failure)
             (cwd / "receipts/002.failure.json").write_text(json.dumps(failure))
             return subprocess.CompletedProcess(command, 2)
         return subprocess.run(command, cwd=cwd, env=env, timeout=timeout, check=False, capture_output=True)
@@ -264,10 +283,14 @@ def test_deep_second_round_failure_collects_diagnostic_and_preserves_prior_score
     assert len(harness_calls) == 1
     assert run["error_code"] == "process_nonzero_exit" and run["ready"] is False
     assert len(run["rounds"]) == 1 and run["rounds"][0]["overall_score"] == 0.5
-    diagnostic = json.loads((
-        tmp_path / "trial" / run["attempt"] / "diagnostics/subject-002-failure.json"
-    ).read_text())
-    assert diagnostic["round_index"] == 2 and diagnostic["code"] == "step_limit"
+    assert report["cases"][0]["lunar_best"] is None
+    assert run["usage"] is None and run.get("cost_micros") is None
+    attempt = tmp_path / "trial" / run["attempt"]
+    assert not (attempt / "subject/receipts/002.json").exists()
+    diagnostic_path = attempt / "diagnostics/subject-002-failure.json"
+    diagnostic_bytes = diagnostic_path.read_bytes()
+    # Collection preserves either version and cannot turn a failed round into a scored round.
+    assert json.loads(diagnostic_bytes) == emitted_failures[0]
 
     # A failed round's sidecar does not authorize a receipt and does not block a later success.
     resumed = DeepEffectTrialRunner(
@@ -276,6 +299,8 @@ def test_deep_second_round_failure_collects_diagnostic_and_preserves_prior_score
     ).run().to_dict()["cases"][0]["runs"][0]
     assert resumed["ready"] is True and len(resumed["rounds"]) == 2
     assert resumed["rounds"][0]["overall_score"] == 0.5
+    assert resumed["attempt"] != run["attempt"]
+    assert diagnostic_path.read_bytes() == diagnostic_bytes
 
 
 def _make_command_script(path: Path, source: str) -> tuple[str, ...]:

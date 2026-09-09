@@ -14,9 +14,8 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 
-from .budget import BudgetExceeded
 from .memory import MemoryStore
-from .model_profile import UsageLedger
+from .model_profile import BudgetFailureEvidence, ProfileBudgetExceeded, UsageLedger
 from .profiles import ModelProfile
 from .runtime import ModelTurn, OpenAICompatibleRuntime, RuntimeExecutionError, RuntimeResult
 from .tools import LocalToolRegistry
@@ -60,6 +59,14 @@ class AgentInputRequired(RuntimeExecutionError):
         super().__init__(question)
         self.question = question
         self.options = options
+
+
+class ProfileBudgetFailure(RuntimeExecutionError):
+    """A repository-owned profile failure carrying reported usage for safe diagnostics."""
+
+    def __init__(self, evidence: BudgetFailureEvidence) -> None:
+        self.evidence = evidence
+        super().__init__(f"model profile budget {evidence.state}: {evidence.limit}")
 
 
 class AgentLoopRuntime:
@@ -363,8 +370,8 @@ class AgentLoopRuntime:
             return
         try:
             snapshot = ledger.record(turn.usage)
-        except BudgetExceeded as exc:
-            raise RuntimeExecutionError(f"model profile budget exceeded: {exc.limit}") from exc
+        except ProfileBudgetExceeded as exc:
+            raise ProfileBudgetFailure(exc.evidence) from exc
         except (TypeError, ValueError) as exc:
             raise RuntimeExecutionError("model profile usage is invalid") from exc
         # Equality is valid for a final answer, but tool calls require another model turn to
@@ -375,7 +382,10 @@ class AgentLoopRuntime:
                 ("max_cost_micros", snapshot.cost_micros, profile.max_cost_micros),
             ):
                 if maximum is not None and actual is not None and actual >= maximum:
-                    raise RuntimeExecutionError(f"model profile budget exhausted: {name}")
+                    raise ProfileBudgetFailure(BudgetFailureEvidence(
+                        limit=name, state="exhausted", maximum=maximum,
+                        accepted_usage=snapshot, observed_usage=snapshot, trigger_recorded=True,
+                    ))
 
     @staticmethod
     def _telemetry_metadata(
