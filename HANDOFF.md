@@ -8,9 +8,12 @@
 
 ## 1. 当前状态
 
-2026-09-09 最新：Feature 066 已补齐后续预算失败的具体触发项与有界部分用量证据，保持
+2026-09-09 最新：Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
+200000 token ceiling，subject 耗时 488.371 / 522.781 秒，valid=0/2、scored=0，完整失败
+usage 和分数仍为 null。新诊断与独立审计均通过，详见第 25 节；没有补位或回填历史。
+Feature 066 已补齐后续预算失败的具体触发项与有界部分用量证据，保持
 旧版诊断、成功回执和评分/恢复边界兼容；全仓 726 项测试及独立审查通过，详见第 24 节。
-本轮没有真实模型调用，没有回填旧记录。此前 Feature 065 已完成 Feature 063/064 新变体
+Feature 066 开发轮没有真实模型调用或回填旧记录。此前 Feature 065 已完成 Feature 063/064 新变体
 的两槽真实 GLM 实评。两次均在
 subject 阶段 runtime/budget_exceeded，无产物、receipt 或评分；valid=0/2，评分和未知
 usage 为 null。已独立核验并保留负结果，详见第 23 节。Feature 064 代码为 `6189e50`，
@@ -398,17 +401,18 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：用新的独立测量确认预算触发项，再决定求解变体
+### P0：围绕已观测的输入预算压力，审查并设计最小上下文改动
 
 第 19–20 节的历史解释和固定两槽测量已完成，失败就是该配置下的正式结果。当前按
 第 21–23 节完成 WebAgent 设计借鉴及其实评：Feature 063/064 的两槽新变体仍未完成，
-没有观察到本批完成率改善；不能宣称其中某个改动的因果效果。Feature 066 已用 SDD
-补齐预算失败的明确触发项与有界部分用量证据（第 24 节），但还没有携带新版诊断的真实
-观测。继续实评时先预注册独立 campaign、固定尝试数并冻结新源码，保持 `glm-5.1` 及原
-预算以观测触发项，再决定是否有依据调整预算或求解策略。诊断代码不改变 prompt/工具
-能力，不预设失败一定是 token ceiling。大文件分页、UTF-8 截断和上下文归档仍是独立
-候选，不能当作本次失败的已证实原因。
-不追加本 campaign 的第三次尝试，不为了成功而补位，不修改历史结果，不再运行 WebAgent
+没有观察到本批完成率改善；不能宣称其中某个改动的因果效果。Feature 066 补齐诊断后，
+Feature 067 的独立两槽测量已明确这两个新槽触发 token ceiling（第 25 节）。两次最后
+请求仅输入 tokens（25670 / 25488）就超过此前剩余额度（20433 / 1880），这支持优先
+离线审查完整消息回放、工具读取/输出和上下文体积，再用 SDD 选择最小预算管理改动。
+方案需保留公开任务、工具调用/结果配对、候选与评分权威边界，并在原 `glm-5.1` 和预算下
+另行预注册固定次数测量；只提前拒绝下一请求不能证明求解效果提升。大文件分页、UTF-8
+截断和上下文归档仍是独立候选，不能当作已定位的具体根因。
+不追加任何已结束 campaign 的第三次尝试，不为了成功而补位，不修改历史结果，不再运行 WebAgent
 或索要数据。历史失败的具体预算触发项仍未知，完整失败消耗仍不能由部分观测推定。
 
 以下保留既有测量所用的冻结来源与执行边界：
@@ -1033,3 +1037,51 @@ Ruff、compileall、build、Feature 066 Specify 和 diff 检查通过；独立�
 本轮没有真实模型调用、WebAgent 执行、公司平台查询或历史结果回填。没有新的测量结论，
 Feature 065 的 0/2 与 null 分数仍原样保留。旧 campaign 的源码 SHA 审计针对其冻结版本，
 当前实现已经变化，不能为通过旧脚本的当前源码检查而改写 manifest 或历史 summary。
+
+## 25. Feature 067：新诊断真实测量与 token 触发证据（2026-09-09）
+
+预注册提交 `9c00b88`，产品源码 `01c541e`；新 campaign 为
+`.lunar/real-eval-glm-5.1-budget-diagnostics-20260909/`，两次独立 normal attempt 在全新
+兄弟目录各启动一次、共享一次 CC Switch 环境快照并行执行。与 Feature 065 相比仅源码
+诊断变化，prompt/工具行为、glm-5.1、40 tool calls、900 秒、200000 tokens、公开输入、
+private case/harness、SDK 0.1.81 与 extractor glm-5.2 保持相同；没有连接探测或补位。
+
+| 观测 | Slot 1 | Slot 2 |
+| --- | ---: | ---: |
+| Subject 耗时（秒）/ 退出码 | 488.371 / 2 | 522.781 / 2 |
+| 明确触发项 / 状态 | max_total_tokens / exceeded | max_total_tokens / exceeded |
+| 已接受累计 input / output | 159471 / 20096 | 184628 / 13492 |
+| 已接受累计 total / rounds | 179567 / 11 | 198120 / 12 |
+| 含触发响应累计 input / output | 185141 / 29582 | 210116 / 28596 |
+| 含触发响应累计 total / rounds | 214723 / 12 | 238712 / 13 |
+| 触发前剩余 tokens | 20433 | 1880 |
+| 触发响应 input / output | 25670 / 9486 | 25488 / 15104 |
+| 模型响应事件 / 工具结果事件 | 11 / 12 | 12 / 13 |
+| 保留普通文件数 | 3 | 1 |
+| Subject receipt / harness / 分数 | 无 / 未运行 / null | 无 / 未运行 / null |
+
+两个触发响应都未入账（trigger_recorded=false），快照固定 usage_completeness=partial。
+费用与完整失败用量仍未知，事件计数不包含触发失败的模型响应，不通过事件或差值补造
+完整账单。Slot 1 保留 analyze.py、analyze2.py、analyze3.py；Slot 2 为 solve.py。
+只检查文件名、类型和大小，未读取正文或另行执行，不能宣称已有有效候选或补跑评分。
+
+固定分母 planned=2、started=2、terminated=2、failed=2、valid=0、scored=0、unresolved=0；
+有效解比例 0/2。overall/quality n=0 且为 null；usage_known_attempts=0，total_tokens_known
+为 null。两个 v2 budget diagnostics 单独计数，不混入完整 usage；历史分母和结果不变。
+
+确定性事后算术显示：两个最后请求的 input tokens 已分别超出剩余额度 5237 / 23608，
+尚未计入当轮 output。观测累计输入占比约 86.22% / 88.02%。这支持优先验证上下文输入
+开销管理，但没有原始消息/工具正文，不能定位具体读取或证明归档/压缩必然有效；新增
+文件和更长运行时间也不能归因于诊断功能。只确认本批 token 触发项，不回填以前失败。
+
+独立预启动/最终审计通过：35 源码（与实现 git blob 相同）、14 输入、95 历史文件、
+22 个观测 SHA 链及新版汇总一致；预注册提交先于启动。最终无本批进程残留。本轮产品
+源码未改，沿用 Feature 066 的 726 项通过测试，执行了本机脚本语法、无调用 readiness、
+预检、部分用量/旧版/未决汇总回归、Specify 与 diff 检查。
+
+Manifest SHA：`41479e3b5d97ea3e2635aea0dc1ae831b18d15bbe746e0f002163826f8553e5f`。
+Summary SHA：`7c90a35bf958306d6d030019093f42e2e4f0ea4f0d98bb6252e4af9fb30f05cb`。
+Audit SHA：`1d19768cabe8d9e9cca229f19447894842e80f7cc1c69056425ebb68a5ac1674`。
+完整结果、汇总、审计和派生算术分别位于本机 campaign 的 `results.md`、`summary.json`、
+`audit.json`、`budget-analysis.json`。`summarize.py --check-only` 为只读复核；启动器有
+started marker，不能再执行。未来代码变化不应导致改写本批 manifest 或历史源码锚点。
