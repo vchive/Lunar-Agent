@@ -109,6 +109,16 @@ from .evolution import (
 )
 from .model_profile import UsageLedger, UsageSnapshot
 from .profiles import EvaluatorProfile, ModelProfile, ProfileRegistry, SolverProfile
+from .workflow_checkpoint import (
+    AggregateUsage,
+    Checkpoint,
+    WorkflowCheckpoint,
+    WorkflowCheckpointError,
+    WorkflowController,
+    WorkflowError,
+    WorkflowManifest,
+    WorkflowState,
+)
 
 __version__ = "0.1.0"
 
@@ -125,6 +135,7 @@ __all__ = [
     "AgentRequest",
     "AgentResult",
     "AgentSelectionError",
+    "AggregateUsage",
     "BaselineProvenance",
     "BenchmarkConfig",
     "BenchmarkError",
@@ -138,6 +149,7 @@ __all__ = [
     "CandidateExecution",
     "CandidateInputArtifact",
     "CandidateRunner",
+    "Checkpoint",
     "CommandAgentAdapter",
     "CommandCandidateEvaluator",
     "CommandCandidateGenerator",
@@ -186,6 +198,12 @@ __all__ = [
     "TrialSuite",
     "UsageLedger",
     "UsageSnapshot",
+    "WorkflowCheckpoint",
+    "WorkflowCheckpointError",
+    "WorkflowController",
+    "WorkflowError",
+    "WorkflowManifest",
+    "WorkflowState",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_candidate_manifest",

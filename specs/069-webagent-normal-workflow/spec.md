@@ -2,7 +2,7 @@
 
 **Created**: 2026-09-09  
 **Branch**: main  
-**Status**: Draft (design only)
+**Status**: In progress (control-plane slice implemented)
 
 ## Objective
 

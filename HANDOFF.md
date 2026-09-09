@@ -25,6 +25,12 @@ ledger、模型/工具/公开输入和 exact harness 权威，只改变 subject 
 control/staged 两臂测量；在此之前不改默认 normal workflow、不启动新模型。设计见
 `specs/069-webagent-normal-workflow/`。
 
+Feature 069 的第一段控制面已实现但尚未接入模型：`workflow_checkpoint.py` 提供严格的
+manifest/master/checkpoint/state schema、路径和软链保护、原子落盘、累计 usage/墙钟上限、
+凭据脱敏和单次 resume guard；新增离线测试覆盖跨 run、乱序、重复 checkpoint、预算回退、
+路径逃逸和脱敏边界。全仓测试与 Ruff 通过。它不能创建 receipt、分数或 harness 权限，
+AgentLoop 分阶段编排仍是后续工作；在集成和新预注册测量完成前，不启动新模型。
+
 Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
 200000 token ceiling，subject 耗时 488.371 / 522.781 秒，valid=0/2、scored=0，完整失败
 usage 和分数仍为 null。新诊断与独立审计均通过，详见第 25 节；没有补位或回填历史。
