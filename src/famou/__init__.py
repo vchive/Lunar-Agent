@@ -109,6 +109,7 @@ from .evolution import (
 )
 from .model_profile import UsageLedger, UsageSnapshot
 from .profiles import EvaluatorProfile, ModelProfile, ProfileRegistry, SolverProfile
+from .staged_workflow import StagedRunResult, StagedWorkflowRunner
 from .workflow_checkpoint import (
     AggregateUsage,
     Checkpoint,
@@ -193,6 +194,8 @@ __all__ = [
     "RuntimeContractCompiler",
     "SolverProfile",
     "SolverScoringContract",
+    "StagedRunResult",
+    "StagedWorkflowRunner",
     "StrategyResult",
     "TrialBaseline",
     "TrialSuite",

@@ -29,9 +29,11 @@ Feature 069 的第一段控制面已实现但尚未接入模型：`workflow_chec
 manifest/master/checkpoint/state schema、路径和软链保护、原子落盘、累计 usage/墙钟上限、
 凭据脱敏和单次 resume guard；新增离线测试覆盖跨 run、乱序、重复 checkpoint、预算回退、
 路径逃逸和脱敏边界。全仓测试与 Ruff 通过。它不能创建 receipt、分数或 harness 权限，
-AgentLoop 分阶段编排仍是后续工作。当前仅增加了兼容性的显式 shared `UsageLedger` 与
-累计 tool-step offset seam，默认 invocation 预算行为不变；在集成和新预注册测量完成前，
-不启动新模型。
+当前已增加独立的 `StagedWorkflowRunner`：它执行 master/build、保留失败候选、写 typed
+checkpoint，并允许同一 attempt 至多一次显式 resume；它不创建 receipt、不计算分数、不调用
+harness。`AgentLoopRuntime` 的 shared `UsageLedger` 与累计 tool-step offset seam 保持默认
+invocation 预算行为不变。EffectTrialRunner subject-adapter 接入和 exact harness 集成仍未完成，
+在此之前不启动新模型。
 
 Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
 200000 token ceiling，subject 耗时 488.371 / 522.781 秒，valid=0/2、scored=0，完整失败

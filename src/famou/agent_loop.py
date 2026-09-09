@@ -107,6 +107,7 @@ class AgentLoopRuntime:
         self._event_sink: Callable[[str, dict[str, object]], None] | None = None
         self._run_id: str | None = None
         self._task_id: str | None = None
+        self._last_tool_steps = 0
 
     def set_context(self, run_id: str, task_id: str, goal: str | None = None) -> None:
         """Attach durable identity for memory scoping and observability."""
@@ -138,6 +139,11 @@ class AgentLoopRuntime:
     def cancel(self) -> None:
         self.model.cancel()
 
+    @property
+    def last_tool_steps(self) -> int:
+        """Tool calls observed by the most recent invocation, including any offset."""
+        return self._last_tool_steps
+
     def run(
         self,
         prompt: str,
@@ -160,6 +166,7 @@ class AgentLoopRuntime:
         started = time.monotonic()
         model_turns = 0
         tool_steps = tool_steps_offset
+        self._last_tool_steps = tool_steps
         response_models: list[str | None] = []
         usages: list[dict[str, int] | None] = []
         while True:
@@ -237,6 +244,7 @@ class AgentLoopRuntime:
                 if self.profile is not None:
                     self._remaining_timeout(started, effective_timeout)
                 tool_steps += 1
+                self._last_tool_steps = tool_steps
                 artifacts.extend(result.artifacts)
                 self._emit(
                     "agent_tool_result",

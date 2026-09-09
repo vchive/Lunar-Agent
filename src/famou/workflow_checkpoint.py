@@ -202,8 +202,10 @@ class AggregateUsage:
             _fail("unavailable usage must not claim counters")
 
     @classmethod
-    def unavailable(cls, *, rounds: int = 0, tool_steps: int = 0) -> AggregateUsage:
-        return cls(False, None, None, None, None, rounds, tool_steps, 0)
+    def unavailable(
+        cls, *, rounds: int = 0, tool_steps: int = 0, elapsed_ms: int = 0
+    ) -> AggregateUsage:
+        return cls(False, None, None, None, None, rounds, tool_steps, elapsed_ms)
 
     @classmethod
     def zero(cls) -> AggregateUsage:

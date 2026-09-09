@@ -103,3 +103,32 @@ def test_harness_transition_is_owned_by_runner(tmp_path: Path) -> None:
     controller = _controller(tmp_path)
     with pytest.raises(WorkflowCheckpointError, match="EffectTrialRunner"):
         controller.transition("harness_pending")
+
+
+def test_unavailable_usage_cannot_authorize_resume(tmp_path: Path) -> None:
+    """A candidate checkpoint without provider usage is diagnostic evidence only."""
+    controller = _controller(tmp_path)
+    controller.checkpoint(
+        stage="checkpointed", declared_paths=["candidate.py"],
+        usage=AggregateUsage.unavailable(rounds=1, tool_steps=1),
+    )
+    with pytest.raises(WorkflowCheckpointError, match="unavailable usage"):
+        controller.resume()
+    state = controller.state()
+    assert state["stage"] == "checkpointed"
+    assert state["resume_used"] is False
+
+
+def test_unavailable_to_available_usage_is_monotonic(tmp_path: Path) -> None:
+    """Once provider counters become observable, they may be attached monotonically."""
+    controller = _controller(tmp_path)
+    controller.checkpoint(
+        stage="checkpointed", declared_paths=["candidate.py"],
+        usage=AggregateUsage.unavailable(rounds=1, tool_steps=1),
+    )
+    # A diagnostic checkpoint remains legal while the provider usage is unavailable.  The
+    # controller must not manufacture a zero budget, and a later observed sample may advance it.
+    observed = AggregateUsage(True, 3, 2, 5, 0, 2, 2)
+    controller.checkpoint(stage="checkpointed", declared_paths=["candidate.py"], usage=observed)
+    assert AggregateUsage.from_dict(controller.state()["usage"]) == observed
+    controller.resume()
