@@ -138,11 +138,20 @@ class AgentLoopRuntime:
     def cancel(self) -> None:
         self.model.cancel()
 
-    def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
+    def run(
+        self,
+        prompt: str,
+        workspace: Path,
+        timeout: float | None = None,
+        *,
+        usage_ledger: UsageLedger | None = None,
+        tool_steps_offset: int = 0,
+    ) -> RuntimeResult:
         effective_timeout = self._profile_timeout(timeout)
         workspace.mkdir(parents=True, exist_ok=True)
-        # A runtime can be reused for independent tasks; budget accounting is per invocation.
-        ledger = UsageLedger(self.profile) if self.profile is not None else None
+        ledger = self._resolve_usage_ledger(usage_ledger)
+        if isinstance(tool_steps_offset, bool) or not isinstance(tool_steps_offset, int) or tool_steps_offset < 0:
+            raise ValueError("tool_steps_offset must be a non-negative integer")
         messages = self._initial_messages(prompt)
         # Memory is exposed through explicit model tool calls. We do not inject local notes into a
         # request implicitly: sending durable user context to a configured endpoint must remain an
@@ -150,7 +159,7 @@ class AgentLoopRuntime:
         artifacts: list[str] = []
         started = time.monotonic()
         model_turns = 0
-        tool_steps = 0
+        tool_steps = tool_steps_offset
         response_models: list[str | None] = []
         usages: list[dict[str, int] | None] = []
         while True:
@@ -344,6 +353,16 @@ class AgentLoopRuntime:
                 ),
             },
         )
+
+    def _resolve_usage_ledger(self, usage_ledger: UsageLedger | None) -> UsageLedger | None:
+        """Return a per-call ledger by default, or validate an explicit staged ledger."""
+        if usage_ledger is None:
+            return UsageLedger(self.profile) if self.profile is not None else None
+        if self.profile is None:
+            raise ValueError("an explicit usage ledger requires a model profile")
+        if not isinstance(usage_ledger, UsageLedger) or usage_ledger.profile != self.profile:
+            raise ValueError("usage ledger profile does not match runtime profile")
+        return usage_ledger
 
     def _profile_timeout(self, timeout: float | None) -> float | None:
         if self.profile is None:

@@ -11,6 +11,7 @@ from threading import Barrier
 import pytest
 
 from famou.agent_loop import AgentLoopRuntime
+from famou.model_profile import UsageLedger
 from famou.profiles import ModelProfile
 from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
 from famou.tools import LocalToolRegistry
@@ -98,6 +99,24 @@ def test_snapshot_has_null_spend_without_ceilings_and_no_profile_has_no_hint(tmp
     legacy = Model([ModelTurn("done")])
     AgentLoopRuntime(legacy, tools=tools).run("legacy", tmp_path)
     assert "lunar_runtime_budget" not in str(legacy.requests)
+
+
+def test_explicit_ledger_carries_usage_across_staged_invocations(tmp_path):
+    profile = ModelProfile("staged", "fixture", max_total_tokens=20)
+    model = Model([ModelTurn("first", usage=sample(7)), ModelTurn("second", usage=sample(5))])
+    runtime = AgentLoopRuntime(model, profile=profile)
+    ledger = UsageLedger(profile)
+
+    first = runtime.run("build", tmp_path, usage_ledger=ledger)
+    second = runtime.run("resume", tmp_path, usage_ledger=ledger)
+
+    assert first.text == "first" and second.text == "second"
+    assert ledger.snapshot.total_tokens == 12
+    assert snapshot(model.requests[1])["tokens_remaining"] == 13
+
+    other = ModelProfile("other", "fixture", max_total_tokens=20)
+    with pytest.raises(ValueError, match="does not match"):
+        runtime.run("wrong", tmp_path, usage_ledger=UsageLedger(other))
 
 
 def test_profile_commands_recompute_deadline_without_mutating_registry(tmp_path, monkeypatch):

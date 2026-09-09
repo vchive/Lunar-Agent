@@ -18,5 +18,10 @@ deliberately does not yet invoke AgentLoop stages or change
 EffectTrialRunner receipt/harness authority; T069-03 and T069-05 remain open until that integration
 is designed and tested.
 
+The runtime seam is now prepared without changing default invocation semantics: `AgentLoopRuntime.run`
+accepts an explicitly shared `UsageLedger` and a cumulative tool-step offset. Omitted arguments keep
+the existing per-invocation budget reset. This is an integration seam only; it does not yet create a
+staged runner or authorize receipt/harness execution.
+
 Offline verification passed for the new tests, runtime/transcript regression tests, Ruff, and the
 full existing test suite. No model, provider, WebAgent, or private harness was called.
