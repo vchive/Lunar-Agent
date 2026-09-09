@@ -18,6 +18,13 @@ Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_opti
 固定分母 valid=1/2，完成率 0.5；不同 case 不合并均分。结果、审计和 SHA 见 Feature 068。
 暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
 
+Feature 069 已进入设计阶段，目标是验证最小的 WebAgent-inspired staged workflow：
+`Master → Build → typed checkpoint → 至多一次同 attempt resume`。它保留同一 aggregate
+ledger、模型/工具/公开输入和 exact harness 权威，只改变 subject 控制面；不把 WebAgent
+分数、私有 evaluator 或历史候选给 subject。先完成 fake-runtime 离线边界测试，再单独预注册
+control/staged 两臂测量；在此之前不改默认 normal workflow、不启动新模型。设计见
+`specs/069-webagent-normal-workflow/`。
+
 Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
 200000 token ceiling，subject 耗时 488.371 / 522.781 秒，valid=0/2、scored=0，完整失败
 usage 和分数仍为 null。新诊断与独立审计均通过，详见第 25 节；没有补位或回填历史。
