@@ -8,8 +8,10 @@
 
 ## 1. 当前状态
 
-2026-09-09 最新：Feature 064 已完成 profile 预算提示、命令剩余时间收紧、write_file 原子
-替换和超时单流输出修复，667 项测试通过，详见第 22 节。没有启动新实评或修改现有 campaign。
+2026-09-09 最新：Feature 065 已完成 Feature 063/064 新变体的两槽真实 GLM 实评。两次均在
+subject 阶段 runtime/budget_exceeded，无产物、receipt 或评分；valid=0/2，评分和未知
+usage 为 null。已独立核验并保留负结果，详见第 23 节。Feature 064 代码为 `6189e50`，
+profile 预算提示、命令剩余时间收紧、write_file 原子替换和超时输出修复已通过 667 项测试。
 此前 Feature 063 已提交并推送于 `fef89a8`，吸收 WebAgent v2.5/base `e24df25` 的工具参数
 契约思路；分支审查见第 21 节和 `docs/webagent-v25-review-20260909.md`。
 
@@ -393,15 +395,16 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：冻结新变体，验证预算提示与候选保存的实际效果
+### P0：保留新变体负结果，补足可用于决策的预算诊断
 
 第 19–20 节的历史解释和固定两槽测量已完成，失败就是该配置下的正式结果。当前按
-第 21–22 节推进 WebAgent 设计借鉴：Feature 063/064 已完成工具参数说明、profile 预算提示、
-命令时间收紧和单文件候选原子保存。下一步先冻结一个包含这些改动的新变体及固定 attempts，
-继续使用 `glm-5.1` 与已冻结 harness 进行独立测量；不能宣称单个改动的因果效果。大文件
-分页、UTF-8 截断和上下文归档留作后续独立问题，不作为运行新实评的前置条件。
-不修改原 campaign，不为了得到成功而补位重跑，不依赖新的 WebAgent 数据。当前原失败的
-具体预算原因仍未知；不要因为保留了文件就把 subject 失败标成成功。
+第 21–23 节完成 WebAgent 设计借鉴及其实评：Feature 063/064 的两槽新变体仍未完成，
+没有观察到本批完成率改善；不能宣称其中某个改动的因果效果。继续时优先以小型 SDD
+补充预算失败的明确触发项与有界数值证据（不保存原始模型/工具正文，也不将部分账本
+冒充完整消耗），再决定是否有依据做下一项求解变体。大文件分页、UTF-8 截断和上下文
+归档仍是独立候选，不能当作本次失败的已证实原因。
+不追加本 campaign 的第三次尝试，不为了成功而补位，不修改历史结果，不再运行 WebAgent
+或索要数据。当前具体预算触发项和失败完整用量仍未被 sidecar 记录。
 
 以下保留既有测量所用的冻结来源与执行边界：
 
@@ -538,7 +541,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/064-budget-aware-candidate-preservation
+specs/065-budget-guided-fixed-measurement
 ```
 
 后续新功能必须：
@@ -960,3 +963,39 @@ stdout 或 stderr 为 bytes 时，原本与空字符串拼接产生 TypeError，
 subject receipt 缺失、harness 未调用、逻辑 run 失败、分数/usage 为 null，诊断仍为
 runtime/budget_exceeded。所有模型返回来自本机 HTTP fixture，没有外部模型调用、WebAgent
 执行、公司平台查询或新真实评分。2026-09-08/09 的 campaign 和统计分母保持不变。
+
+## 23. Feature 065：预算感知变体真实测量（2026-09-09）
+
+预注册提交 `cb590aa`，产品实现 `6189e50`。新 campaign 为
+`.lunar/real-eval-glm-5.1-variant-v2-20260909/`，在两个全新兄弟 attempt 目录各启动一次。
+保持之前的 parallel=2、`glm-5.1`、40 tool calls、900 秒与 200,000 token ceiling；suite/
+公开文件、private case/harness、SDK 0.1.81 和 extractor `glm-5.2` 均保持相同。runner
+改为共享一次 CC Switch 环境快照，启动前核对冻结源码和输入；没有新模型连接探测或补跑。
+manifest 不随状态更新，观测写到独立 started/terminated/report 文件。
+
+| 项目 | Slot 1 | Slot 2 |
+| --- | --- | --- |
+| subject 耗时 | 299.895 秒 | 264.173 秒 |
+| subject 退出码 | 2 | 2 |
+| 诊断 | runtime/budget_exceeded | runtime/budget_exceeded |
+| 模型响应/工具结果事件 | 11 / 12 | 13 / 14 |
+| 新增文件 / 成功 receipt | 0 / 无 | 0 / 无 |
+| harness / 分数 | 未运行 / null | 未运行 / null |
+
+两次失败均占槽，planned=2、failed=2、valid=0、scored=0、unresolved=0。`valid_solution_rate`
+为 0/2，表示完成率统计；overall/quality n=0 且值为 null。失败完整 usage 与费用未知，
+不能当作零，也不能将事件次数换算成 token 消耗。本次无需也没有运行 extractor/evaluator。
+
+独立离线审计通过：35 个源码文件、14 个冻结输入、57 个历史证据文件、22 个观测 SHA
+链均一致；public projection、private case/harness 和历史 campaign 未变。最终进程检查
+未发现本批 runner/subject/harness 残留。原产品 667 项测试已于 Feature 064 通过，本轮
+没有改产品代码，执行了本机脚本语法、只读预检、Specify 和 diff 检查。
+
+预注册 manifest SHA：`7bc9df8abb895312a24d707afcd8aa708642472a3d9dd1515ad83c738e0abe7b`。
+summary SHA：`7dec7eef0b97bba8547c1ef44535259f648439a4a4884f9991311d22f5db9c9a`。
+完整说明、机器汇总与审计分别为该 campaign 的 `results.md`、`summary.json`、`audit.json`；
+`summarize.py --check-only` 可离线复核，`run_campaign.py` 已有 started marker，不能重启。
+
+本批没有观察到新工具说明和预算提示改善完成率。这只有两个并发样本，包含多个改动，
+且没有进入 evaluator，不能推出整体框架劣势、某项改动无效或已定位 provider 故障。
+前批 0/2 与本批 0/2 是两个独立配置的分母，不合并、不挑成功、不重跑到成功为止。
