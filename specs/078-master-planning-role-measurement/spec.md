@@ -1,7 +1,7 @@
 # Feature 078: Master Planning Role Fixed Measurement
 
-**Created**: 2026-09-10  
-**Branch**: `main`  
+**Created**: 2026-09-10
+**Branch**: `codex/master-role-measurement`
 **Status**: Draft
 
 ## Objective
@@ -15,14 +15,16 @@ and it does not reinterpret any prior failure or score.
 
 - Exactly two fresh staged `S` attempts: `sheet_metal_nesting` and
   `china_post_pickup_optimization`, one slot per case, one wave `[[1, 2]]`, concurrency 2.
+- Freeze product source `fba6ab8cf5b27d3bd1b42f353907a6ae21c25ef9` and campaign identity
+  `.lunar/real-eval-glm-5.2-master-role-20260910` before launch.
 - Subject model and profile remain the historically authorized GLM-5.2 configuration through the
   existing local CC Switch snapshot. No provider probe, model upgrade, WebAgent execution, or
   company-platform query is allowed.
 - Reuse the exact public projections, private cases, extractor, exact harness and evaluator
   bindings used by Feature 076. The subject receives no private evaluator content or old candidate.
 - Keep the 076 staged limits unchanged: Master 1200 seconds, Build 2400 seconds, reserve 120
-  seconds, shared subject 5400 seconds, 200 tool steps, 8,000,000 cumulative tokens, and one
-  cooperative continuation at the existing checkpoint boundary. Outer subject, harness and slot
+  seconds, shared subject 5400 seconds, 200 tool steps, 8,000,000 cumulative tokens, and at most one
+  same-process cooperative continuation, with `checkpoint_after_rounds=32`. Outer subject, harness and slot
   limits remain 5430, 3630 and 9300 seconds.
 - Run each slot once. A timeout, provider failure, malformed plan, partial candidate or missing
   receipt occupies its slot; no retry, replacement, prompt edit, budget change or score backfill.
@@ -39,13 +41,16 @@ this measurement.
 ## Evidence and acceptance
 
 1. Before either start marker, independently verify the registration commit, source tree, public and
-   private input digests, profile/model identity, helper closure, harness identity and empty slot
-   workspaces. Record the manifest and mirror the preaudit/dry-run reports.
+   private input digests, profile/model identity, complete pinned helper closure, actual harness
+   bytes and installed dependency versions. Freeze every new script, test and input byte and verify
+   fresh unstarted slots. Record the manifest and mirror the preaudit/dry-run reports.
 2. For each slot, preserve immutable observations for Master plan validation, Build entry, optional
    checkpoint/continuation, subject receipt, harness invocation/receipt, evaluator completion,
    validity and scores. A plan, local score, candidate file or checkpoint never authorizes scoring.
-3. Count the planned denominator as two only after both slots reach terminal states. Keep stage rates
-   explicit (plan accepted / started, Build entered / plan accepted, valid / planned). Unknown
+3. The planned denominator is two from registration onward. Unstarted or unterminated slots remain
+   unresolved, never implicit failures. Final outcome acceptance waits for both terminal states.
+   Report the fixed-denominator observed valid count separately from explicit started, terminated,
+   plan accepted, Build entered, receipt and harness counts. Unknown
    scores, precise Master duration, and complete failed usage/cost remain `null`.
 4. The exact native harness remains the sole validity and score authority. Preserve valid scores
    above one and do not calculate pooled quality, causal deltas, stability claims or WebAgent parity.
@@ -54,8 +59,9 @@ this measurement.
 
 ## Safety and scope limits
 
-Diagnostics are score-free and advisory. Raw prompts, provider bodies, exception text, credentials,
-private evaluator data and candidate contents are not added to the campaign evidence. Existing
+Diagnostics are score-free and advisory. Existing native transcripts and artifacts retain their
+normal behavior. This measurement adds no new raw prompt, provider-body, exception-text or candidate
+content projection; no credentials or private evaluator content enter public evidence. Existing
 failure diagnostics may report fixed stages/codes and nullable HTTP status; they must not authorize
 recovery, receipt creation, harness execution or a retry. Historical 069/072/074/076 attempts stay
 outside this campaign denominator and their manifests and bytes are immutable.
