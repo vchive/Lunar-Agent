@@ -8,6 +8,14 @@
 
 ## 1. 当前状态
 
+Feature076正在准备075修复后的真实交接测量，`.specify`指向
+`specs/076-public-plan-handoff-measurement`。源码固定`96d5a60`，GLM-5.2，钣金与邮政
+各一个新S尝试，Master1200、build2400、reserve120秒，5400秒/200工具/800万tokens，
+一波并发2、至多一次合作式续跑、不补位。311项隔离检查与独立审查通过，已prepare，
+manifest SHA=`6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76`。
+尚未launch，正独立预审/dry-run，登记提交推送后启动一次。075解决词汇误拒绝，未解决或保证解决
+钣金规划超时；本轮只作描述性测量，历史不进分母，不修改074封存SHA或重开旧槽。
+
 最新状态：074已在`68b5e58`封存推送后，合入075公开计划词汇修复：isolated `065661f`，
 merge `b5fc3b2`。当前`.specify`指向075，T074/T075全部关闭。主仓src/tests/.specify
 与已审隔离版本相同，主仓260项定向回归/Ruff/Specify/diff通过，隔离全仓1316项通过。
