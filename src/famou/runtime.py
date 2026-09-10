@@ -73,6 +73,52 @@ class RuntimeExecutionError(RuntimeError):
     """A runtime returned a non-successful or unusable result."""
 
 
+MODEL_FAILURE_REASONS = frozenset({
+    "http_error", "transport_timeout", "transport_error", "invalid_json",
+    "invalid_response_shape", "empty_response", "invalid_tool_calls",
+    "invalid_model_identity", "invalid_usage",
+})
+
+
+@dataclass(frozen=True)
+class ModelFailureEvidence:
+    """Fixed observations of an existing rejection, never provider prose or root cause."""
+
+    reason: str
+    response_status: int | None
+
+
+class ModelRequestFailure(RuntimeExecutionError):
+    """A terminal model failure carrying an optional, independently validated projection."""
+
+    def __init__(self, message: str, reason: str, response_status: int | None = None) -> None:
+        super().__init__(message)
+        self.evidence = ModelFailureEvidence(reason, response_status)
+
+
+def _observed_response_status(value: object) -> int | None:
+    return value if type(value) is int and 100 <= value <= 599 else None
+
+
+def _transport_failure_reason(error: BaseException) -> str:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    for _ in range(8):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        if isinstance(current, TimeoutError):
+            return "transport_timeout"
+        # Only urllib's concrete error has a known reason field. Never interpret string reasons
+        # or look for arbitrary provider exception attributes.
+        try:
+            reason = current.reason if type(current) is URLError else None
+            current = reason if isinstance(reason, BaseException) else current.__cause__
+        except Exception:  # noqa: BLE001 - diagnostic inspection must not mask a transport error
+            break
+    return "transport_error"
+
+
 class MockRuntime:
     """Deterministic runtime used for smoke runs and controller tests."""
 
@@ -462,26 +508,41 @@ class OpenAICompatibleRuntime:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         request = Request(self.endpoint, data=body, headers=headers, method="POST")
+        observed_status = None
         try:
             with urlopen(request, timeout=timeout) as response:
                 status = response.getcode()
+                observed_status = _observed_response_status(status)
                 raw = response.read(8 * 1024 * 1024)
         except HTTPError as exc:
             detail = self._redact(self._read_error_body(exc))
             suffix = f": {detail}" if detail else ""
-            raise RuntimeExecutionError(f"model endpoint returned HTTP {exc.code}{suffix}") from exc
+            raise ModelRequestFailure(
+                f"model endpoint returned HTTP {exc.code}{suffix}", "http_error",
+                _observed_response_status(exc.code),
+            ) from exc
         except (TimeoutError, URLError, OSError) as exc:
             detail = self._redact(str(exc))
-            raise RuntimeExecutionError(f"could not reach model endpoint: {detail}") from exc
+            raise ModelRequestFailure(
+                f"could not reach model endpoint: {detail}", _transport_failure_reason(exc),
+                observed_status,
+            ) from exc
         if status < 200 or status >= 300:
-            raise RuntimeExecutionError(f"model endpoint returned HTTP {status}")
+            raise ModelRequestFailure(
+                f"model endpoint returned HTTP {status}", "http_error", observed_status,
+            )
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeExecutionError("model endpoint returned malformed JSON") from exc
-        text, tool_calls = self._extract_turn(payload)
+            raise ModelRequestFailure(
+                "model endpoint returned malformed JSON", "invalid_json", observed_status,
+            ) from exc
+        text, tool_calls = self._extract_turn(payload, response_status=observed_status)
         if not text and not tool_calls:
-            raise RuntimeExecutionError("model endpoint returned empty content")
+            raise ModelRequestFailure(
+                "model endpoint returned empty content", self._empty_response_reason(payload),
+                observed_status,
+            )
         response_model = payload.get("model")
         if response_model is not None and (
             not isinstance(response_model, str)
@@ -489,8 +550,11 @@ class OpenAICompatibleRuntime:
             or len(response_model.encode("utf-8")) > 512
             or "\x00" in response_model
         ):
-            raise RuntimeExecutionError("model endpoint returned an invalid model identity")
-        usage = self._parse_usage(payload.get("usage"))
+            raise ModelRequestFailure(
+                "model endpoint returned an invalid model identity", "invalid_model_identity",
+                observed_status,
+            )
+        usage = self._parse_usage(payload.get("usage"), response_status=observed_status)
         return ModelTurn(
             text=text,
             tool_calls=tool_calls,
@@ -523,7 +587,9 @@ class OpenAICompatibleRuntime:
         return detail[-2_000:]
 
     @staticmethod
-    def _extract_turn(payload: object) -> tuple[str, tuple[ToolCall, ...]]:
+    def _extract_turn(
+        payload: object, *, response_status: int | None = None,
+    ) -> tuple[str, tuple[ToolCall, ...]]:
         if not isinstance(payload, dict):
             return "", ()
         choices = payload.get("choices")
@@ -534,7 +600,9 @@ class OpenAICompatibleRuntime:
                 message = choice.get("message")
                 if isinstance(message, dict):
                     text = OpenAICompatibleRuntime._content_to_text(message.get("content"))
-                    return text, OpenAICompatibleRuntime._parse_tool_calls(message.get("tool_calls"))
+                    return text, OpenAICompatibleRuntime._parse_tool_calls(
+                        message.get("tool_calls"), response_status=response_status,
+                    )
                 text = OpenAICompatibleRuntime._content_to_text(choice.get("text"))
                 if text:
                     return text, ()
@@ -542,8 +610,34 @@ class OpenAICompatibleRuntime:
         if isinstance(message, dict):
             content = OpenAICompatibleRuntime._content_to_text(message.get("content"))
             if content:
-                return content, OpenAICompatibleRuntime._parse_tool_calls(message.get("tool_calls"))
+                return content, OpenAICompatibleRuntime._parse_tool_calls(
+                    message.get("tool_calls"), response_status=response_status,
+                )
         return OpenAICompatibleRuntime._content_to_text(payload.get("response")), ()
+
+    @staticmethod
+    def _empty_response_reason(payload: object) -> str:
+        """Observe only an already rejected empty result; never participate in acceptance."""
+        if isinstance(payload, dict):
+            choices = payload.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                message = choices[0].get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    return ("empty_response" if content is None or isinstance(content, (str, list))
+                            else "invalid_response_shape")
+                if isinstance(choices[0].get("text"), (str, list)):
+                    return "empty_response"
+            message = payload.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if content is None or isinstance(content, (str, list)):
+                    return "empty_response"
+            if "response" in payload and (
+                payload["response"] is None or isinstance(payload["response"], (str, list))
+            ):
+                return "empty_response"
+        return "invalid_response_shape"
 
     @staticmethod
     def _extract_text(payload: object) -> str:
@@ -551,11 +645,13 @@ class OpenAICompatibleRuntime:
         return OpenAICompatibleRuntime._extract_turn(payload)[0]
 
     @staticmethod
-    def _parse_usage(raw: object) -> dict[str, int] | None:
+    def _parse_usage(raw: object, *, response_status: int | None = None) -> dict[str, int] | None:
         if raw is None:
             return None
         if not isinstance(raw, dict):
-            raise RuntimeExecutionError("model endpoint returned malformed usage")
+            raise ModelRequestFailure(
+                "model endpoint returned malformed usage", "invalid_usage", response_status,
+            )
         aliases = (
             ("input_tokens", "prompt_tokens"),
             ("output_tokens", "completion_tokens"),
@@ -565,33 +661,48 @@ class OpenAICompatibleRuntime:
         for normalized, source in aliases:
             value = raw.get(source, raw.get(normalized))
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise RuntimeExecutionError("model endpoint returned malformed usage")
+                raise ModelRequestFailure(
+                    "model endpoint returned malformed usage", "invalid_usage", response_status,
+                )
             values[normalized] = value
         if values["input_tokens"] + values["output_tokens"] != values["total_tokens"]:
-            raise RuntimeExecutionError("model endpoint returned inconsistent usage")
+            raise ModelRequestFailure(
+                "model endpoint returned inconsistent usage", "invalid_usage", response_status,
+            )
         return values
 
     @staticmethod
-    def _parse_tool_calls(raw: object) -> tuple[ToolCall, ...]:
+    def _parse_tool_calls(raw: object, *, response_status: int | None = None) -> tuple[ToolCall, ...]:
         if raw is None:
             return ()
         if not isinstance(raw, list):
-            raise RuntimeExecutionError("model returned malformed tool calls")
+            raise ModelRequestFailure(
+                "model returned malformed tool calls", "invalid_tool_calls", response_status,
+            )
         calls: list[ToolCall] = []
         for index, item in enumerate(raw):
             if not isinstance(item, dict):
-                raise RuntimeExecutionError("model returned malformed tool call")
+                raise ModelRequestFailure(
+                    "model returned malformed tool call", "invalid_tool_calls", response_status,
+                )
             function = item.get("function")
             if not isinstance(function, dict) or not isinstance(function.get("name"), str):
-                raise RuntimeExecutionError("model returned a tool call without a function name")
+                raise ModelRequestFailure(
+                    "model returned a tool call without a function name", "invalid_tool_calls",
+                    response_status,
+                )
             raw_arguments = function.get("arguments", {})
             if isinstance(raw_arguments, str):
                 try:
                     raw_arguments = json.loads(raw_arguments)
                 except json.JSONDecodeError as exc:
-                    raise RuntimeExecutionError("model returned malformed tool arguments") from exc
+                    raise ModelRequestFailure(
+                        "model returned malformed tool arguments", "invalid_tool_calls", response_status,
+                    ) from exc
             if not isinstance(raw_arguments, dict):
-                raise RuntimeExecutionError("model tool arguments must be a JSON object")
+                raise ModelRequestFailure(
+                    "model tool arguments must be a JSON object", "invalid_tool_calls", response_status,
+                )
             call_id = item.get("id")
             calls.append(
                 ToolCall(
