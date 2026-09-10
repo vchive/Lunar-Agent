@@ -6,6 +6,7 @@ is resolved and checked before it is performed; command execution is opt-in and 
 
 from __future__ import annotations
 
+import codecs
 import json
 import math
 import os
@@ -98,8 +99,8 @@ class LocalToolRegistry:
                         "description": (
                             "Path to a UTF-8 text file inside the task workspace; prefer a relative "
                             f"path. Preview uses at most the first {self.max_output_bytes} bytes, "
-                            "plus a truncation marker if larger. UTF-8 decoding can fail at the "
-                            "cutoff. Repeating a call does not retrieve another page."
+                            "plus a truncation marker if larger. A UTF-8 character split by the "
+                            "cutoff is omitted. Repeating a call does not retrieve another page."
                         ),
                     }
                 },
@@ -294,13 +295,16 @@ class LocalToolRegistry:
         if not path.is_file():
             raise ToolError(f"file does not exist: {arguments.get('path')}")
         raw = path.read_bytes()
-        if len(raw) > self.max_output_bytes:
+        truncated = len(raw) > self.max_output_bytes
+        if truncated:
             raw = raw[: self.max_output_bytes]
             suffix = "\n[tool output truncated]"
         else:
             suffix = ""
         try:
-            output = raw.decode("utf-8")
+            # Only a truncated preview may omit an incomplete trailing character; EOF stays strict.
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
+            output = decoder.decode(raw, final=not truncated)
         except UnicodeDecodeError as exc:
             raise ToolError("file is not valid UTF-8 text") from exc
         return ToolResult(output + suffix)
