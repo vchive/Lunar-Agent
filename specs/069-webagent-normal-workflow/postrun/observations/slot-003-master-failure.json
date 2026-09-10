@@ -1,0 +1,81 @@
+{
+  "schema_version": "1",
+  "kind": "feature069_slot003_master_failure_observation",
+  "observed_utc": "2026-09-10T03:22:02.635836+00:00",
+  "campaign_complete": false,
+  "source_audit": "observations/20260910T031858Z.json",
+  "diagnostic": {
+    "code": "timeout",
+    "http_status": null,
+    "kind": "subject_failure",
+    "mode": "normal",
+    "model_turns": 7,
+    "request_sha256": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3",
+    "round_index": null,
+    "run_index": 1,
+    "schema_version": "1",
+    "stage": "model",
+    "tool_steps": 11
+  },
+  "subject_termination": {
+    "elapsed_seconds": 300.222,
+    "error_type": null,
+    "index": 3,
+    "manifest_sha256": "07781f3390586e49c2c521012e7981350c06215e6c7103a865a97f25597e423e",
+    "returncode": 2,
+    "schema_version": "1",
+    "stage": "subject"
+  },
+  "master_stage": "master_running",
+  "resume_used": false,
+  "master_plan_written": false,
+  "build_started": false,
+  "checkpoint_written": false,
+  "subject_receipt_accepted": false,
+  "harness_started": false,
+  "validity_score": null,
+  "overall_score": null,
+  "quality_score": null,
+  "complete_usage": null,
+  "complete_cost_micros": null,
+  "observed_model_responses": 7,
+  "complete_tool_pairs": 11,
+  "tool_counts": {
+    "read_file": 4,
+    "list_dir": 3,
+    "run_command": 4
+  },
+  "tool_errors": {
+    "count": 1,
+    "category": "run_command_FileNotFoundError",
+    "nested_command_type": "string_containing_json_array",
+    "interpreted_executable": "[python3,"
+  },
+  "evidence_sha256": {
+    ".lunar/real-eval-glm-5.2-staged-20260910/manifest.json": "07781f3390586e49c2c521012e7981350c06215e6c7103a865a97f25597e423e",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slot-003-started.json": "2617f0f0ec521e97ef9914883e95851b6ef9a6e536977e4e5398b1313c480a4a",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slot-003-terminated.json": "5be046648d03c0d9647127b9ea409fc51fab106cdc3a9276199cc874cef30577",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/outcome.json": "8cdcc03ad2131ad5e0713999616595b8ada83b90c696263534ebcdcdd9eb6f81",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/worker-started.json": "3796b516731050d5da8ffb5cd0ccce2d5bc13d5d864d91ee0c49205c5be5d84a",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/worker-terminated.json": "459bfba868a639841d8c2edd4e086bb4f6ee3ea2e4b970ea77d7747aa8f10964",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/subject-started.json": "9c54bdf930c8f8265dbffbb0e057ca19e551ba2eba53263d8008464058f5a1d0",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/subject-terminated.json": "14dbd01d87d9ca17ceb18adc522706c6c8245819bbdc44dc06d794c80c8c1520",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/report.json": "f9303e205d1809a52e8b71b75e42cfd22fa49e078e3b5e44698a8468a05bf660",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/control/state.json": "f4141a5b65009bfce4cfd25a76f579c7a0499beee0316ed205a5e5954680478c",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/record.json": "aac03ee46d5fa21a93a8c7fda93906d3381a75479ad101a85d1e82be440dec21",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/diagnostics/subject-failure.json": "ec36b73df2e759d75b616c0aaa6022b47b2bfe69e49c1de5ac8cca8bba608f23",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/receipt.failure.json": "ec36b73df2e759d75b616c0aaa6022b47b2bfe69e49c1de5ac8cca8bba608f23",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/request.json": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/config.json": "b2db12682b1ae66d63242779abb0daafdafb867f73c306ea6eeed2d2ba289bb1",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/state.json": "16e9c4e90311916767ad465546c92bf4580f8c61f24c93c7e7f1744bd1639d49",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/master-transcript.jsonl": "94cdaa3e19632ed5418dc11fa3f8192f83b5af8374c03d56bf6a91c91a2770d0"
+  },
+  "limitations": [
+    "initial_state_counters_are_not_zero_spending",
+    "no_per_tool_timing_or_complete_failed_request_usage",
+    "one_tool_error_does_not_independently_explain_master_timeout",
+    "master_failure_does_not_measure_build_or_resume_effect"
+  ],
+  "analysis_model_calls": 0,
+  "candidate_executions": 0
+}

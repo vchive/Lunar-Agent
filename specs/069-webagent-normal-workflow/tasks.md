@@ -56,3 +56,24 @@ model deadline, slots 3/4 queued. Final mode correctly rejects this partial stat
 open until four terminations, final native summary and independent result/process review. Seal
 final audit/report before integrating Features 070/071; do not rewrite frozen historical inputs
 after the current source changes.
+
+2026-09-10 11:14 +0800: slot 1 completed with accepted exact harness validity 1 and
+overall/quality 0.999999. Subject elapsed 3068.032 seconds, harness 122.493 seconds; subject
+usage 869277 tokens and 30 model interactions, excluding extractor usage; cost remains null.
+Independent receipt/state/record/report/outcome and actual private-harness review passed.
+Slots 3/4 automatically started at 11:12:53 after both wave-one terminations. New partial
+observation `postrun/observations/20260910T031419Z.json` and `.md` covers 185 evidence files;
+`postrun/slot-001-success.md` records the success interpretation. T069-07 remains open.
+
+2026-09-10 11:18 +0800: slot 3 also terminated at the 300-second master model deadline
+(subject 300.222 seconds, exit 2; native 300237 ms; diagnostic model/timeout, 7 model responses,
+11 tools). Both staged slots are now failed with no accepted receipts or scores, valid 0/2;
+neither reached build/resume. Slot 4 normal remains unresolved, so the campaign is not final.
+`postrun/observations/20260910T031858Z.json` and `.md` verify 196 evidence files. Product source,
+dispatcher and original tests stay frozen until the last registered attempt terminates and
+final evidence is sealed; no repair integration, replacement attempt or campaign relaunch.
+Independent slot 3 review also verifies 11 unique call/result pairs (read_file 4, list_dir 3,
+run_command 4), with one nested-JSON argv string causing FileNotFoundError. No validated master
+plan, build transcript, checkpoint file or harness exists. The initial workflow counters are
+not zero spending, and missing per-tool timing prevents attributing the entire timeout to that
+one error. The bounded projection and 17 hashes are in `postrun/observations/slot-003-master-failure.json`.

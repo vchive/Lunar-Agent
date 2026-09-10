@@ -18,7 +18,8 @@ Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_opti
 固定分母 valid=1/2，完成率 0.5；不同 case 不合并均分。结果、审计和 SHA 见 Feature 068。
 暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
 
-Feature 069 已完成可选 staged subject 接入与离线验证，两臂真实评测已启动，结果待产生。目标仍为
+Feature 069 已完成可选 staged subject 接入与离线验证，四槽真实评测已有三槽终止。钣金M
+有效且overall=0.999999，邮政S和钣金S均在master超时失败；邮政M仍运行。目标仍为
 `Master → Build → typed checkpoint → 至多一次同 attempt continuation`，通过同一预算改善交付率。
 入口为 `run_subject_adapter(workflow_config=...)` 或 `effect-subject --workflow-config PATH`；
 默认 normal workflow 不变。实际 master 模型输出的 JSON 计划经过验证后传给新的 build session，
@@ -89,6 +90,28 @@ private case/extractor/evaluator，验证注册提交、全部冻结文件、源
 证据文件；这只是partial observation。外层时间一致性检查有明示2秒容差，不增加预算；
 最终仍须人工确认本批进程退出。T069-07保持未完成，全部终止后用只读工具封存最终审计、
 报告并独立复核，再合入070/071；合入后保留原Git/SHA锚点，不改历史manifest适配新源码。
+
+2026-09-10 11:14进度：slot1钣金M已完成exact harness评分，validity=1、overall/quality
+=0.999999。Subject 3068.032秒，harness 122.493秒，native run 3190.563秒；实际模型
+GLM-5.2，30次模型交互，subject累计input719940/output149337/total869277 tokens，
+费用null，以上用量不包含extractor。独立复核subject/harness回执、record/state/report/
+outcome链及private harness实际字节通过；37/74/8冻结SHA未变。分数与上一批钣金Lunar
+相同，但历史样本不进入本批分母。slot3/4已于11:12:53 +0800在第一波全部结束后自动
+启动；本批仍未完成。新partial审计及报告为`postrun/observations/20260910T031419Z.json`
+和`.md`，核验185个证据文件；成功槽详细口径见`postrun/slot-001-success.md`。
+
+2026-09-10 11:18进度：slot3钣金S也在master的300秒模型截止点失败，subject退出2、
+耗时300.222秒，native300237ms；诊断model/timeout，7个模型响应、11次工具调用，
+无subject/harness回执，评分与完整usage为null，resume_used=false。两槽S已全部终止，
+本臂有效解0/2；两次均未进入Build或触发续跑，不能由此评价续跑后的求解效果。slot4邮政M
+仍未决，全批T069-07仍未完成，不提前计算普通臂的最终完成率。最新partial观测见
+`postrun/observations/20260910T031858Z.json`与`.md`，核验196个证据文件。继续等待唯一
+剩余的已注册attempt终止，主仓源码/dispatcher/tests保持冻结，070/071暂不合入。
+Slot3 transcript经独立只读核验有11个唯一call/result完整配对：read_file4、list_dir3、
+run_command4；其中1次run_command把JSON argv嵌套编码成string，触发FileNotFoundError，
+与071所覆盖的模式相同。无其他工具错误，不能由此把300秒全部归因于这一次错误。
+workflow的初始0计数不代表零消费；checkpoints目录存在但为空，无master计划/build
+transcript/receipt/harness。17项证据SHA及分析见`postrun/observations/slot-003-master-failure.json`。
 
 保持产品源码、measurement脚本和tests冻结，待全部结束后按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
 由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
