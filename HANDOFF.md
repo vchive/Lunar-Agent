@@ -8,15 +8,21 @@
 
 ## 1. 当前状态
 
-Feature074正在登记修复后的新实评，`.specify`已指向`074-corrected-staged-measurement`。
+Feature074已启动修复后的新实评，`.specify`指向`074-corrected-staged-measurement`。
 被测产品源码固定`c28e498`：钣金、邮政各一个全新S尝试，GLM-5.2，Master上限1200秒，
 其余共享5400秒/200工具/800万tokens和一次合作式续跑不变。一波并发2、不补位；历史
 069/072仅作背景，不进入分母。本轮分别验证计划验收、进入Build及最终exact-harness
 有效解。测量脚本通过固定SHA复用原生执行/receipt与072只读阶段校验，只替换两槽登记
 和汇总边界，不修改产品。137项新测试、239项完整隔离场景与独立交叉审查通过，登记已
 生成：SHA `b154975d9557b9697fcdc7915de3ab7bb225165c6aaa1c6c0ab3f432a2123229`。
-尚未launch，正独立执行实际预审/dry-run，冻结提交推送后才能启动一次。步骤与固定
-协议见074 spec/plan/tasks；从现在起不要修改源码、scripts、tests或输入字节。
+实际独立预审/dry-run已通过并镜像，37源码/99冻结文件/18历史锚点一致。登记提交
+`27f7124b28ef9a7318c5f574a9ac97b16a718b9c`推送后于2026-09-10 14:10:22 +0800
+唯一启动。dispatcher PID/PGID77166，slot1/2 worker77318/77317，初始快照观察到
+subject PID/PGID77319/77320。首份独立partial审计通过181证据SHA，两槽均master_running，
+当时还无计划/Build/receipt/评分。T074-04已关闭、05/06待结束与最终审计；绝不能再次
+launch，不要修改源码、scripts、tests或输入字节。进度只读使用074 campaign.py --summarize
+和postrun/audit.py；不要执行要求未启动状态的check-only/dry-run。启动与初始进程快照
+见074 measurement/，独立观测见postrun/observations/；progress/为非权威只读进程/阶段快照。
 
 最新代码状态：072最终证据已在`0a7f90e`封存推送后，合入073修复（merge `228b213`，
 isolated `dd4d7f5`）。当前`.specify`指向073，T072与T073全部关闭。主仓src/tests与已审
