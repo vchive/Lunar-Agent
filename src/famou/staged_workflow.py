@@ -30,6 +30,30 @@ def _profile_digest(agent: AgentLoopRuntime) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _master_prompt(prompt: str) -> str:
+    """Frame the unchanged task as later Build work; labels do not parse or sanitize its text."""
+    return '''Planning stage: your only deliverable in this invocation is a short handoff plan for Build.
+The task below describes what the later Build stage must solve and deliver. In this invocation,
+plan that work; do not implement the solver, run optimization, or create the final solution files.
+Instructions about solving, saving candidates and writing the final summary describe Build's work.
+Use public-input inspection only as needed to identify a starting approach, output paths and checks.
+
+--- task for the later Build stage ---
+''' + prompt + '''
+--- end Build task context ---
+
+Return ONLY a JSON object with exactly {"plan": ["ordered implementation steps"], "expected_paths": ["solution output paths"]}.
+Include _agent_summary.md in expected_paths. Paths must be relative output files outside case/ and
+workflow/. Do not write workflow control files or receipt files. The build stage will receive this
+plan and the original public task. Keep inspection to the minimum needed for a useful handoff;
+you do not need to prove feasibility or finish the solution before returning the plan.
+Leave unresolved data or implementation details as explicit plan steps for Build.
+Once a starting approach, delivery paths and public-check steps are identified, return the JSON.
+In the plan, have Build save a complete candidate before expensive refinement, verify public
+constraints and preserve improvements atomically. No result is guaranteed.
+'''
+
+
 def _parse_master_response(text: str) -> dict[str, object]:
     """Accept one whole object or one explicit JSON fence, never select or repair a substring."""
     try:
@@ -204,13 +228,7 @@ class StagedWorkflowRunner:
         self.controller._write_new(self.workspace / "workflow" / "config.json", self.config.to_dict())
         self.controller.transition("master_running")
         self._attach_transcript(self.workspace / "workflow" / "master-transcript.jsonl")
-        master_prompt = prompt + '''\n\nPlanning stage: inspect public inputs if needed, then return ONLY a JSON object
-with exactly {"plan": ["ordered implementation steps"], "expected_paths": ["solution output paths"]}.
-Include _agent_summary.md in expected_paths. Paths must be relative output files outside case/ and
-workflow/. Do not write workflow control files or receipt files. The build stage will receive this
-plan and the original public task. Plan to save a complete candidate before expensive refinement,
-verify public constraints, and preserve improvements atomically. No result is guaranteed.
-'''
+        master_prompt = _master_prompt(prompt)
         master = self.agent.run(
             master_prompt, self.workspace,
             timeout=min(self.config.policy.master_seconds, self._remaining()),
