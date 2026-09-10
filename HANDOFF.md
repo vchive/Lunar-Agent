@@ -14,7 +14,18 @@
 失败评分及完整用量保留null。本批证明普通流程能在这两个历史高分case交付有效解；
 单次case/arm样本不能证明稳定性或整体优劣，也不能据此评价续跑效果。最终资料见
 `specs/069-webagent-normal-workflow/postrun/results.md`、`final-audit.json`和`final-report.md`。
-测量源码始终为`80f5af1`；最终审计封存后才允许集成已审070/071修复。
+测量源码始终为`80f5af1`；最终证据已在`26fc4a4`封存推送，随后按序合入070（`6def340`）
+和071（`caf9a1f`），两项SDD任务均关闭。当前主仓`.specify`指向071；127项主仓定向测试、
+Ruff、Specify、diff和独立集成复核通过。src/tests与已审071分支完全一致，沿用其946项
+全量通过记录。修复只改tools.py：UTF-8截断保留完整前缀；嵌套argv字符串在执行前返回
+可纠正诊断，不自动执行或重试。这些修复未参与刚结束的测量，也未新增模型调用。
+
+当前目标：保持普通流程作为已验证的默认交付路径；下一步基于Master的真实失败证据，
+用独立SDD定义更明确的规划职责和最小交接，再另行冻结验证。无需为得到成功而补跑本批，
+不将普通流程2/2推广成普遍稳定保证，不扩张尚未真实触发的续跑能力。
+
+以下保留历史过程；其中“运行中”“待合入”“保持源码冻结”等描述对应当时状态，
+当前状态以本节开头的最终结果及已集成说明为准。
 
 2026-09-09 最新转向：用户要求优先在 WebAgent 稳定高分的 case 上真实测量 Lunar。
 Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_optimization；来自
@@ -60,7 +71,7 @@ slot3/4；绝不能再次运行`--launch`。当前启动快照见measurement/lau
 它不是最终结果。仅用`campaign.py --summarize`读取进度，勿运行要求未启动的check-only/dry-run。
 2026-09-10 10:34进度：slot2邮政S已在master阶段300秒模型超时，subject退出2，
 15模型响应/19工具调用，尚无master计划/build/resume/receipt/harness/分数；worker退出0仅
-代表失败证据正常保存。slot1钣金M仍运行，slot3/4尚在波次屏障后，不能把本轮当成全部失败。
+代表失败证据正常保存。当时slot1钣金M仍运行，slot3/4尚在波次屏障后，不能把该观测当成全部失败。
 诊断/记录/SHA经独立核验，机器与文字观测见measurement/interim-slot-002.json和.md。
 
 本槽还暴露一个确定性工具bug：28,878字节UTF8有效CSV的20,000字节预览截断汉字，误报编码
@@ -140,7 +151,7 @@ passed/complete/final_acceptance均true，212项证据SHA经独立重算一致�
 `3175509fe7d2df7210047ec956ad2f24049189524adfe5670586704ec6cdb2e7`。
 独立进程检查及root复核均未发现已知PID/PGID、可见命令参数或cwd关联的本批残留；
 详见`postrun/final-process-check.json`，保留child PID未记录等覆盖范围限制。全部四槽
-各一次，未重跑WebAgent、未请求新平台数据、未补位、未复制旧候选。以下带时间的运行中
+各一次，未重跑WebAgent、未请求新平台数据、未补位、未复制旧候选。文中带时间的运行中
 段落是历史观测；本批现在已封存，后续源码变化不得改写manifest来通过旧冻结检查。
 
 本批运行期间产品源码、measurement脚本和tests保持冻结，现已完成按case报告和独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt

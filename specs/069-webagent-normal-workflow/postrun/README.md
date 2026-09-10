@@ -1,5 +1,12 @@
 # Read-only result audit and report
 
+The campaign completed on 2026-09-10. Its final audit, report and process observation were sealed
+in commit `26fc4a4` before the reviewed 070/071 tool fixes were merged. See [results.md](results.md),
+[final-audit.json](final-audit.json), [final-report.md](final-report.md) and
+[final-process-check.json](final-process-check.json). Current product source now includes those
+fixes, so running the original live-source audit commands below must reject the changed source.
+The commands document the pre-integration audit; do not rewrite the manifest to make them pass.
+
 These analysis tools were added while the registered Feature 069 campaign was running. They are
 outside its frozen `measurement/` dispatcher directory and do not change product source, tools,
 inputs, budgets, attempt counts or launch behavior. They never load provider configuration,
