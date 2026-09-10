@@ -231,7 +231,8 @@ class LocalToolRegistry:
                             ],
                             "description": (
                                 "Runs without a shell in the task workspace. Prefer an argv array, "
-                                'e.g. ["python3", "-u", "solve.py"]. A string is split into arguments; '
+                                'e.g. ["python3", "-u", "solve.py"]. Do not encode the array as a string. '
+                                "A string is split into arguments; "
                                 "pipes, redirects, wildcards and environment variables are not expanded. "
                                 f"Timeout: at most {self.command_timeout:g} seconds, further limited "
                                 "by a profiled invocation's remaining time; output is captured until exit."
@@ -437,6 +438,17 @@ class LocalToolRegistry:
             raise ToolError("run_command is disabled; pass --allow-exec to enable it")
         command = arguments.get("command")
         if isinstance(command, str):
+            if command.lstrip().startswith("["):
+                try:
+                    decoded = json.loads(command)
+                except (ValueError, RecursionError):
+                    decoded = None
+                if isinstance(decoded, list):
+                    raise ToolError(
+                        "Pass the argv array directly, without enclosing the entire array in a "
+                        'string, e.g. {"command": ["python3", "--version"]}, or provide an '
+                        "ordinary command string."
+                    )
             command = shlex.split(command)
         if not isinstance(command, list) or not command or any(not isinstance(item, str) for item in command):
             raise ToolError("command must be a non-empty string or string array")
