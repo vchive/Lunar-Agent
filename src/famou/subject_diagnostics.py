@@ -15,7 +15,12 @@ from urllib.error import HTTPError
 
 from .agent_loop import AgentInputRequired, ProfileBudgetFailure
 from .model_profile import BudgetFailureEvidence, UsageSnapshot
-from .runtime import RuntimeExecutionError
+from .runtime import (
+    MODEL_FAILURE_REASONS,
+    ModelFailureEvidence,
+    ModelRequestFailure,
+    RuntimeExecutionError,
+)
 
 MAX_DIAGNOSTIC_BYTES = 4096
 MAX_COUNTER = 1_000_000
@@ -137,14 +142,31 @@ def _project_budget(evidence: BudgetFailureEvidence) -> dict[str, object]:
     })
 
 
+def _normalize_model_failure(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != {"reason", "response_status"}:
+        raise ValueError("invalid model failure fields")
+    reason, status = value["reason"], value["response_status"]
+    if type(reason) is not str or reason not in MODEL_FAILURE_REASONS:
+        raise ValueError("invalid model failure reason")
+    if status is not None and not _integer(status, 100, 599):
+        raise ValueError("invalid model response status")
+    if status is not None:
+        if reason == "http_error" and 200 <= status <= 299:
+            raise ValueError("inconsistent HTTP failure status")
+        if reason not in {"http_error", "transport_timeout", "transport_error"} and not 200 <= status <= 299:
+            raise ValueError("inconsistent response validation status")
+    return dict(value)
+
+
 def normalize_diagnostic(value: object) -> dict[str, object]:
     """Accept only the fixed score-free vocabulary, without arbitrary error strings."""
     if not isinstance(value, dict) or "schema_version" not in value:
         raise ValueError("invalid diagnostic fields")
     version = value.get("schema_version")
-    if type(version) is not str or version not in {"1", "2"}:
+    if type(version) is not str or version not in {"1", "2", "3"}:
         raise ValueError("invalid diagnostic version")
-    if set(value) != (_FIELDS | {"budget"} if version == "2" else _FIELDS):
+    additional = {"2": {"budget"}, "3": {"model_failure"}}.get(version, set())
+    if set(value) != _FIELDS | additional:
         raise ValueError("invalid diagnostic fields")
     if value["kind"] != "subject_failure":
         raise ValueError("invalid diagnostic kind")
@@ -170,6 +192,16 @@ def normalize_diagnostic(value: object) -> dict[str, object]:
         if (value["stage"], value["code"], value["http_status"]) != ("runtime", "budget_exceeded", None):
             raise ValueError("invalid diagnostic budget classification")
         return {**value, "budget": _normalize_budget(value["budget"])}
+    if version == "3":
+        if value["stage"] != "model" or value["code"] not in {"model_failed", "model_http_failed", "timeout"}:
+            raise ValueError("invalid model failure classification")
+        failure = _normalize_model_failure(value["model_failure"])
+        status = value["http_status"]
+        if status is not None and (failure["reason"] != "http_error" or status != failure["response_status"]):
+            raise ValueError("inconsistent model failure status")
+        if value["code"] == "model_http_failed" and status is None:
+            raise ValueError("missing model HTTP failure status")
+        return {**value, "model_failure": failure}
     return dict(value)
 
 
@@ -358,12 +390,25 @@ class SubjectDiagnosticObserver:
     ) -> dict[str, object]:
         http_status = None
         budget = None
+        model_failure = None
+        model_failure_checked = False
         current: BaseException | None = error
         seen: set[int] = set()
         for _ in range(8):
             if current is None or id(current) in seen:
                 break
             seen.add(id(current))
+            if self.stage == "model" and type(current) is ModelRequestFailure and not model_failure_checked:
+                model_failure_checked = True
+                try:
+                    if type(current.evidence) is ModelFailureEvidence:
+                        model_failure = _normalize_model_failure({
+                            "reason": current.evidence.reason,
+                            "response_status": current.evidence.response_status,
+                        })
+                except (TypeError, ValueError, AttributeError):
+                    # Malformed owned evidence cannot prevent the legacy failure projection.
+                    pass
             if isinstance(current, HTTPError) and _integer(current.code, 100, 599):
                 http_status = current.code
                 if self.stage == "model":
@@ -402,4 +447,9 @@ class SubjectDiagnosticObserver:
         )
         if budget is not None and code == "budget_exceeded" and http_status is None:
             return {**payload, "schema_version": "2", "budget": budget}
+        if model_failure is not None:
+            try:
+                return normalize_diagnostic({**payload, "schema_version": "3", "model_failure": model_failure})
+            except (TypeError, ValueError):
+                pass
         return payload
