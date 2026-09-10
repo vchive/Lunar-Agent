@@ -8,13 +8,19 @@
 
 ## 1. 当前状态
 
-Feature076正在准备075修复后的真实交接测量，`.specify`指向
+Feature076已启动075修复后的真实交接测量，`.specify`指向
 `specs/076-public-plan-handoff-measurement`。源码固定`96d5a60`，GLM-5.2，钣金与邮政
 各一个新S尝试，Master1200、build2400、reserve120秒，5400秒/200工具/800万tokens，
 一波并发2、至多一次合作式续跑、不补位。311项隔离检查与独立审查通过，已prepare，
 manifest SHA=`6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76`。
-尚未launch，正独立预审/dry-run，登记提交推送后启动一次。075解决词汇误拒绝，未解决或保证解决
-钣金规划超时；本轮只作描述性测量，历史不进分母，不修改074封存SHA或重开旧槽。
+实际独立预审和311项dry-run通过，37源码/111冻结文件/24历史锚点一致，原样报告已镜像。
+登记`2916041947c49800b3dda0f5c463014292291aae`推送后，于2026-09-10 17:25:31 +0800
+唯一启动；dispatcher PID/PGID93194，worker93363/93364，初始快照subject93365/93366。
+两槽初始均master_running，尚无计划/Build/评分；T076-04关闭，05/06待结束和最终审计。
+绝不能再次launch、prepare或执行要求未启动的preaudit/dry-run，不改源码/scripts/tests/
+输入字节。观察只用076 campaign.py --summarize、postrun/audit.py；新缺陷在隔离worktree
+处理，封存后再集成。075未解决或保证解决钣金规划超时；本轮只作描述性测量，历史不进
+分母，不修改074封存SHA或重开旧槽。
 
 最新状态：074已在`68b5e58`封存推送后，合入075公开计划词汇修复：isolated `065661f`，
 merge `b5fc3b2`。当前`.specify`指向075，T074/T075全部关闭。主仓src/tests/.specify
