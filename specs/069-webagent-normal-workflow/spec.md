@@ -78,8 +78,8 @@ bounded invocation timeout. Build's slice is cooperative, checked between comple
 build and continuation requests use the remaining aggregate time minus the finalization reserve.
 The reserve is never added to the budget. An in-flight request or tool can consume the remaining
 window before the next cooperative boundary, in which case no continuation is authorized. Optional
-`checkpoint_after_rounds` is a fixed policy input, not an outcome-dependent retry. Actual experiment
-values remain unregistered until T069-06.
+`checkpoint_after_rounds` is a fixed policy input, not an outcome-dependent retry. The T069-06 values and fixed four-slot schedule are registered in `measurement/README.md` and
+`measurement/manifest.json`.
 
 Shared-ledger responses report cumulative tokens, cost, model identity and interaction turns across
 master/build/resume. Rejected response usage is latched as failure evidence; unknown consumption

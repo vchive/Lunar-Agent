@@ -18,7 +18,7 @@ Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_opti
 固定分母 valid=1/2，完成率 0.5；不同 case 不合并均分。结果、审计和 SHA 见 Feature 068。
 暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
 
-Feature 069 已完成可选 staged subject 接入与离线验证，尚未进行两臂实评。目标仍为
+Feature 069 已完成可选 staged subject 接入与离线验证，两臂评测预注册与离线演练已完成，实评结果待产生。目标仍为
 `Master → Build → typed checkpoint → 至多一次同 attempt continuation`，通过同一预算改善交付率。
 入口为 `run_subject_adapter(workflow_config=...)` 或 `effect-subject --workflow-config PATH`；
 默认 normal workflow 不变。实际 master 模型输出的 JSON 计划经过验证后传给新的 build session，
@@ -34,10 +34,20 @@ staged 定向测试），Ruff、diff check 和独立审查通过。
 
 真实 AgentLoop + 假模型、subject adapter/CLI、现有 trial gate + fixture harness 的离线测试已
 覆盖计划传递、累计预算、单次续跑、失败不评分和身份/路径保护。它们不是私有 harness 实评，
-不能据此声称有效解比例提高。下一步为 T069-06：冻结同 case/GLM-5.2/aggregate ceilings 的
-control/staged 两臂配置、源码、请求和顺序，独立审计及 dry-run 后才进行 T069-07。此前结果不
-回填、不重新运行 WebAgent。源码 SHA 和 run/attempt 标签由预注册调用者核验，adapter 本身
-核验 request/case/profile/limits 的实际绑定。设计见 `specs/069-webagent-normal-workflow/`。
+不能据此声称有效解比例提高。T069-06 已完成：冻结4个新尝试，每个case各1次 control(M)
+和staged(S)，两波并发2，顺序为钣金M/邮政S，然后钣金S/邮政M。两臂均GLM-5.2、
+5400秒/200工具/800万tokens；S的master300/build2400/reserve120秒均包含在总时间内，
+32个完整工具轮次可触发唯一一次同进程合作式续跑。失败不补位，未评分保留null。
+
+产品源码冻结在`80f5af1`，预注册SHA为
+`07781f3390586e49c2c521012e7981350c06215e6c7103a865a97f25597e423e`；
+37源码、74执行/测试/输入文件、8个历史证据锚点已固定。独立审计通过，隔离dry-run26项、
+全仓874项测试通过，未调用真实模型。协议与证据见`specs/069-webagent-normal-workflow/measurement/`。
+汇总纯读取native state/record/report，不调用会恢复备份的读取路径；启动与退出证据须一致。
+下一步T069-07：先提交预注册，再启动本机`.lunar/real-eval-glm-5.2-staged-20260910/`，
+按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
+由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
+用户已授权的CC Switch读取并传进相应子进程环境，不写入证据。设计见`specs/069-webagent-normal-workflow/`。
 
 Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
 200000 token ceiling，subject 耗时 488.371 / 522.781 秒，valid=0/2、scored=0，完整失败

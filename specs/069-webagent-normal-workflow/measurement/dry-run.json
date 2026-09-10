@@ -1,0 +1,94 @@
+{
+  "schema_version": "1",
+  "kind": "feature069_offline_dry_run",
+  "status": "passed",
+  "passed": true,
+  "model_calls": 0,
+  "credentials_loaded": false,
+  "manifest_sha256": "07781f3390586e49c2c521012e7981350c06215e6c7103a865a97f25597e423e",
+  "scenarios": {
+    "control_adapter_and_native_trial_success": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_dry_run069.py::test_native_offline_scenario[control_success]"
+      ]
+    },
+    "staged_adapter_and_native_trial_success_with_one_resume": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_dry_run069.py::test_native_offline_scenario[staged_success]",
+        "tests/test_staged_workflow.py::test_durable_boundary_replays_pairs_with_same_identity_and_no_budget_reset"
+      ]
+    },
+    "missing_usage_retains_candidate_without_receipt_or_harness": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_dry_run069.py::test_native_offline_scenario[missing_usage]"
+      ]
+    },
+    "timeout_retains_candidate_without_receipt_or_harness": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_dry_run069.py::test_native_offline_scenario[timeout]"
+      ]
+    },
+    "worker_native_receipt_gate_and_independent_phase_timeouts": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_worker069.py::test_native_runner_owns_receipt_gate_and_phase_timeouts[None]",
+        "tests/test_worker069.py::test_native_runner_owns_receipt_gate_and_phase_timeouts[subject_process]",
+        "tests/test_worker069.py::test_native_runner_owns_receipt_gate_and_phase_timeouts[missing_receipt]",
+        "tests/test_worker069.py::test_native_runner_owns_receipt_gate_and_phase_timeouts[changed_request_pin]"
+      ]
+    },
+    "worker_independent_environments": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_worker069.py::test_environment_split_checks_endpoints_and_ignores_ambient_values"
+      ]
+    },
+    "worker_exclusive_markers_and_path_confinement": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_worker069.py::test_control_files_never_overwrite_or_follow_links"
+      ]
+    },
+    "campaign_summary_schedule_launch_and_local_process_cleanup": {
+      "status": "passed",
+      "test_nodes": [
+        "tests/test_campaign069.py::test_outer_timeout_stops_local_process_group",
+        "tests/test_campaign069.py::test_slot_marker_prevents_second_dispatch",
+        "tests/test_campaign069.py::test_summary_fixed_denominator_and_null_scores[failed_extraction]",
+        "tests/test_campaign069.py::test_summary_fixed_denominator_and_null_scores[failed_subject]",
+        "tests/test_campaign069.py::test_summary_fixed_denominator_and_null_scores[success]",
+        "tests/test_campaign069.py::test_summary_never_restores_record_backup",
+        "tests/test_campaign069.py::test_summary_rejects_broken_native_digest_chain[attempt]",
+        "tests/test_campaign069.py::test_summary_rejects_broken_native_digest_chain[outcome]",
+        "tests/test_campaign069.py::test_summary_rejects_broken_native_digest_chain[record]",
+        "tests/test_campaign069.py::test_summary_rejects_broken_native_digest_chain[report]",
+        "tests/test_campaign069.py::test_summary_rejects_broken_native_digest_chain[state]",
+        "tests/test_campaign069.py::test_summary_requires_start_and_consistent_exit[exit]",
+        "tests/test_campaign069.py::test_summary_requires_start_and_consistent_exit[slot]",
+        "tests/test_campaign069.py::test_summary_requires_start_and_consistent_exit[worker]",
+        "tests/test_campaign069.py::test_wave_two_waits_for_both_wave_one_slots"
+      ]
+    }
+  },
+  "tests_passed": 26,
+  "test_files_sha256": {
+    "tests/test_dry_run069.py": "920ba72438e242fe10ee6472117b6a317a1daa196dc5a69c7e921eb50f1fbff8",
+    "tests/test_worker069.py": "89cd5a7ec6d95ccf16bae3cb45cc21da2010be549966bff596b3298a758db4ca",
+    "tests/test_staged_workflow.py": "adaad0b059d78c277423712ce1192df14fd7e8b79cfa49982c26d0f3b13a422c",
+    "tests/test_staged_effect_adapter.py": "41cd429ee2d616aa68ee31876be74d61a0a48d9dcf11ec71dd4118842e8bcf02",
+    "tests/test_effect_adapters.py": "aaf220e5d565af942ec965007441bbc2ab63afbfe399eb92a4abf7673ff68fff",
+    "tests/test_effect_trial.py": "87ec28555e02857baebbe00a284c2be072b87136d51f245e04730c1e32835208",
+    "tests/test_campaign069.py": "6743b4583714af0e19a0dc5e3e6b5f2e997bc84853b87263181272eaece1159e"
+  },
+  "isolation": {
+    "inherited_environment": false,
+    "temporary_fixture_workspaces": true,
+    "network_connections_blocked": true,
+    "ccswitch_file_access_blocked": true,
+    "private_harness_executed": false
+  }
+}
