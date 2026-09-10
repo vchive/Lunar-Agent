@@ -1,0 +1,103 @@
+{
+  "schema_version": "1",
+  "kind": "feature069_master_behavior_observation",
+  "observed_utc": "2026-09-10T03:31:17.203718+00:00",
+  "campaign_complete": false,
+  "implementation_commit": "80f5af10f4a25dab5c5aa2ad767e3b78994f34a3",
+  "slots": [
+    {
+      "index": 2,
+      "case_key": "china_post_pickup_optimization",
+      "recorded_assistant_responses": 15,
+      "complete_tool_pairs": 19,
+      "tool_counts": {
+        "list_dir": 4,
+        "read_file": 6,
+        "run_command": 9
+      },
+      "tool_error_results": 3,
+      "recorded_final_text_responses": 0,
+      "transcript_system_matches_default": true,
+      "normal_solve_instruction_present": true,
+      "user_utf8_bytes": 2223,
+      "planning_text_utf8_bytes": 568,
+      "planning_separator_utf8_bytes": 2,
+      "runtime_budget_hint_persisted": false,
+      "master_plan_exists": false,
+      "build_session_transcript_exists": false,
+      "checkpoint_file_count": 0,
+      "workflow_stage": "master_running",
+      "resume_used": false,
+      "subject_returncode": 2,
+      "subject_elapsed_seconds": 300.255,
+      "diagnostic_stage": "model",
+      "diagnostic_code": "timeout",
+      "complete_usage": null,
+      "scores": null
+    },
+    {
+      "index": 3,
+      "case_key": "sheet_metal_nesting",
+      "recorded_assistant_responses": 7,
+      "complete_tool_pairs": 11,
+      "tool_counts": {
+        "read_file": 4,
+        "list_dir": 3,
+        "run_command": 4
+      },
+      "tool_error_results": 1,
+      "recorded_final_text_responses": 0,
+      "transcript_system_matches_default": true,
+      "normal_solve_instruction_present": true,
+      "user_utf8_bytes": 2050,
+      "planning_text_utf8_bytes": 568,
+      "planning_separator_utf8_bytes": 2,
+      "runtime_budget_hint_persisted": false,
+      "master_plan_exists": false,
+      "build_session_transcript_exists": false,
+      "checkpoint_file_count": 0,
+      "workflow_stage": "master_running",
+      "resume_used": false,
+      "subject_returncode": 2,
+      "subject_elapsed_seconds": 300.222,
+      "diagnostic_stage": "model",
+      "diagnostic_code": "timeout",
+      "complete_usage": null,
+      "scores": null
+    }
+  ],
+  "source_findings": {
+    "master_timeout_is_invocation_hard_limit": true,
+    "plan_parsing_occurs_after_successful_agent_run": true,
+    "request_budget_hint_uses_invocation_remaining_time": true,
+    "budget_hint_added_to_request_copy_not_transcript": true,
+    "master_reuses_normal_agent_and_registry": true
+  },
+  "evidence_sha256": {
+    "specs/069-webagent-normal-workflow/measurement/manifest.json": "07781f3390586e49c2c521012e7981350c06215e6c7103a865a97f25597e423e",
+    "src/famou/staged_workflow.py": "a91e86c0e6859b179572d794387bdea36377d029abb1900045dcfb0d5e200b82",
+    "src/famou/agent_loop.py": "1981e212b6ec415a855f6407590ec613428ed928c3ff0968eaa76aa8ce8ef311",
+    "src/famou/effect_adapters.py": "16d786a6a6dbf67af2fd7341a268909fada3a7183734a5eb04e22a0f0cf68232",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/master-transcript.jsonl": "5b0481bb972442e1d19f184f27ce56a8f664e5b5cbb8c18853989fa69147723c",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/state.json": "56cd2aad352bc7906e2aac8e925a24373645a0c2809ae0951703354964622030",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/diagnostics/subject-failure.json": "11c53a519ecc876517367247c942e8a77234017aa5b3f672fc826b2f82c635c0",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/subject-terminated.json": "647a5f39e03b5cd3b8537ddba1831e55b1d09555e82f117cf98bb14b674da7a2",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/config.json": "acc683087bee0655cf984caa9a040ff379d451f5434addf2ac46c06b21c60465",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/request.json": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/master-transcript.jsonl": "94cdaa3e19632ed5418dc11fa3f8192f83b5af8374c03d56bf6a91c91a2770d0",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/state.json": "16e9c4e90311916767ad465546c92bf4580f8c61f24c93c7e7f1744bd1639d49",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/diagnostics/subject-failure.json": "ec36b73df2e759d75b616c0aaa6022b47b2bfe69e49c1de5ac8cca8bba608f23",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/subject-terminated.json": "14dbd01d87d9ca17ceb18adc522706c6c8245819bbdc44dc06d794c80c8c1520",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/config.json": "b2db12682b1ae66d63242779abb0daafdafb867f73c306ea6eeed2d2ba289bb1",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/003/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/request.json": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3"
+  },
+  "limitations": [
+    "recorded_final_response_absent_not_a_schema_rejection_observation",
+    "no_exact_request_budget_snapshots_in_persisted_history",
+    "no_per_tool_or_per_model_latency",
+    "behavior_does_not_establish_single_cause_of_timeout",
+    "unchanged_normal_slot004_remains_unresolved"
+  ],
+  "model_calls": 0,
+  "candidate_executions": 0
+}

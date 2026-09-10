@@ -77,3 +77,13 @@ run_command 4), with one nested-JSON argv string causing FileNotFoundError. No v
 plan, build transcript, checkpoint file or harness exists. The initial workflow counters are
 not zero spending, and missing per-tool timing prevents attributing the entire timeout to that
 one error. The bounded projection and 17 hashes are in `postrun/observations/slot-003-master-failure.json`.
+
+Additional read-only terminal-master analysis is in `postrun/master-behavior-analysis.md` and
+`.json` (16 evidence hashes). Neither master successfully returned and persisted a final response, so these are not observed
+plan-schema rejections. Distinct direct file/directory reads and repeated Python data inspections
+show exploration, with self-corrected command errors and no observed solver implementation.
+Runtime code provides invocation remaining time on request copies, not persisted transcript;
+missing historical budget tags do not prove that the model lacked a deadline hint. These findings
+inform a later role/handoff SDD; role mixing is an unproven explanation, and network/queue/generation
+latency cannot be separated. Local evidence cannot prove that the provider never generated final
+text. Slot 4 and all current experiment boundaries remain unchanged.

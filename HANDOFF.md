@@ -113,6 +113,15 @@ run_command4；其中1次run_command把JSON argv嵌套编码成string，触发Fi
 workflow的初始0计数不代表零消费；checkpoints目录存在但为空，无master计划/build
 transcript/receipt/harness。17项证据SHA及分析见`postrun/observations/slot-003-master-failure.json`。
 
+随后补充两份已终止Master的行为分析，见`postrun/master-behavior-analysis.md`和`.json`。
+两槽都没有成功返回并持久化的最终响应，模型超时发生在计划JSON解析之前，并非已返回的
+计划被校验拒绝；不能据此断言服务端未生成文本。read_file/list_dir没有同路径重复；成功的Python数据探查分别7/3次，
+重复加载公开输入进行不同统计，未见写候选或执行solver。参数错误后均有自主纠正，
+缺少逐调用耗时，不能单独归因。实际master复用通用系统角色和normal求解任务，加附加
+planning说明；代码向每次请求副本提供master剩余时间，但不持久化该提示。不能说模型
+不知道截止时间，亦无法区分网络、排队与生成耗时。角色混合仍是待验证解释。下一轮角色/
+交接设计仍待本批结束后另行SDD，当前不改预算或启动新尝试。
+
 保持产品源码、measurement脚本和tests冻结，待全部结束后按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
 由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
 用户已授权的CC Switch读取并传进相应子进程环境，不写入证据。设计见`specs/069-webagent-normal-workflow/`。
