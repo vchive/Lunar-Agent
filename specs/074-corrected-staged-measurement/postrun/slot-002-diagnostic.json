@@ -1,0 +1,213 @@
+{
+  "schema_version": "1",
+  "kind": "feature074_slot002_read_only_failure_diagnostic",
+  "observed_utc": "2026-09-10T06:18:22.579849+00:00",
+  "manifest_sha256": "b154975d9557b9697fcdc7915de3ab7bb225165c6aaa1c6c0ab3f432a2123229",
+  "index": 2,
+  "case_key": "china_post_pickup_optimization",
+  "arm": "S",
+  "budget_arm": "master_1200",
+  "root_cause": {
+    "code": "public_objective_vocabulary_false_positive_in_master_forbidden_regex",
+    "classification": "deterministically_reproduced_first_post_parse_validation_block",
+    "source": "src/famou/workflow_checkpoint.py",
+    "function": "WorkflowController.write_master",
+    "regex": "(?i)(?:baseline|private|evaluator|harness|score|credential)",
+    "error_from_corresponding_source_branch": "master plan contains forbidden evaluator evidence",
+    "first_rejected_plan_item": 3,
+    "summary_zh": "Master JSON包络解析成功；公开目标计算词scorer中的score子串命中宽泛门禁，阻断计划持久化与Build。",
+    "matches": [
+      {
+        "plan_item": 3,
+        "matched_token": "score",
+        "match_span": [
+          24,
+          29
+        ],
+        "plan_item_sha256": "b399c4334e41d595a994e6c38ef759235eb6ebd6db8d42aaa69664af4ffc1df4",
+        "plan_item_bytes": 291,
+        "bounded_context": "Implement the objective scorer matching problem.json: sum(demand*distance) + 0.8*load_deviation + 20*overload + 500*radius_excess"
+      },
+      {
+        "plan_item": 7,
+        "matched_token": "score",
+        "match_span": [
+          180,
+          185
+        ],
+        "plan_item_sha256": "a9720c3254e5510caa33a350ab1e4fff3132efb209bede980eb7ff8af4ea5f6c",
+        "plan_item_bytes": 277,
+        "bounded_context": "put/solution.csv; recompute and print the full objective and combined_score and verify all public constraints (9 stations, all 279 assigned, loads<=2600, radius<=3km)."
+      },
+      {
+        "plan_item": 8,
+        "matched_token": "score",
+        "match_span": [
+          159,
+          164
+        ],
+        "plan_item_sha256": "1c31ff590f10e9435092b1cc2d9eb79814b9032dfc1fccd0c81c6205a90780bd",
+        "plan_item_bytes": 165,
+        "bounded_context": "e selected stations, assignment counts, loads, and computed objective/score."
+      }
+    ]
+  },
+  "terminal_evidence": {
+    "outer_elapsed_seconds": 167.3,
+    "outer_exit_code": 0,
+    "outer_failure": null,
+    "subject_elapsed_seconds": 167.136,
+    "subject_returncode": 2,
+    "worker_returncode": 0,
+    "record_status": "failed",
+    "record_error_code": "process_nonzero_exit",
+    "subject_failure": {
+      "code": "runtime_failed",
+      "http_status": null,
+      "kind": "subject_failure",
+      "mode": "normal",
+      "model_turns": 4,
+      "request_sha256": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+      "round_index": null,
+      "run_index": 1,
+      "schema_version": "1",
+      "stage": "runtime",
+      "tool_steps": 5
+    },
+    "workflow_stage": "master_running",
+    "master_record_absent": true,
+    "build_transcript_absent": true,
+    "subject_receipt_absent": true,
+    "harness_start_absent": true,
+    "harness_directory_absent": true
+  },
+  "parser": {
+    "passed": true,
+    "envelope": "one_lowercase_json_fence",
+    "response_bytes": 1944,
+    "response_sha256": "6c628fb1fb96a8e7bacac68221d8c68063414e16788948c0996f74729e8fb223",
+    "transcript_bytes": 20051,
+    "transcript_sha256": "3b3760e649b71ebab0557757a47dcafacf5c06321914bc2c0966b7be80789a90",
+    "exact_keys": [
+      "expected_paths",
+      "plan"
+    ],
+    "plan_items": 8,
+    "expected_paths": [
+      "solve.py",
+      "output/solution.json",
+      "output/solution.csv",
+      "_agent_summary.md"
+    ],
+    "plan_item_bounds_passed": true,
+    "expected_path_shape_and_safety_passed": true
+  },
+  "public_evidence": {
+    "path": ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/case/data/problem.json",
+    "score_and_objective_fields": [
+      {
+        "line": 9,
+        "text": "\"score_direction\": \"minimize\","
+      },
+      {
+        "line": 12,
+        "text": "\"objective\": \"sum(demand * distance_km) + 0.8*load_deviation + 20*overload + 500*radius_excess + 50*single_street_station_count\","
+      },
+      {
+        "line": 19,
+        "text": "\"combined_score\": \"100 / (1 + objective / total_demand)\""
+      }
+    ],
+    "observed_master_tool_calls": [
+      {
+        "name": "list_dir",
+        "path": "case"
+      },
+      {
+        "name": "list_dir",
+        "path": "case/data"
+      },
+      {
+        "name": "read_file",
+        "path": "case/instruction.md"
+      },
+      {
+        "name": "read_file",
+        "path": "case/data/problem.json"
+      },
+      {
+        "name": "read_file",
+        "path": "case/data/opi_points.csv"
+      }
+    ],
+    "tool_calls_are_only_public_lists_and_reads": true
+  },
+  "observed_usage_ledger": {
+    "available": true,
+    "cost_micros": null,
+    "elapsed_ms": 166962,
+    "input_tokens": 14927,
+    "output_tokens": 9821,
+    "rounds": 4,
+    "tool_steps": 5,
+    "total_tokens": 24748
+  },
+  "master_duration_seconds": null,
+  "scores": {
+    "extraction_status": null,
+    "validity_score": null,
+    "overall_score": null,
+    "quality_score": null
+  },
+  "checks": {
+    "manifest_mirrors_match": true,
+    "termination_manifest_bindings_match": true,
+    "worker_outcome_record_report_hash_chain_matches": true,
+    "request_failure_binding_matches": true,
+    "failure_diagnostic_and_failure_receipt_bytes_match": true,
+    "registered_workflow_config_matches": true,
+    "parser_and_semantic_validator_source_bytes_match_registration": true,
+    "observed_input_bytes_unchanged_during_diagnosis": true
+  },
+  "evidence_sha256": {
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/outcome.json": "a48f0d71195a0ab08afcc25792322cea744cc9ce68bf36fabbba2af0813fc5cc",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/subject-started.json": "f68c41f85901ecfcc5b6356d0396e5a9cf9ec27681b79e2f9ed0583aa6b7f2dd",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/subject-terminated.json": "8a360b5ac94c34e879bae50da35ed83e52d338e99058addff7a2eb8b83ff19e1",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/diagnostics/subject-failure.json": "cc95032679faf6cd6cde7929da71e45237498813e34b8fa95db00ef72a5647d7",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/case/data/opi_points.csv": "39c128766c43d650b4b0b003f96694c4dce44447cc73f99880f23ff55e73075c",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/case/data/problem.json": "9029ba075fe25942a3878b371a34b7377a37cb8fbda22bb9a964b9fd766ccd2a",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/case/instruction.md": "821ab7529ea8b69de70cb374c14fa56f1be141bb2d513ae8f92b8582dd11217b",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/receipt.failure.json": "cc95032679faf6cd6cde7929da71e45237498813e34b8fa95db00ef72a5647d7",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/request.json": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/config.json": "5ab93447397d9b7339347467c494d5da846cef27a3f848f74404a5ae9aa3042f",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/master-transcript.jsonl": "3b3760e649b71ebab0557757a47dcafacf5c06321914bc2c0966b7be80789a90",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/state.json": "dda575294f4737b4bab0a27a15cc1f187aa8c84adfb39cbd81d0974b52cf9117",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/record.json": "d5607782a5f14d8938582b04eaddb78bd72c1a1e8b69333f30c4216dd176d3b1",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/control/baseline.json": "348d338e6a0bdff6a7ee6c084cc0879cb22c3160cdd8c403ee73e8374cfed437",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/control/state.json": "71f02ec66d95c123eb0fcde3bfc48343e614391273313358e70a9a23cf48d829",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/control/suite.json": "ccb75919e93e6c39f26d88fa3b99994daba6e225085e41442f46e0a758ac0905",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/trial/report.json": "2eb35aad8e68557c9bd2736af941a0d8f274d01784c263b30bc13509ce2e9741",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/worker-started.json": "df58f1b69178559954e6aee22e8f757daf241442b3e759df47732c8cd7d313bb",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slots/002/worker-terminated.json": "a811ae082de76c1d833ad48c9413c4b50403b93937ea307d592c5cb9f9ae1ee4",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slot-002-started.json": "ff7ec6dc7510b7d73520cde7b26ee5f299bd8af2b9a36c5d74219720daccd838",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/slot-002-terminated.json": "adb9e77084675958304cd5b789d8bb994f89dc3f55361cdbe7ca668dac9e9991",
+    ".lunar/real-eval-glm-5.2-corrected-staged-20260910/manifest.json": "b154975d9557b9697fcdc7915de3ab7bb225165c6aaa1c6c0ab3f432a2123229",
+    "specs/074-corrected-staged-measurement/measurement/manifest.json": "b154975d9557b9697fcdc7915de3ab7bb225165c6aaa1c6c0ab3f432a2123229",
+    "src/famou/staged_workflow.py": "09368f964c62725d8a6ff18324b90007f79e28e6b3d783d781f6c6337d9997f2",
+    "src/famou/workflow_checkpoint.py": "159a3e72b0fa1a8a01b217bf88224023290318432fdc429094ffaf47fcf2e0d8"
+  },
+  "diagnostic_actions": {
+    "provider_calls": 0,
+    "harness_calls": 0,
+    "candidate_executions": 0,
+    "controller_construction_or_methods": 0,
+    "campaign_writes": 0,
+    "frozen_source_writes": 0,
+    "credential_reads": 0
+  },
+  "limitations": [
+    "Native failure receipt preserves runtime_failed, not the original exception traceback; the first blocking validation is reproduced from the frozen code and recorded final response.",
+    "No post-fix attempt, retry, or validity result is produced by this diagnosis.",
+    "Master duration remains null; subject elapsed time and observed usage-ledger elapsed are not an independent precise stage clock."
+  ]
+}

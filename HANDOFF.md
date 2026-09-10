@@ -8,6 +8,17 @@
 
 ## 1. 当前状态
 
+074已于2026-09-10 14:30结束，最终独立审计/root复核205证据SHA通过，已知PID/PGID与
+可见argv/cwd关联进程均无残留。钣金subject1200.203秒明确model/timeout；邮政167.136秒
+runtime_failed，073解析器本次成功，但计划的公开objective scorer/combined_score被
+workflow_checkpoint的score子串规则误拒绝。公开problem.json直接支持这些词汇。两槽
+均无已验收计划/Build/续跑/subject或harness回执，分数与完整失败usage/cost均null，
+有效解计数0/2。原生诊断与纯校验复现的区别、证据SHA及进程可见性限制见074 postrun/
+results.md、final-audit.json、final-report.md、final-process-check.json和逐槽diagnostic。
+本批源c28e498、登记27f7124b、manifest b154975d保持，T074全部关闭，不得重开失败槽。
+075已在隔离分支修复语义词汇误拒绝并补充凭据路径拒绝，260定向/1316全仓及独立review
+通过；先封存推送074，再合入075。075未参与本次测量，尚无修复后的真实有效解结论。
+
 Feature074已启动修复后的新实评，`.specify`指向`074-corrected-staged-measurement`。
 被测产品源码固定`c28e498`：钣金、邮政各一个全新S尝试，GLM-5.2，Master上限1200秒，
 其余共享5400秒/200工具/800万tokens和一次合作式续跑不变。一波并发2、不补位；历史
