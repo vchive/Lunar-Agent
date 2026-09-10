@@ -8,6 +8,10 @@
 
 ## 1. 当前状态
 
+078进展22:25：第二份独立partial审计通过212证据SHA，钣金和邮政均已验收Master计划
+且进入Build（2/2）；未续跑、尚无subject/harness回执或评分，两槽仍未决。观测为078
+postrun/observations/20260910T142536754391Z.json/md。不能把交接计为有效解或因果结论。
+
 078进展22:21：首次独立partial审计通过210证据SHA；邮政有效Master计划已验收并进入
 Build，钣金仍Master。两槽仍未决，无subject/harness回执和分数。观测文件为078
 postrun/observations/20260910T142109400271Z.json/md，不计有效解，不改变运行条件。
