@@ -8,6 +8,12 @@
 
 ## 1. 当前状态
 
+076进展2026-09-10 17:32：独立只读审计确认邮政slot2计划验收且进入Build，计划含
+combined_score/score/evaluator，201项证据SHA通过；这是075后首个真实合法阶段交接。
+钣金slot1仍master_running；两槽均未决，尚无subject/harness回执、有效解或评分。
+最新观测见076 postrun/observations/20260910T093257281442Z.json/md；不提前计有效，
+不更改正在运行的预算/源码/输入。仍须等两槽结束后最终审计封存。
+
 Feature076已启动075修复后的真实交接测量，`.specify`指向
 `specs/076-public-plan-handoff-measurement`。源码固定`96d5a60`，GLM-5.2，钣金与邮政
 各一个新S尝试，Master1200、build2400、reserve120秒，5400秒/200工具/800万tokens，
