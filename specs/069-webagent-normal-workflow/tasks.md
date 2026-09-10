@@ -36,3 +36,8 @@ one attempt each; GLM-5.2, 5400 seconds / 200 tools / 8,000,000 tokens. Product 
 The independent actual-evidence audit and 26-check isolated dry-run passed without model calls;
 874 full-suite tests, Ruff, Specify prerequisites and diff checks passed. No historical campaign
 or default workflow changed. Commit registration before launch; T069-07 remains open.
+
+T069-07 started: registration commit `454b521` was pushed before first dispatch at
+2026-09-10 10:19:43 +0800. Slots 1/2 have subject-started evidence; slots 3/4 are queued behind
+the fixed wave barrier. `measurement/launch-observation.json` is an initial observation, not a
+result. The detached campaign process owns both waves; never relaunch. Final outcome audit pending.

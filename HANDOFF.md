@@ -18,7 +18,7 @@ Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_opti
 固定分母 valid=1/2，完成率 0.5；不同 case 不合并均分。结果、审计和 SHA 见 Feature 068。
 暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
 
-Feature 069 已完成可选 staged subject 接入与离线验证，两臂评测预注册与离线演练已完成，实评结果待产生。目标仍为
+Feature 069 已完成可选 staged subject 接入与离线验证，两臂真实评测已启动，结果待产生。目标仍为
 `Master → Build → typed checkpoint → 至多一次同 attempt continuation`，通过同一预算改善交付率。
 入口为 `run_subject_adapter(workflow_config=...)` 或 `effect-subject --workflow-config PATH`；
 默认 normal workflow 不变。实际 master 模型输出的 JSON 计划经过验证后传给新的 build session，
@@ -44,8 +44,12 @@ staged 定向测试），Ruff、diff check 和独立审查通过。
 37源码、74执行/测试/输入文件、8个历史证据锚点已固定。独立审计通过，隔离dry-run26项、
 全仓874项测试通过，未调用真实模型。协议与证据见`specs/069-webagent-normal-workflow/measurement/`。
 汇总纯读取native state/record/report，不调用会恢复备份的读取路径；启动与退出证据须一致。
-下一步T069-07：先提交预注册，再启动本机`.lunar/real-eval-glm-5.2-staged-20260910/`，
-按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
+T069-07进行中：预注册已提交推送`454b521`，本机`.lunar/real-eval-glm-5.2-staged-20260910/`
+于2026-09-10 10:19:43 +0800启动；父进程PID48660，第一波slot1/2已进入subject，
+邮政S当时为master_running，尚无终止或评分。后台父进程会在第一波两槽均终止后启动
+slot3/4；绝不能再次运行`--launch`。当前启动快照见measurement/launch-observation.json，
+它不是最终结果。仅用`campaign.py --summarize`读取进度，勿运行要求未启动的check-only/dry-run。
+保持产品源码、measurement脚本和tests冻结，待全部结束后按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
 由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
 用户已授权的CC Switch读取并传进相应子进程环境，不写入证据。设计见`specs/069-webagent-normal-workflow/`。
 

@@ -1,0 +1,27 @@
+{
+  "evidence_sha256": {
+    ".lunar/real-eval-glm-5.2-staged-20260910/launch-process.json": "797c049558e2caa607af4d6cadacd66ac696ce6a6b44eabb396fece93588b8cc",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slot-001-started.json": "e67dff7cf14d533825507bac16148e92479c4ec64fb993a3ffd21d13425a7ba7",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slot-002-started.json": "5b8881beae1538a173ec8469b5f1d790cbf492cd0b76c47a0cd5f9aea3d921a2",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/001/subject-started.json": "1e4c8aeecf1e01e3ad8ecd8ba054901f21f715fd55219c8f3511fdb02e1d1d19",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/001/worker-started.json": "6223c1eb4c11167f9a711b65074bc03aab7a13d29a4efeec9a5e3322f61beb1a",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/subject-started.json": "75749128832fa449f4166f98b293fcc3d3299a23076df95be798ee1c03e601e9",
+    ".lunar/real-eval-glm-5.2-staged-20260910/slots/002/worker-started.json": "bca832482fc16d1c459577c9720467c4342f7ddacb8a87142a5899a7150bbf8a",
+    ".lunar/real-eval-glm-5.2-staged-20260910/started.json": "ad6eeed861d019d2462e47dd8eacb7db247d5951be7f302323df96ad4300bd35"
+  },
+  "kind": "feature069_launch_observation",
+  "manifest_sha256": "07781f3390586e49c2c521012e7981350c06215e6c7103a865a97f25597e423e",
+  "observed_utc": "2026-09-10T02:21:30.218609+00:00",
+  "queued_slots": [
+    3,
+    4
+  ],
+  "registration_commit": "454b52118a85e1e5b04bae86cf231cfefe6b9524",
+  "schema_version": "1",
+  "score_observations": null,
+  "started_slots": [
+    1,
+    2
+  ],
+  "terminated_slots": []
+}
