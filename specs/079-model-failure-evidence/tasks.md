@@ -7,7 +7,7 @@
 - [x] T079-05 Verify strict schema, secret exclusion, legacy v1/v2, wrapped/unknown errors and hostile sidecars.
 - [x] T079-06 Verify native normal/deep/staged failures leave no receipt/harness/retry/score and preserve ledger rules.
 - [x] T079-07 Run isolated focused/adjacent/full checks; record red/green evidence and limitations.
-- [ ] T079-08 Obtain independent review; root owns commit/push and integration after Feature 078 evidence sealing.
+- [x] T079-08 Obtain independent review; root owns commit/push and integration after Feature 078 evidence sealing.
 
 ## Scope and authorization
 
@@ -16,7 +16,7 @@ The isolated worktree is `.lunar/worktrees/feature079-model-failure-evidence`, b
 the initial three-document design and then authorized isolated implementation before Feature 078
 launch. Feature 078's measured product excludes this work. Product edits are confined to
 `runtime.py` and `subject_diagnostics.py`; one new test module, these SDD files and the isolated
-Specify selector accompany them. Integration into main remains pending the Feature078 seal.
+Specify selector accompany them. Integration into main completed after the Feature078 seal; see below.
 
 No real provider call, provider probe, credential loading, private harness, WebAgent run or
 historical candidate execution was performed. The tests use explicit fixture credentials and
@@ -62,10 +62,29 @@ satisfy the isolated environment.
 
 Independent cross-review approved the implementation without blockers and independently passed
 215 model-evidence/runtime/subject/budget tests, Ruff and diff checks. Root reviewed the typed
-projection, cause traversal and failure-only shape classification. Root-owned integration remains
-pending until Feature078 is sealed. Passing tests proves the bounded
+projection, cause traversal and failure-only shape classification. Root-owned integration completed
+after Feature078 was sealed and pushed. Passing tests proves the bounded
 projection and compatibility contract. It does not recover Feature 076's unknown cause, establish
 provider fault, supply failed-request usage, validate a saved candidate or improve measured
 valid-solution rate. Rare failures without owned typed evidence retain the existing v1 fallback.
 The existing raw exception formatting behavior is unchanged; the new diagnostic does not add raw
 logs or cause text to sidecars.
+
+## Main integration acceptance (2026-09-10)
+
+Feature078 was first sealed and pushed as `a80f9b8826bcf9645340dcf806a66fb61a30538c`.
+Only then was reviewed079 commit `b2ed0e9` integrated in merge
+`27eb0cc8b736fff8de72a46a50c5f1daf38b9541`. The sole Specify selector conflict was resolved
+to the exact reviewed079 bytes. Main full regression passed **1538 tests in40.13 seconds**;
+full src/tests Ruff, Specify079 prerequisites and staged/unstaged diff checks passed.
+
+Independent integration review found no blockers:37 source files,74 reviewed test files,31 Specify
+files and3 feature documents match the reviewed branch byte-for-byte; the2 new078 root test files
+remain intact. All205 Git-sealed078 files,105 sealed076 files and68 sealed074 files are unchanged.
+The reviewer also rehashed69/67/65 local native/history entries from the three respective audits,
+all matching. This task closure document is the only subsequent079 document update.
+
+No new provider call, campaign, candidate execution, retry, receipt or score accompanied integration.
+Feature078's two Build-stage model timeouts remain valid0/2 with unknown scores and complete failed
+usage/cost. Old live-source audits are expected to reject current changed source; their manifests,
+results and frozen hashes must not be rewritten. T079 is complete.
