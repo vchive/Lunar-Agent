@@ -41,3 +41,18 @@ T069-07 started: registration commit `454b521` was pushed before first dispatch 
 2026-09-10 10:19:43 +0800. Slots 1/2 have subject-started evidence; slots 3/4 are queued behind
 the fixed wave barrier. `measurement/launch-observation.json` is an initial observation, not a
 result. The detached campaign process owns both waves; never relaunch. Final outcome audit pending.
+
+Postrun analysis added on 2026-09-10 without changing the frozen product, dispatcher or tests:
+`postrun/audit.py` checks actual private case/harness bindings through each original worker,
+committed source blobs and import location, frozen/history hashes, unique attempts, phase/wave
+ordering and native evidence/receipt links. `postrun/render_report.py` preserves null and scores
+above one and verifies descriptive historical references against their pinned originals. Neither
+tool dispatches, restores records, loads credentials or writes campaign evidence. Independent
+read-only review found no blockers; 29 analysis tests, Ruff and diff checks passed.
+
+The saved actual observation `postrun/observations/20260910T030511Z.json` (and `.md`) verifies
+155 evidence files but remains incomplete: slot 1 running, slot 2 failed at the 300-second master
+model deadline, slots 3/4 queued. Final mode correctly rejects this partial state. T069-07 stays
+open until four terminations, final native summary and independent result/process review. Seal
+final audit/report before integrating Features 070/071; do not rewrite frozen historical inputs
+after the current source changes.

@@ -1,0 +1,78 @@
+{
+  "authority": "descriptive_only",
+  "cases": {
+    "china_post_pickup_optimization": {
+      "platform_runs": [
+        {
+          "overall_score": 1.0164,
+          "source_run_index": 0,
+          "validity_score": 1.0
+        },
+        {
+          "overall_score": 0.7973,
+          "source_run_index": 1,
+          "validity_score": 1.0
+        },
+        {
+          "overall_score": 0.9938,
+          "source_run_index": 2,
+          "validity_score": 1.0
+        }
+      ],
+      "prior_lunar": {
+        "extraction_status": null,
+        "harness_receipt_accepted": false,
+        "overall_score": null,
+        "quality_score": null,
+        "status": "failed",
+        "subject_elapsed_seconds": 5400.152,
+        "subject_receipt_accepted": false,
+        "validity_score": null
+      }
+    },
+    "sheet_metal_nesting": {
+      "platform_runs": [
+        {
+          "overall_score": 0.996101,
+          "source_run_index": 0,
+          "validity_score": 1.0
+        },
+        {
+          "overall_score": 0.999999,
+          "source_run_index": 1,
+          "validity_score": 1.0
+        },
+        {
+          "overall_score": 0.999999,
+          "source_run_index": 2,
+          "validity_score": 1.0
+        }
+      ],
+      "prior_lunar": {
+        "extraction_status": "completed",
+        "harness_receipt_accepted": true,
+        "overall_score": 0.999999,
+        "quality_score": 0.999999,
+        "status": "completed",
+        "subject_elapsed_seconds": 2944.383,
+        "subject_receipt_accepted": true,
+        "validity_score": 1.0
+      }
+    }
+  },
+  "historical_attempts_in_denominator": 0,
+  "kind": "feature069_historical_reference",
+  "manifest_sha256": "07781f3390586e49c2c521012e7981350c06215e6c7103a865a97f25597e423e",
+  "model": "glm-5.2",
+  "platform": {
+    "agent_family": "AgentServer/OpenCode",
+    "exact_agent_commit": null,
+    "experiment_id": "fmexp-ac8297cd-53a6-4c1f-aa06-49751bc6ad05"
+  },
+  "prior_lunar_campaign": "real-eval-glm-5.2-high-score-20260909",
+  "schema_version": "1",
+  "source_files_sha256": {
+    ".lunar/high-score-case-selection-20260909/baseline-audit.json": "83581b93438a9ad02ca97534f77556bcf2584d23bab03d07cc5d3291b6ea86a4",
+    ".lunar/real-eval-glm-5.2-high-score-20260909/summary.json": "c09493b2bb2c22f7a7e30a5de86592f6e3ca5e65a0bb7700c08b7efd0e76858c"
+  }
+}

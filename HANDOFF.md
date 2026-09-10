@@ -78,6 +78,18 @@ WebAgent同等配置。实际v2.5 master协调多角色、写PLAN.md并派发sol
 2026-09-10 10:49进度：钣金M仍在运行，已有分析脚本但无receipt/评分；邮政S的失败仍为
 已审计记录，后两例继续等待第一波结束。源码37、冻结输入/测试74、历史锚点8项SHA均未变。
 
+2026-09-10 11:05只读观测：slot1仍未决，slot2失败，slot3/4未启动。新增
+`specs/069-webagent-normal-workflow/postrun/`审计与中文报告工具，位于冻结dispatcher/tests
+之外；29项离线测试、Ruff和独立复核通过，没有模型调用。审计通过原worker逐槽核对实际
+private case/extractor/evaluator，验证注册提交、全部冻结文件、源码Git blobs与实际import
+路径，再核对唯一attempt、wave顺序和native record/state/report/receipt链。它不启动或
+恢复运行、不写campaign文件；`--require-complete`对当前未完成批次明确拒绝最终验收。
+历史分数投影逐项对照已冻结原记录，null和大于1的分数原样保留，不加入本批分母。
+实际审计及报告已保存为`postrun/observations/20260910T030511Z.json`和`.md`，共155个
+证据文件；这只是partial observation。外层时间一致性检查有明示2秒容差，不增加预算；
+最终仍须人工确认本批进程退出。T069-07保持未完成，全部终止后用只读工具封存最终审计、
+报告并独立复核，再合入070/071；合入后保留原Git/SHA锚点，不改历史manifest适配新源码。
+
 保持产品源码、measurement脚本和tests冻结，待全部结束后按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
 由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
 用户已授权的CC Switch读取并传进相应子进程环境，不写入证据。设计见`specs/069-webagent-normal-workflow/`。
