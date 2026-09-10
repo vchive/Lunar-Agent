@@ -125,7 +125,7 @@ def test_longer_master_cap_does_not_admit_malformed_plan_to_build(tmp_path, cloc
     model = TimedSubject(clock, invalid_plan=True)
     runner, request = native_runner(tmp_path, model, master_seconds)
 
-    with pytest.raises(json.JSONDecodeError):
+    with pytest.raises(WorkflowCheckpointError):
         runner.run("public task")
 
     assert model.timeouts == [master_seconds]

@@ -30,6 +30,55 @@ def _profile_digest(agent: AgentLoopRuntime) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _parse_master_response(text: str) -> dict[str, object]:
+    """Accept one whole object or one explicit JSON fence, never select or repair a substring."""
+    try:
+        size = len(text.encode("utf-8"))
+    except (AttributeError, UnicodeError):
+        raise WorkflowCheckpointError("master response is not valid UTF-8 text") from None
+    if size > 128 * 1024:
+        raise WorkflowCheckpointError("master response exceeds bounded size")
+    candidate = text.strip(" \t\r\n")
+    if not candidate.startswith("{"):
+        lines = text.split("\n")
+        delimiters = [(index, line.removesuffix("\r").strip(" \t"))
+                      for index, line in enumerate(lines)
+                      if line.lstrip(" \t").startswith(("```", "~~~"))]
+        if len(delimiters) != 2 or delimiters[0][1] != "```json" or delimiters[1][1] != "```":
+            raise WorkflowCheckpointError("master response must contain one unambiguous JSON object")
+        start, end = delimiters[0][0], delimiters[1][0]
+        outside = "\n".join([*lines[:start], *lines[end + 1:]])
+        if any(character in outside for character in "{}[]"):
+            raise WorkflowCheckpointError("master response contains competing structured content")
+        candidate = "\n".join(lines[start + 1:end])
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate object member")
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError("nonfinite JSON number")
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("nonfinite JSON number")
+        return result
+
+    try:
+        parsed = json.loads(candidate, object_pairs_hook=unique_object,
+                            parse_constant=reject_constant, parse_float=finite_float)
+    except (ValueError, RecursionError):
+        raise WorkflowCheckpointError("master response contains invalid JSON") from None
+    if not isinstance(parsed, dict):
+        raise WorkflowCheckpointError("master response must be a JSON object")
+    return parsed
+
+
 @dataclass(frozen=True)
 class StagePolicy:
     """Reservations in seconds, always inside the manifest's aggregate wall limit."""
@@ -169,9 +218,7 @@ verify public constraints, and preserve improvements atomically. No result is gu
         )
         self._steps = self.agent.last_tool_steps
         self.controller.record_usage(self._usage())
-        if len(master.text.encode()) > 128 * 1024:
-            raise WorkflowCheckpointError("master response exceeds bounded size")
-        parsed = json.loads(master.text)
+        parsed = _parse_master_response(master.text)
         if not isinstance(parsed, dict) or set(parsed) != {"plan", "expected_paths"}:
             raise WorkflowCheckpointError("master must return plan and expected_paths")
         paths = parsed["expected_paths"]
