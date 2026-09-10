@@ -1,0 +1,397 @@
+{
+  "schema_version": "1",
+  "kind": "feature076_slot001_read_only_failure_diagnostic",
+  "observed_utc": "2026-09-10T09:49:57.537121+00:00",
+  "manifest_sha256": "6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76",
+  "index": 1,
+  "case_key": "sheet_metal_nesting",
+  "arm": "S",
+  "budget_arm": "master_1200",
+  "root_cause": {
+    "code": "master_model_stage_timeout_before_final_response",
+    "classification": "explicit_native_subject_failure_evidence",
+    "summary_zh": "失败诊断明确为model阶段timeout；1200秒Master窗口内没有最终计划响应，未进入Build。",
+    "registered_master_seconds": 1200,
+    "registered_subject_outer_seconds": 5430,
+    "parser_or_semantic_failure_not_established": true
+  },
+  "terminal_evidence": {
+    "outer_elapsed_seconds": 1200.425,
+    "outer_exit_code": 0,
+    "outer_failure": null,
+    "subject_elapsed_seconds": 1200.259,
+    "subject_returncode": 2,
+    "subject_outer_error_type": null,
+    "worker_returncode": 0,
+    "record_status": "failed",
+    "record_error_code": "process_nonzero_exit",
+    "record_elapsed_ms": 1200280,
+    "subject_failure": {
+      "code": "timeout",
+      "http_status": null,
+      "kind": "subject_failure",
+      "mode": "normal",
+      "model_turns": 6,
+      "request_sha256": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3",
+      "round_index": null,
+      "run_index": 1,
+      "schema_version": "1",
+      "stage": "model",
+      "tool_steps": 12
+    },
+    "workflow_stage": "master_running",
+    "absent_evidence": [
+      "master_record",
+      "build_transcript",
+      "subject_receipt",
+      "agent_summary",
+      "harness_start",
+      "harness_directory"
+    ]
+  },
+  "transcript_observation": {
+    "bytes": 35792,
+    "sha256": "50214295c3bbd02dc36640485fd2136b527a251112b84cb4e7104a937482e8b6",
+    "message_count": 20,
+    "role_counts": {
+      "system": 1,
+      "user": 1,
+      "assistant": 6,
+      "tool": 12
+    },
+    "completed_assistant_messages": 6,
+    "tool_call_count": 12,
+    "tool_result_messages": 12,
+    "tool_counts_by_name": {
+      "read_file": 3,
+      "list_dir": 2,
+      "run_command": 7
+    },
+    "final_assistant_response_count": 0,
+    "last_message_role": "tool",
+    "tool_call_metadata": [
+      {
+        "message_index": 3,
+        "result_message_index": 4,
+        "name": "read_file",
+        "argument_keys": [
+          "path"
+        ],
+        "arguments_sha256": "83318758226db04aadd7deb50f1d1760044cbe50069c8ae9a28dc8efbb1a8cc7",
+        "result_sha256": "0d2e792398c2e69b82e059b68b4845ff145d14a649718caf83847a3b7e470d1e",
+        "result_bytes": 623,
+        "path": "case/instruction.md"
+      },
+      {
+        "message_index": 3,
+        "result_message_index": 5,
+        "name": "list_dir",
+        "argument_keys": [
+          "path"
+        ],
+        "arguments_sha256": "d00865c012f41bbd1857b7f6e3a71a016dd71e49ae72d43b76ea9b2fc13dfacf",
+        "result_sha256": "390090b7998793ef1ff7c92c4d09e7c5fc399a77cc490ef7ebeeae913037569c",
+        "result_bytes": 83,
+        "path": "case"
+      },
+      {
+        "message_index": 6,
+        "result_message_index": 7,
+        "name": "list_dir",
+        "argument_keys": [
+          "path"
+        ],
+        "arguments_sha256": "c2169ab8a6a0ff75ac1b79ae32904b34e0fc0d958690f976d36aa210f0b44bbd",
+        "result_sha256": "ddc68c4c7f17965bfa028e99c836858194d06432086bd85e13c32f07d378ac90",
+        "result_bytes": 100,
+        "path": "case/data"
+      },
+      {
+        "message_index": 8,
+        "result_message_index": 9,
+        "name": "read_file",
+        "argument_keys": [
+          "path"
+        ],
+        "arguments_sha256": "bcd3366cbc9e918bf6c6f3599f2a5d919e8403cc91d9b4d40f64e87501fa6a97",
+        "result_sha256": "2c7686497189cbbe082db12dd2ac66c4c5898d5d72372146a1f08fd20798e3ed",
+        "result_bytes": 12000,
+        "path": "case/data/生产订单.json"
+      },
+      {
+        "message_index": 8,
+        "result_message_index": 10,
+        "name": "read_file",
+        "argument_keys": [
+          "path"
+        ],
+        "arguments_sha256": "333cf033cc7f08583adb248ff1def0526478600795a34d49b8569059ae707216",
+        "result_sha256": "8f485c728d1ae636a7555fff43155d6674bc00518faa5fcecafe6c8737774872",
+        "result_bytes": 7396,
+        "path": "case/data/立库原材料表.json"
+      },
+      {
+        "message_index": 11,
+        "result_message_index": 12,
+        "name": "run_command",
+        "argument_keys": [
+          "command"
+        ],
+        "arguments_sha256": "320bf72f2211ec1a90e1726c88b78dc0d101969cbc68c2c7602d76e6bcca521f",
+        "result_sha256": "d4162d46b291259fe476e84c11f488c93e806f0c06f24755726aca913fe8402e",
+        "result_bytes": 183,
+        "command_value_type": "str",
+        "command_sha256": "67cf98357cf9fd2d1c232adc9e574f1e11f4a25eb039cc8b1bbc27e5fd435eb2",
+        "result_class": "argv_shape_rejected"
+      },
+      {
+        "message_index": 11,
+        "result_message_index": 13,
+        "name": "run_command",
+        "argument_keys": [
+          "command"
+        ],
+        "arguments_sha256": "7eb834dc0ea4c78945c0488d044380163fbb4dab09479008de1bb1a15fe4e188",
+        "result_sha256": "d4162d46b291259fe476e84c11f488c93e806f0c06f24755726aca913fe8402e",
+        "result_bytes": 183,
+        "command_value_type": "str",
+        "command_sha256": "10fd9b040bc168b29688e5525a0ca9b8909ee307f34c239ee189112b41231f00",
+        "result_class": "argv_shape_rejected"
+      },
+      {
+        "message_index": 11,
+        "result_message_index": 14,
+        "name": "run_command",
+        "argument_keys": [
+          "command"
+        ],
+        "arguments_sha256": "e40752fcfbbd0e53fda92243455e4467cebb41b8e8f1aba0c37514bb0eb38a82",
+        "result_sha256": "d4162d46b291259fe476e84c11f488c93e806f0c06f24755726aca913fe8402e",
+        "result_bytes": 183,
+        "command_value_type": "str",
+        "command_sha256": "522a080440bfc5f44cb04323b78d2764b3fb8f9ad18febbda67b31b2e5ac1dc5",
+        "result_class": "argv_shape_rejected"
+      },
+      {
+        "message_index": 15,
+        "result_message_index": 16,
+        "name": "run_command",
+        "argument_keys": [
+          "command"
+        ],
+        "arguments_sha256": "77acb5e08caec759090ca8896a272d1206fa42bd6ab976c8a2508e02d77fa37f",
+        "result_sha256": "95ad67bf550bf3ff2aafed60579945b47d2067597c9f8484dfbd0b695b2c6106",
+        "result_bytes": 1193,
+        "command_value_type": "str",
+        "command_sha256": "007f9e32b83a88e445336882552e01ba4cdf6a197449e06ae90f6022cbe42d95",
+        "result_class": "exit_zero"
+      },
+      {
+        "message_index": 15,
+        "result_message_index": 17,
+        "name": "run_command",
+        "argument_keys": [
+          "command"
+        ],
+        "arguments_sha256": "6b23498edefdbb2ebaa673d91bc571b0ec3735de324469c0ba0ab4764002d8b4",
+        "result_sha256": "0dd44f2e3db47e7f2237525a99079adc3adcbf4260c4ae368ed29a3646b98806",
+        "result_bytes": 1856,
+        "command_value_type": "str",
+        "command_sha256": "1830370ccc9b6f089f631093d26c4924228a19748acfcbc1793e5846c9d5b97e",
+        "result_class": "exit_zero"
+      },
+      {
+        "message_index": 15,
+        "result_message_index": 18,
+        "name": "run_command",
+        "argument_keys": [
+          "command"
+        ],
+        "arguments_sha256": "4d76957eb0f3aed9f4506a90ea77968d92f08aa15665531bcf8d03631fe0774c",
+        "result_sha256": "0f73d8fbe150afd105fb2f636ddb02072fa0b1f7c45f46fe7b1fae783c691332",
+        "result_bytes": 1564,
+        "command_value_type": "str",
+        "command_sha256": "592e1456f93c092bd841ffad31f5ad0782ab01b3bb0a53c8ec2ded45eb732587",
+        "result_class": "exit_zero"
+      },
+      {
+        "message_index": 19,
+        "result_message_index": 20,
+        "name": "run_command",
+        "argument_keys": [
+          "command"
+        ],
+        "arguments_sha256": "5ec7147f9325d7e4b724ee6d3e7c088023be58aa2f38e6d001e89bf7c27dc0ab",
+        "result_sha256": "e305311a57933403fdb8eadf37e6205253488df9d92192bf7b3f3be48ed9801d",
+        "result_bytes": 129,
+        "command_value_type": "str",
+        "command_sha256": "d0293740811ea03bd58fadd9ca54ceadce7cf845ccde4f7832e7d4225b1e97e2",
+        "result_class": "exit_zero"
+      }
+    ]
+  },
+  "master_responsibility_observation": {
+    "trace_observations": [
+      {
+        "assistant_message_index": 11,
+        "tool_calls": 3,
+        "observation_zh": "尝试用python3读取公开订单/库存，统计材质、订单与零件编号、分组数量和库存尺寸；3次均因command是字符串化JSON argv而被拒绝。"
+      },
+      {
+        "assistant_message_index": 15,
+        "tool_calls": 3,
+        "observation_zh": "将相同3段数据概览命令改成普通命令字符串，3次均返回exit_code=0；纯文本argv解析核对与前轮意图相同。"
+      },
+      {
+        "assistant_message_index": 19,
+        "tool_calls": 1,
+        "observation_zh": "补查订单条码唯一性、厚度/材质集合及尺寸范围，exit_code=0。",
+        "bounded_assistant_text": "I'll inspect the data structure first, then plan."
+      }
+    ],
+    "argv_shape_rejections": 3,
+    "successful_run_commands": 4,
+    "corrected_commands_match_initial_intent": true,
+    "observed_activity": "public_input_structure_statistics_and_argument_correction",
+    "optimization_search_observed": false,
+    "interpretation_zh": "工具内容是公开数据概览与参数纠错，未观察到排样搜索、优化器或候选生成；不能把本次超时认定为Master越界求解优化。",
+    "hypotheses_not_causal_findings": [
+      {
+        "hypothesis_zh": "限定Master输入勘查的目标和结束条件，鼓励一次结构概览后及时提交最小可执行计划，可能减少规划前反复确认。",
+        "future_validation_zh": "先在离线fixtures验证固定规划工具/轮次边界仍能交接；如需实评，另行预注册，不修改本次窗口或补位。"
+      },
+      {
+        "hypothesis_zh": "提高argv直接数组示例的可见性可能降低字符串化数组误用；已有诊断本次已被模型下一轮采纳。",
+        "future_validation_zh": "独立统计类似格式误用是否重复发生；本次没有每轮耗时，不能估计3次工具错误造成的时间占比或断言修正后必然成功。"
+      }
+    ]
+  },
+  "workspace_existence_only": {
+    "candidate_output_paths": [],
+    "candidate_files_opened": 0,
+    "inventory": [
+      {
+        "path": "case/data/生产订单.json",
+        "size_bytes": 71810,
+        "is_symlink": false
+      },
+      {
+        "path": "case/data/立库原材料表.json",
+        "size_bytes": 7396,
+        "is_symlink": false
+      },
+      {
+        "path": "case/instruction.md",
+        "size_bytes": 623,
+        "is_symlink": false
+      },
+      {
+        "path": "receipt.failure.json",
+        "size_bytes": 265,
+        "is_symlink": false
+      },
+      {
+        "path": "request.json",
+        "size_bytes": 942,
+        "is_symlink": false
+      },
+      {
+        "path": "workflow/config.json",
+        "size_bytes": 639,
+        "is_symlink": false
+      },
+      {
+        "path": "workflow/master-transcript.jsonl",
+        "size_bytes": 35792,
+        "is_symlink": false
+      },
+      {
+        "path": "workflow/state.json",
+        "size_bytes": 785,
+        "is_symlink": false
+      }
+    ]
+  },
+  "usage": {
+    "native_record_usage": null,
+    "native_record_cost_micros": null,
+    "native_record_interaction_turns": null,
+    "persisted_workflow_usage": {
+      "available": false,
+      "cost_micros": null,
+      "elapsed_ms": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "rounds": 0,
+      "tool_steps": 0,
+      "total_tokens": null
+    },
+    "complete_input_tokens": null,
+    "complete_output_tokens": null,
+    "complete_total_tokens": null,
+    "complete_cost_micros": null,
+    "interpretation_zh": "state.available=false表示usage不可用；初始化rounds/tool_steps/elapsed_ms=0不能当真实零用量。transcript可确认6条已完成模型响应与12条工具结果，超时请求完整用量未知。"
+  },
+  "master_duration_seconds": null,
+  "scores": {
+    "extraction_status": null,
+    "validity_score": null,
+    "overall_score": null,
+    "quality_score": null
+  },
+  "checks": {
+    "manifest_mirrors_match": true,
+    "termination_manifest_bindings_match": true,
+    "worker_outcome_record_report_hash_chain_matches": true,
+    "request_failure_binding_matches": true,
+    "failure_diagnostic_and_failure_receipt_bytes_match": true,
+    "registered_workflow_config_matches": true,
+    "observed_runtime_source_bytes_match_registration": true,
+    "public_input_projection_matches_registered_bytes": true,
+    "failure_counts_match_transcript_counts": true,
+    "observed_input_bytes_unchanged": true,
+    "workspace_inventory_unchanged": true
+  },
+  "evidence_sha256": {
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slot-001-started.json": "88d156ce24de083e3a2993bb89da2f41878577b23bb74a5b5ab824900357a4aa",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slot-001-terminated.json": "6cc76698aa819dfa7bc85ba1a7524e209bad7673c7aefbd962a4ec78117c2288",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/manifest.json": "6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76",
+    "specs/076-public-plan-handoff-measurement/measurement/manifest.json": "6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/subject-started.json": "55da4c4b1adec19519a3de91b7f3973e03bf2ad67e77168be2dfd1b6353d8be4",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/subject-terminated.json": "67d9788afdfcc97c72e10a67d701b3c7c4f95e9a9f5f27f471ed1205f232fb3e",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/worker-started.json": "65ec3ec4b30f276aa9154d36771f5997aebbf65abd6b3e2af1cf45516808f752",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/worker-terminated.json": "8ab3e77350f8bce5f8751d762100f0fac1cf97651e9c9986fa4925088dca6e97",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/outcome.json": "5cd81a3d035076746c0e159fff894ad99ca092dfdbe0ef88f2ecd5e7abb73e94",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/report.json": "cb9bb721d697b90994669f1bef56d619420b9ce70150e9d6008712df47c2e817",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/record.json": "0949e7c0e8133601fe0e21faa50d3752252949938f5580fe1a07ac556c3fcc00",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/diagnostics/subject-failure.json": "d3d901b3280dbb71fdff515e4110a4e024b1e14db73c35eaa32437ed40181725",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/receipt.failure.json": "d3d901b3280dbb71fdff515e4110a4e024b1e14db73c35eaa32437ed40181725",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/request.json": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/config.json": "7afdf0608e0406798646cffb1ea579bc0ddf73ac3211f1bde2c4bd529a89abc4",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/state.json": "7e1eca82236587455e00198de15e38f598004e31c12184bec6df40e08ea423b1",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/master-transcript.jsonl": "50214295c3bbd02dc36640485fd2136b527a251112b84cb4e7104a937482e8b6",
+    "src/famou/agent_loop.py": "1981e212b6ec415a855f6407590ec613428ed928c3ff0968eaa76aa8ce8ef311",
+    "src/famou/staged_workflow.py": "3f9b50e467c6c1ba6a511d4ae8d72a994fe02446f1c9ff7a98947ed82b0d79ea",
+    "src/famou/tools.py": "a7910e9950904ecfe913660e988d06282394f9410366565cc1c4744d80207419",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/case/instruction.md": "0d2e792398c2e69b82e059b68b4845ff145d14a649718caf83847a3b7e470d1e",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/case/data/生产订单.json": "4011d3d99d2120b7009de3f3171cc3b949e054a7141af7bc069cf89829cb253e",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/case/data/立库原材料表.json": "8f485c728d1ae636a7555fff43155d6674bc00518faa5fcecafe6c8737774872"
+  },
+  "diagnostic_actions": {
+    "provider_calls": 0,
+    "harness_calls": 0,
+    "candidate_files_opened": 0,
+    "candidate_executions": 0,
+    "controller_construction_or_methods": 0,
+    "campaign_writes": 0,
+    "frozen_source_writes": 0,
+    "credential_reads": 0
+  },
+  "limitations": [
+    "No final Master response exists, so parser or semantic plan failure is not established.",
+    "Exact independent Master duration and complete failed-provider usage/cost remain unknown; subject elapsed is separate.",
+    "Six completed assistant messages do not establish the full provider request count or interrupted-request usage.",
+    "Candidate absence is the final directory observation, not proof about every transient state.",
+    "No per-round timestamps or provider reasoning trace establish how time was divided or whether input inspection caused the timeout."
+  ]
+}

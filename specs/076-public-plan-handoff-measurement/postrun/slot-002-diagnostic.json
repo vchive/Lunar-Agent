@@ -1,0 +1,245 @@
+{
+  "schema_version": "1",
+  "kind": "feature076_slot002_read_only_failure_diagnostic",
+  "observed_utc": "2026-09-10T10:54:58.513185+00:00",
+  "manifest_sha256": "6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76",
+  "index": 2,
+  "case_key": "china_post_pickup_optimization",
+  "arm": "S",
+  "budget_arm": "master_1200",
+  "failure_classification": {
+    "code": "model_failed_during_build_before_final_subject_completion",
+    "evidence_type": "explicit_native_subject_failure",
+    "native_stage": "model",
+    "native_code": "model_failed",
+    "http_status": null,
+    "recorded_as_timeout": false,
+    "specific_provider_cause_known": false,
+    "summary_zh": "计划已验收并进入Build；原生诊断为model/model_failed，未记录HTTP状态或原始异常，不能区分网络失败、响应解析、空响应或其他模型调用问题，也不能改称超时。"
+  },
+  "terminal_evidence": {
+    "outer_elapsed_seconds": 2190.746,
+    "outer_exit_code": 0,
+    "outer_failure": null,
+    "subject_elapsed_seconds": 2190.554,
+    "subject_returncode": 2,
+    "worker_returncode": 0,
+    "record_status": "failed",
+    "record_error_code": "process_nonzero_exit",
+    "record_elapsed_ms": 2190575,
+    "subject_failure": {
+      "code": "model_failed",
+      "http_status": null,
+      "kind": "subject_failure",
+      "mode": "normal",
+      "model_turns": 24,
+      "request_sha256": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+      "round_index": null,
+      "run_index": 1,
+      "schema_version": "1",
+      "stage": "model",
+      "tool_steps": 31
+    },
+    "workflow_stage": "build_running",
+    "checkpoint_number": null,
+    "resume_used": false,
+    "absent_evidence": [
+      "subject_receipt",
+      "agent_summary",
+      "harness_start",
+      "harness_directory"
+    ]
+  },
+  "validated_stage_evidence": {
+    "index": 2,
+    "budget_arm": "master_1200",
+    "master_duration_seconds": null,
+    "plan_record_valid": true,
+    "build_entered_observed": true,
+    "build_transcript_present": true,
+    "workflow_stage": "build_running",
+    "resume_used": false,
+    "master_record_sha256": "da03e45c43dd248a45d50aa93fc33eb5048fe54f4183f7a6f9ba1143cdad61b2"
+  },
+  "transcripts": {
+    "master-transcript.jsonl": {
+      "bytes": 21751,
+      "sha256": "4e9256b4495f11156f55e41f438b9d5140230c34f6cbaa70a2c67a0344de0bec",
+      "message_count": 14,
+      "role_counts": {
+        "system": 1,
+        "user": 1,
+        "assistant": 5,
+        "tool": 7
+      },
+      "last_message_role": "assistant",
+      "final_assistant_response_count": 1,
+      "tool_counts_by_name": {
+        "list_dir": 3,
+        "read_file": 4
+      }
+    },
+    "session-transcript.jsonl": {
+      "bytes": 84740,
+      "sha256": "7d3cd224c422605e5adcdcc205b2267ebd7dd896a46ead5736ac27b647168831",
+      "message_count": 45,
+      "role_counts": {
+        "system": 1,
+        "user": 1,
+        "assistant": 19,
+        "tool": 24
+      },
+      "last_message_role": "tool",
+      "final_assistant_response_count": 0,
+      "tool_counts_by_name": {
+        "read_file": 4,
+        "list_dir": 4,
+        "run_command": 11,
+        "write_file": 5
+      }
+    }
+  },
+  "total_observed_counts": {
+    "completed_model_responses": 24,
+    "tool_results": 31
+  },
+  "last_build_result": {
+    "message_index": 45,
+    "role": "tool",
+    "exit_line": "exit_code=0",
+    "result_bytes": 895,
+    "result_sha256": "8721e61949f1c55ded95cb507871f4b055990a3c57d748eebfa47f6b8f3fc4cd",
+    "interpretation_zh": "最后已保存工具结果exit_code=0，其后没有最终Build响应；该工具输出及本地指标不是exact-harness评分。"
+  },
+  "candidate_metadata_only": {
+    "files": [
+      {
+        "path": "analyze2.py",
+        "size_bytes": 2642,
+        "is_symlink": false
+      },
+      {
+        "path": "balance_tradeoff.py",
+        "size_bytes": 6004,
+        "is_symlink": false
+      },
+      {
+        "path": "output/assignments.csv",
+        "size_bytes": 1713,
+        "is_symlink": false
+      },
+      {
+        "path": "output/solution.json",
+        "size_bytes": 13390,
+        "is_symlink": false
+      },
+      {
+        "path": "pmedian.py",
+        "size_bytes": 4008,
+        "is_symlink": false
+      },
+      {
+        "path": "solve.py",
+        "size_bytes": 20020,
+        "is_symlink": false
+      },
+      {
+        "path": "test_pmedian_assign.py",
+        "size_bytes": 4866,
+        "is_symlink": false
+      }
+    ],
+    "candidate_files_opened": 0,
+    "candidate_file_hashes_computed": 0,
+    "candidate_validity_assessed": false,
+    "expected_output_files_present": [
+      "solve.py",
+      "output/solution.json",
+      "output/assignments.csv"
+    ],
+    "required_agent_summary_present": false,
+    "interpretation_zh": "候选文件存在不等于完整交付或有效解，未读候选内容、未评价其约束满足或分数。"
+  },
+  "usage": {
+    "native_record_usage": null,
+    "native_record_cost_micros": null,
+    "native_record_interaction_turns": null,
+    "persisted_workflow_master_snapshot": {
+      "available": true,
+      "cost_micros": null,
+      "elapsed_ms": 314853,
+      "input_tokens": 26196,
+      "output_tokens": 15095,
+      "rounds": 5,
+      "tool_steps": 7,
+      "total_tokens": 41291
+    },
+    "complete_attempt_input_tokens": null,
+    "complete_attempt_output_tokens": null,
+    "complete_attempt_total_tokens": null,
+    "complete_attempt_cost_micros": null,
+    "interpretation_zh": "state仅保留Master结束时5rounds/7tools/41291tokens快照，不包含完整Build与失败模型请求。完整attempt用量和费用仍null。"
+  },
+  "master_duration_seconds": null,
+  "scores": {
+    "extraction_status": null,
+    "validity_score": null,
+    "overall_score": null,
+    "quality_score": null
+  },
+  "checks": {
+    "final_audit_accepted_registered_native_chain": true,
+    "manifest_mirrors_match": true,
+    "termination_manifest_bindings_match": true,
+    "worker_outcome_record_report_hash_chain_matches": true,
+    "request_failure_binding_matches": true,
+    "failure_diagnostic_and_failure_receipt_bytes_match": true,
+    "registered_workflow_config_matches": true,
+    "classification_runtime_source_bytes_match_registration": true,
+    "failure_counts_match_both_transcripts": true,
+    "observed_input_bytes_unchanged": true,
+    "workspace_metadata_unchanged": true
+  },
+  "evidence_sha256": {
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slot-002-started.json": "29f356e444bfdc00821873f3f527a475737e8969e155163cf4e4b384e4244394",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slot-002-terminated.json": "0710ff09292c4542efa7c9aa23dddc4cdc3a28d57488029affd414733184d3c4",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/manifest.json": "6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76",
+    "specs/076-public-plan-handoff-measurement/measurement/manifest.json": "6690a02223aa3ea34bd5f88d9482d75d4a087857d69edd4245ac04479a321b76",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/subject-started.json": "b02f8750d9f6d53729b78ad71e70100a0588ef95709876a80bf8e382ad94151d",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/subject-terminated.json": "9c5bcc7e936dbe47bc949a8d6f91fd2e2df2f3bf46119f9b1ed96d9165ba0172",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/worker-started.json": "f8ecae08ec3bb9e3e0c454dcdc9b9f7b29a96065e56d41a1db75e9a3a4b4e109",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/worker-terminated.json": "bba52dd99f5b1dcb0bd20b48fce005499a88b5202cdd84474c79bd7fb46cd25c",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/outcome.json": "6bfeb0f4ab7b8269f56455281e0c23f4dc6fcea142dd2c404b4e213268028a8b",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/report.json": "7d3b4251a5ce526088bb6e8038dfab79b1636eccd2bd60155f9ec0c23bafdbf0",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/record.json": "e5ac3d924e5dc4f5833cf12fa4b38023961028d17cad748d4d36eaa7fd53a5d7",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/diagnostics/subject-failure.json": "7220c8426e983c3ab2e8865213390d168c93fd1d7c4377c5f4bfa9796fa2fac7",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/receipt.failure.json": "7220c8426e983c3ab2e8865213390d168c93fd1d7c4377c5f4bfa9796fa2fac7",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/request.json": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/config.json": "f0738da639b83e5308ee3c5e13a5d61771a1a9d4b3bb6813dda09306de442ab2",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/state.json": "13daf08be63d6d0d583d9a787142253c99a3337977f37d0b5b9dd647a97712b7",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/master.json": "da03e45c43dd248a45d50aa93fc33eb5048fe54f4183f7a6f9ba1143cdad61b2",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/master-transcript.jsonl": "4e9256b4495f11156f55e41f438b9d5140230c34f6cbaa70a2c67a0344de0bec",
+    ".lunar/real-eval-glm-5.2-public-plan-20260910/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/session-transcript.jsonl": "7d3cd224c422605e5adcdcc205b2267ebd7dd896a46ead5736ac27b647168831",
+    "src/famou/subject_diagnostics.py": "a573975f0142d5520c3198255f874565cc57d5fdc705aed11e1f0cae471ad187",
+    "src/famou/agent_loop.py": "1981e212b6ec415a855f6407590ec613428ed928c3ff0968eaa76aa8ce8ef311",
+    "src/famou/staged_workflow.py": "3f9b50e467c6c1ba6a511d4ae8d72a994fe02446f1c9ff7a98947ed82b0d79ea",
+    "src/famou/runtime.py": "d43a1da3ff300d4b7912afed6013a84b7507c606225bda1dad6721778972130e",
+    "specs/076-public-plan-handoff-measurement/postrun/final-audit.json": "95d54b9d3c349fd3f83bb0cb1c052694cb3e21247b6c8a21477017e31848b62e"
+  },
+  "diagnostic_actions": {
+    "provider_calls": 0,
+    "harness_calls": 0,
+    "candidate_files_opened": 0,
+    "candidate_executions": 0,
+    "controller_construction_or_methods": 0,
+    "campaign_writes": 0,
+    "frozen_source_writes": 0,
+    "credential_reads": 0
+  },
+  "limitations": [
+    "Failure evidence retains a broad model_failed code with no HTTP status or original exception, so a more specific provider failure diagnosis is not established.",
+    "The last saved successful tool result does not establish the outcome or consumption of the interrupted model request.",
+    "No candidate content or local self-reported score was used for evaluation; no accepted subject receipt or exact-harness result exists.",
+    "Master usage snapshot is not complete attempt usage; exact independent Master duration stays null."
+  ]
+}
