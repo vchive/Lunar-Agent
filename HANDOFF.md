@@ -8,6 +8,10 @@
 
 ## 1. 当前状态
 
+078进展22:21：首次独立partial审计通过210证据SHA；邮政有效Master计划已验收并进入
+Build，钣金仍Master。两槽仍未决，无subject/harness回执和分数。观测文件为078
+postrun/observations/20260910T142109400271Z.json/md，不计有效解，不改变运行条件。
+
 078已在登记`e76a3a341a90703f4ba91a9e14e33ca81a76c488`推送后于2026-09-10 22:17:13 +0800
 唯一启动。dispatcher PID/PGID26135；slot1 worker26307、subject26308；slot2 worker26306、
 subject26309。初始两槽均master_running，尚无计划/Build/回执/评分；root只读watcher
