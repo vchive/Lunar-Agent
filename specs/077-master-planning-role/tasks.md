@@ -4,7 +4,7 @@
 - [x] T077-02 Add failing actual-message and native-handoff tests, including special context characters.
 - [x] T077-03 Implement the private Master-only prompt builder without other behavior changes.
 - [x] T077-04 Run isolated focused checks, Ruff, Specify and diff review; record the evidence.
-- [ ] T077-05 Complete independent review and root-owned integration after Feature 076 evidence sealing.
+- [x] T077-05 Complete independent review and root-owned integration after Feature 076 evidence sealing.
 
 No provider, private harness, WebAgent or historical candidate is executed. Passing deterministic
 tests establishes the message/authority contract, not a cause for the observed timeout or a promise
@@ -32,8 +32,8 @@ Independent review approved the isolated implementation with no blocker, includi
 scope and unchanged native authority; the reviewer independently ran65 tests with isolated imports,
 Ruff and diff checks. Root also reviewed the source/message diff and ran the full suite with
 explicit isolated PYTHONPATH: **1359 passed in37.76 seconds** after the evidence preparation below.
-T077-05 remains open only for root-owned integration after Feature076 evidence sealing. No real
-model request, private evaluator, WebAgent or historical candidate was executed by this feature work.
+No real model request, private evaluator, WebAgent or historical candidate was executed by this
+feature work.
 
 Full-suite environment follow-up: the root agent's first isolated run reported 1358 passes and one
 failure in `test_history_uses_sealed_074_chain_and_keeps_historical_samples_out` because a Git worktree
@@ -50,4 +50,14 @@ historical SHA map, and copied with exclusive creation to the same isolated path
 
 All copied bytes matched their pins and source bytes. No Feature 076 data, candidate, solver,
 credential, test, manifest or source change was introduced. The previously failing test then passed
-in 0.06 seconds. This prepares only the local historical-test environment; a full rerun is root-owned.
+in 0.06 seconds. Root subsequently completed the full1359-test rerun recorded above.
+
+T077-05 completed: reviewed isolated commit1df9ae1774f1f023c67a61d4d52861c5d40cf45e was pushed.
+Feature076 was sealed and pushed as9ad2e1caa599a3e2e9324210eac52b6548da295e before merge
+48e2b70c80e5399c60ec2c4c2e7326d6628c6d5d integrated077 without conflict. Main's238 targeted
+regressions passed in4.30 seconds; Ruff, Specify and diff checks passed. The main source/tests/
+Specify files match the reviewed branch, and076's sealed files remain unchanged. Independent
+integration review verified the two merge parents, all37 source/73 test/31 Specify files against
+1df9ae1, and all105 Git-sealed076 files against9ad2e1c, with no blocker. No new real
+campaign was launched; current-source audits of old campaigns may now reject the changed source,
+which does not permit rewriting their historical registrations.

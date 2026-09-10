@@ -8,18 +8,27 @@
 
 ## 1. 当前状态
 
+076已在`9ad2e1c`封存推送，随后合入077（isolated `1df9ae1`，merge `48e2b70`）。
+当前`.specify`指向`specs/077-master-planning-role`，T076/T077全部关闭。主仓238项定向
+回归、Ruff/Specify/diff通过，隔离全仓1359项通过。077只澄清Master规划职责：先交最小
+Build计划，原始任务逐字保留，未知实现细节留给Build；system/tools/预算/评分权威不变。
+它尚未参加真实评测，不能将离线通过当作有效解改善。当前目标仍是完成分阶段的有效解
+交付；下一步用新预注册验证077，并针对本轮model_failed缺乏细分原因补足安全诊断。
+不重开旧槽、不执行旧候选补分。076封存资料保持原字节；旧live-source审计因当前源码
+改变而拒绝是预期行为，不得更新旧manifest来适配。
+
 076终局：两槽均已结束，独立审计/root复验225证据SHA通过，37源码/111冻结文件/24历史
 锚点未变。钣金1200.259秒model/timeout，无计划和Build；邮政2190.554秒model/model_failed，
 首次通过含公开score词汇的Master计划并进入Build，已有solve.py和两份output文件，缺少
 摘要/完成回执。两槽均无续跑/harness/评分，有效解0/2，完整失败usage/cost及分数均null。
 model_failed没有HTTP状态码，不能断言具体provider原因或超时。watcher98576退出0，已知
 9个PID/5个PGID及可见argv/cwd关联进程无残留。结果见076 postrun/results.md和final证据；
-T076全部关闭，封存后才合入077。不得重开失败槽、执行其候选补分或修改旧登记。
+T076全部关闭，已先封存后合入077。不得重开失败槽、执行其候选补分或修改旧登记。
 
 077已在隔离worktree完成Master职责澄清，独立审查通过：只改Master user prompt，前置
 当前规划职责、原任务逐字保留、未知细节留给Build；不改system/tools/预算/原生评分权威。
 14项新增测试、238项定向检查及1359项隔离全仓测试通过。首次全仓缺少8份.gitignored
-历史证据，按封存SHA复制补齐后通过，未改测试或历史SHA。待076封存推送后再合入。
+历史证据，按封存SHA复制补齐后通过，未改测试或历史SHA。已在076封存推送后合入。
 
 以下为076启动及此前历史；当前终局以上述说明为准。
 
