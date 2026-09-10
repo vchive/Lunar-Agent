@@ -229,8 +229,11 @@ verify public constraints, and preserve improvements atomically. No result is gu
             raise WorkflowCheckpointError("master must declare safe output paths")
         secret = getattr(self.agent.model, "api_key", None)
         plan = parsed["plan"]
-        if isinstance(secret, str) and secret and isinstance(plan, list):
-            plan = [item.replace(secret, "[REDACTED]") if isinstance(item, str) else item for item in plan]
+        if isinstance(secret, str) and secret:
+            if any(secret in path for path in paths):
+                raise WorkflowCheckpointError("expected paths contain a credential")
+            if isinstance(plan, list):
+                plan = [item.replace(secret, "[REDACTED]") if isinstance(item, str) else item for item in plan]
         master_record = self.controller.write_master(plan, paths)
         self._expected = master_record["expected_paths"]
         self._master_sha = master_record["plan_sha256"]
