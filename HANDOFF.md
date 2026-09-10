@@ -60,7 +60,23 @@ slot3/4；绝不能再次运行`--launch`。当前启动快照见measurement/lau
 `.lunar/worktrees/feature070-utf8-prefix`（分支`codex/read-file-utf8-prefix`）修复UTF8边界，
 不修改正在测量的主仓。Feature070已在隔离分支提交`42c7f6e`，45项边界/复现测试与
 919项全仓测试通过，独立审查、Ruff、Specify和diff检查通过；等本批结束并审计后才合入。
-主仓仍为原874项测试与冻结产品源码。新规划时限或argv行为变更均未实施，也不会对本批补跑。
+主仓仍为原874项测试与冻结产品源码，本批不补跑。
+
+随后完成Feature071：在`.lunar/worktrees/feature071-command-argv`、分支
+`codex/command-argv-diagnostic`（基于070）提交`5a39aa4`，为JSON数组被写成字符串的
+command返回静态纠正提示，启动前拒绝，不自动转换/执行/重试；真正argv与普通string保持。
+27项新增测试、946项隔离全仓测试与独立审查通过，Ruff/Specify/diff通过。测试证明模型
+自行纠正后的两次工具调用只启动一次fake进程，原始参数与累计用量不重置。070/071均已
+推送各自分支，等待本轮终止并审计后按顺序合入；主仓`.specify`仍指向069。
+
+再次只读核对WebAgent固定`e24df25`发现：它的300秒是`agent_wait`等待窗口，超时后worker
+继续运行；Lunar的300秒master硬截止与最终JSON计划门槛是自己的实验设计，不能称为
+WebAgent同等配置。实际v2.5 master协调多角色、写PLAN.md并派发solver，权限并非只读。
+详见`docs/webagent-master-comparison-20260910.md`。历史高分记录未绑定这一代码commit，
+因此只把角色/交付契约作为本批结束后的假设，不中途调整规划策略。
+
+2026-09-10 10:49进度：钣金M仍在运行，已有分析脚本但无receipt/评分；邮政S的失败仍为
+已审计记录，后两例继续等待第一波结束。源码37、冻结输入/测试74、历史锚点8项SHA均未变。
 
 保持产品源码、measurement脚本和tests冻结，待全部结束后按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
 由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
