@@ -8,6 +8,17 @@
 
 ## 1. 当前状态
 
+Feature072已在预注册提交`09a7ea997df71e31bcdccaeba20f9140aa630b94`推送后，
+于2026-09-10 13:09:00 +0800启动一次。后台dispatcher PID/PGID69681，第一波worker
+69812/69813，初次进程快照观察到subject69814/69815。当前两槽都在Master，尚无计划、
+Build或评分；后两槽等待波次屏障。不要再次launch，冻结源码/脚本/tests/input字节。
+manifest SHA=`cbdb07e22b08a8944b9e80bf7f30cbd4057b931bd6128077dcf5da533834f830`，
+37源码/92冻结文件/13历史锚点核对通过，实际预审与159项隔离dry-run均已提交并镜像。
+当前观测见072 `measurement/launch-observation.json`、`initial-process-observation.json`和
+`postrun/observations/20260910T050941Z.json`。后者通过169项证据检查，只是partial观测；
+T072-05/06仍待全批完成/最终审计。只读进度使用072 campaign.py --summarize；完整观测
+用072 postrun/audit.py，尚未完成时不能加--require-complete。不运行要求未启动的预审/dry-run。
+
 2026-09-10 13:05左右最新工作：用户质疑300秒Master是否足够，已定义Feature072预算对照，
 当前`.specify`指向`specs/072-master-budget-measurement`。在修正后源码`5c89e04`上，
 同GLM-5.2/公开输入/exact harness新建四个S槽，仅master_seconds为300/1200两组；

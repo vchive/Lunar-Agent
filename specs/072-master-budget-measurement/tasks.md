@@ -13,7 +13,8 @@ checks passed. Independent cross-review confirmed the pinned private module grap
 authority, fixed waves and exclusive launch, per-slot budget checks and read-only phase reporting.
 Postrun review fixes cover missing successful workflow evidence, final transcript/checkpoint
 consistency, recorded usage monotonicity and disagreement between rows and group totals.
-Product source and all Feature069 files are unchanged from 5c89e04. No provider call has occurred.
+Product source and all Feature069 files are unchanged from 5c89e04. At that prelaunch point no
+provider call had occurred.
 
 Final prelaunch checks: seven further regressions reject orphan slot markers/summary before launch;
 Feature072 targeted set 98 passed and isolated exact-registration dry-run 159 passed across
@@ -28,3 +29,10 @@ Both reports are mirrored byte-for-byte into the fresh local campaign directory.
 
 The registration commit containing this record must be pushed before the one-shot launch.
 T072-05/06 remain open until dispatch/observation and final independent audit respectively.
+
+Launched once after pushing registration commit 09a7ea997df71e31bcdccaeba20f9140aa630b94 at
+2026-09-10 13:09:00 +0800. Dispatcher PID/PGID69681; first-wave workers69812/69813 and subjects
+69814/69815 observed. Both initial stages were master_running, no plan/Build/score yet; wave2
+waits for both wave1 slots to terminate. Initial postrun audit passed with 169 evidence hashes,
+complete=false. The launch/process snapshots and observation are saved separately from frozen
+registration. Never rerun --launch or unstarted-only checks; source/scripts/tests/inputs stay frozen.
