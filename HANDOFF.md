@@ -8,6 +8,14 @@
 
 ## 1. 当前状态
 
+078已在登记`e76a3a341a90703f4ba91a9e14e33ca81a76c488`推送后于2026-09-10 22:17:13 +0800
+唯一启动。dispatcher PID/PGID26135；slot1 worker26307、subject26308；slot2 worker26306、
+subject26309。初始两槽均master_running，尚无计划/Build/回执/评分；root只读watcher
+session7684每30秒写postrun/progress，measurement/保存启动与初始身份快照。
+不要再次prepare/check-only/dry-run/launch，不改变已冻source/scripts/tests/input字节。
+观察仅用078 campaign.py --summarize、postrun/audit.py；最终必须等两槽终止、独立审计、
+核对进程并封存后才合入079。T078-05/06仍未关闭。
+
 078已完成077规划职责的新测量登记准备，当前`.specify`指向
 `specs/078-master-planning-role-measurement`。源码固定fba6ab8（不含079），同GLM-5.2、
 钣金/邮政各一个新S槽，Master1200/build2400/reserve120秒、checkpoint32轮、共享5400秒/

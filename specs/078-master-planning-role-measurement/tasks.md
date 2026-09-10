@@ -40,3 +40,9 @@ b1b4dd1dee09d78b07500df9f1996bb5ac8b87e2e5a22ed03e398ddc5adaebc3. Actual328-test
 passed, SHA0e529c2e669aa7f7b67e5f69f8855ef088700eb8dcec50563a01de6fda50e4e9. Both reports were
 exclusively saved and mirrored byte-for-byte. No subjects have started at this registration commit;
 push this complete registration before the unique launch. T078-05/06 remain pending.
+
+T078-04 completed: registratione76a3a341a90703f4ba91a9e14e33ca81a76c488 was pushed before
+the unique launch at2026-09-10 22:17:13+0800. T078-05 active: dispatcher26135, slot1 worker26307/
+subject26308, slot2 worker26306/subject26309. Both initially Master-running; no plan, receipt,
+harness or score yet. Read-only watcher7684 records progress; initial PID/PPID/PGID snapshot is
+saved inmeasurement/. Frozen files may not change. Final acceptance/process review remains pending.
