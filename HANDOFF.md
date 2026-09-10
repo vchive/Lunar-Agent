@@ -8,6 +8,25 @@
 
 ## 1. 当前状态
 
+2026-09-10 13:28之后最新结论：Feature072四槽均已终止，独立最终审计/进程检查通过。
+300秒组0/2：钣金300.229s model/timeout，邮政300.123s runtime/timeout；1200秒组0/2：
+邮政240.183s、钣金841.108s均返回了说明文字+json代码块，被整个响应的json.loads拒绝。
+全部无已验收计划/Build/续跑/receipt/harness/评分，失败完整usage/cost和精确Master耗时
+仍为null。233项证据SHA核对一致，37源码/92冻结文件/13历史锚点未变。已知PID/worker
+PGID和可见argv/cwd关联进程均未发现存活；原始subject child IDs未记录，保留可见性限制。
+结果见072 postrun/results.md、final-audit.json、final-report.md和final-process-check.json。
+T072-05/06关闭；本批不补位、不回填，预注册09a7ea9及旧manifest永久保留。
+
+针对格式问题，Feature073已在隔离worktree `.lunar/worktrees/feature073-master-plan-json-envelope`
+分支codex/master-plan-json-envelope提交推送dd4d7f5。仅增加确定性的Master响应外壳解析，
+原计划语义、路径、脱敏、预算和原生评分入口保持；93解析器+10集成测试通过，全仓1147
+通过，独立review/Ruff/Specify/diff通过。新纯解析器可在内存接受两个已终止响应，但不
+执行候选/模型/harness、不改失败结果。此刻主仓仍为冻结源码，待072证据提交推送后合入。
+后续目标：用新预注册验证修复后的Master→Build→独立有效解链条；本轮只证明放宽时间
+仍会遭遇格式门槛，不能宣称1200秒普遍足够或已改善有效解率。
+
+以下为本轮已完成的启动与准备过程：
+
 Feature072已在预注册提交`09a7ea997df71e31bcdccaeba20f9140aa630b94`推送后，
 于2026-09-10 13:09:00 +0800启动一次。后台dispatcher PID/PGID69681，第一波worker
 69812/69813，初次进程快照观察到subject69814/69815。当前两槽都在Master，尚无计划、

@@ -4,8 +4,8 @@
 - [x] T072-02 Add tested per-slot registration/binding and isolated pinned execution reuse.
 - [x] T072-03 Implement independent preaudit/dry-run and null-aware per-group/postrun reporting.
 - [x] T072-04 Finish offline checks and independent review; freeze, commit and push registration.
-- [ ] T072-05 Launch exactly once and observe all four attempts without changing frozen inputs.
-- [ ] T072-06 Independently audit final native evidence/process termination, seal results and handoff.
+- [x] T072-05 Launch exactly once and observe all four attempts without changing frozen inputs.
+- [x] T072-06 Independently audit final native evidence/process termination, seal results and handoff.
 
 Offline verification on 2026-09-10: full suite 1037 passed (36.16 seconds), including new runner,
 per-arm audit, actual AgentLoop/staged budget fixtures and postrun tests. Ruff, Specify and diff
@@ -36,3 +36,24 @@ Launched once after pushing registration commit 09a7ea997df71e31bcdccaeba20f9140
 waits for both wave1 slots to terminate. Initial postrun audit passed with 169 evidence hashes,
 complete=false. The launch/process snapshots and observation are saved separately from frozen
 registration. Never rerun --launch or unstarted-only checks; source/scripts/tests/inputs stay frozen.
+
+Final closure on 2026-09-10: all four subjects and outer slots terminated. Both300-second slots
+timed out (sheet300.229s model/timeout; postal300.123s runtime/timeout). Both1200-second slots
+returned prose plus one JSON fence and failed before Master acceptance (postal240.183s;
+sheet841.108s). Both budget groups valid0/2, no plan/Build/resume/receipt/harness; scores and full
+failed usage/cost stay null. Precise Master duration stays null. No retry or replacement occurred.
+Final independent audit verified233 evidence hashes; scoped process check found no known PID,
+durable worker group member or visible072-associated argv/cwd process. Original markers did not
+record subject child IDs, so complete historical descendant coverage is not claimed.
+The read-only watcher session74763/PID70063 exited0. All37 source/92 frozen/13 historical file
+hashes were verified unchanged before sealing. Product integration is permitted only after this
+final evidence is committed and pushed, preserving the old manifest unchanged.
+
+- Final audit SHA256: 2973625674cc0056e8891e384b6feeb021ba1174b217e10d3c633cf23232480f
+- Final report SHA256: 10e6399291146c75e4abad942c908af6bbad652f3a5f999522c17fda6f0c15b4
+- Native summary SHA256: 297b2472807a7f11259985edea5c8d415e0b7fccfe13b01e86fc2c7731ef1d4e
+- Process check SHA256: 6c4adfdaed63da5980891b5a98a09cbb08053de866c5e8c9a1ad0067bc80ceb0
+
+Feature073 was independently implemented in an isolated worktree and passed1147 offline tests.
+Its pure parser accepts both observed final responses in memory, with no model/candidate/receipt/
+harness execution; this is follow-up compatibility evidence only and never changes072 outcomes.
