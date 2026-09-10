@@ -1,6 +1,6 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-09
+更新时间：2026-09-10
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
@@ -18,22 +18,26 @@ Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_opti
 固定分母 valid=1/2，完成率 0.5；不同 case 不合并均分。结果、审计和 SHA 见 Feature 068。
 暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
 
-Feature 069 已进入设计阶段，目标是验证最小的 WebAgent-inspired staged workflow：
-`Master → Build → typed checkpoint → 至多一次同 attempt resume`。它保留同一 aggregate
-ledger、模型/工具/公开输入和 exact harness 权威，只改变 subject 控制面；不把 WebAgent
-分数、私有 evaluator 或历史候选给 subject。先完成 fake-runtime 离线边界测试，再单独预注册
-control/staged 两臂测量；在此之前不改默认 normal workflow、不启动新模型。设计见
-`specs/069-webagent-normal-workflow/`。
+Feature 069 已完成可选 staged subject 接入与离线验证，尚未进行两臂实评。目标仍为
+`Master → Build → typed checkpoint → 至多一次同 attempt continuation`，通过同一预算改善交付率。
+入口为 `run_subject_adapter(workflow_config=...)` 或 `effect-subject --workflow-config PATH`；
+默认 normal workflow 不变。实际 master 模型输出的 JSON 计划经过验证后传给新的 build session，
+所有阶段共用累计 tokens/cost/tool steps 和墙钟；receipt 汇总完整阶段用量，EffectTrialRunner
+继续负责公共输入、receipt 和 exact harness 的唯一验证与评分边界。
 
-Feature 069 的第一段控制面已实现但尚未接入模型：`workflow_checkpoint.py` 提供严格的
-manifest/master/checkpoint/state schema、路径和软链保护、原子落盘、累计 usage/墙钟上限、
-凭据脱敏和单次 resume guard；新增离线测试覆盖跨 run、乱序、重复 checkpoint、预算回退、
-路径逃逸和脱敏边界。全仓测试与 Ruff 通过。它不能创建 receipt、分数或 harness 权限，
-当前已增加独立的 `StagedWorkflowRunner`：它执行 master/build、保留失败候选、写 typed
-checkpoint，并允许同一 attempt 至多一次显式 resume；它不创建 receipt、不计算分数、不调用
-harness。`AgentLoopRuntime` 的 shared `UsageLedger` 与累计 tool-step offset seam 保持默认
-invocation 预算行为不变。EffectTrialRunner subject-adapter 接入和 exact harness 集成仍未完成，
-在此之前不启动新模型。
+2026-09-10 复核修正了早期独立 seam 的不足：不再丢弃 master 输出，不再把失败后部分 usage 当
+完整用量，不允许重新初始化同一 attempt 或重置 deadline。首版只在完整工具轮次持久化后的
+合作式边界续跑一次；API 超时/未知 usage、超预算或损坏 checkpoint 均终止，保留已有候选且不
+产生 receipt。进程被杀后的恢复尚不支持。控制文件和 transcript 都增加了运行中软链替换检查。最终配置/master 摘要在落 checkpoint
+前再次校验，避免模型末轮篡改冻结证据后仍生成 receipt。全仓 828 项测试通过（其中 101 项
+staged 定向测试），Ruff、diff check 和独立审查通过。
+
+真实 AgentLoop + 假模型、subject adapter/CLI、现有 trial gate + fixture harness 的离线测试已
+覆盖计划传递、累计预算、单次续跑、失败不评分和身份/路径保护。它们不是私有 harness 实评，
+不能据此声称有效解比例提高。下一步为 T069-06：冻结同 case/GLM-5.2/aggregate ceilings 的
+control/staged 两臂配置、源码、请求和顺序，独立审计及 dry-run 后才进行 T069-07。此前结果不
+回填、不重新运行 WebAgent。源码 SHA 和 run/attempt 标签由预注册调用者核验，adapter 本身
+核验 request/case/profile/limits 的实际绑定。设计见 `specs/069-webagent-normal-workflow/`。
 
 Feature 067 已完成使用新预算诊断的两槽真实 GLM 测量。两次均明确触发
 200000 token ceiling，subject 耗时 488.371 / 522.781 秒，valid=0/2、scored=0，完整失败

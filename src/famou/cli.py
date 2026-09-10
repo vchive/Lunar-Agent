@@ -61,6 +61,7 @@ from .models import Run
 from .policy import MasterPolicy, PlanDocument, PlanPatch
 from .profiles import ModelProfile
 from .runtime import OpenAICompatibleRuntime, build_runtime
+from .staged_workflow import StagedWorkflowConfig
 from .store import Store
 from .tools import LocalToolRegistry
 
@@ -636,6 +637,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subject_parser.add_argument("--max-steps", type=int, default=100)
     subject_parser.add_argument("--timeout", type=float)
+    subject_parser.add_argument(
+        "--workflow-config", type=Path,
+        help="opt-in frozen staged manifest and reservations JSON (normal mode only)",
+    )
     subject_parser.add_argument(
         "--no-exec", action="store_true", help="disable the no-shell command tool"
     )
@@ -3043,6 +3048,7 @@ def _effect_subject(args: argparse.Namespace) -> dict[str, object]:
     profile = _load_model_profile(getattr(args, "model_profile", None))
     if profile is not None and args.model is not None and args.model != profile.model:
         raise ValueError("--model does not match model profile model")
+    workflow_path = getattr(args, "workflow_config", None)
     return run_subject_adapter(
         args.request,
         endpoint=args.endpoint,
@@ -3052,6 +3058,7 @@ def _effect_subject(args: argparse.Namespace) -> dict[str, object]:
         allow_exec=not args.no_exec,
         timeout=args.timeout,
         model_profile=profile,
+        workflow_config=StagedWorkflowConfig.load(workflow_path) if workflow_path else None,
     )
 
 

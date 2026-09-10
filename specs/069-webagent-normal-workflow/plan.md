@@ -7,12 +7,13 @@
    - Audit transcript loading, model-profile ledger behavior, cancellation, and resume guards before
      changing implementation.
 
-2. **Controller implementation (after design approval)**
+2. **Controller implementation**
    - Add a small staged workflow controller around `AgentLoopRuntime`, not a second model runtime.
    - Persist master/state/checkpoint JSON atomically with monotonic identifiers and source/request/profile
      bindings.
    - Carry one aggregate usage ledger across master/build/resume and enforce reserved stage deadlines.
-   - Integrate `SessionTranscript`, event sinks, process observation, and deterministic recovery proposals.
+   - Integrate `SessionTranscript` and cumulative event sinks with typed cooperative tool-round boundaries.
+   - Keep arbitrary process restart and unknown-provider-usage recovery deferred.
 
 3. **Offline verification**
    - Use fake model/tool/process executors to test every legal transition and failure boundary.

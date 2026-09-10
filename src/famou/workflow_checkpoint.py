@@ -88,7 +88,11 @@ def _digest(value: object, label: str) -> str:
 def _relpath(value: object, label: str = "path") -> str:
     text = _text(value, label, max_bytes=_MAX_PATH_BYTES)
     path = Path(text)
-    if "\\" in text or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+    if (
+        "\\" in text or path.is_absolute() or not path.parts
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or text != path.as_posix()
+    ):
         _fail(f"{label} must be a confined POSIX relative path")
     return path.as_posix()
 
@@ -127,7 +131,7 @@ class WorkflowManifest:
     case_key: str
     request_sha256: str
     model_profile_sha256: str | None
-    ceilings: dict[str, int | float | None]
+    ceilings: Mapping[str, int | float | None]
 
     def __post_init__(self) -> None:
         for name in ("run_id", "attempt_id", "suite_key", "case_key"):
@@ -136,17 +140,20 @@ class WorkflowManifest:
             _digest(getattr(self, name), name)
         if self.model_profile_sha256 is not None:
             _digest(self.model_profile_sha256, "model_profile_sha256")
-        if set(self.ceilings) != {"max_wall_seconds", "max_tool_steps", "max_total_tokens", "max_cost_micros"}:
+        if not isinstance(self.ceilings, Mapping):
+            _fail("ceilings must be an object")
+        ceilings = dict(self.ceilings)
+        if set(ceilings) != {"max_wall_seconds", "max_tool_steps", "max_total_tokens", "max_cost_micros"}:
             _fail("ceilings must contain exactly the four aggregate limits")
-        wall = self.ceilings["max_wall_seconds"]
+        wall = ceilings["max_wall_seconds"]
         if isinstance(wall, bool) or not isinstance(wall, (int, float)) or not math.isfinite(float(wall)) or wall <= 0:
             _fail("max_wall_seconds must be finite and positive")
         for key in ("max_tool_steps", "max_total_tokens"):
-            _integer(self.ceilings[key], key, 1)
-        cost = self.ceilings["max_cost_micros"]
+            _integer(ceilings[key], key, 1)
+        cost = ceilings["max_cost_micros"]
         if cost is not None:
             _integer(cost, "max_cost_micros", 1)
-        object.__setattr__(self, "ceilings", MappingProxyType(dict(self.ceilings)))
+        object.__setattr__(self, "ceilings", MappingProxyType(ceilings))
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -222,8 +229,12 @@ class AggregateUsage:
     def monotonic_from(self, previous: AggregateUsage) -> bool:
         if self.tool_steps < previous.tool_steps or self.rounds < previous.rounds or self.elapsed_ms < previous.elapsed_ms:
             return False
-        if not self.available or not previous.available:
-            return self.available or not previous.available
+        if not self.available:
+            return not previous.available
+        if not previous.available:
+            # Only the untouched initial state can acquire its first observed ledger. Once a
+            # round/tool was unaccounted for, later samples cannot establish its missing usage.
+            return previous.rounds == 0 and previous.tool_steps == 0 and previous.elapsed_ms == 0
         token_monotonic = all(
             getattr(self, key) is not None and getattr(previous, key) is not None
             and getattr(self, key) >= getattr(previous, key)
@@ -264,18 +275,17 @@ class WorkflowController:
         self.workspace.mkdir(parents=True, exist_ok=True)
         if self.workspace.is_symlink():
             _fail("workspace must not be a symlink")
+        self.workspace = self.workspace.resolve(strict=True)
         self.manifest = manifest if isinstance(manifest, WorkflowManifest) else WorkflowManifest.from_dict(manifest)
         self.workflow = self.workspace / "workflow"
-        if self.workflow.exists() and (self.workflow.is_symlink() or not self.workflow.is_dir()):
+        if self.workflow.is_symlink() or (self.workflow.exists() and not self.workflow.is_dir()):
             _fail("workflow path must be a regular directory")
         self.workflow.mkdir(exist_ok=True)
         self.checkpoints = self.workflow / "checkpoints"
-        if self.checkpoints.exists() and (self.checkpoints.is_symlink() or not self.checkpoints.is_dir()):
+        if self.checkpoints.is_symlink() or (self.checkpoints.exists() and not self.checkpoints.is_dir()):
             _fail("workflow checkpoints path must be a regular directory")
         self.checkpoints.mkdir(exist_ok=True)
-        for path in (self.workflow, self.checkpoints):
-            if path.is_symlink() or not path.is_dir():
-                _fail("workflow path must be a regular directory")
+        self.assert_paths_safe()
         if not (self.workflow / "state.json").exists():
             # At creation no provider usage has been observed.  Keep that fact explicit instead
             # of manufacturing a zero ledger which could make an unavailable sample look free.
@@ -283,6 +293,46 @@ class WorkflowController:
         else:
             self._validate_state(self._read_json(self.workflow / "state.json"))
             self._recover_orphan_checkpoint()
+
+    def assert_paths_safe(self) -> None:
+        """Reject replaced control directories before subsequent filesystem operations.
+
+        The subject shares the filesystem, so construction-time validation is insufficient.
+        These checks detect static replacement; they are not a concurrent hostile-writer sandbox.
+        """
+        try:
+            if (
+                self.workspace.is_symlink() or not self.workspace.is_dir()
+                or self.workspace.resolve(strict=True) != self.workspace
+            ):
+                _fail("workflow workspace must remain a canonical directory without symlinks")
+            for path in (self.workflow, self.checkpoints):
+                relative = path.relative_to(self.workspace)
+                current = self.workspace
+                for part in relative.parts:
+                    if part in {"", ".", ".."}:
+                        _fail("workflow directory escapes workspace")
+                    current = current / part
+                    if current.is_symlink() or not current.is_dir():
+                        _fail("workflow directories must remain regular directories without symlinks")
+        except WorkflowCheckpointError:
+            raise
+        except (OSError, ValueError) as exc:
+            raise WorkflowCheckpointError("workflow directories are not safely confined") from exc
+
+    def _assert_record_path_safe(self, path: Path) -> None:
+        self.assert_paths_safe()
+        try:
+            relative = path.relative_to(self.workspace)
+        except ValueError as exc:
+            raise WorkflowCheckpointError("workflow record escapes workspace") from exc
+        if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+            _fail("workflow record must be a confined file path")
+        current = self.workspace
+        for part in relative.parts[:-1]:
+            current = current / part
+            if current.is_symlink() or not current.is_dir():
+                _fail("workflow record parents must be regular directories without symlinks")
 
     def _recover_orphan_checkpoint(self) -> None:
         """Complete a checkpoint whose state replacement was interrupted."""
@@ -300,6 +350,8 @@ class WorkflowController:
         checkpoint = self.load_checkpoint(candidates[-1])
         if checkpoint.prior_stage != current["stage"]:
             _fail("orphan workflow checkpoint has an invalid prior stage")
+        if not checkpoint.usage.monotonic_from(AggregateUsage.from_dict(current["usage"])):
+            _fail("orphan checkpoint usage moved backwards or reset")
         self._write_replace(
             self.workflow / "state.json",
             self._state_payload(
@@ -314,6 +366,7 @@ class WorkflowController:
         return {"schema_version": WORKFLOW_SCHEMA_VERSION, "kind": "workflow_state", **self.manifest.to_dict(), "stage": stage, "checkpoint_number": checkpoint_number, "resume_used": resume_used, "usage": usage.to_dict()}
 
     def _read_json(self, path: Path) -> dict[str, object]:
+        self._assert_record_path_safe(path)
         try:
             if path.is_symlink() or not path.is_file() or path.stat().st_size > _MAX_JSON_BYTES:
                 _fail("workflow record is not a bounded regular file")
@@ -327,19 +380,26 @@ class WorkflowController:
         return value
 
     def _write_replace(self, destination: Path, value: Mapping[str, object]) -> None:
+        self._assert_record_path_safe(destination)
         raw = _canonical(value)
-        if destination.exists() and destination.is_symlink():
+        if destination.is_symlink():
             _fail("workflow destination must not be a symlink")
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
-        temporary.write_bytes(raw)
+        created = False
         try:
-            with temporary.open("rb") as stream:
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            created = True
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, destination)
         finally:
-            temporary.unlink(missing_ok=True)
+            if created:
+                temporary.unlink(missing_ok=True)
 
     def _write_new(self, destination: Path, value: Mapping[str, object]) -> None:
+        self._assert_record_path_safe(destination)
         raw = _canonical(value)
         if destination.exists() or destination.is_symlink():
             _fail("workflow checkpoint already exists")
@@ -376,7 +436,11 @@ class WorkflowController:
             _integer(obj["checkpoint_number"], "checkpoint_number", 1)
         if type(obj["resume_used"]) is not bool:
             _fail("resume_used must be boolean")
-        AggregateUsage.from_dict(obj["usage"])
+        self._validate_usage(AggregateUsage.from_dict(obj["usage"]))
+        if obj["stage"] in {"checkpointed", "resuming"} and obj["checkpoint_number"] is None:
+            _fail("workflow stage requires a checkpoint")
+        if obj["stage"] == "resuming" and not obj["resume_used"]:
+            _fail("resuming state requires a consumed resume guard")
 
     def _validate_binding(self, obj: Mapping[str, object]) -> None:
         expected = self.manifest.to_dict()
@@ -390,13 +454,31 @@ class WorkflowController:
             _fail("invalid workflow stage")
         if stage == "harness_pending":
             _fail("harness authority belongs to EffectTrialRunner")
+        if stage == "resuming":
+            _fail("resuming transition requires resume() and its one-resume guard")
+        if stage == "checkpointed":
+            _fail("checkpointed transition requires a durable checkpoint()")
         current = self.state()
         old = current["stage"]
         if stage == old:
-            return
+            _fail(f"duplicate workflow transition: {stage}")
         if stage not in _NEXT[old]:
             _fail(f"out-of-order workflow transition: {old} -> {stage}")
         self._write_replace(self.workflow / "state.json", self._state_payload(stage, current["checkpoint_number"], current["resume_used"], AggregateUsage.from_dict(current["usage"])))
+
+    def record_usage(self, usage: AggregateUsage | Mapping[str, object]) -> None:
+        """Persist the master's observed ledger even when its plan cannot be accepted."""
+        current = self.state()
+        if current["stage"] not in {"master_running", "master_ready"}:
+            _fail("master usage may only be recorded during the master stage")
+        snapshot = usage if isinstance(usage, AggregateUsage) else AggregateUsage.from_dict(usage)
+        if not snapshot.monotonic_from(AggregateUsage.from_dict(current["usage"])):
+            _fail("usage ledger moved backwards or reset")
+        self._validate_usage(snapshot)
+        self._write_replace(
+            self.workflow / "state.json",
+            self._state_payload(current["stage"], current["checkpoint_number"], current["resume_used"], snapshot),
+        )
 
     def write_master(self, plan: Sequence[str], expected_paths: Sequence[str]) -> dict[str, object]:
         current = self.state()
@@ -488,7 +570,7 @@ class WorkflowController:
     def _transcript_record(self, transcript: str | Path | None) -> dict[str, object] | None:
         if transcript is None:
             return None
-        relative = _relpath(transcript, "transcript path")
+        relative = _relpath(transcript.as_posix() if isinstance(transcript, Path) else transcript, "transcript path")
         return self._path_record(relative)
 
     def _validate_usage(self, usage: AggregateUsage) -> None:
@@ -535,13 +617,28 @@ class WorkflowController:
         if current["stage"] != "checkpointed":
             _fail("resume requires a checkpointed stage")
         number = current["checkpoint_number"]
+        if checkpoint_number is not None:
+            _integer(checkpoint_number, "checkpoint number", 1)
         if checkpoint_number is not None and checkpoint_number != number:
             _fail("resume checkpoint does not match current state")
         if not isinstance(number, int):
             _fail("resume requires a checkpoint")
+        self.load_master()
         checkpoint = self.load_checkpoint(number)
+        if checkpoint.stage != current["stage"] or checkpoint.usage != AggregateUsage.from_dict(current["usage"]):
+            _fail("resume checkpoint does not match current state")
         if not checkpoint.usage.available:
             _fail("unavailable usage cannot authorize resume")
+        usage = checkpoint.usage
+        ceilings = self.manifest.ceilings
+        for used, maximum, label in (
+            (usage.total_tokens, ceilings["max_total_tokens"], "token"),
+            (usage.tool_steps, ceilings["max_tool_steps"], "tool-step"),
+            (usage.elapsed_ms, float(ceilings["max_wall_seconds"]) * 1000, "wall-time"),
+            (usage.cost_micros, ceilings["max_cost_micros"], "cost"),
+        ):
+            if maximum is not None and (used is None or used >= maximum):
+                _fail(f"resume requires known headroom below the aggregate {label} ceiling")
         self._write_replace(self.workflow / "state.json", self._state_payload("resuming", number, True, checkpoint.usage))
         return checkpoint
 
@@ -553,13 +650,11 @@ class WorkflowController:
         if obj["schema_version"] != WORKFLOW_SCHEMA_VERSION or obj["kind"] != "workflow_checkpoint" or obj["number"] != number:
             _fail("invalid checkpoint identity")
         self._validate_binding(obj)
+        _integer(obj["number"], "checkpoint number", 1)
         if obj["stage"] not in {"checkpointed", "build_ready"} or obj["prior_stage"] not in {"build_running", "resuming", "checkpointed"}:
             _fail("invalid checkpoint stage")
         usage = AggregateUsage.from_dict(obj["usage"])
         self._validate_usage(usage)
-        current = AggregateUsage.from_dict(self.state()["usage"])
-        if not usage.monotonic_from(current):
-            _fail("checkpoint usage moved backwards or reset")
         records = obj["declared_paths"]
         if not isinstance(records, list) or len(records) > _MAX_PATHS:
             _fail("invalid checkpoint paths")
@@ -570,6 +665,8 @@ class WorkflowController:
             if record != path_record:
                 _fail("declared path digest changed")
             normalized.append(record)
+        if len({record["path"] for record in normalized}) != len(normalized):
+            _fail("declared paths must be unique")
         transcript = obj["transcript"]
         if transcript is not None:
             record = _strict_dict(transcript, {"path", "size_bytes", "sha256"}, "transcript record")

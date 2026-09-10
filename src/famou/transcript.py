@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -20,22 +22,54 @@ class SessionTranscript:
         max_message_bytes: int = 12_000,
         max_total_bytes: int = 1_000_000,
         redactions: tuple[str, ...] = (),
+        confined_workspace: str | Path | None = None,
     ) -> None:
         if max_messages < 1 or max_message_bytes < 256 or max_total_bytes < max_message_bytes:
             raise ValueError("invalid transcript bounds")
-        self.path = Path(path).expanduser().resolve()
+        self._confined_workspace = (
+            Path(confined_workspace).expanduser().absolute()
+            if confined_workspace is not None else None
+        )
+        if self._confined_workspace is None:
+            self.path = Path(path).expanduser().resolve()
+        else:
+            supplied = Path(path).expanduser()
+            if ".." in supplied.parts or ".." in self._confined_workspace.parts:
+                raise ValueError("confined transcript paths must not contain '..'")
+            self.path = supplied if supplied.is_absolute() else self._confined_workspace / supplied
+            try:
+                relative = self.path.relative_to(self._confined_workspace)
+            except ValueError as exc:
+                raise ValueError("transcript must be inside its confined workspace") from exc
+            if not relative.parts:
+                raise ValueError("confined transcript must name a file")
+            self._validate_confined_path()
         self.max_messages = max_messages
         self.max_message_bytes = max_message_bytes
         self.max_total_bytes = max_total_bytes
         self.redactions = tuple(secret for secret in redactions if secret)
 
     def load(self) -> list[dict[str, object]]:
-        if not self.path.is_file():
-            return []
-        try:
-            raw = self.path.read_bytes()
-        except OSError:
-            return []
+        if self._confined_workspace is not None:
+            self._validate_confined_path()
+            try:
+                with self._confined_parent() as parent:
+                    descriptor = os.open(
+                        self.path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent,
+                    )
+                    with os.fdopen(descriptor, "rb") as stream:
+                        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                            raise ValueError("confined transcript must be a regular file")
+                        raw = stream.read()
+            except FileNotFoundError:
+                return []
+        else:
+            if not self.path.is_file():
+                return []
+            try:
+                raw = self.path.read_bytes()
+            except OSError:
+                return []
         if len(raw) > self.max_total_bytes * 2:
             raw = raw[-self.max_total_bytes * 2 :]
         messages: list[dict[str, object]] = []
@@ -49,21 +83,88 @@ class SessionTranscript:
         return messages[-self.max_messages :]
 
     def append(self, message: dict[str, object]) -> None:
+        self._validate_confined_path()
         normalized = self._normalize(message)
         messages = self.load()
         messages.append(normalized)
         messages = self._compact(messages)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = "".join(
             json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n"
             for item in messages
         )
+        if self._confined_workspace is not None:
+            self._append_confined(payload)
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
         try:
             temporary.write_text(payload, encoding="utf-8")
             os.replace(temporary, self.path)
         finally:
             temporary.unlink(missing_ok=True)
+
+    def _validate_confined_path(self) -> None:
+        root = self._confined_workspace
+        if root is None:
+            return
+        current = root
+        for component in (None, *self.path.relative_to(root).parts):
+            if component is not None:
+                current = current / component
+            try:
+                mode = current.lstat().st_mode
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(mode):
+                raise ValueError("confined transcript path must not contain a symlink")
+            if current == self.path:
+                if not stat.S_ISREG(mode):
+                    raise ValueError("confined transcript must be a regular file")
+            elif not stat.S_ISDIR(mode):
+                raise ValueError("confined transcript parent must be a directory")
+
+    @contextmanager
+    def _confined_parent(self, *, create: bool = False):
+        """Anchor all confined I/O to directories opened without following symlinks."""
+        root = self._confined_workspace
+        assert root is not None
+        self._validate_confined_path()
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for component in self.path.relative_to(root).parts[:-1]:
+                if create:
+                    try:
+                        os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                    except FileExistsError:
+                        pass
+                child = os.open(
+                    component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor,
+                )
+                os.close(descriptor)
+                descriptor = child
+            yield descriptor
+        finally:
+            os.close(descriptor)
+
+    def _append_confined(self, payload: str) -> None:
+        with self._confined_parent(create=True) as parent:
+            temporary = f".{self.path.name}.{uuid.uuid4().hex}.tmp"
+            descriptor = os.open(
+                temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600, dir_fd=parent,
+            )
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    stream.write(payload)
+                self._validate_confined_path()
+                os.replace(temporary, self.path.name, src_dir_fd=parent, dst_dir_fd=parent)
+            finally:
+                try:
+                    os.unlink(temporary, dir_fd=parent)
+                except FileNotFoundError:
+                    pass
 
     def _normalize(self, message: dict[str, object]) -> dict[str, object]:
         value = self._redact_value(message)

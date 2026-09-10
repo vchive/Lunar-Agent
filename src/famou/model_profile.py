@@ -72,6 +72,50 @@ class UsageLedger:
         self._input_tokens = 0
         self._output_tokens = 0
         self._rounds = 0
+        self._budget_failure: BudgetFailureEvidence | None = None
+        self._usage_complete = True
+        self._response_models: list[str | None] = []
+
+    @property
+    def usage_complete(self) -> bool:
+        """Whether accepted counters cover every observed provider request."""
+        return self._usage_complete and self._budget_failure is None
+
+    @property
+    def response_model(self) -> str | None:
+        """A model identity only when all observed responses supplied the same value."""
+        if (
+            self._response_models
+            and len(self._response_models) == self._rounds
+            and all(self._response_models)
+            and len(set(self._response_models)) == 1
+        ):
+            return self._response_models[0]
+        return None
+
+    def observe_response_model(self, model: str | None) -> None:
+        self._response_models.append(model)
+
+    def mark_usage_unavailable(self) -> None:
+        """Latch uncertain consumption; subsequent samples cannot fill the missing turn."""
+        self._usage_complete = False
+
+    def check_request(self, *, require_complete: bool = True) -> None:
+        """Refuse further provider spending after rejection, exhaustion, or unknown usage."""
+        if self._budget_failure is not None:
+            raise ProfileBudgetExceeded(self._budget_failure)
+        if require_complete and not self._usage_complete:
+            raise ValueError("model profile aggregate usage is unavailable")
+        snapshot = self.snapshot
+        for name, actual, maximum in (
+            ("max_total_tokens", snapshot.total_tokens, self.profile.max_total_tokens),
+            ("max_cost_micros", snapshot.cost_micros, self.profile.max_cost_micros),
+        ):
+            if maximum is not None and actual is not None and actual >= maximum:
+                raise ProfileBudgetExceeded(BudgetFailureEvidence(
+                    limit=name, state="exhausted", maximum=maximum,
+                    accepted_usage=snapshot, observed_usage=snapshot, trigger_recorded=True,
+                ))
 
     @property
     def snapshot(self) -> UsageSnapshot:
@@ -91,6 +135,8 @@ class UsageLedger:
         ledger; rejection does not imply that the provider did not charge for that response.
         """
 
+        if self._budget_failure is not None:
+            raise ProfileBudgetExceeded(self._budget_failure)
         if not isinstance(usage, Mapping):
             raise TypeError("usage must be an object")
         required = {"input_tokens", "output_tokens", "total_tokens"}
@@ -111,19 +157,21 @@ class UsageLedger:
         accepted = self.snapshot
         observed = UsageSnapshot(new_input, new_output, new_total, new_cost, self._rounds + 1)
         if self.profile.max_total_tokens is not None and new_total > self.profile.max_total_tokens:
-            raise ProfileBudgetExceeded(BudgetFailureEvidence(
+            self._budget_failure = BudgetFailureEvidence(
                 limit="max_total_tokens", state="exceeded", maximum=self.profile.max_total_tokens,
                 accepted_usage=accepted, observed_usage=observed, trigger_recorded=False,
-            ))
+            )
+            raise ProfileBudgetExceeded(self._budget_failure)
         if (
             self.profile.max_cost_micros is not None
             and new_cost is not None
             and new_cost > self.profile.max_cost_micros
         ):
-            raise ProfileBudgetExceeded(BudgetFailureEvidence(
+            self._budget_failure = BudgetFailureEvidence(
                 limit="max_cost_micros", state="exceeded", maximum=self.profile.max_cost_micros,
                 accepted_usage=accepted, observed_usage=observed, trigger_recorded=False,
-            ))
+            )
+            raise ProfileBudgetExceeded(self._budget_failure)
         self._input_tokens, self._output_tokens = new_input, new_output
         self._rounds += 1
         return self.snapshot

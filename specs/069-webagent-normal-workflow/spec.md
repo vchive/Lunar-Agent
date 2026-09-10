@@ -2,7 +2,7 @@
 
 **Created**: 2026-09-09  
 **Branch**: main  
-**Status**: In progress (control-plane slice implemented)
+**Status**: In progress (opt-in subject integration implemented; measurement pending)
 
 ## Objective
 
@@ -38,7 +38,8 @@ and total budget.
 The staged variant uses one logical attempt and one aggregate resource envelope, split into explicit
 control-plane stages:
 
-1. **Master** receives the same public request and tools. It writes a bounded `workflow/master.json`
+1. **Master** receives the same public request and tools, returning strict JSON with `plan` and
+   `expected_paths`. The controller validates and writes a bounded `workflow/master.json`
    containing the request digest, workspace identity, a short ordered build plan, expected deliverable
    paths, and a plan digest. It may inspect public files and formulate the approach; it may not run
    the private harness or write a subject receipt.
@@ -46,32 +47,43 @@ control-plane stages:
    validation. It receives the master plan and the same public request. It implements the candidate,
    runs permitted public/local checks, and must atomically preserve a complete candidate before
    expensive refinement.
-3. **Checkpoint** is written at bounded intervals and at every clean stage boundary. It records only
+3. **Checkpoint** is written at one scheduled cooperative build boundary and at final build readiness. It records only
    typed control data: stage, workspace tree digest for declared paths, transcript digest, usage
    snapshot, tool-step count, and a monotonic checkpoint number. It contains no private results and is
    never treated as a receipt.
-4. **Resume** may reopen the same logical attempt after a process interruption or stage timeout. It
-   uses the checkpoint and the bounded session transcript to continue the build. Resume is allowed
-   only for a pre-registered interruption policy and within the original total wall-time, tool-step,
-   token, and cost ceilings. A resumed process does not reset any ledger or create a new attempt.
-5. **Delivery** ends the subject side when the candidate and the repository-owned subject receipt are
-   complete, or when the fixed aggregate budget is exhausted. Only then does the controller invoke the
-   exact private extractor/evaluator under the existing `EffectTrialRunner` boundary.
+4. **Resume** continues within the same subject process only after a typed `StageBoundary` at the
+   end of a complete, durably persisted tool round. The fixed policy triggers at the first clean
+   boundary after `build_seconds`, or after an optional fixed round count. The original live ledger,
+   paired transcript, candidate digests and aggregate deadline must still match. Resume is at most
+   once and cannot accept a replacement prompt or timeout.
+5. **Delivery** returns the final runtime result to `run_subject_adapter`, which revalidates the
+   public projection and creates the unchanged normal-mode receipt. `EffectTrialRunner` validates
+   that receipt before invoking its existing exact harness; workflow readiness grants no authority.
 
-The minimum product experiment is **one master stage followed by one build stage, with at most one
-resume from a durable checkpoint**. The controller may use a clean process for build/resume, but it
-must retain the same run id, workspace, ledger, request digest, model/profile identity, and
-attempt-start marker. A stage that times out without a checkpoint is a subject failure; it is not
-silently converted into a new attempt.
+The initial implementation supports **one master followed by build and at most one cooperative
+continuation in the same process**. Provider timeout/error, unavailable usage, rejected budget,
+missing output and failed transcript persistence are terminal subject failures. Existing candidates
+remain on disk, but a failure does not manufacture a checkpoint or a receipt. A new runner or adapter
+invocation cannot restart a nonempty workflow. Recovery after process death is deferred until a
+protocol can account for provider requests whose consumption was never returned.
 
 ### Resource accounting
 
 The staged arm and its monolithic control arm use identical aggregate ceilings. The master and build
 stages receive reservations for scheduling only; unused reservation returns to the same aggregate
 ledger. A stage cannot borrow beyond the aggregate cap, and a resume cannot reset accepted or
-observed usage. Suggested first experiment reservations are 15% master / 85% build with a 5% safety
-reserve taken from the aggregate rather than added to it; exact numbers must be frozen in the
-pre-execution manifest after offline boundary tests.
+observed usage. `StagePolicy` freezes positive `master_seconds`, `build_seconds`, and
+`reserve_seconds`; their sum must leave room inside the aggregate ceiling for resume. Master has a
+bounded invocation timeout. Build's slice is cooperative, checked between completed tool rounds;
+build and continuation requests use the remaining aggregate time minus the finalization reserve.
+The reserve is never added to the budget. An in-flight request or tool can consume the remaining
+window before the next cooperative boundary, in which case no continuation is authorized. Optional
+`checkpoint_after_rounds` is a fixed policy input, not an outcome-dependent retry. Actual experiment
+values remain unregistered until T069-06.
+
+Shared-ledger responses report cumulative tokens, cost, model identity and interaction turns across
+master/build/resume. Rejected response usage is latched as failure evidence; unknown consumption
+cannot be repaired by later samples. Ordinary calls still allocate a fresh ledger per invocation.
 
 Stage prompts are protocol text, not an evaluator. They must say to save a complete candidate early,
 keep output paths stable, and leave time for atomic writes. They must not contain baseline scores or
@@ -81,20 +93,23 @@ private harness details.
 
 Each staged attempt has a controller-owned record under its attempt workspace:
 
+- `workflow/config.json` — frozen explicit manifest and stage reservations.
 - `workflow/master.json` — bounded plan projection, request and source identity, no score.
 - `workflow/checkpoints/<n>.json` — typed checkpoint projections; write with temporary file then
   replace; monotonic `n` and no overwrite of an existing checkpoint.
 - `workflow/state.json` — stage state machine and aggregate ledger state, updated atomically.
-- existing `session-transcript.jsonl` — redacted, bounded transcript used only for same-attempt
-  resume; transcript contents are not sent to the evaluator.
+- `workflow/master-transcript.jsonl` — separate planning history.
+- `workflow/session-transcript.jsonl` — bounded active build history with native tool pairs.
+- `workflow/transcript-<n>.jsonl` — immutable transcript copy referenced by each checkpoint.
+  Transcripts contain no evaluator evidence and are not used as validity or scoring evidence.
 - existing subject receipt and diagnostic files — unchanged authority and failure semantics.
 
-The state machine is `created → master_running → master_ready → build_running → checkpointed →
-resuming → build_ready → harness_pending → terminal`, with typed terminal failures for stage timeout,
-resume rejection, budget exhaustion, receipt invalidity, and runtime failure. Transitions must be
-monotonic and idempotent. `harness_pending` is entered only after the same receipt/public-projection
-validation already required by `EffectTrialRunner`; the harness must never read `workflow/master.json`
-as evidence.
+The implemented subject state sequence is `created → master_running → master_ready → build_running`
+then either `build_ready`, or `checkpointed → resuming → build_running → build_ready`. Typed checkpoint
+and resume methods own those transitions; direct or repeated state transitions are rejected. Master
+usage is persisted before starting build. Runtime failures use existing subject diagnostics; the last
+workflow state is partial evidence, not a claim of successful termination. `harness_pending` is not
+reachable through this subject controller; evaluation remains entirely with `EffectTrialRunner`.
 
 A checkpoint is accepted only when all of the following hold:
 
@@ -104,7 +119,13 @@ A checkpoint is accepted only when all of the following hold:
 - every declared path is confined to the subject workspace, regular, and free of symlink escapes;
 - usage is a complete typed snapshot or explicitly marked unavailable; unavailable usage never becomes
   zero and cannot extend a ceiling;
-- the checkpoint digest is recorded before a process is considered resumable.
+- the checkpoint digest is recorded before a cooperative boundary is considered resumable.
+
+The explicit config is supplied through `run_subject_adapter(workflow_config=...)` or
+`effect-subject --workflow-config PATH`. It binds the actual request digest, public case/benchmark,
+profile digest and effective limits before the first model request. Run/attempt labels and the source
+SHA are explicit caller assertions, retained unchanged; measurement registration must independently
+verify their provenance. The normal request and receipt schemas are unchanged.
 
 ## Minimum measurable variants
 
@@ -136,14 +157,13 @@ measurement. Do not add variants after seeing outcomes.
   checkpoint must be a digest/size summary, never raw history in the manifest.
 - `AgentLoopRuntime.set_event_sink`: collect typed model-turn/tool-result events for checkpoint timing
   and diagnostics; event data is bounded and non-authoritative.
-- `AgentLoopRuntime.process_info`, `cancel`, and the existing process observer: stop a stage at its
-  reserved deadline while preserving the aggregate ledger and checkpoint state.
+- `AgentLoopRuntime.StageBoundary` and `InvocationDiagnostics`: pause only at complete durable tool
+  boundaries. No assumption is made that provider HTTP cancellation reports complete usage.
 - `EffectTrialRunner`: retain suite/public projection checks, receipt parsing, one-start guards,
   harness gating, private path isolation, and exact extractor/evaluator invocation. The staged
   controller only changes how the subject process is scheduled.
-- `RecoveryPolicy`: use its deterministic, non-executable proposal model for an interrupted run;
-  a recovery proposal can authorize the controller to resume, but cannot itself execute a resume or
-  change a budget.
+- Recovery proposals and external process restart remain deferred; neither can bypass the live
+  ledger and single cooperative continuation guard.
 - Existing atomic JSON/hash helpers and subject diagnostics: extend bounded typed projections instead
   of adding a second receipt or score path.
 
@@ -151,7 +171,7 @@ measurement. Do not add variants after seeing outcomes.
 
 1. Offline tests reject malformed, out-of-order, duplicated, cross-run, symlinked, over-budget, and
    digest-mismatched checkpoints without invoking a model or private harness.
-2. A simulated stage interruption resumes exactly once with unchanged run id, attempt id, source,
+2. A simulated cooperative stage interruption resumes exactly once with unchanged run id, attempt id, source,
    request, model/profile, aggregate usage, and ceilings; a second resume is rejected by the guard.
 3. A staged subject that writes a complete candidate but no valid receipt remains unscored; a valid
    receipt with an unchanged public projection enters the existing harness boundary only once.
@@ -173,3 +193,9 @@ provider-side hidden state. Session transcript replay may increase input tokens,
 measured from the same ledger and bounded. One case/one attempt per arm cannot estimate success
 probability. Historical WebAgent duration and cache telemetry are descriptive only; they do not define
 Lunar's configuration or prove that a staged arm reproduces WebAgent.
+
+The current offline integration exercises the real AgentLoop and subject adapter with deterministic
+provider responses, plus the existing trial gate with a fixture harness. This is not an exact-harness
+measurement or evidence of improved solution quality. Static path replacements and symlink escapes
+are rejected at control/transcript access; these filesystem checks are not a sandbox against arbitrary
+concurrent native code.

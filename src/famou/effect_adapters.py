@@ -37,8 +37,10 @@ from .effect_trial import (
 )
 from .profiles import ModelProfile
 from .runtime import OpenAICompatibleRuntime
+from .staged_workflow import StagedWorkflowConfig, StagedWorkflowRunner
 from .subject_diagnostics import SubjectDiagnosticContext, SubjectDiagnosticObserver
 from .tools import LocalToolRegistry
+from .workflow_checkpoint import WorkflowController
 
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_PROCESS_OUTPUT_BYTES = 2 * 1024 * 1024
@@ -423,8 +425,9 @@ def run_subject_adapter(
     timeout: float | None = None,
     model_runtime: object | None = None,
     model_profile: ModelProfile | None = None,
+    workflow_config: StagedWorkflowConfig | None = None,
 ) -> dict[str, object]:
-    """Run one fresh Lunar Agent session for a normal or deep subject request.
+    """Run a fresh subject, optionally with same-process stages in normal mode.
 
     Deep requests intentionally execute one outer round at a time.  The caller owns the shared
     attempt workspace and supplies the bounded previous-round evaluator summary; this adapter still
@@ -469,6 +472,8 @@ def run_subject_adapter(
         raise EffectAdapterError("subject request must describe schema v1 normal or deep_evolution mode")
     if request["schema_version"] != "1":
         raise EffectAdapterError("subject request must use schema version 1")
+    if workflow_config is not None and mode != "normal":
+        raise EffectAdapterError("staged workflow requires normal mode")
     BenchmarkIdentity.from_dict(request["benchmark"])
     case = _strict_object(request["case"], {"key", "revision_id", "digest"}, "subject case")
     for key, value in case.items():
@@ -553,6 +558,27 @@ def run_subject_adapter(
                 model_profile.timeout_seconds,
                 timeout if timeout is not None else model_profile.timeout_seconds,
             )
+        if workflow_config is not None:
+            if not isinstance(workflow_config, StagedWorkflowConfig):
+                raise EffectAdapterError("workflow_config must be a StagedWorkflowConfig")
+            manifest = workflow_config.manifest
+            if model_profile is None or model_profile.max_total_tokens is None:
+                raise EffectAdapterError("staged workflow requires a model profile with token ceiling")
+            if (
+                manifest.request_sha256 != request_digest
+                or manifest.case_key != case["key"]
+                or manifest.suite_key != request["benchmark"]["name"]
+                or manifest.model_profile_sha256 != expected_profile_digest
+                or dict(manifest.ceilings) != {
+                    "max_wall_seconds": effective_timeout,
+                    "max_tool_steps": effective_max_steps,
+                    "max_total_tokens": model_profile.max_total_tokens,
+                    "max_cost_micros": model_profile.max_cost_micros,
+                }
+            ):
+                raise EffectAdapterError("staged manifest does not match frozen request/profile/limits")
+            if (workspace / "workflow").exists() or (workspace / "workflow").is_symlink():
+                raise EffectAdapterError("staged workflow requires a fresh attempt directory")
         tools = LocalToolRegistry(
             allow_exec=allow_exec,
             command_timeout=min(float(effective_timeout or 300.0), 300.0),
@@ -568,7 +594,12 @@ def run_subject_adapter(
             max_steps=effective_max_steps,
             profile=model_profile,
         )
-        agent.set_event_sink(diagnostic_observer.event)
+        def subject_event(kind: str, payload: dict[str, object]) -> None:
+            if workflow_config is not None and kind == "agent_model_turn":
+                payload = {**payload, "turn": diagnostic_observer.model_turns + 1}
+            diagnostic_observer.event(kind, payload)
+
+        agent.set_event_sink(subject_event)
         if mode == "normal":
             prompt = f"""You are the normal-mode subject under an external Famou-Bench evaluation.
 
@@ -620,7 +651,19 @@ Case key: {case['key']}
 """
         diagnostic_observer.stage, diagnostic_observer.code = "runtime", "runtime_failed"
         try:
-            result = agent.run(prompt, workspace, timeout=effective_timeout)
+            if workflow_config is None:
+                result = agent.run(prompt, workspace, timeout=effective_timeout)
+            else:
+                controller = WorkflowController(workspace, workflow_config.manifest)
+                staged = StagedWorkflowRunner(
+                    controller, agent, workspace, policy=workflow_config.policy,
+                )
+                outcome = staged.run(prompt)
+                if outcome.status == "checkpointed":
+                    outcome = staged.resume()
+                if outcome.status != "build_ready" or outcome.runtime is None:
+                    raise EffectAdapterError("staged build did not complete")
+                result = outcome.runtime
         except Exception as exc:
             raise EffectAdapterError(f"subject runtime failed: {type(exc).__name__}") from exc
         diagnostic_observer.stage, diagnostic_observer.code = "public_projection", "public_projection_failed"

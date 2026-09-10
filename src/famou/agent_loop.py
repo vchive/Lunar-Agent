@@ -12,6 +12,7 @@ import re
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .memory import MemoryStore
@@ -69,6 +70,27 @@ class ProfileBudgetFailure(RuntimeExecutionError):
         super().__init__(f"model profile budget {evidence.state}: {evidence.limit}")
 
 
+@dataclass(frozen=True)
+class InvocationDiagnostics:
+    """Observed invocation state, including uncertainty after an interrupted request."""
+
+    provider_requests: int = 0
+    responses_received: int = 0
+    usage_complete: bool = True
+    transcript_complete: bool = False
+    tool_steps: int = 0
+    elapsed_seconds: float = 0.0
+    boundary: bool = False
+
+
+class StageBoundary(RuntimeExecutionError):
+    """Cooperative pause after a complete, durably paired tool round."""
+
+    def __init__(self, diagnostics: InvocationDiagnostics) -> None:
+        self.diagnostics = diagnostics
+        super().__init__("agent loop paused at a durable stage boundary")
+
+
 class AgentLoopRuntime:
     """Execute one bounded Hermes-style session with optional persistent memory."""
 
@@ -108,6 +130,7 @@ class AgentLoopRuntime:
         self._run_id: str | None = None
         self._task_id: str | None = None
         self._last_tool_steps = 0
+        self._last_invocation = InvocationDiagnostics()
 
     def set_context(self, run_id: str, task_id: str, goal: str | None = None) -> None:
         """Attach durable identity for memory scoping and observability."""
@@ -116,13 +139,17 @@ class AgentLoopRuntime:
         self._task_id = task_id
         self.tools.set_memory_scope(f"run:{run_id}")
 
-    def set_session_path(self, path: str | Path) -> None:
+    def set_session_path(
+        self, path: str | Path, *, confined_workspace: Path | None = None,
+    ) -> None:
         """Attach a stable run/task transcript path when session history is enabled."""
         if not self.session_history:
             return
         api_key = getattr(self.model, "api_key", None)
         redactions = (api_key,) if isinstance(api_key, str) and api_key else ()
-        self._transcript = SessionTranscript(path, redactions=redactions)
+        self._transcript = SessionTranscript(
+            path, redactions=redactions, confined_workspace=confined_workspace,
+        )
 
     def session_path(self) -> Path | None:
         return self._transcript.path if self._transcript is not None else None
@@ -144,6 +171,10 @@ class AgentLoopRuntime:
         """Tool calls observed by the most recent invocation, including any offset."""
         return self._last_tool_steps
 
+    @property
+    def last_invocation(self) -> InvocationDiagnostics:
+        return self._last_invocation
+
     def run(
         self,
         prompt: str,
@@ -152,12 +183,19 @@ class AgentLoopRuntime:
         *,
         usage_ledger: UsageLedger | None = None,
         tool_steps_offset: int = 0,
+        stage_boundary: Callable[[InvocationDiagnostics], bool] | None = None,
     ) -> RuntimeResult:
         effective_timeout = self._profile_timeout(timeout)
         workspace.mkdir(parents=True, exist_ok=True)
         ledger = self._resolve_usage_ledger(usage_ledger)
         if isinstance(tool_steps_offset, bool) or not isinstance(tool_steps_offset, int) or tool_steps_offset < 0:
             raise ValueError("tool_steps_offset must be a non-negative integer")
+        if stage_boundary is not None and (usage_ledger is None or self._transcript is None):
+            raise ValueError("stage boundaries require an explicit ledger and durable transcript")
+        self._last_invocation = InvocationDiagnostics(
+            tool_steps=tool_steps_offset,
+            usage_complete=ledger.usage_complete if ledger is not None else False,
+        )
         messages = self._initial_messages(prompt)
         # Memory is exposed through explicit model tool calls. We do not inject local notes into a
         # request implicitly: sending durable user context to a configured endpoint must remain an
@@ -171,23 +209,49 @@ class AgentLoopRuntime:
         usages: list[dict[str, int] | None] = []
         while True:
             remaining = self._remaining_timeout(started, effective_timeout)
+            self._check_profile_request(ledger, require_complete=usage_ledger is not None)
+            if model_turns and stage_boundary is not None:
+                self._update_invocation(
+                    started,
+                    transcript_complete=self._durable_transcript_complete(messages),
+                )
+                if stage_boundary(self.last_invocation):
+                    if not self.last_invocation.usage_complete or not self.last_invocation.transcript_complete:
+                        raise RuntimeExecutionError("stage boundary requires complete usage and paired transcript")
+                    self._update_invocation(started, boundary=True)
+                    raise StageBoundary(self.last_invocation)
             request_messages = self._budget_messages(messages, remaining, tool_steps, ledger)
+            self._update_invocation(
+                started,
+                provider_requests=self.last_invocation.provider_requests + 1,
+                usage_complete=False,
+                transcript_complete=False,
+            )
             try:
                 turn = self.model.complete(request_messages, self.tools.schemas(), remaining)
             except AgentInputRequired:
+                if ledger is not None:
+                    ledger.mark_usage_unavailable()
                 raise
             except Exception as exc:
+                if ledger is not None:
+                    ledger.mark_usage_unavailable()
                 self._emit(
                     "agent_runtime_failure",
                     {"phase": "model_turn", "error": _bounded_runtime_error(exc)},
                 )
                 raise
-            if self.profile is not None:
-                self._remaining_timeout(started, effective_timeout)
             model_turns += 1
             response_models.append(turn.response_model)
             usages.append(turn.usage)
-            self._record_profile_usage(turn, ledger)
+            self._update_invocation(started, responses_received=model_turns)
+            try:
+                self._record_profile_usage(turn, ledger)
+            finally:
+                self._update_invocation(
+                    started,
+                    usage_complete=ledger.usage_complete if ledger is not None else False,
+                )
             self._emit(
                 "agent_model_turn",
                 {
@@ -204,13 +268,21 @@ class AgentLoopRuntime:
                     raise RuntimeExecutionError("agent loop ended without a final text result")
                 final_message = {"role": "assistant", "content": turn.text}
                 self._append_transcript(final_message)
+                self._update_invocation(
+                    started,
+                    transcript_complete=self._durable_transcript_complete([*messages, final_message]),
+                )
                 metadata = {
                     "provider": "openai-compatible",
                     "mode": "agent-loop",
-                    "turns": str(model_turns),
+                    "turns": str(ledger.snapshot.rounds if usage_ledger is not None else model_turns),
                     "session_history": str(self.session_history).lower(),
                     **self._telemetry_metadata(response_models, usages, ledger),
                 }
+                if usage_ledger is not None:
+                    metadata["invocation_turns"] = str(model_turns)
+                    metadata["tool_steps"] = str(tool_steps)
+                    metadata["usage_scope"] = "aggregate"
                 return RuntimeResult(
                     text=turn.text,
                     artifacts=tuple(dict.fromkeys(artifacts)),
@@ -227,6 +299,10 @@ class AgentLoopRuntime:
             for call in turn.tool_calls:
                 if self.profile is not None:
                     self._remaining_timeout(started, effective_timeout)
+                # An attempted tool can already have side effects when it raises or overruns.
+                tool_steps += 1
+                self._last_tool_steps = tool_steps
+                self._update_invocation(started, tool_steps=tool_steps)
                 try:
                     deadline_scope = (
                         self.tools.execution_deadline(started + effective_timeout)
@@ -241,10 +317,6 @@ class AgentLoopRuntime:
                         {"phase": "tool", "tool": call.name, "error": _bounded_runtime_error(exc)},
                     )
                     raise
-                if self.profile is not None:
-                    self._remaining_timeout(started, effective_timeout)
-                tool_steps += 1
-                self._last_tool_steps = tool_steps
                 artifacts.extend(result.artifacts)
                 self._emit(
                     "agent_tool_result",
@@ -265,6 +337,11 @@ class AgentLoopRuntime:
                     }
                 )
                 self._append_transcript(messages[-1])
+                self._update_invocation(
+                    started, transcript_complete=self._durable_transcript_complete(messages),
+                )
+                if self.profile is not None:
+                    self._remaining_timeout(started, effective_timeout)
                 if result.awaiting_input:
                     raise AgentInputRequired(
                         result.input_question or result.output[:8_000], result.input_options
@@ -372,6 +449,58 @@ class AgentLoopRuntime:
             raise ValueError("usage ledger profile does not match runtime profile")
         return usage_ledger
 
+    @staticmethod
+    def _check_profile_request(ledger: UsageLedger | None, *, require_complete: bool) -> None:
+        if ledger is None:
+            return
+        try:
+            ledger.check_request(require_complete=require_complete)
+        except ProfileBudgetExceeded as exc:
+            raise ProfileBudgetFailure(exc.evidence) from exc
+        except ValueError as exc:
+            raise RuntimeExecutionError(str(exc)) from exc
+
+    def _update_invocation(self, started: float, **changes: object) -> None:
+        self._last_invocation = replace(
+            self._last_invocation,
+            elapsed_seconds=max(0.0, time.monotonic() - started),
+            **changes,
+        )
+
+    def _durable_transcript_complete(self, messages: list[dict[str, object]]) -> bool:
+        """Reject compaction cuts, missing appends, and unfinished native tool batches."""
+        if self._transcript is None:
+            return False
+        durable = self._transcript.load()
+        if not durable or not messages:
+            return False
+        if durable[-1].get("role") != messages[-1].get("role"):
+            return False
+        if durable[-1].get("tool_call_id") != messages[-1].get("tool_call_id"):
+            return False
+        pending: set[str] = set()
+        for message in durable:
+            if message.get("role") == "tool":
+                call_id = message.get("tool_call_id")
+                if not isinstance(call_id, str) or call_id not in pending:
+                    return False
+                pending.remove(call_id)
+                continue
+            if pending:
+                return False
+            calls = message.get("tool_calls")
+            if calls is not None:
+                if message.get("role") != "assistant" or not isinstance(calls, list):
+                    return False
+                for call in calls:
+                    if not isinstance(call, dict):
+                        return False
+                    call_id = call.get("id")
+                    if not isinstance(call_id, str) or not call_id or call_id in pending:
+                        return False
+                    pending.add(call_id)
+        return not pending
+
     def _profile_timeout(self, timeout: float | None) -> float | None:
         if self.profile is None:
             return timeout
@@ -391,7 +520,9 @@ class AgentLoopRuntime:
         if ledger is None:
             return
         profile = ledger.profile
+        ledger.observe_response_model(turn.response_model)
         if turn.usage is None:
+            ledger.mark_usage_unavailable()
             if profile.max_total_tokens is not None or profile.max_cost_micros is not None:
                 raise RuntimeExecutionError("model profile usage is required for token/cost ceilings")
             return
@@ -400,6 +531,7 @@ class AgentLoopRuntime:
         except ProfileBudgetExceeded as exc:
             raise ProfileBudgetFailure(exc.evidence) from exc
         except (TypeError, ValueError) as exc:
+            ledger.mark_usage_unavailable()
             raise RuntimeExecutionError("model profile usage is invalid") from exc
         # Equality is valid for a final answer, but tool calls require another model turn to
         # finish. Stop before tool side effects when the accepted response has used the ceiling.
@@ -421,12 +553,19 @@ class AgentLoopRuntime:
         ledger: UsageLedger | None,
     ) -> dict[str, str]:
         metadata: dict[str, str] = {}
-        if response_models and all(response_models) and len(set(response_models)) == 1:
+        if ledger is not None and ledger.response_model is not None:
+            metadata["response_model"] = ledger.response_model
+        elif ledger is None and response_models and all(response_models) and len(set(response_models)) == 1:
             metadata["response_model"] = str(response_models[0])
         complete_usage = bool(usages) and all(value is not None for value in usages)
+        if ledger is not None:
+            complete_usage = complete_usage and ledger.usage_complete
         if complete_usage:
             for key in ("input_tokens", "output_tokens", "total_tokens"):
-                metadata[key] = str(sum(value[key] for value in usages if value is not None))
+                metadata[key] = str(
+                    getattr(ledger.snapshot, key) if ledger is not None
+                    else sum(value[key] for value in usages if value is not None)
+                )
         if ledger is not None:
             metadata["profile"] = ledger.profile.name
             snapshot = ledger.snapshot
