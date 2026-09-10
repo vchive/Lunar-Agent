@@ -49,6 +49,19 @@ T069-07进行中：预注册已提交推送`454b521`，本机`.lunar/real-eval-g
 邮政S当时为master_running，尚无终止或评分。后台父进程会在第一波两槽均终止后启动
 slot3/4；绝不能再次运行`--launch`。当前启动快照见measurement/launch-observation.json，
 它不是最终结果。仅用`campaign.py --summarize`读取进度，勿运行要求未启动的check-only/dry-run。
+2026-09-10 10:34进度：slot2邮政S已在master阶段300秒模型超时，subject退出2，
+15模型响应/19工具调用，尚无master计划/build/resume/receipt/harness/分数；worker退出0仅
+代表失败证据正常保存。slot1钣金M仍运行，slot3/4尚在波次屏障后，不能把本轮当成全部失败。
+诊断/记录/SHA经独立核验，机器与文字观测见measurement/interim-slot-002.json和.md。
+
+本槽还暴露一个确定性工具bug：28,878字节UTF8有效CSV的20,000字节预览截断汉字，误报编码
+错误；另两次命令把argv数组嵌套编码成字符串导致可执行名错误。三次错误缺少逐调用耗时，
+不能断言它们单独造成master超时。Feature070只在隔离worktree
+`.lunar/worktrees/feature070-utf8-prefix`（分支`codex/read-file-utf8-prefix`）修复UTF8边界，
+不修改正在测量的主仓。Feature070已在隔离分支提交`42c7f6e`，45项边界/复现测试与
+919项全仓测试通过，独立审查、Ruff、Specify和diff检查通过；等本批结束并审计后才合入。
+主仓仍为原874项测试与冻结产品源码。新规划时限或argv行为变更均未实施，也不会对本批补跑。
+
 保持产品源码、measurement脚本和tests冻结，待全部结束后按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
 由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
 用户已授权的CC Switch读取并传进相应子进程环境，不写入证据。设计见`specs/069-webagent-normal-workflow/`。
