@@ -85,13 +85,12 @@ def test_rejects_symlink_over_budget_and_ledger_reset(tmp_path: Path) -> None:
         controller.checkpoint(stage="checkpointed", declared_paths=["candidate.py"], usage=AggregateUsage(True, 0, 0, 0, 0, 0, 0))
 
 
-def test_master_redacts_secret_and_rejects_score_evidence(tmp_path: Path) -> None:
+def test_master_redacts_secret(tmp_path: Path) -> None:
     controller = WorkflowController(tmp_path / "subject", _manifest())
-    with pytest.raises(WorkflowCheckpointError, match="forbidden"):
-        controller.write_master(["use baseline overall score"], [])
     payload = controller.write_master(["use api_key=sk-1234567890 safely"], [])
     assert "sk-1234567890" not in json.dumps(payload)
     assert "[REDACTED]" in json.dumps(payload)
+    assert controller.load_master() == payload
 
 
 def test_cost_cannot_disappear_from_an_available_ledger() -> None:
@@ -318,8 +317,8 @@ def test_master_usage_survives_rejected_plan_and_enforces_budget(tmp_path: Path)
         controller.record_usage(usage)
     controller.transition("master_running")
     controller.record_usage(usage.to_dict())
-    with pytest.raises(WorkflowCheckpointError, match="forbidden"):
-        controller.write_master(["use private score"], [])
+    with pytest.raises(WorkflowCheckpointError, match="bounded non-empty sequence"):
+        controller.write_master([], [])
     assert AggregateUsage.from_dict(controller.state()["usage"]) == usage
     with pytest.raises(WorkflowCheckpointError, match="backwards|reset"):
         controller.record_usage(AggregateUsage.zero())

@@ -3,6 +3,9 @@
 This module deliberately owns only scheduling/checkpoint evidence.  It never creates or validates
 subject receipts and never talks to a model or the private evaluator.  EffectTrialRunner remains
 the authority for those operations.
+
+Score-free describes the typed control schema and its authority, not the vocabulary of a public
+plan or output filename.  Keywords cannot establish the provenance of natural-language text.
 """
 from __future__ import annotations
 
@@ -29,7 +32,6 @@ _HASH_CHUNK_BYTES = 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _SECRET = re.compile(r"(?i)(?:sk-[A-Za-z0-9_-]{8,}|bearer\s+[A-Za-z0-9._-]{8,}|(?:api[_-]?key|password|token)\s*[:=]\s*[^\s,;]+)")
-_FORBIDDEN = re.compile(r"(?i)(?:baseline|private|evaluator|harness|score|credential)")
 _STAGES = (
     "created", "master_running", "master_ready", "build_running", "checkpointed",
     "resuming", "build_ready", "harness_pending", "terminal",
@@ -491,16 +493,14 @@ class WorkflowController:
         normalized_plan: list[str] = []
         for item in plan:
             text = _redact(_text(item, "plan item", max_bytes=_MAX_PLAN_ITEM_BYTES))
-            if _FORBIDDEN.search(text):
-                _fail("master plan contains forbidden evaluator evidence")
             normalized_plan.append(text)
         if not isinstance(expected_paths, Sequence) or isinstance(expected_paths, (str, bytes)) or len(expected_paths) > _MAX_PATHS:
             _fail("expected_paths must be a bounded sequence")
         paths = [_relpath(item, "expected path") for item in expected_paths]
         if len(set(paths)) != len(paths):
             _fail("expected paths must be unique")
-        if any(_FORBIDDEN.search(path) for path in paths):
-            _fail("expected paths contain forbidden evaluator evidence")
+        if any(_SECRET.search(path) for path in paths):
+            _fail("expected paths contain a credential")
         payload = {"schema_version": WORKFLOW_SCHEMA_VERSION, "kind": "workflow_master", **self.manifest.to_dict(), "plan": normalized_plan, "expected_paths": paths}
         payload["plan_sha256"] = _sha_payload({k: payload[k] for k in payload if k != "plan_sha256"})
         self._write_replace(self.workflow / "master.json", payload)
@@ -525,16 +525,14 @@ class WorkflowController:
             text = _redact(original)
             if text != original:
                 _fail("master plan contains a credential")
-            if _FORBIDDEN.search(text):
-                _fail("master plan contains forbidden evaluator evidence")
         expected = obj["expected_paths"]
         if not isinstance(expected, list) or len(expected) > _MAX_PATHS:
             _fail("invalid expected paths")
         normalized = [_relpath(item, "expected path") for item in expected]
         if normalized != expected or len(set(normalized)) != len(normalized):
             _fail("invalid expected paths")
-        if any(_FORBIDDEN.search(path) for path in normalized):
-            _fail("expected paths contain forbidden evaluator evidence")
+        if any(_SECRET.search(path) for path in normalized):
+            _fail("expected paths contain a credential")
         if _digest(obj["plan_sha256"], "plan_sha256") != _sha_payload({k: obj[k] for k in obj if k != "plan_sha256"}):
             _fail("master plan digest mismatch")
         return obj
