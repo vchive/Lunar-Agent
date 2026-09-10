@@ -3,7 +3,7 @@
 - [x] T078-01 Define the fixed two-slot protocol, integrated 077 source identity and interpretation limits.
 - [x] T078-02 Implement minimal registration, slot bindings and postrun projections reusing pinned 074/native helpers.
 - [x] T078-03 Independently review wrappers and run guarded offline preaudit/dry-run scenarios.
-- [ ] T078-04 Materialize the manifest, mirror reports, commit and push before the first start marker.
+- [x] T078-04 Materialize the manifest, mirror reports, commit and push before the first start marker.
 - [ ] T078-05 Launch once and observe both fresh attempts through terminal state without replacement.
 - [ ] T078-06 Independently audit evidence/processes, seal results and update HANDOFF.
 
@@ -32,3 +32,11 @@ three test files and corrected SDD, checking actual function globals,37 Git-pinn
 23 helper blobs,30 historical entries and75 test-module pins without network or file mutation.
 T078-03 is complete. T078-04 through T078-06 await actual main-checkout registration, independent
 preaudit/dry-run, committed/pushed readiness, unique launch and final evidence seal.
+
+T078-04 readiness: main materialized once, manifest SHA
+605cfd030b3b65e9bc1995157f44acdbbbbe7e55837b6f4a27b7042afb996804. Independent actual preaudit
+passed with37 source/114 frozen/30 historical entries, SHA
+b1b4dd1dee09d78b07500df9f1996bb5ac8b87e2e5a22ed03e398ddc5adaebc3. Actual328-test guarded dry-run
+passed, SHA0e529c2e669aa7f7b67e5f69f8855ef088700eb8dcec50563a01de6fda50e4e9. Both reports were
+exclusively saved and mirrored byte-for-byte. No subjects have started at this registration commit;
+push this complete registration before the unique launch. T078-05/06 remain pending.

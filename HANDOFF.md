@@ -8,6 +8,22 @@
 
 ## 1. 当前状态
 
+078已完成077规划职责的新测量登记准备，当前`.specify`指向
+`specs/078-master-planning-role-measurement`。源码固定fba6ab8（不含079），同GLM-5.2、
+钣金/邮政各一个新S槽，Master1200/build2400/reserve120秒、checkpoint32轮、共享5400秒/
+200工具/800万tokens，一波并发2、至多一次同进程续跑，失败不补位。脚本沿用074固定
+执行层，无额外076加载层，23个helper。328项隔离场景、176项root定向与独立审查通过。
+已prepare一次，实际独立预审和328项登记dry-run通过；37源码/114冻结/30历史项一致。
+manifest SHA605cfd030b3b65e9bc1995157f44acdbbbbe7e55837b6f4a27b7042afb996804，预审/dry-run
+已原样镜像。登记提交推送后才能唯一launch；本段记录时尚未启动。T078-01至04完成，
+05/06待真实终止与最终审计。不得重做prepare或并入079后继续使用当前登记。
+
+079安全模型失败诊断已在隔离分支codex/model-failure-evidence提交推送b2ed0e9，暂未合入。
+仅runtime/subject_diagnostics新增typed v3 fixedreason/response_status，原分类、解析接受、
+预算/失败/评分权威不变；88新测试、1447隔离全仓、215独立回归与review通过。它不会参加
+078，必须等078封存后合入；不能补写076原因或提供失败完整usage。本地worktree为
+`.lunar/worktrees/feature079-model-failure-evidence`。
+
 076已在`9ad2e1c`封存推送，随后合入077（isolated `1df9ae1`，merge `48e2b70`）。
 当前`.specify`指向`specs/077-master-planning-role`，T076/T077全部关闭。主仓238项定向
 回归、Ruff/Specify/diff通过，隔离全仓1359项通过。077只澄清Master规划职责：先交最小
