@@ -4,7 +4,7 @@
 - [x] T075-02 Add failing controller and native handoff regressions; replace obsolete failure fixtures.
 - [x] T075-03 Remove semantic text/name checks, reject credential paths, and verify remaining boundaries.
 - [x] T075-04 Run isolated targeted/full checks and independent review; record verification evidence.
-- [ ] T075-05 Perform root-owned integration after Feature 074 evidence sealing.
+- [x] T075-05 Perform root-owned integration after Feature 074 evidence sealing.
 
 Implementation is isolated. No real model, private evaluator or historical candidate execution is
 part of this feature. A separate future registration is required to measure solution validity.
@@ -36,3 +36,15 @@ Independent review is complete. The root agent authorized committing and pushing
 final audit and evidence seal are complete; branch publication does not authorize merging main or
 running a replacement attempt. Passing offline tests does not change Feature 074's observed failures
 or establish benchmark gain.
+
+T075-05 completed after the Feature 074 final evidence seal was committed and pushed as68b5e58.
+Reviewed isolated commit065661f0f318929ce2d6a101f9cda737e2b16e2b was merged as
+b5fc3b22c5836a4291a44029ad98d2976a9ea214. Main src/tests/.specify exactly match the reviewed
+tree, and all sealed Feature 074 files remain identical to the sealed tree. Main imports resolve to
+the main checkout;260 targeted tests passed in3.90 seconds, with Ruff, Specify and diff checks
+passing. The isolated1316-test full-suite result is retained. No additional real attempt or
+provider request was introduced by integration. The historical074 live-source auditor is now
+expected to reject the changed product/test bytes; never rewrite its manifest to make it pass.
+Independent integration review confirmed the exact two merge parents,138 product/test/Specify
+files against the reviewed tree and68 tracked Feature074 files against the seal. Ignored Python
+bytecode caches are outside the sealed artifact set. No integration blocker remains.
