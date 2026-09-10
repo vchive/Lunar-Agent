@@ -1,0 +1,240 @@
+{
+  "schema_version": "1",
+  "kind": "feature078_slot001_read_only_failure_diagnostic",
+  "observed_utc": "2026-09-10T15:53:44.735263+00:00",
+  "manifest_sha256": "605cfd030b3b65e9bc1995157f44acdbbbbe7e55837b6f4a27b7042afb996804",
+  "registration_commit": "e76a3a341a90703f4ba91a9e14e33ca81a76c488",
+  "implementation_commit": "fba6ab8cf5b27d3bd1b42f353907a6ae21c25ef9",
+  "index": 1,
+  "case_key": "sheet_metal_nesting",
+  "arm": "S",
+  "budget_arm": "master_1200",
+  "failure_classification": {
+    "code": "model_timeout_during_build_before_final_subject_completion",
+    "evidence_type": "explicit_native_subject_failure",
+    "native_stage": "model",
+    "native_code": "timeout",
+    "http_status": null,
+    "recorded_as_timeout": true,
+    "specific_provider_cause_known": false,
+    "summary_zh": "Master计划已验收并进入Build；原生诊断为model/timeout，Build未提交最终完成响应。没有HTTP状态或原始异常，不能进一步确定provider、网络或具体请求内部原因。"
+  },
+  "terminal_evidence": {
+    "outer_elapsed_seconds": 5280.545,
+    "outer_exit_code": 0,
+    "outer_failure": null,
+    "subject_elapsed_seconds": 5280.39,
+    "subject_returncode": 2,
+    "subject_outer_error_type": null,
+    "worker_returncode": 0,
+    "record_status": "failed",
+    "record_error_code": "process_nonzero_exit",
+    "record_elapsed_ms": 5280408,
+    "subject_failure": {
+      "code": "timeout",
+      "http_status": null,
+      "kind": "subject_failure",
+      "mode": "normal",
+      "model_turns": 16,
+      "request_sha256": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3",
+      "round_index": null,
+      "run_index": 1,
+      "schema_version": "1",
+      "stage": "model",
+      "tool_steps": 21
+    },
+    "workflow_stage": "build_running",
+    "checkpoint_number": null,
+    "resume_used": false,
+    "absent_evidence": [
+      "subject_receipt",
+      "agent_summary",
+      "harness_start",
+      "harness_termination",
+      "harness_directory",
+      "checkpoint_000001",
+      "checkpoint_000002",
+      "archived_transcript_000001",
+      "archived_transcript_000002"
+    ]
+  },
+  "validated_stage_evidence": {
+    "index": 1,
+    "budget_arm": "master_1200",
+    "master_duration_seconds": null,
+    "plan_record_valid": true,
+    "build_entered_observed": true,
+    "build_transcript_present": true,
+    "workflow_stage": "build_running",
+    "resume_used": false,
+    "master_record_sha256": "4ff069ec45074d15fccecfe572a0e5ed50813256cb55230f28d391e833bb0a67"
+  },
+  "transcripts": {
+    "master-transcript.jsonl": {
+      "bytes": 36012,
+      "sha256": "54c9359e10316afd1a8009fd71669cf671d06d042db745ef6c122973348938e9",
+      "message_count": 20,
+      "role_counts": {
+        "system": 1,
+        "user": 1,
+        "assistant": 8,
+        "tool": 10
+      },
+      "last_message_role": "assistant",
+      "final_assistant_response_count": 1,
+      "tool_call_count": 10,
+      "tool_counts_by_name": {
+        "read_file": 4,
+        "list_dir": 3,
+        "run_command": 3
+      },
+      "tool_calls_and_results_paired": true
+    },
+    "session-transcript.jsonl": {
+      "bytes": 36786,
+      "sha256": "f5ec19e853dfb9ce9336f1d85b6e3c71da60f1fe7a125df9bc48ba78625953c1",
+      "message_count": 21,
+      "role_counts": {
+        "system": 1,
+        "user": 1,
+        "assistant": 8,
+        "tool": 11
+      },
+      "last_message_role": "tool",
+      "final_assistant_response_count": 0,
+      "tool_call_count": 11,
+      "tool_counts_by_name": {
+        "list_dir": 3,
+        "read_file": 3,
+        "run_command": 4,
+        "write_file": 1
+      },
+      "tool_calls_and_results_paired": true
+    }
+  },
+  "total_observed_counts": {
+    "completed_model_responses": 16,
+    "tool_results": 21
+  },
+  "candidate_metadata_only": {
+    "files": [
+      {
+        "path": "analyze.py",
+        "kind": "file",
+        "size_bytes": 1403,
+        "is_symlink": false
+      }
+    ],
+    "candidate_files_opened": 0,
+    "candidate_file_hashes_computed": 0,
+    "candidate_validity_assessed": false,
+    "master_declared_paths": [
+      "_agent_summary.md",
+      "output/nesting_plan.json",
+      "output/nesting_layout.csv",
+      "solve.py"
+    ],
+    "declared_files_present": [],
+    "declared_files_absent": [
+      "_agent_summary.md",
+      "output/nesting_layout.csv",
+      "output/nesting_plan.json",
+      "solve.py"
+    ],
+    "required_agent_summary_present": false,
+    "interpretation_zh": "只枚举文件名、类型和大小；未读取或执行候选文件，也未使用工具输出的本地分数。文件存在不等于完整交付或有效解。"
+  },
+  "usage": {
+    "native_record_usage": null,
+    "native_record_cost_micros": null,
+    "native_record_interaction_turns": null,
+    "persisted_workflow_master_snapshot": {
+      "available": true,
+      "cost_micros": null,
+      "elapsed_ms": 300482,
+      "input_tokens": 77108,
+      "output_tokens": 16111,
+      "rounds": 8,
+      "tool_steps": 10,
+      "total_tokens": 93219
+    },
+    "complete_attempt_input_tokens": null,
+    "complete_attempt_output_tokens": null,
+    "complete_attempt_total_tokens": null,
+    "complete_attempt_cost_micros": null,
+    "interpretation_zh": "持久化usage对应Master结束时的已接受快照，rounds/tool_steps与Master transcript一致；不包含完整Build及失败请求，不能视作完整attempt用量。elapsed_ms不是独立Master计时。"
+  },
+  "master_duration_seconds": null,
+  "scores": {
+    "extraction_status": null,
+    "validity_score": null,
+    "overall_score": null,
+    "quality_score": null
+  },
+  "checks": {
+    "final_audit_accepted_registered_native_chain": true,
+    "manifest_mirrors_match": true,
+    "termination_manifest_bindings_match": true,
+    "worker_outcome_record_report_hash_chain_matches": true,
+    "request_failure_binding_matches": true,
+    "failure_diagnostic_and_failure_receipt_bytes_match": true,
+    "registered_workflow_config_matches": true,
+    "classification_runtime_source_bytes_match_registration": true,
+    "failure_counts_match_master_plus_active_build_transcript": true,
+    "observed_evidence_bytes_unchanged": true,
+    "workspace_metadata_unchanged": true
+  },
+  "evidence_sha256": {
+    "specs/078-master-planning-role-measurement/measurement/manifest.json": "605cfd030b3b65e9bc1995157f44acdbbbbe7e55837b6f4a27b7042afb996804",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/manifest.json": "605cfd030b3b65e9bc1995157f44acdbbbbe7e55837b6f4a27b7042afb996804",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/started.json": "cc134ade440c3352105d1b4373486db8e145d8e827fded0b0539c860ead276f9",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/terminated.json": "58cf420accb0e763e45fb8ba72183947fdde7c80fa6759e080ad114dfefc07b4",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/summary.json": "33314aad581d81aa46114a20986d464d1a386e39054aa12da31c3eb566e7124d",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slot-001-started.json": "94e326af5240fc43afbd36cc952c69cb273753c9178ac0f51a2d5783f149b274",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/subject-started.json": "f4bb69cc254a4374c31cd2b4892576c12febe9f08975140fd718adbbe4f1a207",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/worker-started.json": "a1d7a0001b052636e9ae36b59681f64a37d4ee171d30a9c95efc9e85ede6c23e",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slot-001-terminated.json": "e52befc29d4ca86b8a170f8875dfd913dd2c7fd9d90d83c3849341b0e5aee739",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/subject-terminated.json": "53a978bf1c1790ea80970b0b8d6ebf09ad81a15d28a2267739d14829db2c396d",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/worker-terminated.json": "1d336b771bd40a324970067e5b62a251bcf328cb2ab5f06214b2364c64ff11a0",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/outcome.json": "d20286ab17080573dfff9703f4dafcfe7708962f67b896d0e82b8f39155404db",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/report.json": "57159835f9b6a7e68dff3530c35c6f9c0a67ead9c63e1421b407a9c7aa1c6219",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/record.json": "8a2cc3141a48e4cdd53188ab315a516871109479a29991d3bb5e1ec94224273c",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/control/state.json": "606214c515292a3403b5deef8f19e52f2989d85587c64e18fab0dd6d26606585",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/control/suite.json": "1cb8903b69ee550123c1d11c2d4dc236cb5af1ffc264580f4d7c82b62c0bf32e",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/control/baseline.json": "aa0e5a6ef08cde03d6ea7216b19cb3db22d069850ee17425fc48871d608df8e8",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/receipt.failure.json": "105138f856039dbccb3fbd3597ca2cb7220ccdebb32e6761a25a4bf7ffd86c9f",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/diagnostics/subject-failure.json": "105138f856039dbccb3fbd3597ca2cb7220ccdebb32e6761a25a4bf7ffd86c9f",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/request.json": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/config.json": "50912631aed76622114b7a4cbe13f73a713ac01d6fbcce93f14975e3df1b9b1f",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/state.json": "b907beaad8e07f46ee9e95b40d38c3060f8789adbce88e00e1c5daf1468b31c2",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/master.json": "4ff069ec45074d15fccecfe572a0e5ed50813256cb55230f28d391e833bb0a67",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/master-transcript.jsonl": "54c9359e10316afd1a8009fd71669cf671d06d042db745ef6c122973348938e9",
+    ".lunar/real-eval-glm-5.2-master-role-20260910/slots/001/trial/cases/sheet_metal_nesting/runs/001/attempts/001/subject/workflow/session-transcript.jsonl": "f5ec19e853dfb9ce9336f1d85b6e3c71da60f1fe7a125df9bc48ba78625953c1",
+    "src/famou/subject_diagnostics.py": "a573975f0142d5520c3198255f874565cc57d5fdc705aed11e1f0cae471ad187",
+    "src/famou/agent_loop.py": "1981e212b6ec415a855f6407590ec613428ed928c3ff0968eaa76aa8ce8ef311",
+    "src/famou/staged_workflow.py": "430447ec342093673a9b3630525268e15d3dafb4bd2f21fcf9d8f094126f78c5",
+    "src/famou/runtime.py": "d43a1da3ff300d4b7912afed6013a84b7507c606225bda1dad6721778972130e",
+    "specs/078-master-planning-role-measurement/postrun/final-audit.json": "a6cea5e657ef38fe7bd23bdce86b8361adef038313d9b691ec892833217de5a4"
+  },
+  "diagnostic_actions": {
+    "provider_calls": 0,
+    "harness_calls": 0,
+    "additional_candidate_files_opened": 0,
+    "additional_candidate_file_hashes_computed": 0,
+    "candidate_executions": 0,
+    "controller_construction_or_methods": 0,
+    "campaign_writes": 0,
+    "frozen_source_writes": 0,
+    "credential_reads": 0
+  },
+  "limitations": [
+    "原生v1明确记录model/timeout，但没有具体provider失败细分、HTTP状态或原始异常。",
+    "模型响应和工具结果计数只包含已保存事件；未完成请求的消耗和内部状态未知。",
+    "两阶段transcript各计一次；本槽未续跑，未叠加任何归档或重放历史。",
+    "最终Build完成响应、subject receipt和harness均不存在，候选未独立执行或评分，分数仍为null。",
+    "持久化Master usage不等于完整失败attempt用量；精确独立Master耗时仍为null。",
+    "subject耗时覆盖整个subject，不能将其直接称为Build独立耗时或从耗时断言具体provider原因。",
+    "进程存活核查由独立final-process-check记录；此诊断不探测OS进程。",
+    "文件元数据仅代表本次终局观察，不证明运行中每一个瞬时状态。"
+  ]
+}

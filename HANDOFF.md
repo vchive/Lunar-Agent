@@ -8,6 +8,18 @@
 
 ## 1. 当前状态
 
+078终局已核验：两槽均Master计划验收且进入Build（2/2），但均约5280秒model/timeout，
+没有checkpoint/续跑/subject回执/harness/评分，有效解0/2。subject原生耗时5280.390/
+5280.378秒、退出码2，模型/工具事件16/21与14/21；HTTP状态、分数、完整失败usage/cost
+和独立精确Master耗时均保持null，不能推断provider故障或提示修改的因果效果。
+独立审计与root复验236证据SHA通过，37源码/114冻结文件/30历史锚点未变；watcher7684
+退出0，174进度快照已保存，已知5个PID/5个PGID及可见argv/cwd关联无残留。
+T078全部关闭，结果和最终证据见078 postrun/results.md。此批须先封存推送，再合入已审
+079（b2ed0e9）；079未参加078，不自动追加campaign、重开失败槽或修改旧manifest。
+当前目标仍是分阶段Build完成交付并经原生harness验证；普通流程历史2/2只是已验证背景。
+
+以下078运行中记录为历史过程，当前状态以上述终局为准。
+
 078进展22:25：第二份独立partial审计通过212证据SHA，钣金和邮政均已验收Master计划
 且进入Build（2/2）；未续跑、尚无subject/harness回执或评分，两槽仍未决。观测为078
 postrun/observations/20260910T142536754391Z.json/md。不能把交接计为有效解或因果结论。

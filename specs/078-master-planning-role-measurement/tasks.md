@@ -4,8 +4,8 @@
 - [x] T078-02 Implement minimal registration, slot bindings and postrun projections reusing pinned 074/native helpers.
 - [x] T078-03 Independently review wrappers and run guarded offline preaudit/dry-run scenarios.
 - [x] T078-04 Materialize the manifest, mirror reports, commit and push before the first start marker.
-- [ ] T078-05 Launch once and observe both fresh attempts through terminal state without replacement.
-- [ ] T078-06 Independently audit evidence/processes, seal results and update HANDOFF.
+- [x] T078-05 Launch once and observe both fresh attempts through terminal state without replacement.
+- [x] T078-06 Independently audit evidence/processes, seal results and update HANDOFF.
 
 ## Verification notes
 
@@ -46,3 +46,16 @@ the unique launch at2026-09-10 22:17:13+0800. T078-05 active: dispatcher26135, s
 subject26308, slot2 worker26306/subject26309. Both initially Master-running; no plan, receipt,
 harness or score yet. Read-only watcher7684 records progress; initial PID/PPID/PGID snapshot is
 saved inmeasurement/. Frozen files may not change. Final acceptance/process review remains pending.
+
+Final acceptance (2026-09-10): both slots terminated once, both Master plans accepted and Build
+entered, neither checkpointed/resumed or produced subject/harness receipts. Native subject durations
+5280.390/5280.378 seconds, exit2, both diagnostics model/timeout with null HTTP status; observed
+model/tool events16/21 and14/21. Fixed valid0/2; scores and complete failed usage/cost remain null.
+Independent complete audit and root rehash passed236 evidence SHA,37 source/114 frozen/30 history
+entries. Watcher7684 exited0;174 progress snapshots retained. Final process observation found no
+known5 PID/5 PGID or visible argv/cwd association alive, retaining point-in-time visibility limits.
+Results, exact audit/report, per-slot diagnostics and process evidence are sealed inpostrun/.
+No retries/replacements/candidate execution/provider probe or extra scoring occurred. T078-05/06
+are closed. Commit/push this seal before integrating reviewed079; never rewrite old pins to accept
+later source changes. Offline328 scenarios and176 root targeted checks were already passed at
+registration; no product or test bytes changed during this live campaign.
