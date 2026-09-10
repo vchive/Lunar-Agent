@@ -6,7 +6,7 @@
 - [x] T069-04 Add offline tests for cooperative interruption, one-resume, budget carry-over, and redaction.
 - [x] T069-05 Preserve EffectTrialRunner harness gating and add staged subject/CLI integration tests.
 - [x] T069-06 Pre-register a two-arm, fixed-denominator measurement and independently audit its manifest.
-- [ ] T069-07 Run the registered measurement, summarize per case, update HANDOFF, and publish audit evidence.
+- [x] T069-07 Run the registered measurement, summarize per case, update HANDOFF, and publish audit evidence.
 
 The 2026-09-10 integration replaces the earlier standalone fake-runner seam with actual AgentLoop
 stages. The model-generated master plan is validated and passed to a fresh build transcript. A typed
@@ -87,3 +87,18 @@ missing historical budget tags do not prove that the model lacked a deadline hin
 inform a later role/handoff SDD; role mixing is an unproven explanation, and network/queue/generation
 latency cannot be separated. Local evidence cannot prove that the provider never generated final
 text. Slot 4 and all current experiment boundaries remain unchanged.
+
+T069-07 completed on 2026-09-10 after campaign termination at 12:09:16 +0800. M is valid 2/2:
+sheet_metal_nesting overall/quality 0.999999 and china_post_pickup_optimization 1.0185, both
+validity 1. S is valid 0/2 with two master timeouts before build/resume; unscored/unknown usage
+stays null. No replacement attempt, model change, WebAgent run or new platform query occurred.
+`postrun/final-audit.json` passed require-complete mode before any fix integration, and independent
+review reverified all 212 evidence hashes, native receipt/result links, 37 sources, 74 frozen files
+and 8 historical anchors. `postrun/final-report.md` preserves scores above one, fixed denominators
+and descriptive-only comparisons. `postrun/results.md` records interpretation and timing/usage.
+Independent process review and `postrun/final-process-check.json` found no associated visible
+residual processes within the documented PID/PGID/argv/cwd scope. Product source remained
+80f5af1 throughout measurement. Final audit SHA 3175509fe7d2df7210047ec956ad2f24049189524adfe5670586704ec6cdb2e7;
+native summary SHA 712e78755f61ce360a3249abe29624ec9aef291936b7209adba075d18938d450.
+The earlier pending observations above are historical. Preserve these seals when integrating fixes;
+the original auditor must reject changed current source rather than rewrite old registration hashes.

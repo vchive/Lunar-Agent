@@ -1,0 +1,51 @@
+{
+  "schema_version": "1",
+  "kind": "feature069_final_process_observation",
+  "observed_utc": "2026-09-10T04:15:24.352776+00:00",
+  "passed": true,
+  "head_before_integration": "6dbc9a595db6512ea8aa0698f9dd2a81027fdda2",
+  "known_pids_checked": [
+    48660,
+    48706,
+    48707,
+    55829,
+    55830,
+    55832
+  ],
+  "known_pgids_checked": [
+    48660,
+    48706,
+    48707,
+    55829,
+    55830
+  ],
+  "known_pids_present": [],
+  "known_pgid_members": [],
+  "visible_process_count": 1306,
+  "observer_and_ancestor_pids_excluded": [
+    1,
+    1416,
+    1917,
+    62498
+  ],
+  "matching_visible_argv_pids": [],
+  "matching_visible_cwd_pids": [],
+  "lsof_returncode": 0,
+  "lsof_stderr_bytes": 0,
+  "phase_markers_with_unobserved_child_ids": 6,
+  "frozen_sha256_counts_verified": {
+    "source_files_sha256": 37,
+    "frozen_files_sha256": 74,
+    "historical_files_sha256": 8
+  },
+  "final_audit_sha256": "3175509fe7d2df7210047ec956ad2f24049189524adfe5670586704ec6cdb2e7",
+  "independent_process_review_local": "2026-09-10T12:13:25+08:00",
+  "model_calls": 0,
+  "candidate_executions": 0,
+  "processes_terminated_by_observer": 0,
+  "limitations": [
+    "point_in_time_visible_process_observation",
+    "unknown_child_pids_are_not_fabricated",
+    "cannot_exclude_unassociated_processes_that_detached_changed_cwd_and_removed_campaign_paths"
+  ]
+}

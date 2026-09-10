@@ -8,6 +8,14 @@
 
 ## 1. 当前状态
 
+2026-09-10最新结论：Feature069四次预注册真实评测已全部结束并通过独立最终审计。
+普通M有效2/2：钣金validity=1、overall/quality=0.999999；邮政validity=1、overall/quality
+=1.0185。分阶段S有效0/2，两次均在300秒Master模型截止点失败，未进入Build或续跑，
+失败评分及完整用量保留null。本批证明普通流程能在这两个历史高分case交付有效解；
+单次case/arm样本不能证明稳定性或整体优劣，也不能据此评价续跑效果。最终资料见
+`specs/069-webagent-normal-workflow/postrun/results.md`、`final-audit.json`和`final-report.md`。
+测量源码始终为`80f5af1`；最终审计封存后才允许集成已审070/071修复。
+
 2026-09-09 最新转向：用户要求优先在 WebAgent 稳定高分的 case 上真实测量 Lunar。
 Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_optimization；来自
 平台 WebAgent/AgentServer（OpenCode）的同一 GLM-5.2 normal 实验，均三次有效且均分最高。
@@ -18,8 +26,8 @@ Feature 068 已完成两例对照：sheet_metal_nesting、china_post_pickup_opti
 固定分母 valid=1/2，完成率 0.5；不同 case 不合并均分。结果、审计和 SHA 见 Feature 068。
 暂停上下文功能开发，不改变旧 GLM-5.1 campaign，不运行 WebAgent。详见 Feature 068。
 
-Feature 069 已完成可选 staged subject 接入与离线验证，四槽真实评测已有三槽终止。钣金M
-有效且overall=0.999999，邮政S和钣金S均在master超时失败；邮政M仍运行。目标仍为
+Feature 069 已完成可选 staged subject 接入、离线验证与四槽真实评测。钣金M与邮政M均
+有效，overall分别0.999999和1.0185；邮政S和钣金S均在master超时失败。原设计目标为
 `Master → Build → typed checkpoint → 至多一次同 attempt continuation`，通过同一预算改善交付率。
 入口为 `run_subject_adapter(workflow_config=...)` 或 `effect-subject --workflow-config PATH`；
 默认 normal workflow 不变。实际 master 模型输出的 JSON 计划经过验证后传给新的 build session，
@@ -122,7 +130,20 @@ planning说明；代码向每次请求副本提供master剩余时间，但不持
 不知道截止时间，亦无法区分网络、排队与生成耗时。角色混合仍是待验证解释。下一轮角色/
 交接设计仍待本批结束后另行SDD，当前不改预算或启动新尝试。
 
-保持产品源码、measurement脚本和tests冻结，待全部结束后按case报告4槽结果并独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
+2026-09-10 12:09:16 +0800，全批终止。Slot4 subject3331.589秒、harness50.244秒、native
+3381.900秒，GLM-5.2/provider_observed、59次模型交互，input2010306/output138981/
+total2149287 tokens；用量仅subject、不含extractor，费用null。原始harness认可validity=1、
+overall/quality=1.0185，大于1原样保留。12:11:50只读`--require-complete`最终审计通过：
+passed/complete/final_acceptance均true，212项证据SHA经独立重算一致，37源码、74冻结
+文件及8历史锚点全未变。T069-07已关闭；summary SHA为
+`712e78755f61ce360a3249abe29624ec9aef291936b7209adba075d18938d450`，final audit SHA为
+`3175509fe7d2df7210047ec956ad2f24049189524adfe5670586704ec6cdb2e7`。
+独立进程检查及root复核均未发现已知PID/PGID、可见命令参数或cwd关联的本批残留；
+详见`postrun/final-process-check.json`，保留child PID未记录等覆盖范围限制。全部四槽
+各一次，未重跑WebAgent、未请求新平台数据、未补位、未复制旧候选。以下带时间的运行中
+段落是历史观测；本批现在已封存，后续源码变化不得改写manifest来通过旧冻结检查。
+
+本批运行期间产品源码、measurement脚本和tests保持冻结，现已完成按case报告和独立审计。此前结果不回填，不重新运行WebAgent。源码SHA和run/attempt
 由预注册worker实际核验；adapter继续核验request/case/profile/limits绑定。模型密钥仅通过
 用户已授权的CC Switch读取并传进相应子进程环境，不写入证据。设计见`specs/069-webagent-normal-workflow/`。
 
