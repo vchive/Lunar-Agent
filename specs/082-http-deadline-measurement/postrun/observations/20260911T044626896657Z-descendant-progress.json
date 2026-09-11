@@ -1,0 +1,78 @@
+{
+  "kind": "feature082_read_only_descendant_progress",
+  "observed_utc": "2026-09-11T04:46:26.896657+00:00",
+  "point_in_time_only": true,
+  "model_calls": 0,
+  "process_environments_read": false,
+  "raw_argv_read": false,
+  "known_pgids": [
+    88086,
+    88266,
+    88267,
+    88272,
+    88273
+  ],
+  "visible_processes": [
+    {
+      "pid": 88086,
+      "ppid": 1,
+      "pgid": 88086,
+      "elapsed": "18:00",
+      "python_executable_observed": true,
+      "initial_known_role": "dispatcher"
+    },
+    {
+      "pid": 88266,
+      "ppid": 88086,
+      "pgid": 88266,
+      "elapsed": "17:58",
+      "python_executable_observed": true,
+      "initial_known_role": "slot_worker"
+    },
+    {
+      "pid": 88267,
+      "ppid": 88086,
+      "pgid": 88267,
+      "elapsed": "17:58",
+      "python_executable_observed": true,
+      "initial_known_role": "slot_worker"
+    },
+    {
+      "pid": 88272,
+      "ppid": 88266,
+      "pgid": 88272,
+      "elapsed": "17:58",
+      "python_executable_observed": true,
+      "initial_known_role": "subject"
+    },
+    {
+      "pid": 88273,
+      "ppid": 88267,
+      "pgid": 88273,
+      "elapsed": "17:58",
+      "python_executable_observed": true,
+      "initial_known_role": "subject"
+    },
+    {
+      "pid": 91249,
+      "ppid": 88272,
+      "pgid": 88272,
+      "elapsed": "01:09",
+      "python_executable_observed": true,
+      "initial_known_role": "descendant_role_not_revalidated"
+    },
+    {
+      "pid": 91365,
+      "ppid": 88273,
+      "pgid": 88273,
+      "elapsed": "00:01",
+      "python_executable_observed": true,
+      "initial_known_role": "descendant_role_not_revalidated"
+    }
+  ],
+  "limitations": [
+    "Numeric identities from the initial observation; PID reuse can cause false positives.",
+    "Elapsed is process lifetime, not request latency or phase time.",
+    "Descendant role is not revalidated from argv in this observation."
+  ]
+}

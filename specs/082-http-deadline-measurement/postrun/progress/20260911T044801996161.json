@@ -1,0 +1,86 @@
+{
+  "all_slots_terminated": false,
+  "authoritative_audit": false,
+  "elapsed_seconds": 1175.1,
+  "kind": "feature082_read_only_progress",
+  "known_pgids": [
+    88086,
+    88266,
+    88267
+  ],
+  "known_pids": [
+    88086,
+    88266,
+    88267
+  ],
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "model_calls_by_observer": 0,
+  "observed_utc": "2026-09-11T04:48:01.996161+00:00",
+  "process_environments_read": false,
+  "raw_transcript_content_read": false,
+  "slots": [
+    {
+      "checkpoint_number": null,
+      "harness_started": false,
+      "harness_terminated": false,
+      "index": 1,
+      "plan_file_present": false,
+      "resume_used": false,
+      "slot_terminated": false,
+      "stage": "build_running",
+      "subject_started": true,
+      "subject_terminated": false,
+      "transcript_bytes": {
+        "master-transcript.jsonl": 41063,
+        "session-transcript.jsonl": 35236
+      },
+      "worker_started": true,
+      "worker_terminated": false
+    },
+    {
+      "checkpoint_number": null,
+      "harness_started": false,
+      "harness_terminated": false,
+      "index": 2,
+      "plan_file_present": false,
+      "resume_used": false,
+      "slot_terminated": false,
+      "stage": "build_running",
+      "subject_started": true,
+      "subject_terminated": false,
+      "transcript_bytes": {
+        "master-transcript.jsonl": 25964,
+        "session-transcript.jsonl": 47324
+      },
+      "worker_started": true,
+      "worker_terminated": false
+    }
+  ],
+  "visible_related_processes": [
+    {
+      "pgid": 88086,
+      "pid": 88086,
+      "ppid": 1
+    },
+    {
+      "pgid": 88266,
+      "pid": 88266,
+      "ppid": 88086
+    },
+    {
+      "pgid": 88267,
+      "pid": 88267,
+      "ppid": 88086
+    },
+    {
+      "pgid": 88272,
+      "pid": 88272,
+      "ppid": 88266
+    },
+    {
+      "pgid": 88273,
+      "pid": 88273,
+      "ppid": 88267
+    }
+  ]
+}
