@@ -301,7 +301,10 @@ class ConstraintSpec:
 
 @dataclass(frozen=True)
 class EvolutionSpec:
-    strategy: Literal["loop", "population", "openevolve"] = "loop"
+    # New contracts use the population engine by default.  ``loop`` remains a
+    # valid parsed value so sealed/historical contracts can still be inspected;
+    # creation and execution entry points enforce the population-first policy.
+    strategy: Literal["loop", "population", "openevolve"] = "population"
     max_rounds: int = 5
     stagnation_rounds: int = 3
 
@@ -322,7 +325,10 @@ class EvolutionSpec:
         if not isinstance(value, dict):
             raise TypeError("evolution must be an object")
         return cls(
-            strategy=value.get("strategy", "loop"),  # type: ignore[arg-type]
+            # Omitting evolution strategy is the population-first contract
+            # default.  Keep explicit ``loop`` accepted for historical read-only
+            # compatibility; callers creating a new run must reject it.
+            strategy=value.get("strategy", "population"),  # type: ignore[arg-type]
             max_rounds=value.get("max_rounds", 5),  # type: ignore[arg-type]
             stagnation_rounds=value.get("stagnation_rounds", 3),  # type: ignore[arg-type]
         )
