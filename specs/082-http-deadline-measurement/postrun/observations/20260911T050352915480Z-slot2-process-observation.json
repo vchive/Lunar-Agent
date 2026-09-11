@@ -1,0 +1,47 @@
+{
+  "kind": "feature082_slot2_posttermination_process_observation",
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "started_utc": "2026-09-11T05:03:52.561155+00:00",
+  "finished_utc": "2026-09-11T05:03:52.915480+00:00",
+  "scope_slot": 2,
+  "subject_returncode": 2,
+  "subject_elapsed_seconds": 1324.816,
+  "slot2_terminal_marker_present": true,
+  "slot2_harness_started_marker_present": false,
+  "slot1_terminal_marker_present": false,
+  "slot1_known_subject_visible": true,
+  "campaign_terminal_marker_present": false,
+  "known_pids": [
+    88267,
+    88273,
+    88860,
+    91365
+  ],
+  "known_pgids": [
+    88267,
+    88273
+  ],
+  "known_pids_absent_from_ps": [
+    88267,
+    88273,
+    88860,
+    91365
+  ],
+  "visible_slot2_candidates": [],
+  "slot2_cwd_match_pids_absent_from_ps": [],
+  "cwd_scan_returncode": 0,
+  "cwd_scan_stderr_present": false,
+  "no_visible_slot2_candidates_in_checked_scope": true,
+  "point_in_time_only": true,
+  "pid_reuse_not_excluded": true,
+  "escaped_unobserved_descendants_not_excluded": true,
+  "os_visibility_limits_apply": true,
+  "global_cleanup_claimed": false,
+  "campaign_final_closure": false,
+  "process_environments_read": false,
+  "raw_argv_read": false,
+  "raw_argv_saved": false,
+  "candidate_contents_read": false,
+  "signals_sent": 0,
+  "model_calls": 0
+}

@@ -1,0 +1,94 @@
+{
+  "kind": "feature082_slot2_terminal_partial_diagnostic",
+  "observed_utc": "2026-09-11T05:15:22.240740+00:00",
+  "campaign_complete": false,
+  "slot": 2,
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "native_audit_sha256": "dafd0c8c983bd1362bf88484a98bc0cba7d7c68bdacb5b57e5e9f929011865de",
+  "accepted_native_failure": true,
+  "subject_elapsed_seconds": 1324.816,
+  "subject_returncode": 2,
+  "subject_receipt_accepted": false,
+  "harness_receipt_accepted": false,
+  "diagnostic": {
+    "code": "model_failed",
+    "http_status": null,
+    "kind": "subject_failure",
+    "mode": "normal",
+    "model_failure": {
+      "reason": "transport_timeout",
+      "response_status": null
+    },
+    "model_turns": 14,
+    "request_observation": {
+      "elapsed_ms": 14901,
+      "phase": "open_response",
+      "request_timeout_ms": 3970214
+    },
+    "request_sha256": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+    "round_index": null,
+    "run_index": 1,
+    "schema_version": "4",
+    "stage": "model",
+    "tool_steps": 17
+  },
+  "score": null,
+  "full_failed_usage": null,
+  "full_failed_cost": null,
+  "candidate_metadata": [
+    {
+      "relative_path": "solve.py",
+      "exists": true,
+      "type": "file",
+      "bytes": 25027
+    },
+    {
+      "relative_path": "output/solution.json",
+      "exists": true,
+      "type": "file",
+      "bytes": 44259
+    },
+    {
+      "relative_path": "output/assignment.csv",
+      "exists": true,
+      "type": "file",
+      "bytes": 9464
+    },
+    {
+      "relative_path": "output/stations.csv",
+      "exists": true,
+      "type": "file",
+      "bytes": 475
+    },
+    {
+      "relative_path": "_agent_summary.md",
+      "exists": false,
+      "type": null,
+      "bytes": null
+    },
+    {
+      "relative_path": "receipt.json",
+      "exists": false,
+      "type": null,
+      "bytes": null
+    }
+  ],
+  "terminal_evidence_sha256_verified": {
+    ".lunar/real-eval-glm-5.2-http-deadline-20260911/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/receipt.failure.json": "02d4d004f4ba76dc2e5680b9c90ab7cc489253a7e716f6b12a7b2ce7077e2be6",
+    ".lunar/real-eval-glm-5.2-http-deadline-20260911/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/diagnostics/subject-failure.json": "02d4d004f4ba76dc2e5680b9c90ab7cc489253a7e716f6b12a7b2ce7077e2be6",
+    ".lunar/real-eval-glm-5.2-http-deadline-20260911/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/request.json": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+    ".lunar/real-eval-glm-5.2-http-deadline-20260911/slots/002/trial/cases/china_post_pickup_optimization/runs/001/record.json": "1b693ade8bc944a6d80cc74bc6f1466888e6b04e86f78a0d02e03f69b6cb9b5f",
+    ".lunar/real-eval-glm-5.2-http-deadline-20260911/slots/002/trial/cases/china_post_pickup_optimization/runs/001/attempts/001/subject/workflow/master.json": "85d9d1c8b52bdb4dfa84e83af9444ca90082bcdcbdc3f0582fcbef895cb93dae",
+    ".lunar/real-eval-glm-5.2-http-deadline-20260911/slots/002/subject-terminated.json": "5cd04f09423f1bb67e4b42ab8025ecd04d25c3578799deb94f773130032eb556"
+  },
+  "candidate_content_read": false,
+  "candidate_executions": 0,
+  "model_calls": 0,
+  "limitations": [
+    "Only slot2 has terminated; this is not final campaign acceptance.",
+    "File existence and byte sizes do not establish a valid solution or authorize harness.",
+    "No raw candidate content or transcript content was inspected.",
+    "Request elapsed is smaller than its allowed timeout; neither precise underlying cause nor a future retry outcome is established.",
+    "Saved workflow stage is a last-known stage, not process liveness."
+  ]
+}

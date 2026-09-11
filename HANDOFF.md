@@ -8,6 +8,23 @@
 
 ## 1. 当前状态
 
+082进展13:01独立partial：邮政slot2已原生失败终止（subject1324.816秒、退出2），钣金
+slot1仍Build。238项证据SHA通过；邮政合法v4为model/model_failed，typed
+transport_timeout，phase=open_response，elapsed14901ms、request_timeout3970214ms，
+HTTP/status均null。本次不是共享预算耗尽，不能进一步确定底层或provider原因。
+无subject/harness回执、无评分、完整失败usage/cost未知，当前1/2终止而非本批最终0/2。
+新审计为082 postrun/observations/20260911T050153627104Z-independent-partial-audit.json
+及同时间report.md；root核对报告SHA。slot2进程观察05:03:52 UTC未见已知PID/PGID及
+可见后代/slot2 cwd残留，slot1仍活跃，不宣称全批清理。13:15 root逐槽诊断再核验6份
+终止证据，确认solve.py及3份output文件存在，缺少_agent_summary.md/receipt.json；
+仅文件元数据，未执行候选或补评。详情见同目录20260911T051522240740Z-slot2-terminal-
+diagnostic.json。冻结条件未改；T082-05/06继续开放，等slot1终局再作全批终审封存。
+
+后续判读与进程核验方案见082 postrun/terminal-decision-guide.md和process-cleanup-review.md；
+它们是运行期只读审查说明，不是本批最终结果，不授权新增尝试或改变原生评分边界。
+
+以下12:41及12:35为较早观测，当前终止状态以上述13:01记录为准。
+
 082进展12:41：第二份独立只读partial审计通过227项证据SHA，钣金slot1与邮政slot2
 均已验收Master计划并进入Build（2/2）。两槽均未续跑、仍started_unresolved，终止0、
 subject/harness回执0；分数、完整用量和费用均null，尚无最终有效解结论。新观测为082

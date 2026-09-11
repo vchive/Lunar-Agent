@@ -90,3 +90,16 @@ Root verified the saved audit SHA
 `51fcb2dd6d56d1e29507be3c3d7cff3a5fe36fb7b1461e52b0928b8986667734`.
 The earlier partial observation remains unchanged. T082-05/06 remain open until termination and
 final acceptance; Build entry does not establish a valid solution.
+
+Third independent partial audit at2026-09-11T05:01:53.627104Z passed238 evidence hashes.
+Slot2 terminated with accepted native failed report, no subject/harness receipt; slot1 remains
+unresolved in Build. Validated v4 records model/model_failed with typed transport_timeout,
+open_response,14901ms elapsed against3970214ms timeout and null HTTP/status. It does not establish
+exhaustion of the shared/request deadline or a specific provider cause. Root checked saved audit
+SHA `dafd0c8c983bd1362bf88484a98bc0cba7d7c68bdacb5b57e5e9f929011865de` and report SHA
+`aa61eca1a7bcea88c1c1a85f0dec8a956a441fc6433001ef7c351ae1f252ee28`.
+The05:03:52UTC slot2-only process observation found no known PID/group/visible descendant/cwd
+candidate; slot1 remains visible, so this is not campaign closure. Root's05:15:22UTC diagnostic
+verified6 terminal evidence hashes and candidate file metadata, without reading/executing candidate
+content: solve.py and three output files exist, but summary and receipt are absent. All scores/full
+failed usage/cost remain null. T082-05/06 stay open while slot1 runs and before final acceptance.
