@@ -8,6 +8,18 @@
 
 ## 1. 当前状态
 
+082已完成新测量登记，`.specify`指向082。源固定e36b103，GLM-5.2，钣金/邮政各一新S槽，
+Master1200/build2400/reserve120、共享5400秒/200工具/800万tokens，一波并发2、不补位。
+232项实现定向、232项独立复核、1819项主仓全量（53.27秒）、73项单独loopback验证通过。
+唯一prepare已完成；实际独立preaudit与449项正式guarded dry-run通过，原样报告已镜像。
+38源码/122冻结/36历史/23helper与实际shebang解释器、Python/SSL和HTTP helper身份一致。
+manifest SHA880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb。
+当前尚未launch；登记提交推送后才能唯一启动。T082-01至04完成，05/06待真实终局和封存。
+不要再prepare或改已冻src/scripts/tests/inputs/readiness。未作provider探测、WebAgent执行
+或公司平台查询；本次测079/080/081合入整体表现，不作纯deadline因果结论，不解释078
+旧根因。074/076/078各68/105/205份Git封存文件保持原样。正式失败诊断会绑定原生失败
+记录、请求及双副本，只投影v1–v4固定字段，不改变回执/harness/评分或补回完整失败成本。
+
 081已完成有限timeout的绝对HTTP传输截止，`.specify`指向081，T081全部关闭。stdlib
 独立exec HTTP worker受父进程统一deadline约束并kill/wait回收；匿名lifeline处理父进程
 单PID死亡，worker继承subject PGID。请求/凭据走有界匿名IPC，环境净化；保留代理绕行、

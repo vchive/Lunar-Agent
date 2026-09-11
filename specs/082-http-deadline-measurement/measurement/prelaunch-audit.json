@@ -1,0 +1,23 @@
+{
+  "schema_version": "1",
+  "kind": "feature082_independent_prelaunch_audit",
+  "passed": true,
+  "status": "passed",
+  "checked_utc": "2026-09-11T04:24:52.707440+00:00",
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "implementation_commit": "e36b103fd6fc4a64304d16ae446e0383dab0a8a8",
+  "planned_attempts": 2,
+  "model_calls": 0,
+  "credentials_loaded": false,
+  "checks": {
+    "git_source_bytes": true,
+    "frozen_and_historical_bytes": true,
+    "two_slot_schedule_and_denominator": true,
+    "workflow_identity_and_aggregate_limits": true,
+    "public_and_private_case_bytes": true,
+    "exact_harness_bytes_and_installed_versions": true,
+    "unstarted_attempts": true,
+    "pinned_helper_closure": true,
+    "subject_interpreter_and_http_helper_identity": true
+  }
+}
