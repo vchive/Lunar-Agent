@@ -22,6 +22,11 @@ diagnostic.json。冻结条件未改；T082-05/06继续开放，等slot1终局�
 
 后续判读与进程核验方案见082 postrun/terminal-decision-guide.md和process-cleanup-review.md；
 它们是运行期只读审查说明，不是本批最终结果，不授权新增尝试或改变原生评分边界。
+本地固定WebAgent e24恢复策略已作独立只读比较，18份blob身份及关键source/dist逻辑
+复核通过，见docs/webagent-transport-recovery-review-20260911.md。可研究有限传输恢复，
+但需单独解决共享期限、物理尝试计数、未知usage预留及回执契约；不能把SSE卡顿重放
+当作本次非流式错误的现成修复，不能照搬会受300秒TTL影响的重试计数。没有执行
+WebAgent、外部探测、当前槽重试或新产品改动，下一项仍待082终局证据及封存。
 
 以下12:41及12:35为较早观测，当前终止状态以上述13:01记录为准。
 

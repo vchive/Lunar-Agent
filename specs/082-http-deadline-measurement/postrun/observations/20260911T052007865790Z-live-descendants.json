@@ -1,0 +1,62 @@
+{
+  "kind": "feature082_scoped_descendant_observation",
+  "observed_utc": "2026-09-11T05:20:07.865790+00:00",
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "known_pids": [
+    88086,
+    88266,
+    88267,
+    88272,
+    88273
+  ],
+  "known_pgids": [
+    88086,
+    88266,
+    88267,
+    88272,
+    88273
+  ],
+  "processes": [
+    {
+      "pid": 88086,
+      "ppid": 1,
+      "pgid": 88086,
+      "elapsed": "51:41",
+      "argv_observed": true,
+      "http_transport_worker_confirmed": false
+    },
+    {
+      "pid": 88266,
+      "ppid": 88086,
+      "pgid": 88266,
+      "elapsed": "51:39",
+      "argv_observed": true,
+      "http_transport_worker_confirmed": false
+    },
+    {
+      "pid": 88272,
+      "ppid": 88266,
+      "pgid": 88272,
+      "elapsed": "51:39",
+      "argv_observed": true,
+      "http_transport_worker_confirmed": false
+    },
+    {
+      "pid": 92327,
+      "ppid": 88272,
+      "pgid": 88272,
+      "elapsed": "30:46",
+      "argv_observed": true,
+      "http_transport_worker_confirmed": true
+    }
+  ],
+  "point_in_time_only": true,
+  "raw_argv_saved": false,
+  "process_environments_read": false,
+  "model_calls": 0,
+  "limitations": [
+    "Process elapsed is lifetime, not HTTP request phase timing.",
+    "PID reuse and visibility limitations apply.",
+    "This is live observation, not final cleanup."
+  ]
+}
