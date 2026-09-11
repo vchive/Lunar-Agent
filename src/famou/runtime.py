@@ -22,6 +22,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
+from .http_transport import TransportFailure, exchange, validate_timeout
+
 MAX_ENVELOPE_ARTIFACTS = 32
 MAX_ENVELOPE_BYTES = 256 * 1024
 MAX_ENVELOPE_METADATA = 16
@@ -536,6 +538,15 @@ class OpenAICompatibleRuntime:
         timeout: float | None = None,
     ) -> ModelTurn:
         """Request one model turn, preserving structured tool calls for the agent loop."""
+        if timeout is not None:
+            validate_timeout(timeout)
+        return self._complete(messages, tools, timeout, bounded=timeout is not None)
+
+    def _complete_direct(self, messages, tools=(), timeout=None) -> ModelTurn:
+        """Explicit same-process seam for deterministic transport/exception contract tests."""
+        return self._complete(messages, tools, timeout, bounded=False)
+
+    def _complete(self, messages, tools, timeout, *, bounded) -> ModelTurn:
         body = json.dumps(
             {
                 "model": self.model,
@@ -558,11 +569,33 @@ class OpenAICompatibleRuntime:
         started = _request_clock()
         try:
             try:
-                with urlopen(request, timeout=timeout) as response:
-                    status = response.getcode()
+                if bounded:
+                    try:
+                        response = exchange(request, timeout)
+                    except TransportFailure as failure:
+                        phase, observed_status = failure.phase, failure.status
+                        if failure.cause == "http_error":
+                            cause = HTTPError("", failure.status, "HTTP request failed", {}, None)
+                            detail = self._redact(failure.body.decode("utf-8", errors="replace"))
+                            suffix = f": {detail}" if detail else ""
+                            message = f"model endpoint returned HTTP {failure.status}{suffix}"
+                        else:
+                            cause = {
+                                "timeout": TimeoutError("HTTP transport deadline exceeded"),
+                                "cause_timeout": TimeoutError("HTTP transport timed out"),
+                                "url_timeout": URLError(TimeoutError("HTTP transport timed out")),
+                                "url_error": URLError("HTTP transport failed"),
+                            }.get(failure.cause, OSError("HTTP transport failed"))
+                            message = "could not reach model endpoint: HTTP transport failed"
+                        raise ModelRequestFailure(message, failure.reason, failure.status) from cause
+                    status, raw = response.status, response.body
                     observed_status = _observed_response_status(status)
-                    phase = "read_response_body"
-                    raw = response.read(8 * 1024 * 1024)
+                else:
+                    with urlopen(request, timeout=timeout) as response:
+                        status = response.getcode()
+                        observed_status = _observed_response_status(status)
+                        phase = "read_response_body"
+                        raw = response.read(8 * 1024 * 1024)
             except HTTPError as exc:
                 # This records entry into existing error-body handling, not its success or cause.
                 phase = "read_http_error_body"

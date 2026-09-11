@@ -8,7 +8,24 @@
 
 ## 1. 当前状态
 
-080已完成最后失败请求的阶段与耗时证据，`.specify`指向080，T080全部关闭。产品只改
+081已完成有限timeout的绝对HTTP传输截止，`.specify`指向081，T081全部关闭。stdlib
+独立exec HTTP worker受父进程统一deadline约束并kill/wait回收；匿名lifeline处理父进程
+单PID死亡，worker继承subject PGID。请求/凭据走有界匿名IPC，环境净化；保留代理绕行、
+标准TLS行为、None直接urllib及v4/legacy失败分类，不接受迟到成功或失败，不自动重试。
+66项HTTP＋7项HTTPS新增测试、464项实现定向、73项独立复核、主仓1687项全量（50.45秒）
+通过；Ruff/Specify/diff通过。离线wheel安装到独立venv后，public complete成功加载包内
+helper；正常请求成功，0.3秒慢体在0.3041秒被拒绝，全程只有两次loopback请求。
+074/076/078各68/105/205份Git封存文件保持原样，没有新增真实评测或provider探测。
+
+当前目标仍是GLM-5.2分阶段Master→Build完成交付并经原生harness验证。下一步需围绕
+当前产品准备新的固定测量登记，使用已有WebAgent高分case背景，不重跑WebAgent、
+升级模型或重开旧槽。081不能证明078的旧超时根因或有效解改善；078保持有效0/2，
+旧分数与完整失败usage/cost未知。纯模型解析仍在父进程，不宣称整个complete硬实时
+返回或服务端停止计费；当前验证是macOS证据，Linux尚未实跑。
+
+以下为080及此前历史状态；080当时提出的HTTP截止改造已在081完成。
+
+080已完成最后失败请求的阶段与耗时证据，当时`.specify`指向080，T080全部关闭。产品只改
 runtime/subject_diagnostics；v4新增request_observation固定phase、elapsed_ms及实际
 传入的request_timeout_ms，保留v1/v2/v3与原异常链/成功解析/请求参数/账本/评分边界。
 坏时钟或无效时序安全回退v3，不跨请求或异常节点复用证据。76新测试、391实现定向、

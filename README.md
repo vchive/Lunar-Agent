@@ -428,9 +428,23 @@ versions 1–3 remain readable. See [Feature 079](specs/079-model-failure-eviden
 These observations describe only a request that propagated a typed failure. They do not log a live
 request, survive an outer process kill, recover failed-request usage or change retries and scoring.
 Milliseconds are rounded down; a positive timeout below one millisecond appears as zero, while
-null means no explicit timeout. The timeout passed to urllib bounds individual blocking waits,
-not the entire HTTP exchange; successive reads can take longer in total. Enforcing an absolute
-transport deadline is a separate change.
+null means no explicit timeout. The recorded timeout is the caller's request limit, and elapsed
+time includes necessary cleanup.
+
+On POSIX macOS/Linux, finite HTTP timeouts now use one absolute transport deadline, including worker
+startup, request/response pipes, DNS, connection and body reads. An isolated standard-library worker
+performs the HTTP exchange; the caller terminates and reaps it before returning on timeout. A
+lifeline pipe also ends the worker if its parent dies. Each call owns its worker, and no request is
+retried or late response accepted. Finite limits must be positive numbers at most 86400 seconds.
+
+The worker adds process startup overhead. Endpoint, credentials and narrowly projected proxy/TLS
+settings travel through anonymous pipes; the worker inherits neither the full caller environment
+nor a custom in-memory urllib opener. Environment NO_PROXY and SSL_CERT_FILE/SSL_CERT_DIR remain
+supported, along with the standard library's default HTTPS negotiation. With timeout=None the
+original direct urllib path remains, including its lack of an absolute transport deadline.
+Parent-side JSON/model parsing and OS cleanup are not a hard realtime whole-function deadline,
+and disconnecting cannot guarantee a remote server stops processing or billing.
+See [Feature 081](specs/081-http-transport-deadline/spec.md).
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

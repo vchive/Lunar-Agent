@@ -59,7 +59,7 @@ def invoke(monkeypatch, response=None, open_error=None, timeout=1.2349):
 
     monkeypatch.setattr(rt, "urlopen", open_response)
     with pytest.raises(rt.ModelRequestFailure) as caught:
-        rt.OpenAICompatibleRuntime("http://local.invalid/" + SECRET, "fixture", SECRET).complete(
+        rt.OpenAICompatibleRuntime("http://local.invalid/" + SECRET, "fixture", SECRET)._complete_direct(
             [{"role": "user", "content": SECRET}], timeout=timeout,
         )
     assert len(calls) == 1 and calls[0][1] is timeout
@@ -300,7 +300,7 @@ def test_success_has_identical_wire_fields_and_no_end_clock_or_state(monkeypatch
     model = rt.OpenAICompatibleRuntime("http://local.invalid", "fixture", SECRET)
     messages = [{"role": "user", "content": "hello"}]
     tool = {"type": "function", "function": {"name": "read_file"}}
-    assert model.complete(messages, (tool,), timeout=1.2349) == rt.ModelTurn("done")
+    assert model._complete_direct(messages, (tool,), timeout=1.2349) == rt.ModelTurn("done")
     request, timeout = calls[0]
     assert len(calls) == 1 and timeout == 1.2349
     assert response.reads == [8 * 1024 * 1024]
@@ -322,13 +322,13 @@ def test_same_runtime_never_reuses_timing_across_successes_and_failures(tmp_path
 
     monkeypatch.setattr(rt, "urlopen", open_response)
     model = rt.OpenAICompatibleRuntime("http://local.invalid", "fixture")
-    assert model.complete([], timeout=1) == rt.ModelTurn("done")
+    assert model._complete_direct([], timeout=1) == rt.ModelTurn("done")
     with pytest.raises(rt.ModelRequestFailure) as first:
-        model.complete([], timeout=2)
+        model._complete_direct([], timeout=2)
     before = observer_payload(tmp_path, first.value)
-    assert model.complete([], timeout=3) == rt.ModelTurn("done")
+    assert model._complete_direct([], timeout=3) == rt.ModelTurn("done")
     with pytest.raises(rt.ModelRequestFailure) as second:
-        model.complete([], timeout=None)
+        model._complete_direct([], timeout=None)
     assert first.value is not second.value
     assert observer_payload(tmp_path, first.value) == before
     assert before["request_observation"] == {
