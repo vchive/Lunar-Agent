@@ -8,6 +8,15 @@
 
 ## 1. 当前状态
 
+082进展12:41：第二份独立只读partial审计通过227项证据SHA，钣金slot1与邮政slot2
+均已验收Master计划并进入Build（2/2）。两槽均未续跑、仍started_unresolved，终止0、
+subject/harness回执0；分数、完整用量和费用均null，尚无最终有效解结论。新观测为082
+postrun/observations/20260911T044152076409Z-independent-partial-audit.json及同时间report.md；
+root核对保存JSON/报告SHA与阶段计数。12:35旧观测保持原字节。不改冻结条件、不重试；
+继续观察到两槽终止，再作独立终审与进程核验。T082-05/06仍开放。
+
+以下12:35记录是较早的观测，最新阶段状态以上述12:41记录为准。
+
 082进展12:35：独立只读partial审计通过225项证据SHA，邮政slot2的Master计划已验收，
 Build进入证据已确认；钣金slot1仍Master。两槽均started_unresolved，终止0、回执0、
 harness0，尚无分数或最终有效解结论。观测为082 postrun/observations/

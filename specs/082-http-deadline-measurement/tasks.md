@@ -81,3 +81,12 @@ Scores/full usage/cost remain null, and final acceptance is false. The immutable
 rendered report are saved underpostrun/observations/20260911T043548445457Z-independent-partial-*;
 root checked the saved audit SHA and stage counts. This is stage progress, not a final failure rate
 or valid-solution result.
+
+Second independent partial audit at2026-09-11T04:41:52.076409Z passed227 evidence hashes.
+Both slots have validated Master plans and observed Build transcripts; neither has resumed or
+terminated, and both subject/harness receipt counts remain0. Scores/full usage/cost remain null.
+Root verified the saved audit SHA
+`318afe96b5f9cb8b5a6350927ec57ae3e1f32749496f2158a3fb35ba13e26013` and report SHA
+`51fcb2dd6d56d1e29507be3c3d7cff3a5fe36fb7b1461e52b0928b8986667734`.
+The earlier partial observation remains unchanged. T082-05/06 remain open until termination and
+final acceptance; Build entry does not establish a valid solution.
