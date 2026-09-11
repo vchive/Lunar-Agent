@@ -62,14 +62,18 @@ def test_problem_contract_round_trips_all_supported_types(problem_type: str) -> 
     assert AlgorithmProblemContract.from_dict(canonical).to_dict() == canonical
 
 
-def test_problem_contract_defaults_to_loop_and_accepts_population() -> None:
+def test_problem_contract_defaults_to_population_and_reads_legacy_loop() -> None:
     without_evolution = _contract()
     without_evolution.pop("evolution")
-    assert AlgorithmProblemContract.from_dict(without_evolution).evolution.strategy == "loop"
+    assert AlgorithmProblemContract.from_dict(without_evolution).evolution.strategy == "population"
+    assert AlgorithmProblemContract.from_dict(_contract(evolution={})).evolution.strategy == "population"
     population = AlgorithmProblemContract.from_dict(
         _contract(evolution={"strategy": "population", "max_rounds": 20, "stagnation_rounds": 4})
     )
     assert population.evolution.strategy == "population"
+    legacy_loop = AlgorithmProblemContract.from_dict(_contract())
+    assert legacy_loop.evolution.strategy == "loop"
+    assert AlgorithmProblemContract.from_dict(legacy_loop.to_dict()).digest() == legacy_loop.digest()
 
 
 def test_contract_declares_structured_data_outputs() -> None:

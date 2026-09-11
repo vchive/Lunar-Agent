@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.benchmark import BenchmarkConfig, BenchmarkError, BenchmarkRunner
+from famou.benchmark import BenchmarkConfig, BenchmarkError, BenchmarkRun, BenchmarkRunner
 from famou.evolution import CandidateDraft
 
 
@@ -24,7 +24,7 @@ def _contract() -> AlgorithmProblemContract:
             "soft_constraints": [],
             "success_criteria": ["The candidate is valid."],
             "deliverables": ["candidate source"],
-            "evolution": {"strategy": "loop", "max_rounds": 2, "stagnation_rounds": 10},
+            "evolution": {"strategy": "population", "max_rounds": 2, "stagnation_rounds": 10},
         }
     )
 
@@ -56,14 +56,14 @@ def _generator(strategy: str):
     return generate
 
 
-def test_benchmark_compares_strategies_in_isolated_workspaces(tmp_path: Path) -> None:
+def test_benchmark_runs_population_in_an_isolated_workspace(tmp_path: Path) -> None:
     runner = BenchmarkRunner(
         _contract(),
         tmp_path / "benchmark",
         generator_factory=_generator,
         evaluator_factory=lambda strategy: _evaluator,
         config=BenchmarkConfig(
-            strategies=("loop", "population"),
+            strategies=("population",),
             max_rounds=2,
             population_size=2,
             rng_seed=7,
@@ -72,38 +72,35 @@ def test_benchmark_compares_strategies_in_isolated_workspaces(tmp_path: Path) ->
 
     report = runner.run()
 
-    assert [item.strategy for item in report.runs] == ["loop", "population"]
+    assert [item.strategy for item in report.runs] == ["population"]
     assert all(item.status in {"completed", "stagnated"} for item in report.runs)
     assert all(item.best_score is not None for item in report.runs)
-    assert report.runs[0].workspace != report.runs[1].workspace
-    assert (tmp_path / "benchmark" / "strategies" / "loop" / "evolution" / "archive.jsonl").is_file()
     assert (tmp_path / "benchmark" / "strategies" / "population" / "evolution" / "archive.jsonl").is_file()
     payload = json.loads((tmp_path / "benchmark" / "benchmark.json").read_text(encoding="utf-8"))
     assert payload["contract_sha256"] == _contract().digest()
     assert all(not Path(item["workspace"]).is_absolute() for item in payload["runs"])
 
 
-def test_benchmark_records_one_strategy_failure_and_continues(tmp_path: Path) -> None:
+def test_benchmark_records_population_strategy_failure(tmp_path: Path) -> None:
     def generator_factory(strategy: str):
-        if strategy == "loop":
-            def fail(_request):
-                raise RuntimeError("fixture generator failed")
+        del strategy
 
-            return fail
-        return _generator(strategy)
+        def fail(_request):
+            raise RuntimeError("fixture generator failed")
+
+        return fail
 
     report = BenchmarkRunner(
         _contract(),
         tmp_path / "benchmark",
         generator_factory=generator_factory,
         evaluator_factory=lambda strategy: _evaluator,
-        config=BenchmarkConfig(strategies=("loop", "population"), max_rounds=1, population_size=2),
+        config=BenchmarkConfig(strategies=("population",), max_rounds=1, population_size=2),
     ).run()
 
     assert report.runs[0].status == "failed"
     assert "fixture generator failed" in (report.runs[0].error or "")
-    assert report.runs[1].status in {"completed", "stagnated"}
-    assert report.runs[1].best_score is not None
+    assert report.runs[0].best_score is None
 
 
 def test_benchmark_includes_explicit_openevolve_adapter(tmp_path: Path) -> None:
@@ -125,15 +122,15 @@ def test_benchmark_includes_explicit_openevolve_adapter(tmp_path: Path) -> None:
         generator_factory=_generator,
         evaluator_factory=lambda strategy: _evaluator,
         config=BenchmarkConfig(
-            strategies=("loop", "population", "openevolve"),
+            strategies=("population", "openevolve"),
             max_rounds=2,
             population_size=2,
             strategy_commands={"openevolve": command},
         ),
     ).run()
 
-    assert [item.status for item in report.runs] == ["completed", "completed", "completed"]
-    assert report.runs[2].best_score == 9.0
+    assert [item.status for item in report.runs] == ["completed", "completed"]
+    assert report.runs[1].best_score == 9.0
     assert report.config.to_dict()["strategy_commands_sha256"]["openevolve"]
     config = json.loads(
         (
@@ -158,16 +155,15 @@ def test_benchmark_keeps_native_results_when_openevolve_command_fails(tmp_path: 
         generator_factory=_generator,
         evaluator_factory=lambda strategy: _evaluator,
         config=BenchmarkConfig(
-            strategies=("loop", "openevolve"),
+            strategies=("openevolve",),
             max_rounds=1,
             population_size=2,
             strategy_commands={"openevolve": (str(tmp_path / "missing-openevolve"),)},
         ),
     ).run()
 
-    assert report.runs[0].status == "completed"
-    assert report.runs[1].status == "failed"
-    assert report.runs[1].best_score is None
+    assert report.runs[0].status == "failed"
+    assert report.runs[0].best_score is None
 
 
 def test_benchmark_rejects_invalid_selection_and_existing_workspace(tmp_path: Path) -> None:
@@ -175,6 +171,19 @@ def test_benchmark_rejects_invalid_selection_and_existing_workspace(tmp_path: Pa
         BenchmarkConfig(strategies=())
     with pytest.raises(BenchmarkError, match="unsupported"):
         BenchmarkConfig(strategies=("invalid",))
+    with pytest.raises(BenchmarkError, match="retired"):
+        BenchmarkConfig(strategies=("loop",))
+    historical = BenchmarkRun(
+        strategy="loop",
+        status="completed",
+        elapsed_ms=1,
+        evaluated_candidates=1,
+        valid_candidates=1,
+        best_score=1.0,
+        workspace="strategies/loop",
+        archive="strategies/loop/evolution/archive.jsonl",
+    )
+    assert historical.to_dict()["strategy"] == "loop"
     existing = tmp_path / "existing"
     existing.mkdir()
     (existing / "keep.txt").write_text("do not overwrite", encoding="utf-8")

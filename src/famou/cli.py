@@ -198,7 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     solve_parser.add_argument(
         "--strategy",
-        choices=("loop", "population", "openevolve"),
+        choices=("population", "openevolve"),
         help="evolution strategy when --evolve is enabled (default: contract strategy)",
     )
     solve_parser.add_argument(
@@ -272,7 +272,11 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument("--resume", action="store_true", help="resume an existing strategy run")
     evolve_parser.add_argument("--run-id", help="existing evolution run ID (required with --resume)")
     evolve_parser.add_argument("--detach", action="store_true", help="return an evolution run ID and execute in the background")
-    evolve_parser.add_argument("--strategy", choices=("loop", "population", "openevolve"), help="override the contract strategy")
+    evolve_parser.add_argument(
+        "--strategy",
+        choices=("population", "openevolve"),
+        help="override the contract strategy",
+    )
     evolve_parser.add_argument("--generator-command", help="explicit generator command; receives a request JSON path")
     evolve_parser.add_argument("--agent-command", help="explicit Agent command used as candidate generator")
     evolve_parser.add_argument(
@@ -384,8 +388,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy",
         dest="strategies",
         action="append",
-        choices=("loop", "population", "openevolve"),
-        help="strategy to compare; repeat for order (default: loop and population)",
+        choices=("population", "openevolve"),
+        help="strategy to compare; repeat for order (default: population)",
     )
     benchmark_parser.add_argument("--workspace", type=Path, help="new benchmark workspace")
     benchmark_parser.add_argument(
@@ -1699,7 +1703,7 @@ def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
     """Validate option bounds before a handoff request is persisted in the intake ledger."""
     try:
         EvolutionConfig(
-            strategy="loop",
+            strategy="population",
             max_rounds=args.max_rounds if args.max_rounds is not None else 1,
             stagnation_rounds=(
                 args.stagnation_rounds if args.stagnation_rounds is not None else 1
@@ -1879,6 +1883,10 @@ def _solve_evolution(
     contract = AlgorithmProblemContract.from_dict(contract_payload.algorithm_problem)
     candidate_inputs = _candidate_input_artifacts(controller.store, parent.id)
     strategy_name = args.strategy or contract.evolution.strategy
+    if strategy_name == "loop":
+        raise ValueError(
+            "loop evolution is retired for new runs; choose population or explicit openevolve"
+        )
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
     compile_evaluator = bool(getattr(args, "compile_evaluator", False))
 
@@ -2322,6 +2330,10 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             raise ValueError("supplied contract does not match the existing evolution run")
         contract = canonical
     strategy_name = args.strategy or contract.evolution.strategy
+    if strategy_name == "loop":
+        raise ValueError(
+            "loop evolution is retired for new runs; choose population or explicit openevolve"
+        )
     workspace = (existing_run.workspace if existing_run is not None else args.workspace)
     if workspace is None:
         if args.resume:
@@ -2748,7 +2760,7 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"contract is not valid JSON: {exc.msg}") from exc
     contract = AlgorithmProblemContract.from_dict(payload)
-    strategies = tuple(args.strategies or ("loop", "population"))
+    strategies = tuple(args.strategies or ("population",))
     generator_command = _parse_command(args.generator_command, "--generator-command")
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
     openevolve_command = _parse_command(args.openevolve_command, "--openevolve-command")

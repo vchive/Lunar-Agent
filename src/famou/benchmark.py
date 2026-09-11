@@ -56,7 +56,7 @@ class BenchmarkError(ValueError):
 class BenchmarkConfig:
     """Common bounded settings applied to every selected native strategy."""
 
-    strategies: tuple[str, ...] = ("loop", "population")
+    strategies: tuple[str, ...] = ("population",)
     max_rounds: int = 5
     stagnation_rounds: int = 3
     population_size: int = 8
@@ -79,7 +79,11 @@ class BenchmarkConfig:
             raise BenchmarkError("benchmark requires at least one and at most three strategies")
         if any(strategy not in BENCHMARK_STRATEGIES for strategy in normalized):
             raise BenchmarkError(
-                "benchmark strategy is unsupported; choose loop, population, or openevolve"
+                "benchmark strategy is unsupported; choose population or openevolve"
+            )
+        if "loop" in normalized:
+            raise BenchmarkError(
+                "loop benchmark strategy is retired for new runs; choose population or openevolve"
             )
         if len(set(normalized)) != len(normalized):
             raise BenchmarkError("benchmark strategies must be unique")

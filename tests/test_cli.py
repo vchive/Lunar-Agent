@@ -97,7 +97,7 @@ class BenchmarkModelServer:
         self.thread.join(timeout=2)
 
 
-def _write_evolution_contract(path: Path, *, strategy: str = "loop", max_rounds: int = 2) -> None:
+def _write_evolution_contract(path: Path, *, strategy: str = "population", max_rounds: int = 2) -> None:
     path.write_text(
         json.dumps(
             {
@@ -350,7 +350,7 @@ def test_cli_delegate_detach_preserves_explicit_worker_request(tmp_path: Path, c
     assert f"{sys.executable} {worker}" in calls[0][0]
 
 
-def test_cli_evolve_loop_uses_sqlite_authority_and_resume_metadata(tmp_path: Path, capsys) -> None:
+def test_cli_evolve_population_uses_sqlite_authority_and_resume_metadata(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path)
     generator, evaluator = _write_evolution_commands(tmp_path)
@@ -366,6 +366,8 @@ def test_cli_evolve_loop_uses_sqlite_authority_and_resume_metadata(tmp_path: Pat
                 generator_command,
                 "--evaluator-command",
                 evaluator_command,
+                "--population-size",
+                "1",
                 "--json",
                 "--home",
                 str(tmp_path / "home"),
@@ -376,14 +378,14 @@ def test_cli_evolve_loop_uses_sqlite_authority_and_resume_metadata(tmp_path: Pat
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "completed"
     assert payload["run_status"] == "succeeded"
-    assert payload["evaluated_candidates"] == 2
+    assert payload["evaluated_candidates"] == 3
     assert payload["best_score"] == 2.0
     run_id = payload["run_id"]
 
     assert main(["status", run_id, "--json", "--home", str(tmp_path / "home")]) == 0
     status = json.loads(capsys.readouterr().out)
     assert status["run"]["status"] == "succeeded"
-    assert status["evolution"]["candidates"] == 2
+    assert status["evolution"]["candidates"] == 3
     assert status["evolution"]["iterations"] == 2
     workspace = Path(payload["workspace"])
     assert (workspace / "evolution" / "archive.jsonl").is_file()
@@ -726,8 +728,6 @@ def test_cli_benchmark_compares_native_strategies(tmp_path: Path, capsys) -> Non
                 "benchmark",
                 str(contract_path),
                 "--strategy",
-                "loop",
-                "--strategy",
                 "population",
                 "--generator-command",
                 f"{sys.executable} {generator}",
@@ -749,7 +749,7 @@ def test_cli_benchmark_compares_native_strategies(tmp_path: Path, capsys) -> Non
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "completed"
-    assert [item["strategy"] for item in payload["runs"]] == ["loop", "population"]
+    assert [item["strategy"] for item in payload["runs"]] == ["population"]
     assert all(item["best_score"] is not None for item in payload["runs"])
     assert str(generator) not in json.dumps(payload["config"])
     assert (workspace / "benchmark.json").is_file()
@@ -777,8 +777,6 @@ def test_cli_benchmark_includes_explicit_openevolve(tmp_path: Path, capsys) -> N
                 "benchmark",
                 str(contract_path),
                 "--strategy",
-                "loop",
-                "--strategy",
                 "openevolve",
                 "--generator-command",
                 f"{sys.executable} {generator}",
@@ -800,7 +798,7 @@ def test_cli_benchmark_includes_explicit_openevolve(tmp_path: Path, capsys) -> N
         == 0
     )
     payload = json.loads(capsys.readouterr().out)
-    assert [item["strategy"] for item in payload["runs"]] == ["loop", "openevolve"]
+    assert [item["strategy"] for item in payload["runs"]] == ["openevolve"]
     assert all(item["status"] == "completed" for item in payload["runs"])
     assert "openevolve" in payload["config"]["strategy_commands_sha256"]
 
@@ -812,8 +810,6 @@ def test_cli_benchmark_runtime_one_shot_and_loop_profiles(tmp_path: Path, capsys
         common = [
             "benchmark",
             str(contract_path),
-            "--strategy",
-            "loop",
             "--strategy",
             "population",
             "--agent-runtime",
@@ -1205,6 +1201,14 @@ def test_cli_evolve_requires_explicit_commands_and_supports_population(tmp_path:
     payload = json.loads(capsys.readouterr().out)
     assert payload["strategy"] == "population"
     assert payload["run_status"] == "succeeded"
+
+
+def test_cli_evolve_rejects_legacy_loop_contracts(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "legacy-loop-contract.json"
+    _write_evolution_contract(contract_path, strategy="loop", max_rounds=1)
+    assert main(["evolve", str(contract_path), "--json", "--home", str(tmp_path / "home")]) == 2
+    error = json.loads(capsys.readouterr().err)
+    assert "loop evolution is retired" in error["error"]
 
 
 def test_cli_evolve_detach_returns_handle_then_resume_executes_same_run(
