@@ -12,7 +12,6 @@ from famou.evolution import (
     EvolutionConfig,
     EvolutionContext,
     EvolutionError,
-    LoopStrategy,
     PopulationStrategy,
 )
 
@@ -33,7 +32,7 @@ def _contract() -> AlgorithmProblemContract:
             "soft_constraints": [],
             "success_criteria": ["Return a valid route."],
             "deliverables": ["Route program."],
-            "evolution": {"strategy": "loop", "max_rounds": 3, "stagnation_rounds": 10},
+            "evolution": {"strategy": "population", "max_rounds": 3, "stagnation_rounds": 10},
         }
     )
 
@@ -129,13 +128,13 @@ def test_loop_derives_experiment_outcomes_from_evaluator_and_resume(
     )
     agent = ExperimentAgent()
     reports = iter((_report(1, 100), _report(3, 80), _report(2, 90)))
-    result = LoopStrategy(
+    result = PopulationStrategy(
         EvolutionContext(
             _contract(),
             root,
             AgentCandidateGenerator(agent, contract=_contract()),
             lambda path, contract: next(reports),
-            EvolutionConfig(max_rounds=3, stagnation_rounds=10),
+            EvolutionConfig(max_rounds=2, stagnation_rounds=10, population_size=1),
         )
     ).run()
 
@@ -183,7 +182,7 @@ def test_invalid_experiment_never_claims_improvement(tmp_path: Path) -> None:
         None,
         0,
         1,
-        "loop",
+        "population",
         None,
         _report(1, 100),
         {"experiment": _experiment("seed")},
@@ -194,7 +193,7 @@ def test_invalid_experiment_never_claims_improvement(tmp_path: Path) -> None:
         parent.candidate_id,
         1,
         2,
-        "loop",
+        "population",
         None,
         _report(0, 50, valid=0),
         {"experiment": _experiment("unsafe-shortcut")},
@@ -226,7 +225,7 @@ def test_unchanged_outcome_and_only_declared_metric_are_projected(tmp_path: Path
         None,
         0,
         1,
-        "loop",
+        "population",
         None,
         before,
         {"experiment": _experiment("seed")},
@@ -237,7 +236,7 @@ def test_unchanged_outcome_and_only_declared_metric_are_projected(tmp_path: Path
         parent.candidate_id,
         1,
         2,
-        "loop",
+        "population",
         None,
         after,
         {"experiment": _experiment("no-op")},

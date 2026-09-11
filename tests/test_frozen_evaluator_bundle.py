@@ -49,7 +49,7 @@ def _contract() -> AlgorithmProblemContract:
                     "required": True,
                 }
             ],
-            "evolution": {"strategy": "loop", "max_rounds": 2, "stagnation_rounds": 3},
+            "evolution": {"strategy": "population", "max_rounds": 2, "stagnation_rounds": 3},
         }
     )
 

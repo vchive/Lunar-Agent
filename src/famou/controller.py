@@ -11,7 +11,7 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -50,6 +50,7 @@ from .evaluator import (
     evaluate_output_contract,
 )
 from .evolution import (
+    MAX_STATE_BYTES,
     CandidateEvaluator,
     CandidateExecution,
     CandidateGenerator,
@@ -67,6 +68,7 @@ from .profiles import ProfileRegistry
 from .recovery import RecoveryPolicy, RecoveryProposal
 from .routing import DomainRouter, RouteDecision
 from .runtime import Runtime, RuntimeExecutionError
+from .seed_handoff import SeedAdmissionError, SeedManifest, admit_seed_manifest
 from .store import Store
 
 
@@ -169,6 +171,11 @@ class LocalController:
         """
         if not isinstance(contract, AlgorithmProblemContract):
             raise TypeError("contract must be an AlgorithmProblemContract")
+        if contract.evolution.strategy == "loop":
+            raise EvolutionError(
+                "loop_strategy_retired: legacy loop runs are read-only; use population or an "
+                "explicit external backend"
+            )
         run = self.store.create_run(
             f"Evolve algorithm problem {contract.problem_id}",
             workspace=workspace,
@@ -290,6 +297,10 @@ class LocalController:
         evolution_config: EvolutionConfig,
         *,
         resume: bool = False,
+        seed_manifest: SeedManifest | Mapping[str, Any] | str | os.PathLike[str] | None = None,
+        seed_evaluator_kind: str = "exact_harness",
+        seed_dependency_sha256: str | None = None,
+        seed_environment_sha256: str | None = None,
     ) -> tuple[Run, StrategyResult]:
         """Execute or resume an evolution strategy while retaining SQLite run authority."""
         run = self.store.get_run(run_id)
@@ -313,28 +324,268 @@ class LocalController:
             raise EvolutionError("evolution run must contain exactly one task")
         evolution_task = task[0]
 
-        context = EvolutionContext(
-            contract=contract,
-            workspace=Path(run.workspace),
-            generate=generator,
-            evaluate=evaluator,
-            config=evolution_config,
-            cancelled=lambda: (
-                (latest := self.store.get_run(run_id)) is None
-                or latest.status == RunStatus.CANCELLED
-            ),
-            observe=lambda event, payload: self._observe_evolution(run_id, evolution_task.id, event, payload),
-        )
-        strategy = build_strategy(context)
+        if seed_manifest is None and (
+            seed_dependency_sha256 is not None
+            or seed_environment_sha256 is not None
+            or seed_evaluator_kind != "exact_harness"
+        ):
+            raise EvolutionError("seed_manifest_required_for_seed_identity")
+
+        def append_seed_summary_event(event_type: str, summary: dict[str, Any]) -> None:
+            summary_digest = hashlib.sha256(
+                json.dumps(
+                    {"run_id": run.id, "summary": summary},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            self.store.append_event(
+                run.id,
+                event_type,
+                summary,
+                task_id=evolution_task.id,
+                event_id=f"event-{event_type.replace('_', '-')}-{summary_digest}",
+            )
+
+        def adjudicate_initial_seeds() -> tuple[tuple[Any, ...], dict[str, Any] | None]:
+            if seed_manifest is None:
+                return (), None
+            if evolution_config.strategy != "population":
+                raise EvolutionError("verified seeds are supported only by population evolution")
+            if evolution_config.evaluator_fingerprint is None:
+                raise EvolutionError("verified seeds require a pinned evaluator fingerprint")
+            if seed_dependency_sha256 is None or seed_environment_sha256 is None:
+                raise EvolutionError(
+                    "verified seeds require dependency and environment fingerprints"
+                )
+            try:
+                admission = admit_seed_manifest(
+                    seed_manifest,
+                    contract,
+                    evaluator,
+                    evaluator_kind=seed_evaluator_kind,
+                    evaluator_fingerprint=evolution_config.evaluator_fingerprint,
+                    dependency_sha256=seed_dependency_sha256,
+                    environment_sha256=seed_environment_sha256,
+                    staging_root=Path(run.workspace) / "evolution",
+                    num_islands=evolution_config.num_islands,
+                )
+            except SeedAdmissionError as exc:
+                failure = {
+                    "schema_version": "1",
+                    "code": exc.code,
+                    "rejected": [
+                        {
+                            "index": item.index,
+                            "identity": item.identity,
+                            "code": item.code,
+                        }
+                        for item in (exc.result.rejected if exc.result is not None else ())
+                    ],
+                }
+                failure_digest = hashlib.sha256(
+                    json.dumps(
+                        {"run_id": run.id, "failure": failure},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                self.store.append_event(
+                    run.id,
+                    "seed_admission_failed",
+                    failure,
+                    task_id=evolution_task.id,
+                    event_id=f"event-seed-admission-failed-{failure_digest}",
+                )
+                raise EvolutionError(exc.code) from exc
+            admitted = tuple(sorted(admission.admitted, key=lambda item: item.candidate_id))
+            summary: dict[str, Any] = {
+                "schema_version": "1",
+                "admitted": [
+                    {
+                        "candidate_id": item.candidate_id,
+                        "handoff_sha256": item.handoff_sha256,
+                        "receipt_sha256": item.receipt.receipt_sha256,
+                    }
+                    for item in admitted
+                ],
+                "rejected": [
+                    {"index": item.index, "identity": item.identity, "code": item.code}
+                    for item in admission.rejected
+                ],
+            }
+            append_seed_summary_event("seed_admission_adjudicated", summary)
+            return admitted, summary
+
+        def read_bounded_evolution_json(path: Path, code: str) -> dict[str, Any]:
+            try:
+                if (
+                    path.is_symlink()
+                    or not path.is_file()
+                    or path.stat().st_size > MAX_STATE_BYTES
+                ):
+                    raise EvolutionError(code)
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except EvolutionError:
+                raise
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise EvolutionError(code) from exc
+            if not isinstance(payload, dict):
+                raise EvolutionError(code)
+            return payload
+
+        def record_committed_seed_admission(summary: dict[str, Any] | None) -> None:
+            if summary is None:
+                return
+            evolution_root = Path(run.workspace) / "evolution"
+            state = read_bounded_evolution_json(
+                evolution_root / "state.json", "verified_seed_commit_evidence_mismatch"
+            )
+            marker = read_bounded_evolution_json(
+                evolution_root / "seed-commit.json", "verified_seed_commit_evidence_mismatch"
+            )
+            seed_admission = state.get("seed_admission")
+            state_seeds = seed_admission.get("seeds") if isinstance(seed_admission, dict) else None
+            if not isinstance(state_seeds, list):
+                raise EvolutionError("verified_seed_commit_evidence_mismatch")
+            persisted = []
+            for item in state_seeds:
+                if not isinstance(item, dict):
+                    raise EvolutionError("verified_seed_commit_evidence_mismatch")
+                projected = {
+                    "candidate_id": item.get("candidate_id"),
+                    "handoff_sha256": item.get("handoff_sha256"),
+                    "receipt_sha256": item.get("receipt_sha256"),
+                }
+                if any(not isinstance(value, str) for value in projected.values()):
+                    raise EvolutionError("verified_seed_commit_evidence_mismatch")
+                persisted.append(projected)
+            persisted.sort(key=lambda item: item["candidate_id"])
+            admitted = summary.get("admitted")
+            candidate_ids = [item["candidate_id"] for item in persisted]
+            if (
+                persisted != admitted
+                or marker.get("candidate_ids") != candidate_ids
+                or marker.get("admission_sha256") != seed_admission.get("admission_sha256")
+            ):
+                raise EvolutionError("verified_seed_commit_evidence_mismatch")
+
+            artifacts = ArtifactStore(run.workspace, self.store, run.id)
+            evidence_paths = [
+                ("evolution/seed-commit.json", "evolution_seed_commit"),
+                *(
+                    (
+                        f"evolution/candidates/{candidate_id}/{name}",
+                        kind,
+                    )
+                    for candidate_id in candidate_ids
+                    for name, kind in (
+                        ("record.json", "evolution_seed_record"),
+                        ("receipt.json", "evolution_seed_receipt"),
+                    )
+                ),
+            ]
+            existing = {
+                (item["path"], item["kind"])
+                for item in self.store.list_artifacts(run.id)
+            }
+            for relative, kind in evidence_paths:
+                path = Path(run.workspace) / relative
+                if (relative, kind) not in existing:
+                    artifacts.record(path, evolution_task.id, kind=kind)
+            append_seed_summary_event("seed_admission_committed", summary)
+
+        def require_terminal_strategy_state(terminal_run: Run) -> None:
+            state_path = Path(terminal_run.workspace) / "evolution" / "state.json"
+            if not state_path.exists() and not state_path.is_symlink():
+                raise EvolutionError("terminal_evolution_state_missing")
+            state = read_bounded_evolution_json(
+                state_path, "terminal_evolution_state_invalid"
+            )
+            expected_statuses = {
+                RunStatus.SUCCEEDED: {"completed", "stagnated"},
+                RunStatus.FAILED: {"failed"},
+                RunStatus.CANCELLED: {"cancelled"},
+            }
+            if (
+                terminal_run.status not in expected_statuses
+                or state.get("status") not in expected_statuses[terminal_run.status]
+                or state.get("strategy") != evolution_config.strategy
+                or state.get("contract_sha256") != contract.digest()
+                or state.get("config") != evolution_config.to_dict()
+            ):
+                raise EvolutionError("terminal_evolution_state_mismatch")
+            if evolution_config.strategy == "population":
+                has_seed_state = isinstance(state.get("seed_admission"), dict)
+                if has_seed_state != (seed_manifest is not None):
+                    raise EvolutionError("terminal_evolution_seed_manifest_mismatch")
+                marker_path = state_path.with_name("seed-commit.json")
+                has_seed_marker = marker_path.exists() or marker_path.is_symlink()
+                if has_seed_marker != has_seed_state:
+                    raise EvolutionError("terminal_evolution_seed_state_mismatch")
+                if has_seed_state:
+                    marker = read_bounded_evolution_json(
+                        marker_path, "terminal_evolution_seed_state_mismatch"
+                    )
+                    if marker.get("admission_sha256") != state["seed_admission"].get(
+                        "admission_sha256"
+                    ):
+                        raise EvolutionError("terminal_evolution_seed_state_mismatch")
+
+        def configured_strategy(
+            admitted_seeds: tuple[Any, ...],
+            adjudication_summary: dict[str, Any] | None,
+        ):
+            def observe(event: str, payload: dict[str, Any]) -> None:
+                self._observe_evolution(run_id, evolution_task.id, event, payload)
+                if event == "state" and "seed_admission" in payload:
+                    record_committed_seed_admission(adjudication_summary)
+
+            context = EvolutionContext(
+                contract=contract,
+                workspace=Path(run.workspace),
+                generate=generator,
+                evaluate=evaluator,
+                config=evolution_config,
+                initial_seeds=admitted_seeds,
+                cancelled=lambda: (
+                    (latest := self.store.get_run(run_id)) is None
+                    or latest.status == RunStatus.CANCELLED
+                ),
+                observe=observe,
+            )
+            return build_strategy(context)
+
         if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
-            return run, strategy.resume()
+            try:
+                require_terminal_strategy_state(run)
+                admitted_seeds, summary = adjudicate_initial_seeds()
+                strategy = configured_strategy(admitted_seeds, summary)
+                result = strategy.resume()
+                record_committed_seed_admission(summary)
+                return run, result
+            except EvolutionError:
+                raise
+            except Exception as exc:
+                raise EvolutionError("terminal_evolution_resume_failed") from exc
         if resume:
             self.store.recover_running(run.id)
         attempt = self.store.claim_task(evolution_task.id, f"evolution:{evolution_config.strategy}")
         if attempt is None:
             latest = self.store.get_run(run.id)
             if latest is not None and latest.status == RunStatus.CANCELLED:
-                return latest, strategy.resume()
+                try:
+                    require_terminal_strategy_state(latest)
+                    admitted_seeds, summary = adjudicate_initial_seeds()
+                    result = configured_strategy(admitted_seeds, summary).resume()
+                    record_committed_seed_admission(summary)
+                    return latest, result
+                except EvolutionError:
+                    raise
+                except Exception as exc:
+                    raise EvolutionError("terminal_evolution_resume_failed") from exc
             raise EvolutionError("evolution task is already claimed or not runnable")
         self.store.append_event(
             run.id,
@@ -347,7 +598,10 @@ class LocalController:
             task_id=evolution_task.id,
         )
         try:
+            admitted_seeds, summary = adjudicate_initial_seeds()
+            strategy = configured_strategy(admitted_seeds, summary)
             result = strategy.resume() if resume else strategy.run()
+            record_committed_seed_admission(summary)
             result_path = Path(run.workspace) / "evolution" / "result.json"
             result_path.write_text(
                 json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
@@ -403,6 +657,8 @@ class LocalController:
                             )
             for relative, kind in (
                 ("evolution/archive.jsonl", "evolution_archive"),
+                ("evolution/offspring-outcomes.jsonl", "evolution_offspring_outcomes"),
+                ("evolution/seed-commit.json", "evolution_seed_commit"),
                 ("evolution/state.json", "evolution_state"),
                 ("evolution/result.json", "result"),
             ):
@@ -412,6 +668,19 @@ class LocalController:
                     for item in self.store.list_artifacts(run.id)
                 ):
                     artifacts.record(path, evolution_task.id, kind=kind)
+            for filename, kind in (
+                ("record.json", "evolution_seed_record"),
+                ("receipt.json", "evolution_seed_receipt"),
+            ):
+                for path in sorted(execution_root.glob(f"seed-*/{filename}")):
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    relative = path.relative_to(Path(run.workspace)).as_posix()
+                    if not any(
+                        item["path"] == relative and item["kind"] == kind
+                        for item in self.store.list_artifacts(run.id)
+                    ):
+                        artifacts.record(path, evolution_task.id, kind=kind)
             self.store.append_event(
                 run.id,
                 "evolution_finished",

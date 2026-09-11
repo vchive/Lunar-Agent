@@ -16,12 +16,11 @@ from famou.evolution import (
     EvolutionConfig,
     EvolutionContext,
     ExecutionAwareCandidateEvaluator,
-    LoopStrategy,
     PopulationStrategy,
 )
 
 
-def _contract(strategy: str = "loop") -> AlgorithmProblemContract:
+def _contract(strategy: str = "population") -> AlgorithmProblemContract:
     return AlgorithmProblemContract.from_dict(
         {
             "schema_version": "1",
@@ -75,7 +74,7 @@ def _candidate(candidate_id: str = "candidate-0001") -> Candidate:
         parent_id=None,
         generation=0,
         iteration=1,
-        strategy="loop",
+        strategy="population",
         island_id=None,
         evaluation=_report(valid=0),
     )
@@ -168,13 +167,13 @@ def test_loop_repairs_candidate_from_persisted_execution_evidence(tmp_path: Path
         ContractCandidateRunner(root, (descriptor,), contract.outputs, timeout_seconds=2),
         evaluator,
     )
-    result = LoopStrategy(
+    result = PopulationStrategy(
         EvolutionContext(
             contract,
             root,
             generator,
             grounded,
-            EvolutionConfig(max_rounds=2, stagnation_rounds=10),
+                EvolutionConfig(max_rounds=1, stagnation_rounds=10, population_size=1),
         )
     ).run()
 

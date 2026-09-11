@@ -443,7 +443,7 @@ def _default_contract(goal: str) -> AlgorithmProblemContract:
             "success_criteria": ["Produce a reproducible solution and report its measured result."],
             "deliverables": ["algorithm source", "verification report"],
             "assumptions": ["Input schema, objective details, and hard constraints require user or data confirmation."],
-            "evolution": {"strategy": "loop", "max_rounds": 3, "stagnation_rounds": 2},
+            "evolution": {"strategy": "population", "max_rounds": 3, "stagnation_rounds": 2},
         }
     )
 

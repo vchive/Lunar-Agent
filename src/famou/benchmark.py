@@ -105,6 +105,16 @@ class BenchmarkConfig:
         if "openevolve" in normalized and not normalized_commands.get("openevolve"):
             raise BenchmarkError("openevolve strategy requires an explicit command")
         object.__setattr__(self, "strategy_commands", normalized_commands)
+        for name, fingerprint in (
+            ("generator_fingerprint", self.generator_fingerprint),
+            ("evaluator_fingerprint", self.evaluator_fingerprint),
+        ):
+            if fingerprint is not None and (
+                not isinstance(fingerprint, str) or not _SHA256.fullmatch(fingerprint)
+            ):
+                raise BenchmarkError(f"{name} must be a lowercase SHA-256 hex digest or null")
+        if "openevolve" in normalized and self.evaluator_fingerprint is None:
+            raise BenchmarkError("openevolve strategy requires a pinned local evaluator fingerprint")
         if self.runtime_profile is not None:
             if not isinstance(self.runtime_profile, dict):
                 raise BenchmarkError("runtime_profile must be an object or null")
@@ -160,15 +170,9 @@ class BenchmarkConfig:
                 rng_seed=self.rng_seed,
                 timeout_seconds=self.timeout_seconds,
                 command=normalized_commands.get(strategy, ()),
+                generator_fingerprint=self.generator_fingerprint,
+                evaluator_fingerprint=self.evaluator_fingerprint,
             )
-        for name, fingerprint in (
-            ("generator_fingerprint", self.generator_fingerprint),
-            ("evaluator_fingerprint", self.evaluator_fingerprint),
-        ):
-            if fingerprint is not None and (
-                not isinstance(fingerprint, str) or not _SHA256.fullmatch(fingerprint)
-            ):
-                raise BenchmarkError(f"{name} must be a lowercase SHA-256 hex digest or null")
 
     def evolution(self, strategy: str) -> EvolutionConfig:
         if strategy not in self.strategies:

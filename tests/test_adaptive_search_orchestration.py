@@ -10,7 +10,6 @@ from famou.evolution import (
     Candidate,
     EvolutionConfig,
     EvolutionContext,
-    LoopStrategy,
     PopulationStrategy,
 )
 
@@ -264,20 +263,20 @@ def test_directive_tag_policy_uses_verified_outcomes_and_is_bounded(tmp_path: Pa
 
 
 def test_loop_changes_repair_directive_to_refine_after_feasibility(tmp_path: Path) -> None:
-    root = tmp_path / "loop"
+    root = tmp_path / "population"
     (root / "evolution").mkdir(parents=True)
     (root / "evolution" / "contract.json").write_text(
         json.dumps(_contract().to_dict()), encoding="utf-8"
     )
     agent = DirectiveAgent()
     reports = iter((_report(0, valid=0), _report(1), _report(2)))
-    LoopStrategy(
+    PopulationStrategy(
         EvolutionContext(
             _contract(),
             root,
             AgentCandidateGenerator(agent, contract=_contract()),
             lambda path, contract: next(reports),
-            EvolutionConfig(max_rounds=3, stagnation_rounds=10),
+            EvolutionConfig(max_rounds=2, stagnation_rounds=10, population_size=1),
         )
     ).run()
 

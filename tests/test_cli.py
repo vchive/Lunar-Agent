@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shlex
 import sys
@@ -9,6 +10,7 @@ from typing import ClassVar, Self
 
 import pytest
 
+from famou.algorithm import AlgorithmProblemContract
 from famou.cli import (
     _adapter_fingerprint,
     _compiler_fingerprint,
@@ -210,6 +212,61 @@ def _write_evolution_commands(root: Path) -> tuple[Path, Path]:
     return generator, evaluator
 
 
+def _write_seed_manifest(
+    root: Path,
+    contract_path: Path,
+    evaluator_command: tuple[str, ...],
+    *,
+    dependency_sha256: str,
+    environment_sha256: str,
+) -> tuple[Path, Path]:
+    source = root / "imported-seed.py"
+    source.write_text("def solve():\n    return 9\n", encoding="utf-8")
+    contract = AlgorithmProblemContract.from_dict(
+        json.loads(contract_path.read_text(encoding="utf-8"))
+    )
+    evaluator_fingerprint = _adapter_fingerprint(
+        evaluator_command,
+        kind="objective-harness",
+        name="command-evaluator",
+        role="evaluator",
+    )
+    assert evaluator_fingerprint is not None
+    manifest = root / "seed-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "contract_sha256": contract.digest(),
+                "evaluator": {
+                    "kind": "exact_harness",
+                    "fingerprint": evaluator_fingerprint,
+                },
+                "dependency_sha256": dependency_sha256,
+                "environment_sha256": environment_sha256,
+                "seeds": [
+                    {
+                        "source_path": source.name,
+                        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                        "lineage": ["external-parent-1"],
+                        "provenance": {
+                            "origin_kind": "external",
+                            "producer_id": "openevolve-fixture",
+                            "producer_fingerprint": "a" * 64,
+                            "producer_run_id": "producer-run-1",
+                            "material_refs": ["candidate.py"],
+                            "external_evidence": {"external_score": 999.0},
+                        },
+                        "metadata": {"label": "fixture seed"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest, source
+
+
 def test_cli_run_and_status_use_repository_runtime(tmp_path: Path, capsys) -> None:
     assert main(["run", "cli goal", "--runtime", "mock", "--home", str(tmp_path)]) == 0
     output = capsys.readouterr().out
@@ -397,6 +454,314 @@ def test_cli_evolve_population_uses_sqlite_authority_and_resume_metadata(tmp_pat
     assert any(event["type"] == "evolution_started" for event in events)
     assert any(event["type"] == "evolution_iteration" for event in events)
     assert any(event["type"] == "evolution_finished" for event in events)
+
+
+def test_cli_evolve_admits_verified_seed_and_revalidates_it_on_resume(
+    tmp_path: Path, capsys
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    generator_command = (sys.executable, str(generator))
+    evaluator_command = (sys.executable, str(evaluator))
+    dependency_sha256 = "d" * 64
+    environment_sha256 = "e" * 64
+    manifest, source = _write_seed_manifest(
+        tmp_path,
+        contract_path,
+        evaluator_command,
+        dependency_sha256=dependency_sha256,
+        environment_sha256=environment_sha256,
+    )
+    home = tmp_path / "home"
+    arguments = [
+        "evolve",
+        str(contract_path),
+        "--seed-manifest",
+        str(manifest),
+        "--seed-dependency-sha256",
+        dependency_sha256,
+        "--seed-environment-sha256",
+        environment_sha256,
+        "--generator-command",
+        shlex.join(generator_command),
+        "--evaluator-command",
+        shlex.join(evaluator_command),
+        "--population-size",
+        "1",
+        "--json",
+        "--home",
+        str(home),
+    ]
+
+    assert main(arguments) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["best_score"] == 9.0
+    workspace = Path(payload["workspace"])
+    archive = [
+        json.loads(line)
+        for line in (workspace / "evolution" / "archive.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    seed = next(item for item in archive if item["candidate_id"].startswith("seed-"))
+    assert seed["iteration"] == seed["generation"] == 0
+    assert seed["metadata"]["seed_handoff"]["provenance"]["producer_id"] == (
+        "openevolve-fixture"
+    )
+    receipt = (
+        workspace
+        / seed["code_path"]
+    ).parent / "receipt.json"
+    assert receipt.is_file()
+    state = json.loads((workspace / "evolution" / "state.json").read_text(encoding="utf-8"))
+    assert [item["candidate_id"] for item in state["seed_admission"]["seeds"]] == [
+        seed["candidate_id"]
+    ]
+    events = Store(home / "state.db").list_events(payload["run_id"])
+    adjudicated = [
+        item for item in events if item["type"] == "seed_admission_adjudicated"
+    ]
+    committed = [item for item in events if item["type"] == "seed_admission_committed"]
+    assert len(adjudicated) == len(committed) == 1
+    assert adjudicated[0]["payload"] == committed[0]["payload"]
+    assert events.index(adjudicated[0]) < events.index(committed[0])
+    artifacts = Store(home / "state.db").list_artifacts(payload["run_id"])
+    artifact_evidence = {(item["path"], item["kind"]) for item in artifacts}
+    seed_root = f"evolution/candidates/{seed['candidate_id']}"
+    assert {
+        ("evolution/seed-commit.json", "evolution_seed_commit"),
+        ("evolution/offspring-outcomes.jsonl", "evolution_offspring_outcomes"),
+        (f"{seed_root}/record.json", "evolution_seed_record"),
+        (f"{seed_root}/receipt.json", "evolution_seed_receipt"),
+    } <= artifact_evidence
+
+    resume = [
+        *arguments[:1],
+        str(contract_path),
+        "--resume",
+        "--run-id",
+        payload["run_id"],
+        *arguments[2:],
+    ]
+    assert main(resume) == 0
+    assert json.loads(capsys.readouterr().out)["run_id"] == payload["run_id"]
+    repeated_events = Store(home / "state.db").list_events(payload["run_id"])
+    assert [
+        item
+        for item in repeated_events
+        if item["type"] in {"seed_admission_adjudicated", "seed_admission_committed"}
+    ] == [adjudicated[0], committed[0]]
+
+    source.write_text("def solve():\n    return 10\n", encoding="utf-8")
+    assert main(resume) == 2
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert "no_usable_seeds" in error or "source_digest_mismatch" in error
+
+
+def test_cli_seed_adjudication_summary_survives_later_strategy_failure(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    generator_command = (sys.executable, str(generator))
+    evaluator_command = (sys.executable, str(evaluator))
+    dependency_sha256 = "d" * 64
+    environment_sha256 = "e" * 64
+    manifest, _ = _write_seed_manifest(
+        tmp_path,
+        contract_path,
+        evaluator_command,
+        dependency_sha256=dependency_sha256,
+        environment_sha256=environment_sha256,
+    )
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    missing_seed = dict(manifest_payload["seeds"][0])
+    missing_seed.update(
+        {
+            "source_path": "private/credential-seed.py",
+            "source_sha256": "b" * 64,
+            "lineage": ["rejected-parent"],
+        }
+    )
+    manifest_payload["seeds"].append(missing_seed)
+    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    class FailingStrategy:
+        @staticmethod
+        def run():
+            raise RuntimeError("strategy failure containing private credential text")
+
+    monkeypatch.setattr("famou.controller.build_strategy", lambda context: FailingStrategy())
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--seed-manifest",
+                str(manifest),
+                "--seed-dependency-sha256",
+                dependency_sha256,
+                "--seed-environment-sha256",
+                environment_sha256,
+                "--generator-command",
+                shlex.join(generator_command),
+                "--evaluator-command",
+                shlex.join(evaluator_command),
+                "--population-size",
+                "1",
+                "--workspace",
+                str(workspace),
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 2
+    )
+    capsys.readouterr()
+
+    store = Store(home / "state.db")
+    run = store.get_run_by_workspace(workspace)
+    assert run is not None
+    events = store.list_events(run.id)
+    adjudicated = next(
+        item for item in events if item["type"] == "seed_admission_adjudicated"
+    )
+    failed = next(item for item in events if item["type"] == "evolution_failed")
+    assert events.index(adjudicated) < events.index(failed)
+    assert not any(item["type"] == "seed_admission_committed" for item in events)
+    summary = adjudicated["payload"]
+    assert set(summary) == {"schema_version", "admitted", "rejected"}
+    assert len(summary["admitted"]) == 1
+    assert set(summary["admitted"][0]) == {
+        "candidate_id",
+        "handoff_sha256",
+        "receipt_sha256",
+    }
+    assert len(summary["rejected"]) == 1
+    assert set(summary["rejected"][0]) == {"index", "identity", "code"}
+    assert summary["rejected"][0]["index"] == 1
+    assert summary["rejected"][0]["code"] == "source_missing"
+    persisted = json.dumps(summary, sort_keys=True)
+    assert "credential-seed.py" not in persisted
+    assert "strategy failure" not in persisted
+
+
+def test_cli_all_invalid_seed_event_uses_only_safe_fixed_fields(tmp_path: Path, capsys) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, _ = _write_evolution_commands(tmp_path)
+    evaluator = tmp_path / "failing-evaluator.py"
+    evaluator.write_text(
+        "raise RuntimeError('password=private-credential source=/private/input.py')\n",
+        encoding="utf-8",
+    )
+    evaluator_command = (sys.executable, str(evaluator))
+    dependency_sha256 = "d" * 64
+    environment_sha256 = "e" * 64
+    manifest, _ = _write_seed_manifest(
+        tmp_path,
+        contract_path,
+        evaluator_command,
+        dependency_sha256=dependency_sha256,
+        environment_sha256=environment_sha256,
+    )
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--seed-manifest",
+                str(manifest),
+                "--seed-dependency-sha256",
+                dependency_sha256,
+                "--seed-environment-sha256",
+                environment_sha256,
+                "--generator-command",
+                shlex.join((sys.executable, str(generator))),
+                "--evaluator-command",
+                shlex.join(evaluator_command),
+                "--population-size",
+                "1",
+                "--workspace",
+                str(workspace),
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 2
+    )
+    assert json.loads(capsys.readouterr().err)["error"] == "no_usable_seeds"
+
+    store = Store(home / "state.db")
+    run = store.get_run_by_workspace(workspace)
+    assert run is not None
+    events = store.list_events(run.id)
+    failed = next(item for item in events if item["type"] == "seed_admission_failed")
+    payload = failed["payload"]
+    assert set(payload) == {"schema_version", "code", "rejected"}
+    assert payload["code"] == "no_usable_seeds"
+    assert len(payload["rejected"]) == 1
+    assert set(payload["rejected"][0]) == {"index", "identity", "code"}
+    assert payload["rejected"][0]["code"] == "evaluator_failed"
+    persisted = json.dumps(payload, sort_keys=True)
+    assert "imported-seed.py" not in persisted
+    assert "private-credential" not in persisted
+    assert "/private/input.py" not in persisted
+
+
+def test_cli_seed_manifest_requires_explicit_exact_identity_options(
+    tmp_path: Path, capsys
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--seed-manifest",
+                str(manifest),
+                "--json",
+                "--home",
+                str(tmp_path / "missing-identities"),
+            ]
+        )
+        == 2
+    )
+    assert "seed-dependency-sha256" in json.loads(capsys.readouterr().err)["error"]
+
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--seed-manifest",
+                str(manifest),
+                "--seed-dependency-sha256",
+                "d" * 64,
+                "--seed-environment-sha256",
+                "e" * 64,
+                "--generator-command",
+                sys.executable,
+                "--json",
+                "--home",
+                str(tmp_path / "missing-evaluator"),
+            ]
+        )
+        == 2
+    )
+    assert "exact harness" in json.loads(capsys.readouterr().err)["error"]
 
 
 def test_cli_evolve_can_use_explicit_agent_as_candidate_generator(tmp_path: Path, capsys) -> None:
@@ -671,6 +1036,24 @@ def test_cli_evolve_rejects_single_evaluator_portfolio_and_openevolve_mix(
         == 2
     )
     assert "only supported" in json.loads(capsys.readouterr().err)["error"]
+
+    assert (
+        main(
+            [
+                "evolve",
+                str(openevolve_contract),
+                "--openevolve-command",
+                str(openevolve),
+                "--json",
+                "--home",
+                str(tmp_path / "openevolve-missing-evaluator-home"),
+            ]
+        )
+        == 2
+    )
+    assert "requires --evaluator-command" in json.loads(capsys.readouterr().err)[
+        "error"
+    ]
 
 
 def test_cli_evolve_uses_repository_runtime_for_solver_and_evaluator(tmp_path: Path, capsys) -> None:
@@ -1315,15 +1698,115 @@ def test_cli_evolve_openevolve_is_explicit_and_imports_canonical_result(tmp_path
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path, strategy="openevolve", max_rounds=1)
     external = tmp_path / "openevolve.py"
+    producer_count = tmp_path / "producer-count.txt"
     external.write_text(
         "import json, pathlib, sys\n"
         "config = json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
+        f"counter = pathlib.Path({str(producer_count)!r})\n"
+        "counter.write_text(str(int(counter.read_text()) + 1 if counter.exists() else 1))\n"
         "root = pathlib.Path.cwd()\n"
         "(root / 'candidate.py').write_text('def solve():\\n    return 7\\n')\n"
         "(root / 'result.json').write_text(json.dumps({'candidate_path':'candidate.py','evaluation':{'schema_version':'1','evaluator_id':'external','validity':1,'quality':0.7,'combined_score':0.7,'detailed_scores':{'quality':{'value':0.7,'direction':'maximize'}},'error_info':[]}}))\n",
         encoding="utf-8",
     )
     external.chmod(external.stat().st_mode | 0o100)
+    evaluator = tmp_path / "local-evaluator.py"
+    evaluator.write_text(
+        "import json, pathlib, sys\n"
+        "assert 'return 7' in pathlib.Path(sys.argv[1]).read_text()\n"
+        "print(json.dumps({'schema_version':'1','evaluator_id':'local-exact',"
+        "'validity':1,'quality':0.4,'combined_score':0.4,'detailed_scores':{},"
+        "'error_info':[]}))\n",
+        encoding="utf-8",
+    )
+    arguments = [
+        "evolve",
+        str(contract_path),
+        "--openevolve-command",
+        f"{sys.executable} {external}",
+        "--evaluator-command",
+        f"{sys.executable} {evaluator}",
+        "--json",
+        "--home",
+        str(tmp_path / "home"),
+    ]
+    assert main(arguments) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["strategy"] == "openevolve"
+    assert payload["best_score"] == 0.4
+    assert payload["run_status"] == "succeeded"
+    assert producer_count.read_text(encoding="utf-8") == "1"
+
+    evolution_root = Path(payload["workspace"]) / "evolution"
+    archive_path = evolution_root / "archive.jsonl"
+    archive_before_resume = archive_path.read_bytes()
+    archive = [json.loads(line) for line in archive_before_resume.decode().splitlines()]
+    assert len(archive) == 1
+    candidate = archive[0]
+    candidate_id = candidate["candidate_id"]
+    assert candidate_id.startswith("seed-")
+    assert candidate["strategy"] == "openevolve"
+    assert candidate["iteration"] == 1
+    assert candidate["evaluation"]["evaluator_id"] == "local-exact"
+    assert candidate["evaluation"]["combined_score"] == 0.4
+    candidate_root = evolution_root / "candidates" / candidate_id
+    receipt = json.loads((candidate_root / "receipt.json").read_text(encoding="utf-8"))
+    record = json.loads((candidate_root / "record.json").read_text(encoding="utf-8"))
+    state = json.loads((evolution_root / "state.json").read_text(encoding="utf-8"))
+    assert receipt["candidate_id"] == candidate_id
+    assert receipt["evaluator_kind"] == "exact_harness"
+    assert receipt["evaluator_id"] == "local-exact"
+    assert receipt["combined_score"] == 0.4
+    assert receipt["evaluator_fingerprint"] == state["config"]["evaluator_fingerprint"]
+    assert len(receipt["receipt_sha256"]) == 64
+    evidence = record["seed_handoff_evidence"]
+    assert evidence["provenance"]["producer_id"] == "openevolve"
+    assert evidence["provenance"]["origin_kind"] == "external"
+    assert evidence["external_evidence"]["present"] is True
+    assert evidence["external_evidence"]["score_present"] is True
+    assert len(evidence["external_evidence"]["payload_sha256"]) == 64
+
+    resume = [
+        "evolve",
+        str(contract_path),
+        "--resume",
+        "--run-id",
+        payload["run_id"],
+        *arguments[2:],
+    ]
+    assert main(resume) == 0
+    resumed = json.loads(capsys.readouterr().out)
+    assert resumed["run_id"] == payload["run_id"]
+    assert resumed["best_candidate_id"] == candidate_id
+    assert archive_path.read_bytes() == archive_before_resume
+    assert producer_count.read_text(encoding="utf-8") == "1"
+
+
+def test_cli_evolve_openevolve_local_failure_creates_no_candidate(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, strategy="openevolve", max_rounds=1)
+    external = tmp_path / "openevolve.py"
+    external.write_text(
+        "import json, pathlib, sys\n"
+        "config = json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
+        "root = pathlib.Path.cwd()\n"
+        "(root / 'candidate.py').write_text('def solve():\\n    return 99\\n')\n"
+        "(root / 'result.json').write_text(json.dumps({'candidate_path':'candidate.py',"
+        "'evaluation':{'validity':1,'combined_score':999}}))\n",
+        encoding="utf-8",
+    )
+    evaluator = tmp_path / "rejecting-evaluator.py"
+    evaluator.write_text(
+        "import json\n"
+        "print(json.dumps({'schema_version':'1','evaluator_id':'local-exact',"
+        "'validity':0,'quality':None,'combined_score':0,'detailed_scores':{},"
+        "'error_info':[{'code':'invalid','message':'locally rejected'}]}))\n",
+        encoding="utf-8",
+    )
+
     assert (
         main(
             [
@@ -1331,17 +1814,28 @@ def test_cli_evolve_openevolve_is_explicit_and_imports_canonical_result(tmp_path
                 str(contract_path),
                 "--openevolve-command",
                 f"{sys.executable} {external}",
+                "--evaluator-command",
+                f"{sys.executable} {evaluator}",
                 "--json",
                 "--home",
                 str(tmp_path / "home"),
             ]
         )
-        == 0
+        == 1
     )
     payload = json.loads(capsys.readouterr().out)
-    assert payload["strategy"] == "openevolve"
-    assert payload["best_score"] == 0.7
-    assert payload["run_status"] == "succeeded"
+    assert payload["status"] == "failed"
+    assert payload["run_status"] == "failed"
+    assert payload["evaluated_candidates"] == 0
+    assert payload["valid_candidates"] == 0
+    assert payload["best_candidate_id"] is None
+    assert payload["best_candidate_path"] is None
+    evolution_root = Path(payload["workspace"]) / "evolution"
+    state = json.loads((evolution_root / "state.json").read_text(encoding="utf-8"))
+    assert state["error"] == "openevolve_local_evaluation_failed"
+    archive_path = evolution_root / "archive.jsonl"
+    assert not archive_path.exists() or not archive_path.read_text(encoding="utf-8").strip()
+    assert not any((evolution_root / "candidates").iterdir())
 
 
 def test_cli_json_contract_and_stdin_goal(tmp_path: Path, capsys, monkeypatch) -> None:

@@ -304,7 +304,7 @@ def test_replan_updates_algorithm_contract_manifest_and_keeps_revision_audit(tmp
         ],
         "success_criteria": ["Every item is served."],
         "deliverables": ["Route table."],
-        "evolution": {"strategy": "loop", "max_rounds": 5, "stagnation_rounds": 3},
+        "evolution": {"strategy": "population", "max_rounds": 5, "stagnation_rounds": 3},
     }
     controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
     original = PlanDocument.from_dict(

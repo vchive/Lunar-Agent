@@ -42,7 +42,7 @@ def _contract() -> AlgorithmProblemContract:
                     "required": True,
                 }
             ],
-            "evolution": {"strategy": "loop", "max_rounds": 2, "stagnation_rounds": 3},
+            "evolution": {"strategy": "population", "max_rounds": 2, "stagnation_rounds": 3},
         }
     )
 
@@ -122,10 +122,12 @@ def test_conversational_evolution_executes_and_gates_each_native_candidate(
                 "--input",
                 str(orders),
                 "--evolve",
-                "--strategy",
-                "loop",
-                "--max-rounds",
-                "2",
+                    "--strategy",
+                    "population",
+                    "--max-rounds",
+                    "2",
+                    "--population-size",
+                    "1",
                 "--stagnation-rounds",
                 "3",
                 "--timeout",
@@ -144,10 +146,10 @@ def test_conversational_evolution_executes_and_gates_each_native_candidate(
         for line in (child / "evolution" / "archive.jsonl").read_text().splitlines()
     ]
 
-    assert [item["evaluation"]["validity"] for item in archive] == [0, 1]
+    assert [item["evaluation"]["validity"] for item in archive] == [0, 1, 1]
     assert archive[0]["evaluation"]["combined_score"] == 0
     assert payload["evolution"]["result"]["best_candidate_id"] == "candidate-0002"
-    assert len(runtime.evaluation_prompts) == 1
+    assert len(runtime.evaluation_prompts) == 2
     evaluator_context = runtime.evaluation_prompts[0]
     assert "candidate_source" in evaluator_context
     assert "execution" in evaluator_context
@@ -155,16 +157,16 @@ def test_conversational_evolution_executes_and_gates_each_native_candidate(
     assert "secret-order-42" not in evaluator_context
     assert "sk-must-not-reach-candidate" not in evaluator_context
 
-    for candidate_id in ("candidate-0001", "candidate-0002"):
+    for candidate_id in ("candidate-0001", "candidate-0002", "candidate-0003"):
         candidate_root = child / "evolution" / "candidates" / candidate_id
         assert (candidate_root / "execution.json").is_file()
         assert (candidate_root / "data" / "raw" / "orders.csv").read_bytes() == orders.read_bytes()
     generations = sorted((child / "evolution" / "agent" / "generations").iterdir())
-    assert len(generations) == 2
+    assert len(generations) == 3
     assert all((item / "data" / "raw" / "orders.csv").read_bytes() == orders.read_bytes() for item in generations)
 
     child_artifacts = Store(home / "state.db").list_artifacts(payload["evolution"]["run_id"])
-    assert sum(item["kind"] == "candidate_execution" for item in child_artifacts) == 2
+    assert sum(item["kind"] == "candidate_execution" for item in child_artifacts) == 3
     assert any(
         item["kind"] == "candidate_execution_output"
         and item["path"].endswith("candidate-0002/output/routes.csv")

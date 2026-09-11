@@ -41,7 +41,7 @@ def test_solve_evolve_links_completed_child_and_returns_best_candidate(tmp_path:
             "mock",
             "--evolve",
             "--strategy",
-            "loop",
+            "population",
             "--max-rounds",
             "2",
             "--json",

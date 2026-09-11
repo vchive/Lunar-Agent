@@ -273,6 +273,19 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument("--run-id", help="existing evolution run ID (required with --resume)")
     evolve_parser.add_argument("--detach", action="store_true", help="return an evolution run ID and execute in the background")
     evolve_parser.add_argument(
+        "--seed-manifest",
+        type=Path,
+        help="optional verified-seed manifest for population initialization",
+    )
+    evolve_parser.add_argument(
+        "--seed-dependency-sha256",
+        help="current dependency identity required with --seed-manifest",
+    )
+    evolve_parser.add_argument(
+        "--seed-environment-sha256",
+        help="current execution-environment identity required with --seed-manifest",
+    )
+    evolve_parser.add_argument(
         "--strategy",
         choices=("population", "openevolve"),
         help="override the contract strategy",
@@ -1606,8 +1619,6 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             raise ValueError("--compile-evaluator and --evaluator-command are mutually exclusive")
         if args.strategy == "openevolve" and args.compile_evaluator:
             raise ValueError("--compile-evaluator is supported only by native evolution strategies")
-        if args.strategy == "openevolve" and args.evaluator_command:
-            raise ValueError("--evaluator-command is supported only by native evolution strategies")
     controller = _controller(args, config)
     runtime = controller.runtime
     fingerprint = _compiler_fingerprint(runtime)
@@ -1902,10 +1913,12 @@ def _solve_evolution(
     if strategy_name == "openevolve":
         if compile_evaluator:
             raise ValueError("--compile-evaluator is supported only by native evolution strategies")
-        if evaluator_command:
-            raise ValueError("--evaluator-command is supported only by native evolution strategies")
         if not openevolve_command:
             raise ValueError("--evolve --strategy openevolve requires --openevolve-command")
+        if not evaluator_command:
+            raise ValueError(
+                "--evolve --strategy openevolve requires --evaluator-command for local verification"
+            )
         executable = Path(openevolve_command[0])
         if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
             raise ValueError("--openevolve-command must start with an existing absolute executable path")
@@ -1914,12 +1927,23 @@ def _solve_evolution(
             del request
             raise EvolutionError("openevolve does not use a native generator")
 
-        def evaluator(path, candidate_contract):
-            del path, candidate_contract
-            raise EvolutionError("OpenEvolve result must include evaluation")
-
+        evaluator = CommandCandidateEvaluator(
+            evaluator_command,
+            args.timeout,
+            environment={
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "PYTHONHASHSEED": "0",
+                "PYTHONIOENCODING": "utf-8",
+            },
+        )
         generator_fingerprint = None
-        evaluator_fingerprint = None
+        evaluator_fingerprint = _adapter_fingerprint(
+            evaluator_command,
+            kind="objective-harness",
+            name="command-evaluator",
+            role="evaluator",
+        )
     else:
         if openevolve_command:
             raise ValueError("--openevolve-command requires --evolve --strategy openevolve")
@@ -2334,6 +2358,26 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         raise ValueError(
             "loop evolution is retired for new runs; choose population or explicit openevolve"
         )
+    seed_identity_options = (
+        args.seed_dependency_sha256,
+        args.seed_environment_sha256,
+    )
+    if args.seed_manifest is None and any(seed_identity_options):
+        raise ValueError(
+            "--seed-dependency-sha256 and --seed-environment-sha256 require --seed-manifest"
+        )
+    if args.seed_manifest is not None:
+        if strategy_name != "population":
+            raise ValueError("--seed-manifest is supported only by the population strategy")
+        if not all(seed_identity_options):
+            raise ValueError(
+                "--seed-manifest requires --seed-dependency-sha256 and "
+                "--seed-environment-sha256"
+            )
+        if not args.evaluator_command:
+            raise ValueError(
+                "--seed-manifest requires --evaluator-command as the local exact harness"
+            )
     workspace = (existing_run.workspace if existing_run is not None else args.workspace)
     if workspace is None:
         if args.resume:
@@ -2435,7 +2479,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             or candidate_runner_command
         ):
             raise ValueError(
-                "native solver/evaluator and candidate runner commands are only supported by loop and population"
+                "native solver/evaluator and candidate runner commands are only supported by population"
             )
         command = openevolve_command
         if not command:
@@ -2444,18 +2488,17 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
             raise ValueError("--openevolve-command must start with an existing absolute executable path")
         evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
-        if evaluator_command:
-            evaluator_fingerprint = _adapter_fingerprint(
-                evaluator_command,
-                kind="evaluator",
-                name="command-evaluator",
-                role="evaluator",
+        if not evaluator_command:
+            raise ValueError(
+                "openevolve strategy requires --evaluator-command for local verification"
             )
-            evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
-        else:
-            def evaluator(path, contract):
-                del path, contract
-                raise EvolutionError("OpenEvolve result must include evaluation or --evaluator-command")
+        evaluator_fingerprint = _adapter_fingerprint(
+            evaluator_command,
+            kind="objective-harness",
+            name="command-evaluator",
+            role="evaluator",
+        )
+        evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
 
         def generator(request):
             del request
@@ -2487,7 +2530,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             )
         if not evaluator_explicit and not agent_runtime:
             raise ValueError(
-                "loop and population require --evaluator-command or "
+                "population requires --evaluator-command or "
                 "--evaluator-agent-command or --evaluator-portfolio-command plus "
                 "--generator-command, --agent-command, or "
                 "at least two --agent-portfolio-command options"
@@ -2549,6 +2592,13 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 role=args.evaluator_agent_role,
                 required_capabilities=tuple(args.evaluator_agent_capabilities),
             )
+        elif evaluator_command:
+            evaluator_fingerprint = _adapter_fingerprint(
+                evaluator_command,
+                kind="objective-harness" if args.seed_manifest is not None else "evaluator",
+                name="command-evaluator",
+                role="evaluator",
+            )
         elif agent_runtime:
             evaluator_fingerprint = _runtime_fingerprint(
                 agent_runtime,
@@ -2563,13 +2613,6 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 loop_allow_exec=args.agent_runtime_allow_exec,
                 loop_memory=args.agent_runtime_memory,
                 loop_session_history=args.agent_runtime_session_history,
-            )
-        else:
-            evaluator_fingerprint = _adapter_fingerprint(
-                evaluator_command,
-                kind="evaluator",
-                name="command-evaluator",
-                role="evaluator",
             )
         if agent_command:
             declared = {*DEFAULT_RUNTIME_CAPABILITIES, *args.agent_capabilities}
@@ -2664,6 +2707,8 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 required_capabilities=tuple(args.evaluator_agent_capabilities),
                 timeout=args.timeout,
             )
+        elif evaluator_command:
+            evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
         elif agent_runtime:
             runtime = _build_evolution_runtime(
                 config,
@@ -2692,7 +2737,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 timeout=args.timeout,
             )
         else:
-            evaluator = CommandCandidateEvaluator(evaluator_command, args.timeout)
+            raise ValueError("population evolution has no evaluator")
         if candidate_runner_command:
             evaluator = ExecutionAwareCandidateEvaluator(
                 CommandCandidateRunner(candidate_runner_command, args.timeout), evaluator
@@ -2740,6 +2785,9 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         evaluator,
         evolution_config,
         resume=args.resume,
+        seed_manifest=args.seed_manifest,
+        seed_dependency_sha256=args.seed_dependency_sha256,
+        seed_environment_sha256=args.seed_environment_sha256,
     )
     return {
         **result.to_dict(),
@@ -3317,6 +3365,12 @@ def _detach_evolution(
     ]
     if args.strategy:
         command.extend(("--strategy", args.strategy))
+    if args.seed_manifest is not None:
+        command.extend(("--seed-manifest", str(args.seed_manifest.expanduser().absolute())))
+    if args.seed_dependency_sha256 is not None:
+        command.extend(("--seed-dependency-sha256", args.seed_dependency_sha256))
+    if args.seed_environment_sha256 is not None:
+        command.extend(("--seed-environment-sha256", args.seed_environment_sha256))
     if args.generator_command:
         command.extend(("--generator-command", args.generator_command))
     if args.agent_command:

@@ -1,8 +1,10 @@
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from famou import OffspringOutcome as PublicOffspringOutcome
 from famou.agent_evolution import (
     AgentCandidateEvaluator,
     AgentCandidateGenerator,
@@ -16,17 +18,18 @@ from famou.config import Config
 from famou.controller import LocalController
 from famou.evolution import (
     Candidate,
+    CandidateDraft,
     EvolutionConfig,
     EvolutionContext,
     EvolutionError,
-    LoopStrategy,
+    OffspringOutcome,
     PopulationStrategy,
 )
 from famou.runtime import MockRuntime, ModelTurn, ToolCall
 from famou.tools import LocalToolRegistry
 
 
-def _contract(strategy: str = "loop") -> AlgorithmProblemContract:
+def _contract(strategy: str = "population") -> AlgorithmProblemContract:
     return AlgorithmProblemContract.from_dict(
         {
             "schema_version": "1",
@@ -49,6 +52,10 @@ def _contract(strategy: str = "loop") -> AlgorithmProblemContract:
             "evolution": {"strategy": strategy, "max_rounds": 2, "stagnation_rounds": 10},
         }
     )
+
+
+def test_package_root_exports_offspring_outcome() -> None:
+    assert PublicOffspringOutcome is OffspringOutcome
 
 
 class FixtureAgent:
@@ -196,10 +203,13 @@ def test_agent_generator_injects_bounded_context_and_returns_draft(tmp_path: Pat
     (root / "evolution" / "contract.json").write_text(json.dumps(contract.to_dict()), encoding="utf-8")
     agent = FixtureAgent()
     generator = AgentCandidateGenerator(agent, contract=contract, required_capabilities=("read_files",))
-    context = EvolutionContext(contract, root, generator, _report, EvolutionConfig(max_rounds=1))
-    result = LoopStrategy(context).run()
+    context = EvolutionContext(
+        contract, root, generator, _report,
+        EvolutionConfig(max_rounds=1, population_size=1),
+    )
+    result = PopulationStrategy(context).run()
     assert result.best_candidate_id == "candidate-0001"
-    assert len(agent.requests) == 1
+    assert len(agent.requests) == 2
     assert "Improve a route" in agent.requests[0].prompt
     assert agent.requests[0].workspace.is_dir()
     assert (root / "evolution" / "candidates" / "candidate-0001" / "candidate.py").is_file()
@@ -213,13 +223,13 @@ def test_agent_evolution_indexes_declared_transcript_through_observer(tmp_path: 
     agent = EvidenceFixtureAgent()
     generator = AgentCandidateGenerator(agent, contract=contract)
     observed: list[tuple[str, dict[str, object]]] = []
-    result = LoopStrategy(
+    result = PopulationStrategy(
         EvolutionContext(
             contract,
             root,
             generator,
             _report,
-            EvolutionConfig(max_rounds=1),
+            EvolutionConfig(max_rounds=1, population_size=1),
             observe=lambda event, payload: observed.append((event, payload)),
         )
     ).run()
@@ -329,9 +339,9 @@ def test_agent_generator_receives_verified_evaluation_feedback(tmp_path: Path) -
 
     context = EvolutionContext(
         contract, root, AgentCandidateGenerator(agent, contract=contract), evaluate,
-        EvolutionConfig(max_rounds=2, stagnation_rounds=10),
+        EvolutionConfig(max_rounds=1, stagnation_rounds=10, population_size=1),
     )
-    result = LoopStrategy(context).run()
+    result = PopulationStrategy(context).run()
     assert result.best_candidate_id == "candidate-0002"
     assert len(agent.requests) == 2
     assert "constraint_violation" in agent.requests[1].prompt
@@ -490,7 +500,7 @@ def test_agent_generation_feedback_is_bounded_and_hides_evaluation_errors(tmp_pa
         parent_id=None,
         generation=0,
         iteration=1,
-        strategy="loop",
+        strategy="population",
         island_id=None,
         evaluation=report,
         metadata={},
@@ -560,6 +570,7 @@ def test_controller_indexes_runtime_agent_evidence_and_redacts_transcript(tmp_pa
                 (ToolCall("1", "write_file", {"path": "solver-trace.txt", "content": "api-secret"}),),
             ),
             ModelTurn(json.dumps({"source": "def solve():\n    return 1\n"}), ()),
+            ModelTurn(json.dumps({"source": "def solve():\n    return 2\n"}), ()),
         ]
     )
     evaluator_model = EventModel(
@@ -577,7 +588,21 @@ def test_controller_indexes_runtime_agent_evidence_and_redacts_transcript(tmp_pa
                     }
                 ),
                 (),
-            )
+            ),
+            ModelTurn(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "evaluator_id": "runtime-fixture",
+                        "validity": 1,
+                        "quality": 1,
+                        "combined_score": 1,
+                        "detailed_scores": {},
+                        "error_info": [],
+                    }
+                ),
+                (),
+            ),
         ]
     )
     generator = AgentCandidateGenerator(
@@ -605,13 +630,13 @@ def test_controller_indexes_runtime_agent_evidence_and_redacts_transcript(tmp_pa
         contract,
         generator,
         evaluator,
-        EvolutionConfig(max_rounds=1),
+        EvolutionConfig(max_rounds=1, population_size=1),
     )
     assert settled.status.value == "succeeded"
     assert result.best_candidate_id == "candidate-0001"
     artifacts = controller.store.list_artifacts(run.id)
     transcripts = [item for item in artifacts if item["kind"] == "evolution_agent_transcript"]
-    assert len(transcripts) == 2
+    assert len(transcripts) == 4
     assert all(item["path"].startswith("evolution/") for item in transcripts)
     event_types = [item["type"] for item in controller.store.list_events(run.id)]
     assert "evolution_agent_artifact" in event_types
@@ -622,6 +647,214 @@ def test_controller_indexes_runtime_agent_evidence_and_redacts_transcript(tmp_pa
     )
     assert "api-secret" not in transcript_text
     assert "api-secret" not in str(controller.store.list_events(run.id))
+
+
+def test_controller_rejects_new_legacy_loop_run_before_workspace_creation(
+    tmp_path: Path,
+) -> None:
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    workspace = tmp_path / "retired-loop"
+
+    with pytest.raises(EvolutionError, match="loop_strategy_retired"):
+        controller.create_evolution_run(_contract("loop"), workspace=workspace)
+
+    assert not workspace.exists()
+    assert controller.store.get_run_by_workspace(workspace) is None
+
+
+def test_controller_records_one_deterministic_failure_event_for_malformed_seed_manifest(
+    tmp_path: Path,
+) -> None:
+    contract = _contract()
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
+    config = EvolutionConfig(
+        max_rounds=1,
+        population_size=1,
+        evaluator_fingerprint="e" * 64,
+    )
+    generated: list[object] = []
+    evaluated: list[Path] = []
+
+    def generate(request):
+        generated.append(request)
+        return CandidateDraft("def solve():\n    return 1\n")
+
+    def evaluate(path: Path, supplied_contract: AlgorithmProblemContract):
+        evaluated.append(path)
+        return _report(path, supplied_contract)
+
+    def invoke() -> None:
+        controller.run_evolution(
+            run.id,
+            contract,
+            generate,
+            evaluate,
+            config,
+            seed_manifest={},
+            seed_dependency_sha256="d" * 64,
+            seed_environment_sha256="f" * 64,
+        )
+
+    with pytest.raises(EvolutionError, match="missing_field"):
+        invoke()
+
+    failures = [
+        event
+        for event in controller.store.list_events(run.id)
+        if event["type"] == "seed_admission_failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0]["payload"] == {
+        "schema_version": "1",
+        "code": "missing_field",
+        "rejected": [],
+    }
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            {"run_id": run.id, "failure": failures[0]["payload"]},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    assert failures[0]["id"] == f"event-seed-admission-failed-{expected_digest}"
+    settled = controller.store.get_run(run.id)
+    assert settled is not None and settled.status.value == "failed"
+    assert controller.store.list_tasks(run.id)[0].state.value == "failed"
+    assert generated == []
+    assert evaluated == []
+    evolution_root = Path(run.workspace) / "evolution"
+    assert sorted(path.name for path in evolution_root.iterdir()) == ["contract.json"]
+
+    with pytest.raises(EvolutionError, match="^terminal_evolution_state_missing$"):
+        invoke()
+    repeated = [
+        event
+        for event in controller.store.list_events(run.id)
+        if event["type"] == "seed_admission_failed"
+    ]
+    assert repeated == failures
+    assert generated == []
+    assert evaluated == []
+
+    with pytest.raises(EvolutionError, match="^terminal_evolution_state_missing$"):
+        controller.run_evolution(run.id, contract, generate, evaluate, config)
+    assert sorted(path.name for path in evolution_root.iterdir()) == ["contract.json"]
+    assert generated == []
+    assert evaluated == []
+
+
+def test_controller_cancelled_before_start_cannot_create_evolution_state(
+    tmp_path: Path,
+) -> None:
+    contract = _contract()
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
+    assert controller.cancel(run.id)
+    generated: list[object] = []
+
+    with pytest.raises(EvolutionError, match="^terminal_evolution_state_missing$"):
+        controller.run_evolution(
+            run.id,
+            contract,
+            lambda request: generated.append(request),
+            _report,
+            EvolutionConfig(max_rounds=1, population_size=1),
+        )
+
+    assert generated == []
+    evolution_root = Path(run.workspace) / "evolution"
+    assert sorted(path.name for path in evolution_root.iterdir()) == ["contract.json"]
+
+
+def test_controller_rejects_seed_identity_flags_without_manifest_before_claim(
+    tmp_path: Path,
+) -> None:
+    contract = _contract()
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
+
+    with pytest.raises(EvolutionError, match="^seed_manifest_required_for_seed_identity$"):
+        controller.run_evolution(
+            run.id,
+            contract,
+            lambda request: pytest.fail("orphan seed flags invoked generator"),
+            lambda path, supplied: pytest.fail("orphan seed flags invoked evaluator"),
+            EvolutionConfig(max_rounds=1, population_size=1),
+            seed_dependency_sha256="d" * 64,
+        )
+
+    task = controller.store.list_tasks(run.id)[0]
+    assert task.attempts == 0
+    assert task.state.value == "ready"
+    assert not any(
+        event["type"] == "evolution_started"
+        for event in controller.store.list_events(run.id)
+    )
+
+
+def test_controller_terminal_resume_wraps_unexpected_strategy_exception(
+    tmp_path: Path, monkeypatch
+) -> None:
+    contract = _contract()
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
+    config = EvolutionConfig(max_rounds=1, population_size=1)
+    settled, _ = controller.run_evolution(
+        run.id,
+        contract,
+        lambda request: CandidateDraft(
+            f"def solve():\n    return {request.iteration + 1}\n"
+        ),
+        _report,
+        config,
+    )
+    assert settled.status.value == "succeeded"
+    evolution_root = Path(run.workspace) / "evolution"
+    before = {
+        path.relative_to(evolution_root).as_posix(): path.read_bytes()
+        for path in evolution_root.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(
+        EvolutionError, match="^terminal_evolution_seed_manifest_mismatch$"
+    ):
+        controller.run_evolution(
+            run.id,
+            contract,
+            lambda request: pytest.fail("terminal seed change invoked generator"),
+            lambda path, supplied: pytest.fail("terminal seed change invoked evaluator"),
+            config,
+            seed_manifest={},
+            seed_dependency_sha256="d" * 64,
+            seed_environment_sha256="f" * 64,
+        )
+
+    class BrokenResumeStrategy:
+        @staticmethod
+        def resume():
+            raise RuntimeError("private terminal exception")
+
+    monkeypatch.setattr(
+        "famou.controller.build_strategy", lambda context: BrokenResumeStrategy()
+    )
+    with pytest.raises(EvolutionError, match="^terminal_evolution_resume_failed$"):
+        controller.run_evolution(
+            run.id,
+            contract,
+            lambda request: pytest.fail("terminal resume generated a candidate"),
+            lambda path, supplied: pytest.fail("terminal resume evaluated a candidate"),
+            config,
+        )
+
+    after = {
+        path.relative_to(evolution_root).as_posix(): path.read_bytes()
+        for path in evolution_root.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
 
 
 def test_agent_evaluator_rejects_malformed_or_failed_reports(tmp_path: Path) -> None:

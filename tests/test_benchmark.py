@@ -99,7 +99,7 @@ def test_benchmark_records_population_strategy_failure(tmp_path: Path) -> None:
     ).run()
 
     assert report.runs[0].status == "failed"
-    assert "fixture generator failed" in (report.runs[0].error or "")
+    assert report.runs[0].error == "offspring_batch_failed"
     assert report.runs[0].best_score is None
 
 
@@ -125,6 +125,7 @@ def test_benchmark_includes_explicit_openevolve_adapter(tmp_path: Path) -> None:
             strategies=("population", "openevolve"),
             max_rounds=2,
             population_size=2,
+            evaluator_fingerprint="e" * 64,
             strategy_commands={"openevolve": command},
         ),
     ).run()
@@ -132,19 +133,38 @@ def test_benchmark_includes_explicit_openevolve_adapter(tmp_path: Path) -> None:
     assert [item.status for item in report.runs] == ["completed", "completed"]
     assert report.runs[1].best_score == 9.0
     assert report.config.to_dict()["strategy_commands_sha256"]["openevolve"]
-    config = json.loads(
-        (
-            tmp_path
-            / "benchmark"
-            / "strategies"
-            / "openevolve"
-            / "evolution"
-            / "external"
-            / "openevolve"
-            / "config.json"
-        ).read_text(encoding="utf-8")
+    evolution_root = (
+        tmp_path / "benchmark" / "strategies" / "openevolve" / "evolution"
     )
-    assert config["budget"]["population_size"] == 2
+    archive = [
+        json.loads(line)
+        for line in (evolution_root / "archive.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(archive) == 1
+    candidate = archive[0]
+    assert candidate["candidate_id"].startswith("seed-")
+    assert candidate["strategy"] == "openevolve"
+    assert candidate["evaluation"]["evaluator_id"] == "benchmark-fixture"
+    assert candidate["evaluation"]["combined_score"] == 9.0
+    candidate_root = evolution_root / "candidates" / candidate["candidate_id"]
+    receipt = json.loads((candidate_root / "receipt.json").read_text(encoding="utf-8"))
+    record = json.loads((candidate_root / "record.json").read_text(encoding="utf-8"))
+    assert receipt["evaluator_kind"] == "exact_harness"
+    assert receipt["evaluator_fingerprint"] == "e" * 64
+    assert receipt["combined_score"] == 9.0
+    assert len(receipt["receipt_sha256"]) == 64
+    evidence = record["seed_handoff_evidence"]
+    assert evidence["provenance"]["origin_kind"] == "external"
+    assert evidence["provenance"]["producer_id"] == "openevolve"
+    assert evidence["external_evidence"] == {
+        "payload_sha256": None,
+        "present": False,
+        "score_present": False,
+    }
+    assert len(evidence["provenance_sha256"]) == 64
+    assert not (evolution_root / "external").exists()
     assert str(wrapper) not in json.dumps(report.to_dict())
 
 
@@ -158,6 +178,7 @@ def test_benchmark_keeps_native_results_when_openevolve_command_fails(tmp_path: 
             strategies=("openevolve",),
             max_rounds=1,
             population_size=2,
+            evaluator_fingerprint="e" * 64,
             strategy_commands={"openevolve": (str(tmp_path / "missing-openevolve"),)},
         ),
     ).run()
@@ -173,6 +194,11 @@ def test_benchmark_rejects_invalid_selection_and_existing_workspace(tmp_path: Pa
         BenchmarkConfig(strategies=("invalid",))
     with pytest.raises(BenchmarkError, match="retired"):
         BenchmarkConfig(strategies=("loop",))
+    with pytest.raises(BenchmarkError, match="pinned local evaluator fingerprint"):
+        BenchmarkConfig(
+            strategies=("openevolve",),
+            strategy_commands={"openevolve": (sys.executable, "wrapper.py")},
+        )
     historical = BenchmarkRun(
         strategy="loop",
         status="completed",

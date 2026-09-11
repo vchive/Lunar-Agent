@@ -34,7 +34,7 @@ def _contract() -> AlgorithmProblemContract:
                     "required": True,
                 }
             ],
-            "evolution": {"strategy": "loop", "max_rounds": 2, "stagnation_rounds": 3},
+            "evolution": {"strategy": "population", "max_rounds": 2, "stagnation_rounds": 3},
         }
     )
 
@@ -157,8 +157,10 @@ def test_solve_evolve_uses_exact_harness_and_materializes_its_winner(
                 "--input",
                 str(orders),
                 "--evolve",
-                "--max-rounds",
-                "2",
+                    "--max-rounds",
+                    "2",
+                    "--population-size",
+                    "1",
                 "--stagnation-rounds",
                 "3",
                 "--evaluator-command",
@@ -180,7 +182,7 @@ def test_solve_evolve_uses_exact_harness_and_materializes_its_winner(
     ]
 
     assert runtime.evaluation_calls == 0
-    assert [item["evaluation"]["combined_score"] for item in archive] == [1 / 91, 1 / 11]
+    assert [item["evaluation"]["combined_score"] for item in archive] == [1 / 91, 1 / 11, 1 / 11]
     assert payload["evolution"]["result"]["best_candidate_id"] == "candidate-0002"
     assert (Path(payload["workspace"]) / "output" / "routes.csv").read_text().endswith(
         "secret-order-42,route-a,10\n"
@@ -223,7 +225,7 @@ def test_solve_evolve_uses_exact_harness_and_materializes_its_winner(
     assert resumed["evolution"]["run_id"] == payload["evolution"]["run_id"]
 
 
-def test_harness_configuration_requires_native_evolution_and_matching_resume(
+def test_harness_configuration_requires_evolution_and_matching_resume(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = HarnessRuntime()
@@ -263,7 +265,7 @@ def test_harness_configuration_requires_native_evolution_and_matching_resume(
             str(home),
         ]
     ) == 2
-    assert "native" in capsys.readouterr().err
+    assert "requires --openevolve-command" in capsys.readouterr().err
 
     orders = tmp_path / "orders.csv"
     orders.write_text("id\nsecret-order-42\n", encoding="utf-8")
