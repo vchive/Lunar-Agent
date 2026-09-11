@@ -6,6 +6,12 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## 0. 当前续作：Feature 084（草案）
+
+已找到并离线审查本地 `famou-v2` 仓库（`/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-v2`）及 WebAgent 2.5 分支。审查结论是：famou-v2 的深度演化通过远端实验控制面运行；其 `initial_programs` 必须经过本地 evaluator enrichment/可行性门槛，有效 rollout 才推进正式 iteration。WebAgent 的 `evolve_create/status/sync/continue/cancel` 是服务委托，不是 Lunar staged Build 的本地 runtime。
+
+Feature 084 草案已写入 `specs/084-verified-seed-handoff/`，目标是先实现本地 verified seed adapter、身份/lineage/provenance/evaluator receipt 和恢复校验，再定义显式但暂不联网的 famou-v2 backend protocol。远端分数只能作为 provenance，必须经 Lunar 本地 exact harness 重验后才可进入 population。084 不启动模型、WebAgent、provider、公司评测、真实 famou-v2 服务或新 campaign，也不改变 074/076/078/082 封存文件。审查证据见 `docs/famou-v2-engine-review-20260911.md`、`docs/webagent-v25-branch-audit-20260911.md` 和 `docs/webagent-v25-evolve-service-audit-20260911.md`。
+
 ## 1. 当前状态
 
 083已完成可选主机执行保护，`.specify`指向083。新增公开Python接口
