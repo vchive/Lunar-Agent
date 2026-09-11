@@ -1,0 +1,34 @@
+{
+  "schema_version": "1",
+  "kind": "feature083_native_scope_smoke",
+  "completed_utc": "2026-09-11T07:36:32.523273+00:00",
+  "owner_pid": 14017,
+  "source_sha256": {
+    "src/famou/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
+    "src/famou/host_session.py": "db63d52cfcab8200c7c895e60a391abe65038daee88e481842a520bb703abc95",
+    "src/famou/cli.py": "5fb5c723b99428868d0940661397fe7f6765998f89448374b6263e7afcbd8298",
+    "specs/083-host-execution-guard/validation/native-scope-smoke.py": "e1c3fe78491201f928ebc8294423b7865d05fe1f1df1f180a2d2eea8a8af159a"
+  },
+  "scopes": [
+    {
+      "journal": "returned.jsonl",
+      "sha256": "50d29f2ddc8c54afbf0d97a3c5ab40f906bc6297b42b3d4a0409a217e251e24b",
+      "work_outcome": "returned",
+      "scope_cleanup_completed": true,
+      "queried_after_release_absent": true
+    },
+    {
+      "journal": "raised.jsonl",
+      "sha256": "9108c56c0a32c76ed2075587479ed2ee69103fdb3aa219421d43a6eec78b21a3",
+      "work_outcome": "raised",
+      "scope_cleanup_completed": true,
+      "queried_after_release_absent": true
+    }
+  ],
+  "passed": true,
+  "model_calls": 0,
+  "network_calls": 0,
+  "system_sleep_requested": false,
+  "permanent_settings_changed": false,
+  "limitations": "Local point-in-time assertion and public-scope cleanup evidence only."
+}

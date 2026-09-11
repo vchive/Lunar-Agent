@@ -9,7 +9,9 @@ import os
 import shlex
 import subprocess
 import sys
+import unicodedata
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -478,6 +480,10 @@ def build_parser() -> argparse.ArgumentParser:
     effect_parser.add_argument("--timeout", type=float, default=3600.0)
     effect_parser.add_argument("--workspace", type=Path, required=True, help="trial workspace")
     effect_parser.add_argument(
+        "--keep-awake-report", type=Path,
+        help="require macOS idle-sleep protection; fresh JSONL outside workspace and case sources",
+    )
+    effect_parser.add_argument(
         "--subject-env",
         action="append",
         default=[],
@@ -582,6 +588,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     deep_effect_parser.add_argument("--timeout", type=float, default=3600.0)
     deep_effect_parser.add_argument("--workspace", type=Path, required=True, help="trial workspace")
+    deep_effect_parser.add_argument(
+        "--keep-awake-report", type=Path,
+        help="require macOS idle-sleep protection; fresh JSONL outside workspace and case sources",
+    )
     deep_effect_parser.add_argument(
         "--subject-env",
         action="append",
@@ -2948,6 +2958,67 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     return {**report.to_dict(), "status": status, "workspace": str(workspace)}
 
 
+def _effect_report_is_inside(report: Path, root: Path) -> bool:
+    """Compare existing directory identities, including macOS name aliases.
+
+    Missing root components have no identity yet. Compare their names conservatively across
+    case and Unicode normalization so creating the workspace cannot absorb the sidecar later.
+    """
+    anchor = root
+    while True:
+        try:
+            identity = anchor.stat()
+            break
+        except FileNotFoundError:
+            if anchor == anchor.parent:
+                raise ValueError("host execution report location could not be validated") from None
+            anchor = anchor.parent
+    missing = root.relative_to(anchor).parts
+    for ancestor in (report, *report.parents):
+        try:
+            candidate = ancestor.stat()
+        except FileNotFoundError:
+            continue
+        if (candidate.st_dev, candidate.st_ino) != (identity.st_dev, identity.st_ino):
+            continue
+        tail = report.relative_to(ancestor).parts
+        normalize = lambda value: unicodedata.normalize("NFD", value).casefold()
+        return len(tail) >= len(missing) and all(
+            normalize(left) == normalize(right) for left, right in zip(missing, tail)
+        )
+    return False
+
+
+def _effect_host_scope(
+    args: argparse.Namespace,
+    operation: Callable[[argparse.Namespace], dict[str, object]],
+) -> dict[str, object]:
+    report = getattr(args, "keep_awake_report", None)
+    if report is None:
+        return operation(args)
+
+    sources = _effect_mapping(args.case_source, "--case-source")
+    try:
+        report = report.expanduser()
+        resolved_report = report.resolve()
+        workspace = args.workspace.expanduser().resolve()
+        source_roots = [path.expanduser().resolve() for path in sources.values()]
+        in_workspace = _effect_report_is_inside(resolved_report, workspace)
+        in_source = any(_effect_report_is_inside(resolved_report, source) for source in source_roots)
+    except (OSError, RuntimeError, ValueError):
+        raise ValueError("host execution report location could not be validated") from None
+    if in_workspace:
+        raise ValueError("host execution report must be outside the trial workspace")
+    if in_source:
+        raise ValueError("host execution report must be outside case sources")
+
+    from .host_session import host_execution
+
+    # Preserve the supplied path so the scope can reject symlink components itself.
+    with host_execution(report):
+        return operation(args)
+
+
 def _effect_trial(args: argparse.Namespace) -> dict[str, object]:
     profile = _load_model_profile(getattr(args, "model_profile", None))
     if profile is not None and profile.model != args.requested_model:
@@ -3458,7 +3529,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "effect-trial":
-            payload = _effect_trial(args)
+            payload = _effect_host_scope(args, _effect_trial)
             _emit(payload, args.json)
             return 0
         if args.command == "effect-preflight":
@@ -3466,7 +3537,7 @@ def main(argv: list[str] | None = None) -> int:
             _emit(payload, args.json)
             return 0
         if args.command == "effect-deep-trial":
-            payload = _effect_deep_trial(args)
+            payload = _effect_host_scope(args, _effect_deep_trial)
             _emit(payload, args.json)
             return 0
         if args.command == "effect-kit":

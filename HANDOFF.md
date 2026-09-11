@@ -8,6 +8,29 @@
 
 ## 1. 当前状态
 
+083已完成可选主机执行保护，`.specify`指向083。新增公开Python接口
+`host_execution(report_path)`，普通/深度trial CLI增加`--keep-awake-report PATH`；默认
+路径和原生结果不变。macOS进程持有PreventUserIdleSystemSleep断言，派发前同步查询
+验收并fsync日志及父目录，结束时查询/释放；单次scope覆盖配置/凭据读取及原trial调用。
+日志必须新建且位于workspace及case-source之外，拒绝symlink、覆盖、文件篡改和目录
+别名绕过；跨PID拒绝，并发单次状态受锁保护。取消/写入/释放失败均保留原业务异常，
+FD关闭结果不确定时不盲目重试旧编号。日志分别记acquisition/release/work状态与墙钟、
+monotonic原始采样及有符号区间，不保存凭据、候选、评分或异常文本。
+
+新增163项、相关222项（5.21秒）、独立163项（0.24秒）通过。主仓首次全量发现一项
+082测试依赖当前38源码文件的陈旧假设，已改为从082固定Git blobs构造临时副本，保留
+缺失HTTP helper拒绝检查；该模块54项root/独立均通过。最终主仓1982项全量通过
+（60.95秒），全src/tests Ruff、Specify、diff通过。两个本机native scope正常/异常路径
+以及普通os._exit(0)局部退出清理验证通过，证据见083 validation；不泛化为真实睡眠或
+所有崩溃模式保证。074/076/078/082各68/105/205/217份Git封存文件未变，未跑旧
+live-source审计、WebAgent、provider探测、候选补评或新campaign。
+
+目标仍是GLM-5.2分阶段Master→Build完整交付并通过原生harness。083只解决主机策略
+和观察证据，不证明有效解率改善，不阻止合盖/手动/低电睡眠，不改变原有timeout或预算。
+后续优先单独定义单次请求时限与有限传输恢复，明确共享期限、物理尝试和未知usage
+边界，再以新登记实评验证；不重开082/078旧槽。082维持有效0/2，普通流程历史2/2
+只作背景，旧失败分数/完整usage/cost仍null。以下082及更早记录保留为历史。
+
 082已完成终局核验与封存：2026-09-11 14:21:02 +0800两槽均已结束，计划验收/进入Build
 各2/2，最终有效解0/2；无checkpoint/续跑/subject完成回执/harness，分数及完整失败
 usage/cost均null。钣金subject原生5280.137秒，最后请求open_response/transport_timeout
@@ -857,7 +880,15 @@ OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenC
 
 ## 6. 下一步任务（按优先级）
 
-### P0：完成 Feature 068 的高分案例真实测量
+083的可选主机防空闲休眠保护已完成实现、独立复核与全量验证。下一项单独定义
+请求时限及有限传输恢复的SDD，明确物理尝试计数、共享期限和失败usage
+未知时的预算边界。需要验证效果时另作GLM-5.2新登记，用已有高分case背景测分阶段
+Master→Build→原生harness有效解，不重开082/078旧槽，也不升级模型或重跑WebAgent。
+主机保护本身不能证明有效解率提升。当前实现和验证状态以第1节及083 validation为准。
+
+以下P0/P1及来源说明保留为早期历史，不再作为当前待执行任务。
+
+### 历史 P0：Feature 068 的高分案例真实测量（已完成）
 
 用户要求先选 WebAgent 稳定高分 case 验证 Lunar 能力。已只读查询既有平台逐次记录，
 在最新选中的 GLM-5.2 normal 实验中按三次均有效/eligible、均分降序选定钣金套料和

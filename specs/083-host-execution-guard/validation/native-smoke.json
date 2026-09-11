@@ -1,0 +1,44 @@
+{
+  "schema_version": "1",
+  "kind": "feature083_native_assertion_smoke",
+  "started_utc": "2026-09-11T07:30:22.418178+00:00",
+  "owner_pid": 12971,
+  "source_sha256": {
+    "src/famou/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
+    "tests/test_host_awake.py": "5d345a19957493f983e9176e0fce14a3fa3b34d1db3e1e73c690bc8d1d8248eb",
+    "specs/083-host-execution-guard/validation/native-smoke.py": "1cdee2cd5ab7886f15cfadb6e7c06178f86b657bd8b888945b36710555e0c949"
+  },
+  "scoped_release": [
+    {
+      "exceptional_body": false,
+      "acquired_verified": true,
+      "queried_after_release_absent": true
+    },
+    {
+      "exceptional_body": true,
+      "acquired_verified": true,
+      "queried_after_release_absent": true
+    }
+  ],
+  "process_exit": {
+    "child_pid": 12972,
+    "active_owned_assertions_before": 1,
+    "active_owned_assertions_after": 0,
+    "exit_method": "os._exit(0)",
+    "exit_without_python_cleanup": true,
+    "process_reaped": true
+  },
+  "model_calls": 0,
+  "network_calls": 0,
+  "system_sleep_requested": false,
+  "permanent_settings_changed": false,
+  "raw_system_inventory_saved": false,
+  "limitations": [
+    "Point-in-time assertion properties do not prove uninterrupted wakefulness.",
+    "Process-exit evidence is from ordinary os._exit(0) on this local macOS host.",
+    "This is not a SIGKILL, crash, lid-close, low-battery or system-sleep test.",
+    "Local cleanup evidence is not a cross-platform or all-failure-mode guarantee."
+  ],
+  "completed_utc": "2026-09-11T07:30:22.492777+00:00",
+  "passed": true
+}

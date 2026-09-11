@@ -335,6 +335,21 @@ lunar-agent effect-trial .lunar/famou-kit/suite.json baseline.json \
   --workspace .lunar/effect-trial-001 --json
 ```
 
+For macOS runs, both `effect-trial` and `effect-deep-trial` optionally accept
+`--keep-awake-report /absolute/new-host-session.jsonl`. This verifies a process-owned assertion
+against idle system sleep before loading trial configuration or credentials, holds it through the
+existing trial call, and releases it on normal or exceptional exit. The report must be fresh, have an
+existing parent without symlink components, and be outside the workspace and all case sources,
+including on resume. Unsupported hosts or failed acquisition reject before trial dispatch.
+Without this option execution is unchanged. Python supervisors may use
+`from famou.host_session import host_execution` and `with host_execution(report_path): ...`.
+
+The bounded host journal records assertion checks, cleanup, and wall/monotonic clock observations.
+Its work outcome distinguishes a returned call from an exception; native receipts and scores
+remain authoritative. It does not change timeouts or prevent lid-close, manual or low-battery
+sleep. Clock divergence is not an exact sleep duration, and partial journals do not prove cleanup.
+See [Feature 083](specs/083-host-execution-guard/quickstart.md) for the lifecycle and local checks.
+
 The suite freezes the benchmark publication, evaluation profile, CaseRevision, public-file ledger,
 and extractor/evaluator digests. The baseline contains individual comparator results; Lunar derives
 the historical best locally and does not accept a manually entered target score. Only the separate

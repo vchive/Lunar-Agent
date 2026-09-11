@@ -129,17 +129,42 @@ def test_new_wrapper_is_required_in_freeze_even_when_old_helper_exists(tmp_path,
         audit.check_frozen(tmp_path, campaign, manifest, here)
 
 
-def test_deadline_helper_is_required_in_complete_source_identity(audit):
-    source = {p.relative_to(ROOT).as_posix(): audit.sha(p)
-              for p in (ROOT / 'src/famou').rglob('*.py')}
+def test_deadline_helper_is_required_in_complete_source_identity(audit, tmp_path, monkeypatch):
+    # Reconstruct only the pinned Git source in an isolated fixture. Product development must
+    # not run a sealed campaign's live-source audit against today's checkout.
+    listing_command = ['git', 'ls-tree', '-r', '--name-only', _adapter.IMPLEMENTATION,
+                       '--', 'src/famou']
+    listing = audit.subprocess.check_output(listing_command, cwd=ROOT, text=True)
+    pinned = {
+        relative: audit.subprocess.check_output(
+            ['git', 'show', f'{_adapter.IMPLEMENTATION}:{relative}'], cwd=ROOT,
+        )
+        for relative in listing.splitlines() if relative.endswith('.py')
+    }
+    for relative, content in pinned.items():
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+
+    def fixture_git(command, **kwargs):
+        assert kwargs['cwd'] == tmp_path
+        if command == listing_command:
+            return listing
+        assert command[:2] == ['git', 'show'] and len(command) == 3
+        commit, relative = command[2].split(':', 1)
+        assert commit == _adapter.IMPLEMENTATION
+        return pinned[relative]
+
+    monkeypatch.setattr(audit.subprocess, 'check_output', fixture_git)
+    source = {relative: audit.sha(tmp_path / relative) for relative in pinned}
     assert len(source) == 38 and 'src/famou/http_transport.py' in source
     manifest = {'implementation_commit': _adapter.IMPLEMENTATION,
                 'source_files_sha256': source, 'source_sha256': audit.object_sha(source)}
-    audit.check_source(ROOT, manifest)
+    audit.check_source(tmp_path, manifest)
     del source['src/famou/http_transport.py']
     manifest['source_sha256'] = audit.object_sha(source)
     with pytest.raises(audit.AuditError):
-        audit.check_source(ROOT, manifest)
+        audit.check_source(tmp_path, manifest)
 
 
 def test_subject_runtime_identity_is_frozen_and_checked_before_launch(adapter, audit, tmp_path, monkeypatch):

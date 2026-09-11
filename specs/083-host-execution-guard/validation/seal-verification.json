@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "method": "static Git seal blobs compared with current tracked files; no historical live-source audit executed",
+  "ignored_python_caches": "excluded from Git seal identity; left untouched",
+  "seals": [
+    {
+      "feature": "074",
+      "seal_commit": "68b5e58ba06d7852559dc8fff7937b501156acaa",
+      "directory": "specs/074-corrected-staged-measurement",
+      "files_verified": 68,
+      "all_blobs_identical": true
+    },
+    {
+      "feature": "076",
+      "seal_commit": "9ad2e1caa599a3e2e9324210eac52b6548da295e",
+      "directory": "specs/076-public-plan-handoff-measurement",
+      "files_verified": 105,
+      "all_blobs_identical": true
+    },
+    {
+      "feature": "078",
+      "seal_commit": "a80f9b8826bcf9645340dcf806a66fb61a30538c",
+      "directory": "specs/078-master-planning-role-measurement",
+      "files_verified": 205,
+      "all_blobs_identical": true
+    },
+    {
+      "feature": "082",
+      "seal_commit": "fe38cfb001e955810ff652d5ac935e7df00156ff",
+      "directory": "specs/082-http-deadline-measurement",
+      "files_verified": 217,
+      "all_blobs_identical": true
+    }
+  ]
+}
