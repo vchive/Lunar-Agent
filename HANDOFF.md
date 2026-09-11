@@ -8,6 +8,18 @@
 
 ## 1. 当前状态
 
+082已在登记021b3d0396d3dbe982dd250b5da956bbc7ce469f推送后于2026-09-11 12:28:28 +0800
+唯一启动。dispatcher PID/PGID88086；worker88266/88267；subject88272/88273来自可见PPID
+链和固定argv角色核验（原生subject-started marker的child PID为null，未伪填）。两槽初始
+均master_running、未决，无已验收计划/Build/回执/评分。新HTTP workers已在对应subject
+PGID内观测到，身份快照见082 measurement/initial-descendant-processes.json；不保存原始
+argv或进程环境。root只读watcher session33500每30秒保存postrun/progress；其marker派生
+进程列表不穷尽子进程，最终检查必须纳入独立快照的subject PGID/HTTP helper与cwd关联。
+不要再prepare/check-only/dry-run/launch，也不要改已冻src/scripts/tests/inputs/readiness。
+当前仅观察082 summarize/postrun audit和元数据；T082-05/06必须等终止、独立终审及封存。
+
+以下是082启动前登记记录，当前运行状态以上述说明为准。
+
 082已完成新测量登记，`.specify`指向082。源固定e36b103，GLM-5.2，钣金/邮政各一新S槽，
 Master1200/build2400/reserve120、共享5400秒/200工具/800万tokens，一波并发2、不补位。
 232项实现定向、232项独立复核、1819项主仓全量（53.27秒）、73项单独loopback验证通过。

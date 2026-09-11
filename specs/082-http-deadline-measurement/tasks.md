@@ -59,3 +59,17 @@ its output was mirrored unchanged. Local prepare alone checked the authorized CC
 without a provider call. Registration is committed/pushed before the unique launch; T082-05/06
 remain open until real termination and final evidence acceptance. Never prepare again or modify
 the frozen source/scripts/tests/inputs/readiness after this point.
+
+## Live measurement
+
+Registration `021b3d0396d3dbe982dd250b5da956bbc7ce469f` was pushed before the unique launch at
+2026-09-11T12:28:28+08:00. Dispatcher PID/PGID88086, slot workers88266/88267; initial visible
+subjects88272/88273 were identified by their parent chain and fixed argv role, since native
+subject-start markers do not expose child PIDs. The initial descendant observation also confirms
+two real HTTP transport workers sharing their subject PGIDs; raw argv/environments were not saved.
+Both slots initially reached master_running and remain unresolved, with no accepted plan/Build/
+receipt/harness/score at that observation. Root read-only watcher session33500 records metadata
+snapshots every30 seconds and performs no model calls. Its marker-derived process list is partial;
+the separate initial descendant snapshot supplies subject/HTTP group identities for final checks.
+Do not repeat prepare/check-only/dry-run/launch. T082-05/06 stay open until both slots terminate and
+the final native audit and process checks pass.

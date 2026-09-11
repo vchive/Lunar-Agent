@@ -1,7 +1,7 @@
 # Feature 082: HTTP Deadline Fixed Measurement
 
 **Created**: 2026-09-11
-**Status**: Independently reviewed and registered; unique launch pending.
+**Status**: Running after the unique registered launch; final acceptance pending.
 
 ## Objective
 

@@ -1,0 +1,56 @@
+{
+  "kind": "feature082_scoped_process_observation",
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "method": "visible_ppid_descendants_with_fixed_argv_role_checks",
+  "model_calls": 0,
+  "native_subject_marker_pids_available": false,
+  "observed_utc": "2026-09-11T04:33:10.832454+00:00",
+  "point_in_time_only": true,
+  "process_environments_read": false,
+  "processes": [
+    {
+      "pgid": 88086,
+      "pid": 88086,
+      "ppid": 1,
+      "role": "dispatcher"
+    },
+    {
+      "pgid": 88266,
+      "pid": 88266,
+      "ppid": 88086,
+      "role": "slot_worker"
+    },
+    {
+      "pgid": 88267,
+      "pid": 88267,
+      "ppid": 88086,
+      "role": "slot_worker"
+    },
+    {
+      "pgid": 88272,
+      "pid": 88272,
+      "ppid": 88266,
+      "role": "subject"
+    },
+    {
+      "pgid": 88273,
+      "pid": 88273,
+      "ppid": 88267,
+      "role": "subject"
+    },
+    {
+      "pgid": 88272,
+      "pid": 88405,
+      "ppid": 88272,
+      "role": "http_transport_worker"
+    },
+    {
+      "pgid": 88273,
+      "pid": 88860,
+      "ppid": 88273,
+      "role": "http_transport_worker"
+    }
+  ],
+  "raw_argv_saved": false,
+  "registration_commit": "021b3d0396d3dbe982dd250b5da956bbc7ce469f"
+}
