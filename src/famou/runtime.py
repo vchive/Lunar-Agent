@@ -8,6 +8,7 @@ configured OpenAI-compatible HTTP endpoint.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shlex
@@ -15,6 +16,7 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import monotonic
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, urlunparse
@@ -88,12 +90,55 @@ class ModelFailureEvidence:
     response_status: int | None
 
 
+MAX_REQUEST_OBSERVATION_MS = 10**12
+
+
+@dataclass(frozen=True)
+class ModelRequestObservation:
+    """Local failed-request phase and elapsed time, not a transport deadline guarantee."""
+
+    phase: str
+    elapsed_ms: int
+    request_timeout_ms: int | None
+
+
 class ModelRequestFailure(RuntimeExecutionError):
     """A terminal model failure carrying an optional, independently validated projection."""
 
     def __init__(self, message: str, reason: str, response_status: int | None = None) -> None:
         super().__init__(message)
         self.evidence = ModelFailureEvidence(reason, response_status)
+        self.observation: ModelRequestObservation | None = None
+
+
+def _request_clock() -> float | None:
+    try:
+        return monotonic()
+    except Exception:  # noqa: BLE001 - observing time cannot change request execution
+        return None
+
+
+def _request_observation(
+    phase: str, started: float | None, timeout: float | None,
+) -> ModelRequestObservation | None:
+    try:
+        ended = monotonic()
+        if any(type(value) not in (int, float) or not math.isfinite(value)
+               for value in (started, ended)) or ended < started:
+            return None
+        elapsed_ms = math.floor((ended - started) * 1000)
+        if timeout is None:
+            timeout_ms = None
+        elif type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            return None
+        else:
+            timeout_ms = math.floor(timeout * 1000)
+        if any(value is not None and not 0 <= value <= MAX_REQUEST_OBSERVATION_MS
+               for value in (elapsed_ms, timeout_ms)):
+            return None
+        return ModelRequestObservation(phase, elapsed_ms, timeout_ms)
+    except Exception:  # noqa: BLE001 - invalid clock/projection must preserve the original failure
+        return None
 
 
 def _observed_response_status(value: object) -> int | None:
@@ -509,58 +554,72 @@ class OpenAICompatibleRuntime:
             headers["Authorization"] = f"Bearer {self.api_key}"
         request = Request(self.endpoint, data=body, headers=headers, method="POST")
         observed_status = None
+        phase = "open_response"
+        started = _request_clock()
         try:
-            with urlopen(request, timeout=timeout) as response:
-                status = response.getcode()
-                observed_status = _observed_response_status(status)
-                raw = response.read(8 * 1024 * 1024)
-        except HTTPError as exc:
-            detail = self._redact(self._read_error_body(exc))
-            suffix = f": {detail}" if detail else ""
-            raise ModelRequestFailure(
-                f"model endpoint returned HTTP {exc.code}{suffix}", "http_error",
-                _observed_response_status(exc.code),
-            ) from exc
-        except (TimeoutError, URLError, OSError) as exc:
-            detail = self._redact(str(exc))
-            raise ModelRequestFailure(
-                f"could not reach model endpoint: {detail}", _transport_failure_reason(exc),
-                observed_status,
-            ) from exc
-        if status < 200 or status >= 300:
-            raise ModelRequestFailure(
-                f"model endpoint returned HTTP {status}", "http_error", observed_status,
+            try:
+                with urlopen(request, timeout=timeout) as response:
+                    status = response.getcode()
+                    observed_status = _observed_response_status(status)
+                    phase = "read_response_body"
+                    raw = response.read(8 * 1024 * 1024)
+            except HTTPError as exc:
+                # This records entry into existing error-body handling, not its success or cause.
+                phase = "read_http_error_body"
+                detail = self._redact(self._read_error_body(exc))
+                suffix = f": {detail}" if detail else ""
+                raise ModelRequestFailure(
+                    f"model endpoint returned HTTP {exc.code}{suffix}", "http_error",
+                    _observed_response_status(exc.code),
+                ) from exc
+            except (TimeoutError, URLError, OSError) as exc:
+                detail = self._redact(str(exc))
+                raise ModelRequestFailure(
+                    f"could not reach model endpoint: {detail}", _transport_failure_reason(exc),
+                    observed_status,
+                ) from exc
+            phase = "validate_response"
+            if status < 200 or status >= 300:
+                raise ModelRequestFailure(
+                    f"model endpoint returned HTTP {status}", "http_error", observed_status,
+                )
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ModelRequestFailure(
+                    "model endpoint returned malformed JSON", "invalid_json", observed_status,
+                ) from exc
+            text, tool_calls = self._extract_turn(payload, response_status=observed_status)
+            if not text and not tool_calls:
+                raise ModelRequestFailure(
+                    "model endpoint returned empty content", self._empty_response_reason(payload),
+                    observed_status,
+                )
+            response_model = payload.get("model")
+            if response_model is not None and (
+                not isinstance(response_model, str)
+                or not response_model.strip()
+                or len(response_model.encode("utf-8")) > 512
+                or "\x00" in response_model
+            ):
+                raise ModelRequestFailure(
+                    "model endpoint returned an invalid model identity", "invalid_model_identity",
+                    observed_status,
+                )
+            usage = self._parse_usage(payload.get("usage"), response_status=observed_status)
+            return ModelTurn(
+                text=text,
+                tool_calls=tool_calls,
+                response_model=response_model.strip() if isinstance(response_model, str) else None,
+                usage=usage,
             )
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ModelRequestFailure(
-                "model endpoint returned malformed JSON", "invalid_json", observed_status,
-            ) from exc
-        text, tool_calls = self._extract_turn(payload, response_status=observed_status)
-        if not text and not tool_calls:
-            raise ModelRequestFailure(
-                "model endpoint returned empty content", self._empty_response_reason(payload),
-                observed_status,
-            )
-        response_model = payload.get("model")
-        if response_model is not None and (
-            not isinstance(response_model, str)
-            or not response_model.strip()
-            or len(response_model.encode("utf-8")) > 512
-            or "\x00" in response_model
-        ):
-            raise ModelRequestFailure(
-                "model endpoint returned an invalid model identity", "invalid_model_identity",
-                observed_status,
-            )
-        usage = self._parse_usage(payload.get("usage"), response_status=observed_status)
-        return ModelTurn(
-            text=text,
-            tool_calls=tool_calls,
-            response_model=response_model.strip() if isinstance(response_model, str) else None,
-            usage=usage,
-        )
+        except ModelRequestFailure as exc:
+            if type(exc) is ModelRequestFailure:
+                try:
+                    exc.observation = _request_observation(phase, started, timeout)
+                except Exception:  # noqa: BLE001, S110 - preserve error without logging request data
+                    pass
+            raise
 
     def cancel(self) -> None:
         # urllib does not expose a portable cancellation handle. Detached cancellation terminates

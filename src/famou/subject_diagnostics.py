@@ -16,9 +16,11 @@ from urllib.error import HTTPError
 from .agent_loop import AgentInputRequired, ProfileBudgetFailure
 from .model_profile import BudgetFailureEvidence, UsageSnapshot
 from .runtime import (
+    MAX_REQUEST_OBSERVATION_MS,
     MODEL_FAILURE_REASONS,
     ModelFailureEvidence,
     ModelRequestFailure,
+    ModelRequestObservation,
     RuntimeExecutionError,
 )
 
@@ -158,14 +160,34 @@ def _normalize_model_failure(value: object) -> dict[str, object]:
     return dict(value)
 
 
+def _normalize_request_observation(value: object, reason: object) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != {"phase", "elapsed_ms", "request_timeout_ms"}:
+        raise ValueError("invalid model request observation fields")
+    if reason in {"transport_timeout", "transport_error"}:
+        phases = {"open_response", "read_response_body"}
+    elif reason == "http_error":
+        phases = {"read_http_error_body", "validate_response"}
+    else:
+        phases = {"validate_response"}
+    if type(value["phase"]) is not str or value["phase"] not in phases:
+        raise ValueError("inconsistent model request phase")
+    if not _integer(value["elapsed_ms"], 0, MAX_REQUEST_OBSERVATION_MS):
+        raise ValueError("invalid model request elapsed time")
+    timeout = value["request_timeout_ms"]
+    if timeout is not None and not _integer(timeout, 0, MAX_REQUEST_OBSERVATION_MS):
+        raise ValueError("invalid model request timeout")
+    return dict(value)
+
+
 def normalize_diagnostic(value: object) -> dict[str, object]:
     """Accept only the fixed score-free vocabulary, without arbitrary error strings."""
     if not isinstance(value, dict) or "schema_version" not in value:
         raise ValueError("invalid diagnostic fields")
     version = value.get("schema_version")
-    if type(version) is not str or version not in {"1", "2", "3"}:
+    if type(version) is not str or version not in {"1", "2", "3", "4"}:
         raise ValueError("invalid diagnostic version")
-    additional = {"2": {"budget"}, "3": {"model_failure"}}.get(version, set())
+    additional = {"2": {"budget"}, "3": {"model_failure"},
+                  "4": {"model_failure", "request_observation"}}.get(version, set())
     if set(value) != _FIELDS | additional:
         raise ValueError("invalid diagnostic fields")
     if value["kind"] != "subject_failure":
@@ -192,7 +214,7 @@ def normalize_diagnostic(value: object) -> dict[str, object]:
         if (value["stage"], value["code"], value["http_status"]) != ("runtime", "budget_exceeded", None):
             raise ValueError("invalid diagnostic budget classification")
         return {**value, "budget": _normalize_budget(value["budget"])}
-    if version == "3":
+    if version in {"3", "4"}:
         if value["stage"] != "model" or value["code"] not in {"model_failed", "model_http_failed", "timeout"}:
             raise ValueError("invalid model failure classification")
         failure = _normalize_model_failure(value["model_failure"])
@@ -201,6 +223,9 @@ def normalize_diagnostic(value: object) -> dict[str, object]:
             raise ValueError("inconsistent model failure status")
         if value["code"] == "model_http_failed" and status is None:
             raise ValueError("missing model HTTP failure status")
+        if version == "4":
+            return {**value, "model_failure": failure, "request_observation":
+                    _normalize_request_observation(value["request_observation"], failure["reason"])}
         return {**value, "model_failure": failure}
     return dict(value)
 
@@ -391,6 +416,7 @@ class SubjectDiagnosticObserver:
         http_status = None
         budget = None
         model_failure = None
+        request_observation = None
         model_failure_checked = False
         current: BaseException | None = error
         seen: set[int] = set()
@@ -409,6 +435,17 @@ class SubjectDiagnosticObserver:
                 except (TypeError, ValueError, AttributeError):
                     # Malformed owned evidence cannot prevent the legacy failure projection.
                     pass
+                if model_failure is not None:
+                    try:
+                        observation = current.observation
+                        if type(observation) is ModelRequestObservation:
+                            request_observation = _normalize_request_observation({
+                                "phase": observation.phase, "elapsed_ms": observation.elapsed_ms,
+                                "request_timeout_ms": observation.request_timeout_ms,
+                            }, model_failure["reason"])
+                    except (TypeError, ValueError, AttributeError):
+                        # Timing belongs only to this accepted evidence node; retain v3 if invalid.
+                        pass
             if isinstance(current, HTTPError) and _integer(current.code, 100, 599):
                 http_status = current.code
                 if self.stage == "model":
@@ -448,6 +485,14 @@ class SubjectDiagnosticObserver:
         if budget is not None and code == "budget_exceeded" and http_status is None:
             return {**payload, "schema_version": "2", "budget": budget}
         if model_failure is not None:
+            try:
+                if request_observation is not None:
+                    return normalize_diagnostic({
+                        **payload, "schema_version": "4", "model_failure": model_failure,
+                        "request_observation": request_observation,
+                    })
+            except (TypeError, ValueError):
+                pass
             try:
                 return normalize_diagnostic({**payload, "schema_version": "3", "model_failure": model_failure})
             except (TypeError, ValueError):

@@ -1,12 +1,25 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-10
+更新时间：2026-09-11
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
 ## 1. 当前状态
+
+080已完成最后失败请求的阶段与耗时证据，`.specify`指向080，T080全部关闭。产品只改
+runtime/subject_diagnostics；v4新增request_observation固定phase、elapsed_ms及实际
+传入的request_timeout_ms，保留v1/v2/v3与原异常链/成功解析/请求参数/账本/评分边界。
+坏时钟或无效时序安全回退v3，不跨请求或异常节点复用证据。76新测试、391实现定向、
+238独立定向和主仓1614全量（39.79秒）通过，独立审查/Ruff/Specify/diff通过。
+078/076/074各205/105/68份Git封存文件未变。本轮无新增真实评测、provider探测或重试；
+078有效解仍0/2，不能由080补回它的未知时序或完整失败usage/cost。
+未来失败可区分请求打开、响应体读取、解析校验与HTTP错误正文处理；它仅是终局诊断，
+不覆盖成功请求历史或外层强杀，不能断言具体网络/provider原因。root独立本机fixture
+确认timeout=0.15秒的分段200响应在0.3100秒仍成功：urllib限制单次socket等待，不保证
+整个HTTP请求deadline。下一项应单独定义并验证绝对请求截止行为；需要真实验证时另作
+固定登记，不改旧槽。该问题不能回填为078两次超时的根因。
 
 078已在`a80f9b8`封存推送后，合入079安全模型失败诊断（isolated `b2ed0e9`，merge
 `27eb0cc`）。`.specify`现指向079，T078/T079全部关闭。主仓1538项全量测试（40.13秒）、

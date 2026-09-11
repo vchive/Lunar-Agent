@@ -413,9 +413,24 @@ response appears only in observed usage; an exact-ceiling tool response is alrea
 cannot execute tools. Both snapshots describe partial reported usage, never complete failed-run
 consumption or provider billing; cost uses the configured profile prices. Numbers outside the
 diagnostic cap (10^15, or 10^6 rounds) become null at the maximum/snapshot boundary, without changing
-budget enforcement. Version 1 remains readable and is still used for other failures. Historical
+budget enforcement. Version 1 remains readable and is still used when richer typed evidence is unavailable. Historical
 diagnostics, successful receipts and report usage are not backfilled. See
 [Feature 066](specs/066-budget-failure-evidence/spec.md).
+
+Typed model failures retain their original error code and add a fixed reason and observed response
+status in version 3. Version 4 also reports the failed request's local phase, elapsed milliseconds
+and actual timeout argument. The phases distinguish opening the response, reading its body,
+validating it and handling an HTTP error body. Opening includes connection and response acquisition;
+it does not identify a server or network root cause. Invalid timing falls back to version 3, and
+versions 1–3 remain readable. See [Feature 079](specs/079-model-failure-evidence/spec.md) and
+[Feature 080](specs/080-model-request-timing/spec.md).
+
+These observations describe only a request that propagated a typed failure. They do not log a live
+request, survive an outer process kill, recover failed-request usage or change retries and scoring.
+Milliseconds are rounded down; a positive timeout below one millisecond appears as zero, while
+null means no explicit timeout. The timeout passed to urllib bounds individual blocking waits,
+not the entire HTTP exchange; successive reads can take longer in total. Enforcing an absolute
+transport deadline is a separate change.
 
 The generated evaluator is explicit local executable authority, not a claim of OS sandboxing. It
 runs with isolated Python, closed stdin, minimal non-secret environment, timeout, and bounded

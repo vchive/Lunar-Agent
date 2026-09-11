@@ -1,6 +1,6 @@
 # Feature 079: Typed Model Failure Evidence
 
-**Status**: Isolated implementation verified; independent review pending.
+**Status**: Complete; independently reviewed and integrated after the Feature078 evidence seal.
 
 ## Problem and P1 story
 
