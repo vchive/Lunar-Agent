@@ -73,3 +73,11 @@ snapshots every30 seconds and performs no model calls. Its marker-derived proces
 the separate initial descendant snapshot supplies subject/HTTP group identities for final checks.
 Do not repeat prepare/check-only/dry-run/launch. T082-05/06 stay open until both slots terminate and
 the final native audit and process checks pass.
+
+Independent partial audit at2026-09-11T04:35:48.445457Z passed225 evidence hashes. Postal slot2
+has a validated Master plan and observed Build transcript; sheet slot1 remains master_running.
+Both slots are started_unresolved with0 terminal slots,0 subject receipts and0 harness receipts.
+Scores/full usage/cost remain null, and final acceptance is false. The immutable observation and
+rendered report are saved underpostrun/observations/20260911T043548445457Z-independent-partial-*;
+root checked the saved audit SHA and stage counts. This is stage progress, not a final failure rate
+or valid-solution result.
