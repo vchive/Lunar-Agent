@@ -8,6 +8,16 @@
 
 ## 1. 当前状态
 
+082进展13:59：墙钟已超过此前估算的13:56工作截止，但slot1仍无原生终止记录，不能
+按UTC差值判定monotonic预算耗尽。root只读power投影记录了本轮Sleep33/Wake35/
+DarkWake32事件；实际Python monotonic/perf_counter实现为mach_absolute_time，SDK
+说明其不累计系统休眠（mach_continuous_time才继续前进）。此前13:56墙钟ETA撤回，
+没有精确重建休眠时长，也不能据此确定任何模型传输失败根因。证据见082
+postrun/observations/20260911T055914717921Z-host-power-time.json。未保存原始电源日志或
+改变主机配置/运行条件；继续等slot1原生终止，T082-05/06仍开放。
+
+以下13:01为邮政终止观测；slot1最新状态以上述13:59说明为准。
+
 082进展13:01独立partial：邮政slot2已原生失败终止（subject1324.816秒、退出2），钣金
 slot1仍Build。238项证据SHA通过；邮政合法v4为model/model_failed，typed
 transport_timeout，phase=open_response，elapsed14901ms、request_timeout3970214ms，

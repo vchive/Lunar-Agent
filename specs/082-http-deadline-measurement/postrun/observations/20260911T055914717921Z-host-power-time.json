@@ -1,0 +1,535 @@
+{
+  "kind": "feature082_host_power_time_observation",
+  "observed_utc": "2026-09-11T05:59:14.717921+00:00",
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "source_window_start_local": "2026-09-11 12:28:28 +0800",
+  "source_window_end_local": "2026-09-11 13:59:14 +0800",
+  "source_command": [
+    "/usr/bin/pmset",
+    "-g",
+    "log"
+  ],
+  "source_returncode": 0,
+  "source_stderr_present": false,
+  "power_event_counts": {
+    "Sleep": 33,
+    "Wake": 35,
+    "DarkWake": 32
+  },
+  "events": [
+    {
+      "local_time": "2026-09-11 12:46:35",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:46:36",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:46:38",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:47:23",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:47:25",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:47:25",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:48:10",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:48:12",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:48:21",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:49:06",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:49:08",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:49:12",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:49:57",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:49:59",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:50:01",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:50:46",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:51:08",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:51:28",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:52:13",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:52:14",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:52:34",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:53:19",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:53:20",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:55:29",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:56:14",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:56:15",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:58:07",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:58:52",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:58:53",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:59:03",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:59:48",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 12:59:49",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 12:59:50",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 12:59:58",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:03:04",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:03:06",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:03:52",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:04:37",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:04:38",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:07:19",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:08:04",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:08:05",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:09:40",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:10:25",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:10:26",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:12:34",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:13:19",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:13:20",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:14:43",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:15:28",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:15:30",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:15:57",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:16:42",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:16:43",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:17:11",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:17:56",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:17:57",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:19:03",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:19:48",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:19:49",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:20:07",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:20:52",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:20:54",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:21:59",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:22:44",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:22:46",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:24:17",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:25:02",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:25:03",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:26:18",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:27:03",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:27:05",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:27:36",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:28:21",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:28:23",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:29:03",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:29:48",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:29:49",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:30:35",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:31:20",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:31:21",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:31:22",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:32:07",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:32:09",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:32:16",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:33:01",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:33:03",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:34:29",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:35:14",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:35:16",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:35:45",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:36:31",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:36:32",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:36:38",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:37:23",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:37:24",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:38:24",
+      "utc_offset": "+0800",
+      "event_type": "DarkWake"
+    },
+    {
+      "local_time": "2026-09-11 13:39:09",
+      "utc_offset": "+0800",
+      "event_type": "Sleep"
+    },
+    {
+      "local_time": "2026-09-11 13:39:10",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    },
+    {
+      "local_time": "2026-09-11 13:39:14",
+      "utc_offset": "+0800",
+      "event_type": "Wake"
+    }
+  ],
+  "clock_implementations": {
+    "time": "clock_gettime(CLOCK_REALTIME)",
+    "monotonic": "mach_absolute_time()",
+    "perf_counter": "mach_absolute_time()"
+  },
+  "raw_power_log_saved": false,
+  "host_configuration_changed": false,
+  "model_calls": 0,
+  "limitations": [
+    "Event projection confirms recorded power transitions, not an exact reconstructed suspend duration.",
+    "No per-process clock history was captured at launch.",
+    "Power events do not identify the cause of either model transport failure.",
+    "Host state was observed only; the running campaign conditions were not changed."
+  ]
+}

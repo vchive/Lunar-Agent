@@ -103,3 +103,12 @@ candidate; slot1 remains visible, so this is not campaign closure. Root's05:15:2
 verified6 terminal evidence hashes and candidate file metadata, without reading/executing candidate
 content: solve.py and three output files exist, but summary and receipt are absent. All scores/full
 failed usage/cost remain null. T082-05/06 stay open while slot1 runs and before final acceptance.
+
+At05:59UTC slot1 remained unresolved after the earlier UTC ETA. Root saved a bounded host-power
+projection (Sleep33/Wake35/DarkWake32, timestamps/enums only) and observed Python monotonic/
+perf_counter using mach_absolute_time. Static source, interpreter, stdlib and SDK review confirms
+that both native work deadlines and outer waits exclude system sleep on this host. The13:56 local
+wall-clock ETA is withdrawn; no exact accumulated suspend duration or new reliable ETA is inferred.
+See postrun/clock-semantics-review.md and observations/20260911T055914717921Z-host-power-time.json.
+No current timeout, host configuration, frozen byte, slot or candidate was changed. This limits
+wall-clock timing claims and does not establish the cause of either transport failure.
