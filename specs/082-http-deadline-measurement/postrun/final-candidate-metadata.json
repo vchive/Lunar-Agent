@@ -1,0 +1,189 @@
+{
+  "kind": "feature082_final_candidate_metadata",
+  "observed_utc": "2026-09-11T06:24:25.681385+00:00",
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "slots": [
+    {
+      "index": 1,
+      "case_key": "sheet_metal_nesting",
+      "native_audit_sha256": "5c8ed7fa586e1465a5da5c05535edf80ddf5689b6346789dafb33bb346492f4e",
+      "master_record_sha256": "548f275fa001ad55eac3924a1fecb6f99fd4cf797917d0763dba1ace4381947a",
+      "subject_termination": {
+        "elapsed_seconds": 5280.137,
+        "error_type": null,
+        "index": 1,
+        "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+        "returncode": 2,
+        "schema_version": "1",
+        "stage": "subject"
+      },
+      "terminal_diagnostic": {
+        "code": "timeout",
+        "http_status": null,
+        "kind": "subject_failure",
+        "mode": "normal",
+        "model_failure": {
+          "reason": "transport_timeout",
+          "response_status": null
+        },
+        "model_turns": 16,
+        "request_observation": {
+          "elapsed_ms": 4036528,
+          "phase": "open_response",
+          "request_timeout_ms": 4036519
+        },
+        "request_sha256": "a841cef3d2470d2a77871c1c0859cfc6d26bf309d62230022683ce29f6c43cc3",
+        "round_index": null,
+        "run_index": 1,
+        "schema_version": "4",
+        "stage": "model",
+        "tool_steps": 24
+      },
+      "expected_paths": [
+        "solve.py",
+        "output/nesting_plan.json",
+        "output/placements.csv",
+        "output/validation_report.json",
+        "_agent_summary.md"
+      ],
+      "candidate_metadata": [
+        {
+          "relative_path": "_agent_summary.md",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        },
+        {
+          "relative_path": "output/nesting_plan.json",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        },
+        {
+          "relative_path": "output/placements.csv",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        },
+        {
+          "relative_path": "output/validation_report.json",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        },
+        {
+          "relative_path": "receipt.json",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        },
+        {
+          "relative_path": "solve.py",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        }
+      ],
+      "candidate_content_read": false,
+      "candidate_executions": 0,
+      "metadata_stable_across_two_reads": true,
+      "score": null,
+      "full_failed_usage": null,
+      "full_failed_cost": null
+    },
+    {
+      "index": 2,
+      "case_key": "china_post_pickup_optimization",
+      "native_audit_sha256": "5c8ed7fa586e1465a5da5c05535edf80ddf5689b6346789dafb33bb346492f4e",
+      "master_record_sha256": "85d9d1c8b52bdb4dfa84e83af9444ca90082bcdcbdc3f0582fcbef895cb93dae",
+      "subject_termination": {
+        "elapsed_seconds": 1324.816,
+        "error_type": null,
+        "index": 2,
+        "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+        "returncode": 2,
+        "schema_version": "1",
+        "stage": "subject"
+      },
+      "terminal_diagnostic": {
+        "code": "model_failed",
+        "http_status": null,
+        "kind": "subject_failure",
+        "mode": "normal",
+        "model_failure": {
+          "reason": "transport_timeout",
+          "response_status": null
+        },
+        "model_turns": 14,
+        "request_observation": {
+          "elapsed_ms": 14901,
+          "phase": "open_response",
+          "request_timeout_ms": 3970214
+        },
+        "request_sha256": "a8ff7417412b41605dba059632947924474ec592c1b8433e84c634c7c7b0c2c5",
+        "round_index": null,
+        "run_index": 1,
+        "schema_version": "4",
+        "stage": "model",
+        "tool_steps": 17
+      },
+      "expected_paths": [
+        "output/solution.json",
+        "output/assignment.csv",
+        "output/stations.csv",
+        "_agent_summary.md"
+      ],
+      "candidate_metadata": [
+        {
+          "relative_path": "_agent_summary.md",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        },
+        {
+          "relative_path": "output/assignment.csv",
+          "type": "file",
+          "exists": true,
+          "bytes": 9464
+        },
+        {
+          "relative_path": "output/solution.json",
+          "type": "file",
+          "exists": true,
+          "bytes": 44259
+        },
+        {
+          "relative_path": "output/stations.csv",
+          "type": "file",
+          "exists": true,
+          "bytes": 475
+        },
+        {
+          "relative_path": "receipt.json",
+          "type": null,
+          "exists": false,
+          "bytes": null
+        },
+        {
+          "relative_path": "solve.py",
+          "type": "file",
+          "exists": true,
+          "bytes": 25027
+        }
+      ],
+      "candidate_content_read": false,
+      "candidate_executions": 0,
+      "metadata_stable_across_two_reads": true,
+      "score": null,
+      "full_failed_usage": null,
+      "full_failed_cost": null
+    }
+  ],
+  "model_calls": 0,
+  "candidate_executions": 0,
+  "limitations": [
+    "Only candidate path/type/size metadata is inspected; it neither proves validity nor authorizes scoring.",
+    "No raw transcript content, candidate contents or credentials were read.",
+    "Subject durations and terminal request observations use native monotonic timing; no exact sleep duration is inferred."
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "kind": "feature082_root_frozen_history_verification",
+  "observed_utc": "2026-09-11T06:22:51.887462+00:00",
+  "manifest_sha256": "880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb",
+  "implementation_commit": "e36b103fd6fc4a64304d16ae446e0383dab0a8a8",
+  "counts_verified": {
+    "source_files_sha256": 38,
+    "frozen_files_sha256": 122,
+    "historical_files_sha256": 36
+  },
+  "source_files_match_implementation_commit": true,
+  "old_git_seals_verified": {
+    "specs/074-corrected-staged-measurement": {
+      "commit": "68b5e58ba06d7852559dc8fff7937b501156acaa",
+      "files_verified": 68
+    },
+    "specs/076-public-plan-handoff-measurement": {
+      "commit": "9ad2e1caa599a3e2e9324210eac52b6548da295e",
+      "files_verified": 105
+    },
+    "specs/078-master-planning-role-measurement": {
+      "commit": "a80f9b8826bcf9645340dcf806a66fb61a30538c",
+      "files_verified": 205
+    }
+  },
+  "old_live_source_audits_executed": false,
+  "model_calls": 0,
+  "candidate_executions": 0,
+  "passed": true
+}

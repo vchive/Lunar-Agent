@@ -8,6 +8,26 @@
 
 ## 1. 当前状态
 
+082已完成终局核验与封存：2026-09-11 14:21:02 +0800两槽均已结束，计划验收/进入Build
+各2/2，最终有效解0/2；无checkpoint/续跑/subject完成回执/harness，分数及完整失败
+usage/cost均null。钣金subject原生5280.137秒，最后请求open_response/transport_timeout
+4036.528秒对期限4036.519秒；邮政subject1324.816秒，最后请求14.901秒对3970.214秒，
+属于提前报出的传输超时，不能判定具体provider原因。钣金计划交付文件均缺失；邮政
+solve.py及三份output存在，缺摘要和回执，未执行候选补评。详情见082 postrun/results.md。
+
+独立终审与root复验251证据SHA通过；38源码/122冻结/36历史项，以及074/076/078
+各68/105/205份Git封存文件保持原样。watcher33500已退出0、保存172快照；进程核验
+联合190份证据、10PID/5PGID及可见后代/argv/cwd未见残留，保留时点和脱离后代局限。
+T082全部关闭；产品仍固定e36b103，未新增产品改动或开启下一批campaign。不要重试
+已失败槽、运行候选补分、改旧manifest或运行旧live-source审计。
+
+本轮系统日志含多次Sleep/Wake；Python/外层wait均使用不计系统休眠的mach_absolute_time，
+原生计时不等墙钟，13:56旧ETA已撤回，不能把墙钟差值当deadline失效或精确休眠时长。
+下一项优先明确评测主机保持唤醒与时间口径，再设计单次请求预算/有限传输恢复及未知
+usage约束。WebAgent固定代码比较已独立复核，见docs/webagent-transport-recovery-review-
+20260911.md；不直接照搬SSE重放或TTL计数。目标仍是分阶段真实交付与原生有效解，
+普通流程历史2/2继续作为已验证背景。以下为082运行中的历史观察，以上述终局为准。
+
 082进展13:59：墙钟已超过此前估算的13:56工作截止，但slot1仍无原生终止记录，不能
 按UTC差值判定monotonic预算耗尽。root只读power投影记录了本轮Sleep33/Wake35/
 DarkWake32事件；实际Python monotonic/perf_counter实现为mach_absolute_time，SDK

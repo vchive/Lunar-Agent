@@ -1,0 +1,11 @@
+{
+  "kind": "feature082_root_watcher_exit_observation",
+  "observed_utc": "2026-09-11T06:22:51.887462+00:00",
+  "exec_session_id": 33500,
+  "exit_code": 0,
+  "source": "root-observed write_stdin tool result chunk55a85d; not an independent OS exit observation",
+  "watcher_completion_sha256": "46a17c555de28988451820e26be8449c86c17c8cda4bc50c14e8445312747d6c",
+  "last_snapshot": "postrun/progress/20260911T062114523168.json",
+  "all_slots_terminated": true,
+  "model_calls": 0
+}

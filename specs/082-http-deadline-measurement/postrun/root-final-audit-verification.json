@@ -1,0 +1,13 @@
+{
+  "kind": "feature082_root_final_audit_verification",
+  "observed_utc": "2026-09-11T06:24:25.681385+00:00",
+  "final_audit_sha256": "5c8ed7fa586e1465a5da5c05535edf80ddf5689b6346789dafb33bb346492f4e",
+  "final_report_sha256": "e16347f83a2c791b550a82f6db1121c4abcf90e57a8cd2eaf0f236350429a13e",
+  "final_audit_evidence_sha256_count_verified": 251,
+  "renderer_bytes_match": true,
+  "candidate_metadata_sha256": "9fb8e4f156033ae134c6e59b21e85627879be7607b08934290d30012651655c8",
+  "passed": true,
+  "process_check_separate": true,
+  "model_calls": 0,
+  "candidate_executions": 0
+}

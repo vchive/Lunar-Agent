@@ -4,8 +4,8 @@
 - [x] T082-02 Add failure-first082 registration, helper/source and diagnostic/lifecycle fixtures.
 - [x] T082-03 Implement reviewed wrappers and safe terminal reporting; run offline regression.
 - [x] T082-04 Materialize once, independently preaudit/dry-run, mirror and commit/push registration.
-- [ ] T082-05 Launch exactly once and observe both slots without changing frozen conditions.
-- [ ] T082-06 Independently audit terminal evidence/processes and seal results with HANDOFF update.
+- [x] T082-05 Launch exactly once and observe both slots without changing frozen conditions.
+- [x] T082-06 Independently audit terminal evidence/processes and seal results with HANDOFF update.
 
 No WebAgent run, company-platform query, provider probe, retry/replacement or prior candidate
 execution. Source is e36b103; GLM-5.2 and native EffectTrialRunner/exact harness remain fixed.
@@ -112,3 +112,22 @@ wall-clock ETA is withdrawn; no exact accumulated suspend duration or new reliab
 See postrun/clock-semantics-review.md and observations/20260911T055914717921Z-host-power-time.json.
 No current timeout, host configuration, frozen byte, slot or candidate was changed. This limits
 wall-clock timing claims and does not establish the cause of either transport failure.
+
+## Terminal acceptance and closure
+
+Both native slots and the campaign terminated by2026-09-11T06:21:02.244734Z. Final independent
+audit passed251 evidence hashes with complete/final_acceptance=true; root reverified all251 and
+the exact rendered report bytes. Both plans/Build entries are accepted; resume/subject/harness
+receipt counts are0. Both attempts failed, valid0/2; all quality scores/full failed usage/cost null.
+Slot1 v4 reports open_response transport_timeout after4036528ms against4036519ms; slot2 reports
+14901ms against3970214ms. Subject native elapsed values are5280.137 and1324.816 seconds; these
+are not UTC elapsed or precise Master durations. Candidate inspection used metadata only.
+
+Watcher33500 exited0 with172 snapshots. Independent process observation checked190 identity/
+progress evidence files,10 known PIDs/5 PGIDs plus visible descendants/argv/cwd and found no scoped
+candidate or inspection failure. Root verified190 evidence SHA and a fresh numeric process scan.
+Root also verified38 source/122 frozen/36 history hashes, source equality to e36b103, and074/076/
+078 Git seals68/105/205 files unchanged. No old live-source audit, model probe, retry, replacement,
+candidate replay, new test run or new campaign occurred during closure. T082-05/06 are complete;
+the earlier open statuses above are historical progress. Results and all limits are in
+postrun/results.md; final-process-check.json binds the final audit, process and root evidence.

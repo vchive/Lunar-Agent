@@ -1,0 +1,56 @@
+{
+  "kind": "feature082_root_final_closure_verification",
+  "observed_utc": "2026-09-11T06:25:50.588103+00:00",
+  "passed": true,
+  "native_final_acceptance": true,
+  "audit_evidence_sha256_count_verified": 251,
+  "process_identity_evidence_sha256_count_verified": 190,
+  "known_pids_checked": [
+    88086,
+    88266,
+    88267,
+    88272,
+    88273,
+    88405,
+    88860,
+    91249,
+    91365,
+    92327
+  ],
+  "known_pgids_checked": [
+    88086,
+    88266,
+    88267,
+    88272,
+    88273
+  ],
+  "fresh_numeric_process_candidates": [],
+  "independent_argv_and_cwd_scope_clear": true,
+  "artifact_sha256": {
+    "final-audit.json": "5c8ed7fa586e1465a5da5c05535edf80ddf5689b6346789dafb33bb346492f4e",
+    "final-report.md": "e16347f83a2c791b550a82f6db1121c4abcf90e57a8cd2eaf0f236350429a13e",
+    "root-final-audit-verification.json": "ca3f4266cb7c333dc6137f75b985d638aa39be3d1ab0b5051f4df4e085c9b2e1",
+    "root-frozen-history-verification.json": "9a692a1d67d8dae8e93a5740565a78a79b21cc57794b3251fe259af557eaa565",
+    "final-process-observation.json": "d2b61550c78666791390534e8ab71e7c3a0e91cbfbfcae12ebf55a6ffcf6f455",
+    "final-candidate-metadata.json": "9fb8e4f156033ae134c6e59b21e85627879be7607b08934290d30012651655c8",
+    "watcher-completion.json": "46a17c555de28988451820e26be8449c86c17c8cda4bc50c14e8445312747d6c",
+    "watcher-exit-observation.json": "7a5ab3035baa41a9f0bbccb9420f4ad41e533799139d2b187b1c41d113569b8d"
+  },
+  "watcher_exec_session_id": 33500,
+  "watcher_exit_code": 0,
+  "watcher_snapshots": 172,
+  "frozen_source_and_history_verified": true,
+  "model_calls": 0,
+  "candidate_executions": 0,
+  "signals_sent": 0,
+  "limitations": [
+    "PID and PGID reuse can cause false positive association; original process start times were not frozen.",
+    "This is a point-in-time view of OS-visible processes, not proof of global process absence.",
+    "Processes may exit or change identity between the cwd and ps snapshots; permissions may limit OS visibility.",
+    "Unobserved descendants that detached and changed parent, group, cwd and argv association can remain unknown.",
+    "Shared private-case cwd or argv associations do not uniquely establish ownership by this campaign.",
+    "Observer and its visible ancestors were excluded because their command source can contain campaign paths.",
+    "No harness started marker exists, so no campaign-owned harness temporary cwd was observed.",
+    "No conclusion about remote generation or billing follows from local process absence."
+  ]
+}
