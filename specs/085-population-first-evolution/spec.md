@@ -16,7 +16,7 @@ Lunar 当前把演化策略分成 `loop`、`population` 和 `openevolve`。其�
 ## Goal
 
 将 Lunar 的生产演化路线收敛到 **population-first**：所有新的本地深度演化默认使用
-`PopulationStrategy`；OpenEvolve 作为显式外部后端；`LoopStrategy` 不再作为新任务的
+`PopulationStrategy`；OpenEvolve 作为显式外部 material producer；`LoopStrategy` 不再作为新任务的
 可选策略。普通 Master→Build 仍独立完成，演化仍是显式 opt-in 阶段。
 
 ## Scope boundary
@@ -47,14 +47,16 @@ Lunar 当前把演化策略分成 `loop`、`population` 和 `openevolve`。其�
 
 ### FR-004 population admission
 
-Population run 在 generator 前必须通过 Feature 084 的 verified seed admission。没有带有
-本地 evaluator receipt 且 `validity == 1` 的 seed 时，运行 fail closed，不推进 iteration，
-不修改 active population。
+Generic `evolve` 可以为 population run 显式提供 seed manifest。提供 manifest 时，系统在
+generator 前必须通过 Feature 084 的 verified seed admission；没有带本地 evaluator receipt
+且 `validity == 1` 的 seed 时 fail closed，不推进 iteration，也不修改 active population。
+未提供 manifest 时保留原生 population 初始化，不推断或自动发现外部 seed。
 
 ### FR-005 正式轮次与失败语义
 
-只有通过 admission 且完成一次候选生成/评估的 population iteration 才计入正式轮次；
-candidate failure、evaluator timeout、worker unknown 和 run failure 必须分别持久化。
+带 seed manifest 的 run 只有通过 admission 后才可生成 offspring。任何 population run 只有
+至少一个 offspring 完成候选生成和评估时才计入正式轮次；candidate failure、evaluator
+timeout、worker unknown 和 run failure 必须分别持久化。
 
 ### FR-006 保持 lineage 和恢复
 
@@ -65,7 +67,10 @@ source/dependency/contract/environment fingerprint。resume 必须校验 fingerp
 ### FR-007 OpenEvolve 边界
 
 `openevolve` 只能作为显式候选生成/搜索后端；其输出必须经过 Lunar 本地 exact harness
-和 evaluator receipt 后才能进入 population 或最终交付。外部得分不能直接成为 Lunar 分数。
+和 evaluator receipt 后才能进入 population 或最终交付。producer 必须在私有临时 workspace
+中运行，外部 evidence/metadata 只保留 digest 摘要，外部得分不能直接成为 Lunar 分数。
+已完成 run 的 resume 不得重跑 producer，但必须重新执行本地 evaluator 并重验 canonical
+source、receipt、provenance 和配置身份。
 
 ### FR-008 历史协议不变
 
@@ -77,8 +82,10 @@ source/dependency/contract/environment fingerprint。resume 必须校验 fingerp
 2. 指定 `--strategy loop` 创建新 run 时，在任何 generator、worker 或 population mutation
    之前失败，并返回迁移提示。
 3. 读取旧 loop archive 可以得到历史状态，但 resume 被拒绝且不会新增候选。
-4. 无有效 verified seed 的 population run 在第 0 轮失败，archive 中没有 active candidate。
-5. 一个有效 seed 能启动 population，恢复时 source 或 evaluator fingerprint 改变会被拒绝。
+4. 显式提供的 manifest 没有有效 verified seed 时，population run 在第 0 轮失败，archive
+   中没有 active candidate；未提供 manifest 时仍能使用原生 generator 初始化 population。
+5. 一个有效 seed 能启动 population；seeded resume 必须重新提供同一 manifest 和当前身份，
+   source 或 evaluator fingerprint 改变时被拒绝。
 6. `--agent-loop` 的普通模型工具交互测试保持通过。
 7. `effect-deep-trial` 历史 fixture 的 protocol、strategy metadata 和报告 SHA 保持不变。
 

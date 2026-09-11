@@ -6,6 +6,57 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## 最新续作：演化生态融合与 OpenEvolve verified producer
+
+本轮已把“Lunar 融合外部演化项目”的边界落实到离线实现。OpenEvolve、未来的
+ShinkaEvolve 及远端 famou-v2/WebAgent 控制面只提供候选 material；Lunar 继续持有
+algorithm contract、本地 exact evaluator、receipt、canonical archive、resume、rank 和最终
+交付权威。OpenEvolve 是 AlphaEvolve 风格的第三方 Apache-2.0 开源实现，不是 Google
+DeepMind 官方源码；其他公开项目及分层接法记录在
+`docs/evolution-ecosystem-fusion-roadmap-20260911.md`。
+
+新增 `src/famou/seed_handoff.py`、`remote_evolution.py` 和 `openevolve_handoff.py`。外部 seed
+的 evidence 与 record metadata 在 canonical persistence 前都规范化为固定
+`{present, score_present, payload_sha256}` 摘要，不保存原始外部分数、payload 或 prose；
+seed identity 绑定 evaluator kind 与 fingerprint，receipt 只接受 report schema `1`。
+manifest/source/symlink/大小/编码/控制字符/lone-surrogate/深层 JSON/material-ref 边界均使用
+固定错误码。远端 backend 目前只有 bounded、score-free 的
+`submit/status/sync/continue_experiment/cancel` DTO/protocol 和 unknown reconciliation，没有
+网络 transport，也不会由默认路径实例化。
+
+`PopulationStrategy` 已支持 verified seed 的私有全批裁决、原子 commit、稳定 `seed-*` ID、
+generation/iteration 0、确定性 island、receipt/provenance/handoff 校验及 fresh resume
+revalidation。offspring 使用五类 durable outcome：`evaluated`、`candidate_failed`、
+`evaluator_timeout`、`worker_unknown`、`run_failed`；journal、SHA watermark、archive baseline
+和 candidate 双向绑定已落盘，failed-only batch 不推进正式 iteration，完整 outcome 可在
+resume 时只 finalize 而不重放。
+
+`OpenEvolveStrategy` 在 mode-0700 系统临时目录运行显式 producer，传入 bounded
+contract/budget/config，stdout/stderr 直接丢弃，timeout/cancel 清理进程组。producer 结果先走
+同一 seed handoff 和本地 exact evaluator，再原子发布一个 `strategy=openevolve`、
+`iteration=1`、`island_id=null` 的稳定 `seed-*` candidate。completed resume 不重跑 producer，
+而是从 canonical source/sidecar 重建 admission，重新调用本地 evaluator 并核对
+source/receipt/provenance/config。外部 evaluation 无论分数多高都不会进入 Lunar 排名；本地
+evaluator 异常、invalid 或 `None` 时为 0 candidate。
+
+controller 的 seed evidence 事件分为 deterministic `seed_admission_adjudicated` 和实际
+state/commit-marker 匹配后的 `seed_admission_committed`，并登记 marker、record、receipt 和
+offspring outcome artifacts。terminal resume 会先核对 SQLite run 与 canonical state 的
+status、strategy、contract、config、seed manifest/marker；缺 state 的失败或取消任务不能被
+新 manifest 复活，避免 run/state split-brain。孤立 seed identity 参数在 claim 前拒绝。
+
+最终离线验证：融合定向 288 项通过；主仓 2183 项全量通过；全 `src/famou`/`tests` Ruff、
+compileall、Specify prerequisites、`git diff --check` 均通过。074/076/078/082 的 Git 封存
+文件无 diff。没有启动模型、真实 OpenEvolve/ShinkaEvolve、WebAgent、provider、公司平台、
+远端 backend 或 campaign，也没有复写任何历史 measurement。
+
+Feature 084/085 文档仍保持 Draft，未完成任务不要勾选，也不能把离线互操作宣称为有效解率
+提升。当前明确保留的后续项：普通 population 初始化仍使用旧 `_persist`，evaluator exception
+可能被转换成 synthetic invalid report；普通 offspring 尚未拥有与 imported seed 等价的
+contract/evaluator/dependency/environment 四类完整 fingerprint/receipt。下一具体 adapter
+优先让 ShinkaEvolve 输出同一 seed manifest；SkyDiscover/LLM4AD 先接 benchmark/task
+envelope，仓库型或 workflow 型候选另开冻结 Feature。
+
 ## 0. 当前续作：Feature 084（草案）
 
 已找到并离线审查本地 `famou-v2` 仓库（`/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-v2`）及 WebAgent 2.5 分支。审查结论是：famou-v2 的深度演化通过远端实验控制面运行；其 `initial_programs` 必须经过本地 evaluator enrichment/可行性门槛，有效 rollout 才推进正式 iteration。WebAgent 的 `evolve_create/status/sync/continue/cancel` 是服务委托，不是 Lunar staged Build 的本地 runtime。

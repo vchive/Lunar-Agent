@@ -126,8 +126,8 @@ validated contract and explicitly supersedes its unstarted generated-plan tasks;
 `evolution/archive.jsonl`, `state.json`, and `result.json`. Staged `--input` files are copied into
 the child with the same SHA-256 and size, never with the source-machine path.
 
-For native `loop` and `population`, every generated `.py` candidate now runs in its own archive
-directory before model evaluation. It receives digest-checked `data/raw/*` copies and a minimal
+For new native `population` runs, every generated `.py` candidate runs in its own archive directory
+before model evaluation. It receives digest-checked `data/raw/*` copies and a minimal
 non-secret environment. Required and present optional outputs must pass the immutable
 CSV/JSON/JSONL/text contract; a process or output failure becomes local validity zero and skips the
 model evaluator entirely. Successful evaluator requests contain a bounded source excerpt,
@@ -145,7 +145,8 @@ oversized file, or conflicting destination makes the effective `solve` status fa
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.
 Contracts without `outputs` keep the existing source-only result. `evolve CONTRACT` remains
-available when separate generator/evaluator commands or an OpenEvolve wrapper are needed.
+available when separate generator/evaluator commands or an OpenEvolve wrapper paired with a local
+exact evaluator are needed.
 
 When a domain already has an exact local objective or constraint checker, keep the conversational
 compiler/generator path and replace only model scoring:
@@ -214,8 +215,8 @@ workspaces.
 Agent solvers may also return one bounded `experiment` beside candidate source: a short hypothesis,
 change tags, and target metric directions. Lunar-Agent treats that declaration as intent, never as
 proof. After independent evaluation it derives seed/improved/unchanged/regressed/invalid experiment
-cards, score delta, and compatible metric deltas from the append-only archive. Later loop and
-population prompts receive up to eight recent cards plus bounded per-tag outcome counts. Resume
+cards, score delta, and compatible metric deltas from the append-only archive. Later population
+prompts receive up to eight recent cards plus bounded per-tag outcome counts. Resume
 reconstructs the same memory without storing reasoning traces, mutable insight files, embeddings,
 or another model call.
 
@@ -738,11 +739,16 @@ promoted from the attempt workspace to the run-level `output/` directory, SHA-25
 `kind=output`, exposed under `algorithm_outputs` in `status --json`, and included by `deliver`. The
 `outputs` field is optional, so older contracts remain compatible.
 
-The contract accepts `loop` (the default WebAgent-style fresh-context serial rounds), `population`
-(an explicit local candidate population), and `openevolve` (an optional explicit local subprocess).
-All three share the same contract, append-only candidate archive, and frozen validity-first
-evaluator boundary. The current local `--workers` option only parallelizes independent DAG tasks; it
-is not population search.
+New contracts use `population` by default and may select `openevolve` as an optional explicit local
+subprocess. The historical evolution strategy value `loop` remains parseable in old contracts,
+archives, results, and sealed effect-trial evidence, but it cannot start or resume a new evolution
+iteration. `LoopStrategy` remains importable as a non-mutating compatibility stub whose active
+methods raise `loop_strategy_retired`. The current local `--workers` option only parallelizes
+independent DAG tasks; it is not population search.
+
+The retired strategy name is separate from `AgentLoopRuntime`, `--agent-loop`, and
+`--agent-runtime-loop`. Those options still wrap one model invocation in Lunar-Agent's bounded
+tool-capable runtime; they do not select the evolution algorithm.
 
 ### Local evolution strategies
 
@@ -757,17 +763,20 @@ context = EvolutionContext(
     workspace=run_workspace,
     generate=lambda request: CandidateDraft("def solve():\\n    return 1\\n"),
     evaluate=lambda path, contract: report,
-    config=EvolutionConfig(strategy="loop", max_rounds=5),
+    config=EvolutionConfig(strategy="population", max_rounds=5),
 )
 result = build_strategy(context).run()
 ```
 
-`loop` archives one or more independently generated candidates per round and returns the best valid
-candidate. `population` maintains a bounded active set plus the complete archive and can use local
-islands and ring migration. `openevolve` is opt-in and requires an explicit absolute executable;
-the base installation does not install or discover OpenEvolve. See
-[`specs/013-evolution-strategies/`](specs/013-evolution-strategies/) for the SDD contract and
-quickstart.
+`population` maintains a bounded active set plus the complete archive and can use local islands and
+ring migration. Its generic `evolve` path can optionally initialize from the verified-seed admission
+defined by [`specs/084-verified-seed-handoff/`](specs/084-verified-seed-handoff/); when a manifest is
+supplied, an empty admitted subset fails before generation or population mutation. Without a
+manifest, population retains native generator initialization. `openevolve` is opt-in and requires
+an explicit absolute executable plus a local evaluator command; the base installation does not
+install or discover OpenEvolve. Historical behavior is documented under
+[`specs/013-evolution-strategies/`](specs/013-evolution-strategies/), while the active migration is
+defined by [`specs/085-population-first-evolution/`](specs/085-population-first-evolution/).
 
 The same boundary is available through the standalone CLI.  Native strategies require explicit
 local generator/evaluator commands; their first argument is a run-scoped request or candidate path
@@ -775,7 +784,7 @@ respectively:
 
 ```bash
 lunar-agent evolve contract.json \
-  --strategy loop \
+  --strategy population \
   --generator-command "/absolute/python /absolute/generator.py" \
   --evaluator-command "/absolute/python /absolute/evaluator.py" \
   --json --home .lunar
@@ -797,6 +806,52 @@ lunar-agent evolve contract.json --resume --run-id <run-id> \
   --json --home .lunar
 ```
 
+The generic `evolve` command can optionally import an already produced population seed manifest.
+This path is population-only and requires the caller's current dependency and environment identity:
+
+```bash
+lunar-agent evolve contract.json \
+  --strategy population \
+  --seed-manifest "/absolute/path/to/seed-manifest.json" \
+  --seed-dependency-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --seed-environment-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  --generator-command "/absolute/python /absolute/generator.py" \
+  --evaluator-command "/absolute/python /absolute/local-exact-evaluator.py" \
+  --json --home .lunar
+```
+
+The manifest's contract digest must match `contract.json`; its `evaluator_kind=exact_harness` and
+evaluator fingerprint must match the explicit local evaluator command; and its
+dependency/environment digests must match the two explicit flags. The digest flags are invalid
+without `--seed-manifest`. Omitting all three seed options preserves the generic evolution path
+without an imported manifest. The staged Master→Build path and benchmark do not infer or attach a
+seed manifest. Resuming a seeded run requires the same manifest, dependency/environment digests,
+and exact evaluator command so Lunar-Agent can repeat admission and reject changed material or
+identity before population mutation. The stable `seed-*` identity binds both evaluator kind and
+fingerprint. For an external seed, Lunar-Agent converts both producer evidence and seed metadata to
+the fixed digest-only summary `{present, score_present, payload_sha256}` before they enter canonical
+state; raw external scores, payloads, and prose are not archived.
+
+OpenEvolve output is untrusted candidate material. Even when its result envelope contains an
+external score, Lunar-Agent admits and ranks the candidate only after the explicit local evaluator
+returns a matching receipt:
+
+```bash
+lunar-agent evolve contract.json \
+  --strategy openevolve \
+  --openevolve-command "/absolute/path/to/openevolve-wrapper" \
+  --evaluator-command "/absolute/path/to/local-exact-evaluator" \
+  --json --home .lunar
+```
+
+The wrapper runs in a private mode-0700 system temporary directory and receives only a bounded
+contract/budget configuration whose workspace points back to that directory. Its stdout and stderr
+are discarded. After local evaluation succeeds, Lunar-Agent atomically publishes a stable
+`seed-*` candidate with `strategy=openevolve`, `iteration=1`, and a matching receipt; the producer
+workspace is removed. Resuming an already completed run verifies canonical source, provenance,
+configuration, and receipt, invokes the current local evaluator again, and does not rerun the
+producer.
+
 Command-backed runs persist credential-safe SHA-256 fingerprints for both the generator/solver and
 evaluator adapter profiles. Resume rejects a changed command, Agent name, role, or required
 capability before claiming the task, so one candidate archive is never silently mixed across
@@ -807,7 +862,7 @@ receives the candidate path, runs in that candidate's attempt directory, and pro
 `execution.json` evidence before the evaluator command is called:
 
 ```bash
-lunar-agent evolve contract.json --strategy loop \
+lunar-agent evolve contract.json --strategy population \
   --generator-command "/absolute/path/to/generator" \
   --candidate-runner-command "/absolute/path/to/run-candidate" \
   --evaluator-command "/absolute/path/to/evaluate-candidate" \
@@ -836,7 +891,7 @@ lunar-agent evolve contract.json --strategy population \
   --json --home .lunar
 
 # Or call an OpenAI-compatible local server directly.
-lunar-agent evolve contract.json --strategy loop \
+lunar-agent evolve contract.json --strategy population \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint "http://127.0.0.1:11434/v1/chat/completions" \
   --agent-runtime-model "your-local-model" \
@@ -853,10 +908,11 @@ stored only as credential-safe fingerprints. Detached runs pass non-secret setti
 and an API key through `FAMOU_AGENT_RUNTIME_API_KEY`, never through argv or state.
 
 For an OpenAI-compatible local model that needs to inspect a candidate, edit files, or run tests
-before returning, opt into the bounded repository-owned loop:
+before returning, keep the population strategy and opt into the bounded repository-owned runtime
+loop:
 
 ```bash
-lunar-agent evolve contract.json --strategy loop \
+lunar-agent evolve contract.json --strategy population \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
   --agent-runtime-model your-local-model \
@@ -865,20 +921,21 @@ lunar-agent evolve contract.json --strategy loop \
   --json --home .lunar
 ```
 
-The loop reuses the same confined `read_file`, `write_file`, `list_dir`, and optional no-shell
-`run_command` tools used by normal Lunar-Agent sessions. Each solver and evaluator role receives a
-fresh runtime and tool registry. The loop is bounded to at most 200 tool calls, and memory,
-transcripts, and command execution are all explicit opt-ins. Its text still crosses the strict
-candidate/evaluation bridges, so a model cannot claim validity or bypass the evaluator.
+`--agent-runtime-loop` wraps each runtime invocation with the same confined `read_file`,
+`write_file`, `list_dir`, and optional no-shell `run_command` tools used by normal Lunar-Agent
+sessions. Each solver and evaluator role receives a fresh runtime and tool registry. The runtime
+loop is bounded to at most 200 tool calls, and memory, transcripts, and command execution are all
+explicit opt-ins. It does not reactivate the retired evolution strategy. Its text still crosses the
+strict candidate/evaluation bridges, so a model cannot claim validity or bypass the evaluator.
 
 ### Reproducible strategy benchmark
 
-Use `benchmark` to compare native strategies with the same contract, command-backed generator and
-evaluator, and bounded budget. Each strategy gets a fresh workspace and archive:
+Use `benchmark` to reproduce population search with a fixed contract, command-backed generator and
+evaluator, and bounded budget. With no `--strategy`, the benchmark runs only `population` in a fresh
+workspace and archive:
 
 ```bash
 lunar-agent benchmark contract.json \
-  --strategy loop --strategy population \
   --generator-command "/absolute/path/to/generator" \
   --evaluator-command "/absolute/path/to/evaluator" \
   --max-rounds 3 --population-size 4 --seed 7 \
@@ -887,17 +944,28 @@ lunar-agent benchmark contract.json \
 
 The JSON report contains per-strategy status, elapsed time, candidate counts, best score, and
 relative archive paths. Generator/evaluator identities are stored as SHA-256 fingerprints; raw
-commands and model credentials are not included. The default benchmark compares the local `loop`
-and `population` strategies. Add `--strategy openevolve --openevolve-command
-"/absolute/path/to/wrapper"` to include the explicit OpenEvolve adapter; its wrapper receives a
-generated config and must write the strict candidate result envelope. OpenEvolve remains an opt-in
-subprocess and is never installed or discovered by Lunar-Agent.
+commands and model credentials are not included. To compare the native population with the explicit
+OpenEvolve adapter, select both and retain the local evaluator command:
+
+```bash
+lunar-agent benchmark contract.json \
+  --strategy population --strategy openevolve \
+  --generator-command "/absolute/path/to/generator" \
+  --openevolve-command "/absolute/path/to/openevolve-wrapper" \
+  --evaluator-command "/absolute/path/to/local-exact-evaluator" \
+  --max-rounds 3 --population-size 4 --seed 7 \
+  --json --home .lunar
+```
+
+The wrapper receives a generated config and writes bounded candidate material. Its evaluation is
+external provenance only; the displayed comparison score comes from the explicit local evaluator.
+OpenEvolve remains an opt-in subprocess and is never installed or discovered by Lunar-Agent.
 
 The same benchmark can use Lunar-Agent's repository-owned runtime instead of command adapters. A
 one-shot comparison uses:
 
 ```bash
-lunar-agent benchmark contract.json --strategy loop --strategy population \
+lunar-agent benchmark contract.json \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
   --agent-runtime-model your-local-model \
@@ -905,9 +973,9 @@ lunar-agent benchmark contract.json --strategy loop --strategy population \
 ```
 
 Run the identical command in a new workspace with `--agent-runtime-loop` to measure the bounded
-tool-capable profile. Loop settings are fingerprinted, and memory, transcripts, and no-shell
-execution remain explicit opt-ins. Runtime-backed calls still use the strict candidate/evaluator
-bridges, so a model response cannot bypass validity checks.
+tool-capable runtime profile. Runtime-loop settings are fingerprinted, and memory, transcripts, and
+no-shell execution remain explicit opt-ins. Runtime-backed calls still use the population strategy
+and strict candidate/evaluator bridges, so a model response cannot bypass validity checks.
 
 Hermes, DeepSeek Harness, Codex, Claude Code, and OpenClaw remain useful optional adapters or parent
 processes. They are execution-plane integrations; Lunar-Agent's local controller, evolution
@@ -935,8 +1003,8 @@ When an Agent is the solver, later generations receive execution-grounded refine
 their parent, population inspirations, and recent archive entries. The shared envelope combines a
 bounded/redacted candidate source excerpt, source digest, controlled process/output-contract status,
 verified output path/size/digest metadata, and the independent `evaluation_feedback` projection.
-This lets native loop and population search repair a real failed attempt instead of merely sampling
-again. It is reconstructed from the candidate archive on resume; no second feedback database or
+This lets native population search repair a real failed attempt instead of merely sampling again.
+It is reconstructed from the candidate archive on resume; no second feedback database or
 in-memory chat dependency is required.
 
 Raw input rows, output contents, candidate stdout/stderr, model credentials, and evaluator adapter
@@ -951,12 +1019,13 @@ contract.
 events, Agent model/tool lifecycle events, and indexed `evolution/archive.jsonl`,
 `evolution/state.json`, `evolution/result.json`, and redacted solver/evaluator transcript artifacts.
 OpenEvolve remains optional and is invoked only when `--openevolve-command` points to an existing
-absolute executable; no global installation is discovered.
+absolute executable and `--evaluator-command` supplies local verification; no global installation
+is discovered and an external evaluation never becomes the Lunar score.
 
 An explicit Agent can generate candidates directly while the evaluator remains independent:
 
 ```bash
-lunar-agent evolve contract.json --strategy loop \
+lunar-agent evolve contract.json --strategy population \
   --agent-command "/absolute/path/to/agent-wrapper --json" \
   --agent-role solver --agent-capability read_files \
   --evaluator-command "/absolute/path/to/evaluator-wrapper" \
@@ -1025,11 +1094,10 @@ lunar-agent run "search for a feasible schedule" --runtime mock --detach --json 
 lunar-agent resume <run-id> --runtime mock --json --home .lunar
 ```
 
-These are process/interface choices, not different evolution algorithms. `loop` remains the first
-implementation target because it gives each round a fresh solver context and is easier to compare
-under a fixed budget. `population` becomes worthwhile when a long local budget can pay for archive
-selection and genuine diversity; it will sit behind the same Solver/Evaluator boundary rather than
-being tied to a specific parent Agent.
+These are process/interface choices, not different evolution algorithms. New evolution work uses
+the population strategy behind the same Solver/Evaluator boundary, independent of whether Lunar is
+called directly, by a parent Agent, or through a detached process. `--agent-loop` and
+`--agent-runtime-loop` remain model/tool runtime choices inside that boundary.
 
 If the session needs a decision, it can call `ask_user`. The run then becomes `awaiting_input` and
 returns the question in JSON/status output. Answer the same durable run later; no duplicate task is
