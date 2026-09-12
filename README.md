@@ -968,9 +968,23 @@ files with size and SHA-256; `admit_producer_result(...)` verifies those bytes a
 batch to one verified-seed manifest. Lunar assigns islands and identities only after the full batch
 has passed the local exact evaluator. Producer metrics such as `combined_score`, `correct`, or
 feedback are reduced to `{present, score_present, payload_sha256}` and cannot become Lunar scores.
-For a Shinka run, export the selected `best/main.<ext>` (or another explicitly selected program)
-and its parent IDs into this envelope; do not map Shinka generation numbers or SQLite IDs to Lunar
-iterations. This adapter is offline and does not launch ShinkaEvolve or any remote backend.
+
+For a native Shinka result directory, `famou.export_shinka_result(...)` is a read-only, offline
+exporter. It opens `programs.sqlite` (with an explicit legacy `evolution_db.sqlite` fallback) in
+immutable read-only mode when the database is quiescent (live `-wal`/`-shm`/rollback-journal
+sidecars are rejected), and writes a fresh envelope plus bounded candidate copies under the
+requested export root. The export-root leaf must be a new path, its existing parent must be a
+regular directory without arbitrary symlink components, and a failed commit can report an
+unknown parent-directory durability state after the complete tree becomes visible. Pass
+`program_ids=[...]` to select an explicit ordered set and leave `top_k` omitted; this can include
+rows that Shinka marked incorrect so Lunar can make the authoritative decision. If IDs are omitted, `top_k`
+defaults to one convenience row and otherwise selects rows with `correct = 1`, ordered
+deterministically by the producer's `combined_score`, generation, and ID. The exporter prefers
+`gen_<generation>/main.<ext>` and uses `best/main.<ext>` only when that generation file is absent,
+after checking exact UTF-8 bytes against the database row. Call `admit_producer_result(export_root,
+...)` afterwards; Shinka scores, correctness, metrics, and SQLite/generation metadata are reduced
+to bounded external evidence and never become Lunar iteration, score, or rank authority. The
+exporter does not launch ShinkaEvolve, a model, a scheduler, or a remote backend.
 
 The same benchmark can use Lunar-Agent's repository-owned runtime instead of command adapters. A
 one-shot comparison uses:

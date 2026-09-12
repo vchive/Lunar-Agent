@@ -154,6 +154,11 @@ from .seed_handoff import (
     compute_seed_identity,
     parse_seed_manifest,
 )
+from .shinka_handoff import (
+    ShinkaHandoffError,
+    export_shinka_envelope,
+    export_shinka_result,
+)
 from .staged_workflow import (
     StagedRunResult,
     StagedWorkflowConfig,
@@ -267,6 +272,7 @@ __all__ = [
     "SeedManifest",
     "SeedProvenance",
     "SeedRecord",
+    "ShinkaHandoffError",
     "SolverProfile",
     "SolverScoringContract",
     "StagePolicy",
@@ -303,6 +309,8 @@ __all__ = [
     "convert_fm_eval_baseline",
     "declared_producer_environment_sha256",
     "declared_protocol_environment_sha256",
+    "export_shinka_envelope",
+    "export_shinka_result",
     "famou_case_content_digest",
     "load_evaluator_bundle",
     "normalize_feedback",

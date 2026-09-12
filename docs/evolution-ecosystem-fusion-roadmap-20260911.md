@@ -3,9 +3,10 @@
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、模型、provider、远端服务、候选评测或真实
 campaign。当前 Feature 084/085 建立 verified seed、population-first 和协议边界，并实现
-OpenEvolve 的有界本地 subprocess producer 接线，以及可供 OpenEvolve、ShinkaEvolve 等
-复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter；这些接线只由离线
-fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar 复现。
+OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读离线结果 exporter，以及
+可供 OpenEvolve、ShinkaEvolve 等复用的 transport-free `ProducerResultEnvelope` →
+`SeedManifest` adapter；这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何
+项目的公开效果已由 Lunar 复现。
 
 ## AlphaEvolve 与 OpenEvolve 的关系
 
@@ -20,6 +21,19 @@ fixture 验证，不能据此声称真实框架已运行或任何项目的公开
 LLM 生成、MAP-Elites、quality-diversity、多岛迁移、外部 evaluator 和 checkpoint 等思路。
 它与 AlphaEvolve 方向一致，适合作为 Lunar 的首个本地 subprocess producer，但其分数、
 数据库和 checkpoint 都不自动成为 Lunar 的权威状态。
+
+ShinkaEvolve 的 native 结果可通过 `src/famou/shinka_handoff.py` 导出到同一 envelope。该
+exporter 只读查询 `programs` 表中固定的 `id`、`code`、`language`、`parent_id`、`generation`、
+`combined_score`、`correct` 字段，并显式兼容 `programs.sqlite` 与旧的 `evolution_db.sqlite`
+文件名；有 live `-wal`/`-shm`/rollback-journal sidecar 的数据库会被拒绝，避免只读打开产生
+副作用。调用方可按顺序指定 `program_ids`，此时省略 `top_k`；不指定时，`top_k` 默认一条，
+只选择 `correct = 1` 的 convenience rows，并按 producer score、generation、ID 确定性排序。
+导出目标要求是不存在的新 leaf，已有 parent 必须是无任意 symlink 组件的目录。源文件优先是
+`gen_<generation>/main.<ext>`，仅在该文件缺失时回退到 `best/main.<ext>`，且必须和数据库
+`code` 的 UTF-8 字节完全一致。导出后的 envelope 仍须经过 `admit_producer_result` 和
+Lunar exact evaluator；Shinka 的 score、correct、metrics、generation 与 SQLite 元数据只归一化
+为 digest-only external evidence，parent IDs 只作有界 lineage，不获得 Lunar 的 score、rank
+或交付权限。当前只用离线 fixture 验证，未运行真实 Shinka、模型、网络或 Slurm。
 
 ## 项目映射
 
@@ -106,8 +120,8 @@ famou-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远�
 2. 把现有 OpenEvolve one-shot wrapper 收敛为首个 `EvolutionMaterialProducer`，补 producer
    fingerprint、lineage、bounded output、timeout/cancel 和同一 exact-harness receipt；当前
    wrapper 与通用 envelope 均已由离线 fixture 验证。
-3. 让 ShinkaEvolve 的显式 best/program 导出器写入同一 `lunar-producer-result-v1` envelope；
-   用固定离线 fixture 验证两种 producer 输出能进入同一 admission，不启动真实模型或外部框架。
+3. 继续用固定离线 fixture 验证 ShinkaEvolve 的显式 best/program exporter 与 OpenEvolve
+   producer 输出能进入同一 `lunar-producer-result-v1` admission；不启动真实模型或外部框架。
 4. 为 SkyDiscover/LLM4AD 增加 benchmark/task envelope，使用相同 contract、输入、模型、
    evaluator 和物理尝试预算进行比较。
 5. 只移植经上述对照有收益的原生算法模块。多文件、Agent/workflow、训练型候选和远端服务

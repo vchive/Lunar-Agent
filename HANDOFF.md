@@ -56,6 +56,19 @@ credential/deep-evidence、空 terminal envelope 和 local invalid evaluation �
 没有启动真实 ShinkaEvolve 或任何远端 transport。Shinka 后续只需显式导出 `best/main.*`
 及 parent lineage，不能把其 generation/SQLite ID 映射成 Lunar iteration。
 
+当前新增的 `src/famou/shinka_handoff.py` 是上述边界的离线 exporter：它只读打开
+`programs.sqlite`（缺失时才使用 `evolution_db.sqlite`）的静态、无 WAL/SHM/rollback-journal
+sidecar 快照，支持显式有序 `program_ids`（此时省略 `top_k`），并把省略 ID 时的 `top_k`
+保留为按 `correct=1` 与 producer score 排序的 convenience 选择，省略 `top_k` 默认取一条。
+候选优先来自
+`gen_<generation>/main.<ext>`，仅在该文件缺失时回退到 `best/main.<ext>`，且必须与 SQLite
+中的 `code` 字节完全一致。导出目标必须是不存在的新 leaf，已有 parent 必须是无任意 symlink
+组件的目录；目录提交后的 parent fsync 不确定时会保留已发布树并返回固定 commit-unknown。
+导出后直接调用 `admit_producer_result`；`combined_score`、
+`correct`、metrics 和 generation/SQLite 元数据都只归一化为外部 evidence，parent IDs 仅作
+有界 lineage，不参与 Lunar exact evaluator、score、rank 或最终交付权威。该 exporter 不启动
+Shinka、模型、网络、Slurm 或远端服务。
+
 初始化 evaluator 异常现在使用固定 `run_failed`、`evaluator_timeout`、`worker_unknown`
 代码；候选 source tree 在评测异常时清理，不再生成带异常正文的 synthetic invalid report，
 fresh failure 保持 iteration 0 并在无 active candidate 时 fail closed，terminal resume 不会
@@ -63,16 +76,16 @@ fresh failure 保持 iteration 0 并在无 active candidate 时 fail closed，te
 offspring/candidate 尚未拥有与 imported seed 等价的 contract/evaluator/dependency/environment
 四类完整 fingerprint/receipt，后续应另立 Feature，避免混改现有 archive schema。
 
-最终离线验证：核心融合定向 231 项；扩展 quickstart 定向 346 项；主仓全量 2210 项（2183 项
-基线加 27 项新增测试）；全 `src/famou`/`tests` Ruff、
+最终离线验证：Shinka exporter 26 项；producer/OpenEvolve/seed/evolution/population defaults
+定向 202 项；主仓全量 2240 项（2210 项基线加 30 项新增测试）；全 `src/famou`/`tests` Ruff、
 compileall、Specify prerequisites、`git diff --check` 均通过。074/076/078/082 的 Git 封存
 文件无 diff。没有启动模型、真实 OpenEvolve/ShinkaEvolve、WebAgent、provider、公司平台、
 远端 backend 或 campaign，也没有复写任何历史 measurement。
 
 Feature 084/085 文档仍保持 Draft，未完成任务不要勾选，也不能把离线互操作宣称为有效解率
 提升。当前明确保留的后续项：普通 offspring/candidate 的完整 receipt/fingerprint schema；
-ShinkaEvolve 的显式 native best/program exporter；SkyDiscover/LLM4AD 先接 benchmark/task
-envelope，仓库型或 workflow 型候选另开冻结 Feature。
+ShinkaEvolve exporter 的更广泛真实 runner/benchmark 验证；SkyDiscover/LLM4AD 先接
+benchmark/task envelope，仓库型或 workflow 型候选另开冻结 Feature。
 
 ## 0. 当前续作：Feature 084（草案）
 
