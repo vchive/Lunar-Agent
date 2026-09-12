@@ -335,6 +335,108 @@ def test_population_failed_only_batch_does_not_advance_iteration(
     assert "pending_offspring" not in state
 
 
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (RuntimeError("private evaluator failure sk-initial-secret-12345"), "run_failed"),
+        (TimeoutError("private evaluator timeout sk-initial-secret-12345"), "evaluator_timeout"),
+        (WorkerUnknownError("private worker state sk-initial-secret-12345"), "worker_unknown"),
+    ],
+    ids=["run-failed", "evaluator-timeout", "worker-unknown"],
+)
+def test_population_initial_evaluator_failure_is_fixed_and_non_persisted(
+    tmp_path: Path,
+    failure: BaseException,
+    expected_code: str,
+) -> None:
+    generate_calls: list[int] = []
+    evaluate_calls: list[Path] = []
+
+    def generate(request):
+        generate_calls.append(request.iteration)
+        return CandidateDraft("initial = True\n")
+
+    def evaluate(path, contract):
+        del contract
+        evaluate_calls.append(path)
+        raise failure
+
+    config = EvolutionConfig(max_rounds=1, population_size=1)
+    result = PopulationStrategy(
+        EvolutionContext(_contract(), tmp_path, generate, evaluate, config)
+    ).run()
+
+    evolution_root = tmp_path / "evolution"
+    state_path = evolution_root / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert result.status == "failed"
+    assert result.iterations == 0
+    assert result.error == expected_code
+    assert state["status"] == "failed"
+    assert state["iteration"] == 0
+    assert state["error"] == expected_code
+    assert generate_calls == [0]
+    assert len(evaluate_calls) == 1
+    assert not (evolution_root / "archive.jsonl").exists()
+    assert not (evolution_root / "offspring-outcomes.jsonl").exists()
+    assert list((evolution_root / "candidates").iterdir()) == []
+    persisted = b"".join(
+        path.read_bytes() for path in evolution_root.rglob("*") if path.is_file()
+    )
+    assert b"private evaluator" not in persisted
+    assert b"sk-initial-secret-12345" not in persisted
+
+    before_resume = {
+        path.relative_to(evolution_root).as_posix(): path.read_bytes()
+        for path in evolution_root.rglob("*")
+        if path.is_file()
+    }
+    resumed = PopulationStrategy(
+        EvolutionContext(
+            _contract(),
+            tmp_path,
+            lambda request: pytest.fail("terminal initialization resume generated"),
+            lambda path, contract: pytest.fail("terminal initialization resume evaluated"),
+            config,
+        )
+    ).resume()
+    assert resumed.to_dict() == result.to_dict()
+    assert {
+        path.relative_to(evolution_root).as_posix(): path.read_bytes()
+        for path in evolution_root.rglob("*")
+        if path.is_file()
+    } == before_resume
+
+
+def test_population_initial_generator_failure_keeps_offspring_retry_semantics(
+    tmp_path: Path,
+) -> None:
+    generated: list[int] = []
+
+    def generate(request):
+        generated.append(request.iteration)
+        if request.iteration == 0:
+            raise RuntimeError("initial generation failed")
+        return CandidateDraft("offspring = True\n")
+
+    result = PopulationStrategy(
+        EvolutionContext(
+            _contract(),
+            tmp_path,
+            generate,
+            lambda path, contract: _report(1),
+            EvolutionConfig(max_rounds=1, population_size=1),
+        )
+    ).run()
+
+    records = CandidateArchive(tmp_path).records()
+    assert generated == [0, 1]
+    assert result.status == "completed"
+    assert result.iterations == 1
+    assert len(records) == 1
+    assert records[0].iteration == 1
+
+
 def test_population_counts_structured_invalid_evaluation_as_evaluated(
     tmp_path: Path,
 ) -> None:

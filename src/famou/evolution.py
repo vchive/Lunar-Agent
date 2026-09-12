@@ -77,6 +77,16 @@ class WorkerUnknownError(EvolutionError):
     """Explicit signal that an evaluator worker's terminal state cannot be reconciled."""
 
 
+class _InitialCandidateFailure(EvolutionError):
+    """Fixed, non-prose outcome for a failed population initialization evaluation."""
+
+    def __init__(self, code: str) -> None:
+        if code not in _OFFSPRING_OUTCOME_CODES - {"evaluated"}:
+            code = "run_failed"
+        self.code = code
+        super().__init__(code)
+
+
 def _bounded_error(error: object) -> str:
     text = " ".join(str(error).split())
     return text[-MAX_ERROR_BYTES:] if text else "unknown evolution error"
@@ -2455,6 +2465,16 @@ def _caused_by_worker_unknown(error: BaseException) -> bool:
     return False
 
 
+def _evaluator_failure_code(error: BaseException) -> str:
+    """Map an evaluator boundary exception to a fixed durable outcome code."""
+
+    if _caused_by_worker_unknown(error):
+        return "worker_unknown"
+    if _caused_by_timeout(error):
+        return "evaluator_timeout"
+    return "run_failed"
+
+
 class ExecutionAwareCandidateEvaluator:
     """Compose candidate execution with an existing independent evaluator.
 
@@ -2531,6 +2551,20 @@ class _BaseStrategy:
         except Exception:  # noqa: BLE001 - cancellation callback is an external boundary
             return True
 
+    def _discard_unarchived_candidate(self, candidate_id: str) -> None:
+        """Remove a source tree that was staged before an archive record existed."""
+
+        path = self.archive.candidates_root / candidate_id
+        try:
+            if path.is_symlink():
+                path.unlink()
+            elif path.exists():
+                shutil.rmtree(path)
+        except OSError:
+            # The durable archive remains authoritative. A missing staging tree is safe to
+            # treat as already discarded; a later resume must never infer a candidate from it.
+            pass
+
     def _persist(
         self,
         draft: CandidateDraft,
@@ -2541,14 +2575,22 @@ class _BaseStrategy:
         island_id: int | None,
     ) -> Candidate:
         candidate_id = self.archive.next_id()
-        path = self.archive.candidate_source_path(candidate_id, draft.filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(draft.source, encoding="utf-8")
+        try:
+            path = self.archive.candidate_source_path(candidate_id, draft.filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(draft.source, encoding="utf-8")
+        except Exception:  # noqa: BLE001 - candidate staging is a fixed boundary
+            self._discard_unarchived_candidate(candidate_id)
+            raise _InitialCandidateFailure("candidate_failed") from None
         try:
             evaluation = _report(self.context.evaluate(path, self.context.contract))
         except Exception as exc:  # noqa: BLE001 - evaluator is an injected boundary
-            evaluation = _invalid_report(exc)
-            draft = CandidateDraft(draft.source, draft.filename, {**draft.metadata, "evaluation_error": _bounded_error(exc)})
+            self._discard_unarchived_candidate(candidate_id)
+            # Do not persist evaluator exception prose in either the synthetic report or
+            # candidate metadata. Initialization has no offspring journal entry, so the caller
+            # records the same fixed code in terminal state when the whole initial population
+            # fails.
+            raise _InitialCandidateFailure(_evaluator_failure_code(exc)) from None
         candidate = self.archive.persist(
             draft,
             candidate_id=candidate_id,
@@ -3233,16 +3275,6 @@ class PopulationStrategy(_BaseStrategy):
         )
         return self.archive.read_state()
 
-    def _discard_unarchived_candidate(self, candidate_id: str) -> None:
-        path = self.archive.candidates_root / candidate_id
-        try:
-            if path.is_symlink():
-                path.unlink()
-            elif path.exists():
-                shutil.rmtree(path)
-        except OSError:
-            pass
-
     def _attempt_offspring(
         self,
         active: dict[int, list[str]],
@@ -3283,13 +3315,12 @@ class PopulationStrategy(_BaseStrategy):
             evaluation = _report(self.context.evaluate(path, self.context.contract))
         except Exception as exc:  # noqa: BLE001 - evaluator is an injected boundary
             self._discard_unarchived_candidate(candidate_id)
-            if _caused_by_worker_unknown(exc):
-                code = "worker_unknown"
-            elif _caused_by_timeout(exc):
-                code = "evaluator_timeout"
-            else:
-                code = "run_failed"
-            return OffspringOutcome(iteration, attempt, island, code)
+            return OffspringOutcome(
+                iteration,
+                attempt,
+                island,
+                _evaluator_failure_code(exc),
+            )
 
         try:
             candidate = self.archive.persist(
@@ -3498,6 +3529,8 @@ class PopulationStrategy(_BaseStrategy):
                 for index, candidate in enumerate(existing[-self.config.population_size :]):
                     active[index % self.config.num_islands].append(candidate.candidate_id)
             else:
+                initialization_error: str | None = None
+                evaluator_failure: str | None = None
                 for index in range(self.config.population_size):
                     if self._cancelled():
                         self._state("cancelled", iteration, active_ids={str(k): v for k, v in active.items()}, error="cancelled")
@@ -3508,9 +3541,34 @@ class PopulationStrategy(_BaseStrategy):
                         draft = drafts[0]
                         candidate = self._persist(draft, iteration=0, generation=0, parent=None, island_id=index % self.config.num_islands)
                         active[index % self.config.num_islands].append(candidate.candidate_id)
+                    except _InitialCandidateFailure as exc:
+                        # Keep only the fixed evaluator outcome; the exception chain may contain
+                        # provider or credential text and must never cross the durable boundary.
+                        if evaluator_failure is None:
+                            evaluator_failure = exc.code
+                        if initialization_error is None:
+                            initialization_error = exc.code
+                        error = initialization_error
                     except Exception:  # noqa: BLE001 - initialization retains one fixed code
-                        error = "candidate_failed"
+                        if initialization_error is None:
+                            initialization_error = "candidate_failed"
+                        error = initialization_error
                 self._trim(active)
+                if not any(active.values()) and evaluator_failure is not None:
+                    terminal_error = evaluator_failure
+                    self._state(
+                        "failed",
+                        iteration,
+                        active_ids={str(k): v for k, v in active.items()},
+                        stagnation=0,
+                        error=terminal_error,
+                        best_candidate_id=None,
+                        rng_seed=self.config.rng_seed,
+                        last_migration_iteration=migration_watermark,
+                    )
+                    return self.archive.result(
+                        self.name, "failed", iteration, terminal_error
+                    )
         initial_best = self.archive.best()
         self._state(
             "running",
