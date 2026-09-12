@@ -115,6 +115,15 @@ from .openevolve_handoff import (
     declared_protocol_environment_sha256,
     source_only_dependency_sha256,
 )
+from .producer_handoff import (
+    ProducerHandoffError,
+    ProducerMaterial,
+    ProducerResultEnvelope,
+    admit_producer_result,
+    declared_producer_environment_sha256,
+    parse_producer_envelope,
+    producer_bundle_dependency_sha256,
+)
 from .profiles import EvaluatorProfile, ModelProfile, ProfileRegistry, SolverProfile
 from .remote_evolution import (
     RemoteCancelRequest,
@@ -235,6 +244,9 @@ __all__ = [
     "PopulationConfig",
     "PopulationState",
     "PopulationStrategy",
+    "ProducerHandoffError",
+    "ProducerMaterial",
+    "ProducerResultEnvelope",
     "ProfileRegistry",
     "RejectedSeed",
     "RemoteCancelRequest",
@@ -273,6 +285,7 @@ __all__ = [
     "WorkflowManifest",
     "WorkflowState",
     "admit_openevolve_result",
+    "admit_producer_result",
     "admit_seed_manifest",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
@@ -288,11 +301,14 @@ __all__ = [
     "config_from_contract",
     "contract_candidate_runner_fingerprint",
     "convert_fm_eval_baseline",
+    "declared_producer_environment_sha256",
     "declared_protocol_environment_sha256",
     "famou_case_content_digest",
     "load_evaluator_bundle",
     "normalize_feedback",
+    "parse_producer_envelope",
     "parse_seed_manifest",
+    "producer_bundle_dependency_sha256",
     "profile_sha256",
     "reconcile_remote_state",
     "run_effect_preflight",

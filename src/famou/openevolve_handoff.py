@@ -160,7 +160,12 @@ def _relative_to_root(
 
 
 def _open_flags(*, directory: bool = False) -> int:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     if directory:
         flags |= getattr(os, "O_DIRECTORY", 0)
     return flags
