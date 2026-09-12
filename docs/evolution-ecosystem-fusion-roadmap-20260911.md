@@ -3,8 +3,9 @@
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、模型、provider、远端服务、候选评测或真实
 campaign。当前 Feature 084/085 建立 verified seed、population-first 和协议边界，并实现
-OpenEvolve 的有界本地 subprocess producer 接线；该接线只由离线假 wrapper 验证，不能据此
-声称真实 OpenEvolve 已运行或任何项目的公开效果已由 Lunar 复现。
+OpenEvolve 的有界本地 subprocess producer 接线，以及可供 OpenEvolve、ShinkaEvolve 等
+复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter；这些接线只由离线
+fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar 复现。
 
 ## AlphaEvolve 与 OpenEvolve 的关系
 
@@ -45,9 +46,10 @@ LLM 生成、MAP-Elites、quality-diversity、多岛迁移、外部 evaluator �
 
 ### 1. Material producer adapter
 
-先为有稳定 CLI/runner 的框架定义通用 `EvolutionMaterialProducer`，不要为每个框架增加一套
-Lunar strategy 状态。请求只包含固定 contract digest、bounded budget、run-scoped output
-root 和 producer identity；结果只允许包含 terminal/unknown 状态、opaque producer run ID、
+`src/famou/producer_handoff.py` 提供通用的 `ProducerResultEnvelope`、`ProducerMaterial` 和
+`admit_producer_result`；它为有稳定 CLI/runner 的框架定义一个共享 material 边界，不要为每个
+框架增加一套 Lunar strategy 状态。请求只包含固定 contract digest、bounded budget、run-scoped
+output root 和 producer identity；结果只允许包含 terminal/unknown 状态、opaque producer run ID、
 候选 material `{path, size, sha256}`、lineage 和 bounded external evidence。所有外部 evidence
 与 record metadata 在进入 Lunar canonical state 前统一变成
 `{present, score_present, payload_sha256}`，不保存原始分数或 prose。
@@ -102,9 +104,10 @@ famou-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远�
 1. 完成 Feature 084 的原子 mixed-batch admission、receipt 持久化、fresh revalidation 和
    resume fingerprint 校验；完成 Feature 085 的 population-first 默认及历史 loop 只读边界。
 2. 把现有 OpenEvolve one-shot wrapper 收敛为首个 `EvolutionMaterialProducer`，补 producer
-   fingerprint、lineage、bounded output、timeout/cancel 和同一 exact-harness receipt。
-3. 增加 ShinkaEvolve adapter；用固定离线 fixture 验证两种 producer 输出能进入同一
-   admission，不启动真实模型或外部框架。
+   fingerprint、lineage、bounded output、timeout/cancel 和同一 exact-harness receipt；当前
+   wrapper 与通用 envelope 均已由离线 fixture 验证。
+3. 让 ShinkaEvolve 的显式 best/program 导出器写入同一 `lunar-producer-result-v1` envelope；
+   用固定离线 fixture 验证两种 producer 输出能进入同一 admission，不启动真实模型或外部框架。
 4. 为 SkyDiscover/LLM4AD 增加 benchmark/task envelope，使用相同 contract、输入、模型、
    evaluator 和物理尝试预算进行比较。
 5. 只移植经上述对照有收益的原生算法模块。多文件、Agent/workflow、训练型候选和远端服务

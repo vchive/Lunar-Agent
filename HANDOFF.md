@@ -1,6 +1,6 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-11
+更新时间：2026-09-12
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
@@ -45,16 +45,33 @@ offspring outcome artifacts。terminal resume 会先核对 SQLite run 与 canoni
 status、strategy、contract、config、seed manifest/marker；缺 state 的失败或取消任务不能被
 新 manifest 复活，避免 run/state split-brain。孤立 seed identity 参数在 claim 前拒绝。
 
-最终离线验证：融合定向 288 项通过；主仓 2183 项全量通过；全 `src/famou`/`tests` Ruff、
+新增 `src/famou/producer_handoff.py`，提供 transport-free 的
+`ProducerResultEnvelope`/`ProducerMaterial` DTO 和 `admit_producer_result`。OpenEvolve、
+ShinkaEvolve 或其他 runner 只需把已落盘的候选 material `{path,size,sha256}`、producer
+identity、lineage、预算和 terminal status 导出到同一 envelope；Lunar 以一个全批
+`SeedManifest` 绑定 source-only bundle digest，统一做 exact-harness admission 和确定性
+island 分配。外部 metrics/evidence 只保留 `{present, score_present, payload_sha256}`，不
+进入 Lunar score/rank。多候选 mixed batch、路径/size/digest/symlink/FIFO、未知字段/status、
+credential/deep-evidence、空 terminal envelope 和 local invalid evaluation 均有离线测试；
+没有启动真实 ShinkaEvolve 或任何远端 transport。Shinka 后续只需显式导出 `best/main.*`
+及 parent lineage，不能把其 generation/SQLite ID 映射成 Lunar iteration。
+
+初始化 evaluator 异常现在使用固定 `run_failed`、`evaluator_timeout`、`worker_unknown`
+代码；候选 source tree 在评测异常时清理，不再生成带异常正文的 synthetic invalid report，
+fresh failure 保持 iteration 0 并在无 active candidate 时 fail closed，terminal resume 不会
+重放 generator/evaluator。generator-only 初始失败仍保留旧的 offspring retry 兼容语义。普通
+offspring/candidate 尚未拥有与 imported seed 等价的 contract/evaluator/dependency/environment
+四类完整 fingerprint/receipt，后续应另立 Feature，避免混改现有 archive schema。
+
+最终离线验证：核心融合定向 231 项；扩展 quickstart 定向 346 项；主仓全量 2210 项（2183 项
+基线加 27 项新增测试）；全 `src/famou`/`tests` Ruff、
 compileall、Specify prerequisites、`git diff --check` 均通过。074/076/078/082 的 Git 封存
 文件无 diff。没有启动模型、真实 OpenEvolve/ShinkaEvolve、WebAgent、provider、公司平台、
 远端 backend 或 campaign，也没有复写任何历史 measurement。
 
 Feature 084/085 文档仍保持 Draft，未完成任务不要勾选，也不能把离线互操作宣称为有效解率
-提升。当前明确保留的后续项：普通 population 初始化仍使用旧 `_persist`，evaluator exception
-可能被转换成 synthetic invalid report；普通 offspring 尚未拥有与 imported seed 等价的
-contract/evaluator/dependency/environment 四类完整 fingerprint/receipt。下一具体 adapter
-优先让 ShinkaEvolve 输出同一 seed manifest；SkyDiscover/LLM4AD 先接 benchmark/task
+提升。当前明确保留的后续项：普通 offspring/candidate 的完整 receipt/fingerprint schema；
+ShinkaEvolve 的显式 native best/program exporter；SkyDiscover/LLM4AD 先接 benchmark/task
 envelope，仓库型或 workflow 型候选另开冻结 Feature。
 
 ## 0. 当前续作：Feature 084（草案）

@@ -961,6 +961,17 @@ The wrapper receives a generated config and writes bounded candidate material. I
 external provenance only; the displayed comparison score comes from the explicit local evaluator.
 OpenEvolve remains an opt-in subprocess and is never installed or discovered by Lunar-Agent.
 
+ShinkaEvolve and other program-search runners can use the same transport-free producer envelope
+before a service adapter exists. The public `ProducerResultEnvelope` / `ProducerMaterial` API accepts
+only a terminal status, producer identity, bounded budget, lineage, and already-written candidate
+files with size and SHA-256; `admit_producer_result(...)` verifies those bytes and converts the
+batch to one verified-seed manifest. Lunar assigns islands and identities only after the full batch
+has passed the local exact evaluator. Producer metrics such as `combined_score`, `correct`, or
+feedback are reduced to `{present, score_present, payload_sha256}` and cannot become Lunar scores.
+For a Shinka run, export the selected `best/main.<ext>` (or another explicitly selected program)
+and its parent IDs into this envelope; do not map Shinka generation numbers or SQLite IDs to Lunar
+iterations. This adapter is offline and does not launch ShinkaEvolve or any remote backend.
+
 The same benchmark can use Lunar-Agent's repository-owned runtime instead of command adapters. A
 one-shot comparison uses:
 
