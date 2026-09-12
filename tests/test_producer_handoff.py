@@ -539,6 +539,10 @@ def test_evidence_credentials_controls_and_budget_bounds_are_rejected() -> None:
         ProducerMaterial("candidate_source", "candidate.py", MAX_SOURCE_BYTES + 1, "c" * 64)
     assert caught.value.code == PRODUCER_MATERIAL_TOO_LARGE
 
+    with pytest.raises(ProducerHandoffError) as caught:
+        ProducerMaterial("candidate_source", "api_key=super-secret.py", 1, "c" * 64)
+    assert caught.value.code == PRODUCER_MATERIAL_PATH_UNSAFE
+
 
 def test_bundle_digest_is_path_free_and_bounded() -> None:
     first = producer_bundle_dependency_sha256(["a" * 64, "b" * 64])

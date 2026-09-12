@@ -192,9 +192,15 @@ def _optional_identifier(value: object, label: str) -> str | None:
 def _relative_path(value: object, code: str = PRODUCER_MATERIAL_PATH_UNSAFE) -> str:
     try:
         raw = os.fspath(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RuntimeError):
         _raise(code)
-    if not isinstance(raw, str) or not raw or "\\" in raw or "\x00" in raw:
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or "\\" in raw
+        or "\x00" in raw
+        or _CREDENTIAL_RE.search(raw)
+    ):
         _raise(code)
     if len(_utf8(raw, code)) > MAX_PRODUCER_PATH_BYTES:
         _raise(code)
@@ -353,7 +359,7 @@ class ProducerMaterial:
         if type(self.size) is not int or not 1 <= self.size <= MAX_SOURCE_BYTES:
             _raise(PRODUCER_MATERIAL_TOO_LARGE)
         object.__setattr__(self, "sha256", _digest(self.sha256, PRODUCER_ENVELOPE_SCHEMA_INVALID))
-        if isinstance(self.lineage, (str, bytes)):
+        if not isinstance(self.lineage, (tuple, list)):
             _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
         try:
             lineage = tuple(self.lineage)
@@ -541,7 +547,7 @@ def _root(value: str | os.PathLike[str]) -> Path:
     try:
         path = Path(value).expanduser()
         info = path.lstat()
-    except (OSError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError, RuntimeError):
         _raise(PRODUCER_ROOT_UNSAFE)
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         _raise(PRODUCER_ROOT_UNSAFE)
