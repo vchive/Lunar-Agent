@@ -28,7 +28,13 @@ from typing import Any, Literal, Protocol
 
 from .algorithm import AlgorithmProblemContract, EvaluationReport
 from .evolution import MAX_SOURCE_BYTES
-from .seed_handoff import SeedAdmissionResult, SeedManifest, admit_seed_manifest
+from .seed_handoff import (
+    MAX_MATERIAL_REFS,
+    MAX_REFERENCE_BYTES,
+    SeedAdmissionResult,
+    SeedManifest,
+    admit_seed_manifest,
+)
 
 PRODUCER_RESULT_SCHEMA_VERSION = "1"
 PRODUCER_RESULT_PROTOCOL = "lunar-producer-result-v1"
@@ -320,6 +326,43 @@ def _merge_summaries(first: Mapping[str, Any], second: Mapping[str, Any]) -> dic
             }
         ),
     }
+
+
+def _material_refs(value: object) -> list[str]:
+    """Detach and bound adapter-supplied provenance references."""
+
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+    result: list[str] = []
+    try:
+        iterator = iter(value)
+        for _ in range(MAX_MATERIAL_REFS + 1):
+            try:
+                item = next(iterator)
+            except StopIteration:
+                break
+            encoded = (
+                _utf8(item, PRODUCER_ENVELOPE_SCHEMA_INVALID)
+                if isinstance(item, str)
+                else b""
+            )
+            if (
+                not isinstance(item, str)
+                or not item
+                or len(encoded) > MAX_REFERENCE_BYTES
+                or _CREDENTIAL_RE.search(item)
+            ):
+                _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+            result.append(encoded.decode("utf-8"))
+        else:
+            _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+        if len(result) != len(set(result)):
+            _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+    except ProducerHandoffError:
+        raise
+    except Exception:  # noqa: BLE001 - custom Sequence implementations are untrusted
+        _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+    return result
 
 
 def _budget(value: object) -> dict[str, int | float]:
@@ -712,51 +755,76 @@ def producer_bundle_dependency_sha256(source_sha256s: Sequence[str]) -> str:
     )
 
 
-def admit_producer_result(
+def _canonical_envelope(value: object) -> ProducerResultEnvelope:
+    """Revalidate an object-level envelope before using any of its fields.
+
+    ``ProducerResultEnvelope`` is frozen for ordinary callers, but Python callers can still
+    deliberately bypass its constructor with ``object.__setattr__`` or provide a subclass. The
+    object-level API is a trust boundary just like the JSON parser, so rebuild the DTO from its
+    canonical dictionary and reject any representation that is not already canonical. This
+    keeps malformed fields and custom-object exceptions inside the fixed producer error boundary.
+    """
+
+    if type(value) is not ProducerResultEnvelope:
+        _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+    try:
+        raw = ProducerResultEnvelope.to_dict(value)
+        canonical = ProducerResultEnvelope.from_dict(raw)
+        if raw != canonical.to_dict():
+            _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+        return canonical
+    except ProducerHandoffError:
+        raise
+    except Exception:  # noqa: BLE001 - object-level DTO fields are untrusted
+        _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+
+
+def admit_producer_envelope(
     external_root: str | os.PathLike[str],
+    envelope: ProducerResultEnvelope,
     contract: AlgorithmProblemContract,
     evaluator: CandidateEvaluator,
     *,
     evaluator_fingerprint: str,
     producer_fingerprint: str,
-    envelope_path: str | os.PathLike[str] = "producer-result.json",
     producer_id: str | None = None,
     staging_root: str | os.PathLike[str] | None = None,
     num_islands: int = 1,
+    material_ref_overrides: Mapping[str, Sequence[str]] | None = None,
 ) -> SeedAdmissionResult:
-    """Verify a producer envelope and admit its candidate materials through local evaluation.
+    """Admit an already parsed producer envelope through the local evaluator.
 
-    The producer is never called here.  ``external_root`` is only a directory containing an
-    envelope and already-created material files.  A caller must pin both fingerprints separately;
-    declarations inside the untrusted envelope are compared against those pins.
+    This is the object-level companion to :func:`admit_producer_result`.  It deliberately shares
+    the same source, identity, and exact-harness checks so a transport-free adapter can construct
+    an envelope without writing a second parser or a parallel score path.  ``material_ref_overrides``
+    is an internal provenance projection for adapters that have an opaque reference list in
+    addition to the verified source path; it never authorizes an unverified file.
     """
 
     if not isinstance(contract, AlgorithmProblemContract):
         _raise(PRODUCER_CONTRACT_MISMATCH)
     if not callable(evaluator):
         _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+    if not isinstance(envelope, ProducerResultEnvelope):
+        _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
     _digest(evaluator_fingerprint, PRODUCER_EVALUATOR_FINGERPRINT_REQUIRED)
     _digest(producer_fingerprint, PRODUCER_FINGERPRINT_REQUIRED)
     if producer_id is not None:
         _identifier(producer_id, "producer_id")
+    if material_ref_overrides is not None and not isinstance(material_ref_overrides, Mapping):
+        _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+    envelope = _canonical_envelope(envelope)
+    try:
+        contract_digest = contract.digest()
+    except Exception:  # noqa: BLE001 - caller-supplied contract is a trust boundary
+        _raise(PRODUCER_CONTRACT_MISMATCH)
+    _digest(contract_digest, PRODUCER_CONTRACT_MISMATCH)
     root = _root(external_root)
-    relative_envelope = _relative_path(envelope_path, PRODUCER_ENVELOPE_PATH_UNSAFE)
-    content = _read_regular(
-        root,
-        relative_envelope,
-        limit=MAX_PRODUCER_ENVELOPE_BYTES,
-        missing=PRODUCER_ENVELOPE_MISSING,
-        regular=PRODUCER_ENVELOPE_NOT_REGULAR,
-        large=PRODUCER_ENVELOPE_TOO_LARGE,
-        changed=PRODUCER_ENVELOPE_JSON_INVALID,
-        unsafe=PRODUCER_ENVELOPE_PATH_UNSAFE,
-    )
-    envelope = ProducerResultEnvelope.from_dict(_parse_json(content))
     if envelope.status != PRODUCER_COMPLETED_STATUS:
         _raise(PRODUCER_ENVELOPE_STATUS_INVALID)
     if not envelope.materials:
         _raise(PRODUCER_MATERIALS_EMPTY)
-    if envelope.contract_sha256 != contract.digest():
+    if envelope.contract_sha256 != contract_digest:
         _raise(PRODUCER_CONTRACT_MISMATCH)
     if envelope.producer_fingerprint != producer_fingerprint or (
         producer_id is not None and envelope.producer_id != producer_id
@@ -782,6 +850,16 @@ def admit_producer_result(
         if hashlib.sha256(source).hexdigest() != material.sha256:
             _raise(PRODUCER_MATERIAL_DIGEST_MISMATCH)
         evidence = _merge_summaries(envelope.external_evidence, material.external_evidence)
+        if material_ref_overrides is None:
+            material_refs: list[str] = []
+        else:
+            try:
+                raw_refs = material_ref_overrides.get(material.path, ())
+                material_refs = _material_refs(raw_refs)
+            except ProducerHandoffError:
+                raise
+            except Exception:  # noqa: BLE001 - adapter metadata is untrusted
+                _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
         records.append(
             {
                 "source_path": material.path,
@@ -792,7 +870,7 @@ def admit_producer_result(
                     "producer_id": envelope.producer_id,
                     "producer_fingerprint": producer_fingerprint,
                     "producer_run_id": envelope.producer_run_id,
-                    "material_refs": [],
+                    "material_refs": material_refs,
                     "external_evidence": evidence,
                 },
                 "metadata": {
@@ -809,7 +887,7 @@ def admit_producer_result(
     manifest = SeedManifest.from_dict(
         {
             "schema_version": "1",
-            "contract_sha256": contract.digest(),
+            "contract_sha256": contract_digest,
             "evaluator": {"kind": "exact_harness", "fingerprint": evaluator_fingerprint},
             "dependency_sha256": dependency_sha256,
             "environment_sha256": declared_producer_environment_sha256(),
@@ -825,6 +903,61 @@ def admit_producer_result(
         evaluator_fingerprint=evaluator_fingerprint,
         dependency_sha256=dependency_sha256,
         environment_sha256=declared_producer_environment_sha256(),
+        staging_root=staging_root,
+        num_islands=num_islands,
+    )
+
+
+def admit_producer_result(
+    external_root: str | os.PathLike[str],
+    contract: AlgorithmProblemContract,
+    evaluator: CandidateEvaluator,
+    *,
+    evaluator_fingerprint: str,
+    producer_fingerprint: str,
+    envelope_path: str | os.PathLike[str] = "producer-result.json",
+    producer_id: str | None = None,
+    staging_root: str | os.PathLike[str] | None = None,
+    num_islands: int = 1,
+) -> SeedAdmissionResult:
+    """Verify a producer envelope and admit its candidate materials through local evaluation.
+
+    The producer is never called here.  ``external_root`` is only a directory containing an
+    envelope and already-created material files.  A caller must pin both fingerprints separately;
+    declarations inside the untrusted envelope are compared against those pins.
+    """
+
+    # Preserve the original validation precedence: malformed caller identity must fail before a
+    # filesystem read, even though the parsed envelope is delegated to the object-level helper.
+    if not isinstance(contract, AlgorithmProblemContract):
+        _raise(PRODUCER_CONTRACT_MISMATCH)
+    if not callable(evaluator):
+        _raise(PRODUCER_ENVELOPE_SCHEMA_INVALID)
+    _digest(evaluator_fingerprint, PRODUCER_EVALUATOR_FINGERPRINT_REQUIRED)
+    _digest(producer_fingerprint, PRODUCER_FINGERPRINT_REQUIRED)
+    if producer_id is not None:
+        _identifier(producer_id, "producer_id")
+    root = _root(external_root)
+    relative_envelope = _relative_path(envelope_path, PRODUCER_ENVELOPE_PATH_UNSAFE)
+    content = _read_regular(
+        root,
+        relative_envelope,
+        limit=MAX_PRODUCER_ENVELOPE_BYTES,
+        missing=PRODUCER_ENVELOPE_MISSING,
+        regular=PRODUCER_ENVELOPE_NOT_REGULAR,
+        large=PRODUCER_ENVELOPE_TOO_LARGE,
+        changed=PRODUCER_ENVELOPE_JSON_INVALID,
+        unsafe=PRODUCER_ENVELOPE_PATH_UNSAFE,
+    )
+    envelope = ProducerResultEnvelope.from_dict(_parse_json(content))
+    return admit_producer_envelope(
+        root,
+        envelope,
+        contract,
+        evaluator,
+        evaluator_fingerprint=evaluator_fingerprint,
+        producer_fingerprint=producer_fingerprint,
+        producer_id=producer_id,
         staging_root=staging_root,
         num_islands=num_islands,
     )
@@ -869,6 +1002,7 @@ __all__ = [
     "ProducerHandoffError",
     "ProducerMaterial",
     "ProducerResultEnvelope",
+    "admit_producer_envelope",
     "admit_producer_result",
     "declared_producer_environment_sha256",
     "parse_producer_envelope",

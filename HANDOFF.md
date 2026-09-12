@@ -1,12 +1,33 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-12
+更新时间：2026-09-13
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
-## 最新续作：演化生态融合与 OpenEvolve verified producer
+## 最新续作：Feature 086 remote material handoff
+
+Feature 086 已在当前工作树完成离线实现并完成独立审查：新增
+`src/famou/remote_material_handoff.py`，把已由调用方取得并可选 reconcile 的
+`RemoteExperimentState(status="completed")` 转换为通用 `ProducerResultEnvelope`，再通过
+对象级 `admit_producer_envelope` 进入既有本地 exact evaluator、receipt 和 verified-seed
+admission。只有 pinned producer ID/fingerprint、非空 `candidate_source` references、有效
+bounded budget 和本地 regular-file/大小/UTF-8/path-confinement/SHA-256 校验全部通过才会调用
+evaluator；remote completion、timestamp、attempt、原始 state ID 和 score-like evidence 只保留
+摘要。generic-safe experiment ID 可以作为经过校验的 opaque `producer_run_id` 标签保留，但
+不能成为 Lunar score 或 candidate identity，也不能直接生成 Lunar rank、archive 或 population
+状态。指定的 staging root 必须与 material root 严格 disjoint（包括解析后的文件系统别名），
+避免 admission 在同步目录内创建临时文件。该 bridge 不执行 backend、网络、
+subprocess、scheduler、模型或 campaign。
+
+新增 remote bridge 生命周期、伪造 DTO、material/staging 路径别名和固定错误边界测试，并补充
+Shinka SQLite → exporter → generic producer admission 端到端离线 fixture：高 producer 分数
+不会覆盖本地 evaluator 的 0.42 分，lineage 保留，无效候选进入 rejected subset，原始
+score/prose 不进入 canonical metadata。当前工作树全量收集并通过 2262 项（基线 2210，另含此前
+Shinka/producer 变更及本轮测试）；最终数字以本轮全量 pytest 输出为准。
+
+## 演化生态融合与 OpenEvolve verified producer
 
 本轮已把“Lunar 融合外部演化项目”的边界落实到离线实现。OpenEvolve、未来的
 ShinkaEvolve 及远端 famou-v2/WebAgent 控制面只提供候选 material；Lunar 继续持有
@@ -46,7 +67,8 @@ status、strategy、contract、config、seed manifest/marker；缺 state 的失�
 新 manifest 复活，避免 run/state split-brain。孤立 seed identity 参数在 claim 前拒绝。
 
 新增 `src/famou/producer_handoff.py`，提供 transport-free 的
-`ProducerResultEnvelope`/`ProducerMaterial` DTO 和 `admit_producer_result`。OpenEvolve、
+`ProducerResultEnvelope`/`ProducerMaterial` DTO、对象入口 `admit_producer_envelope` 和文件
+入口 `admit_producer_result`。OpenEvolve、
 ShinkaEvolve 或其他 runner 只需把已落盘的候选 material `{path,size,sha256}`、producer
 identity、lineage、预算和 terminal status 导出到同一 envelope；Lunar 以一个全批
 `SeedManifest` 绑定 source-only bundle digest，统一做 exact-harness admission 和确定性
@@ -76,11 +98,11 @@ fresh failure 保持 iteration 0 并在无 active candidate 时 fail closed，te
 offspring/candidate 尚未拥有与 imported seed 等价的 contract/evaluator/dependency/environment
 四类完整 fingerprint/receipt，后续应另立 Feature，避免混改现有 archive schema。
 
-最终离线验证：Shinka exporter 26 项；producer/OpenEvolve/seed/evolution/population defaults
-定向 202 项；主仓全量 2240 项（2210 项基线加 30 项新增测试）；全 `src/famou`/`tests` Ruff、
-compileall、Specify prerequisites、`git diff --check` 均通过。074/076/078/082 的 Git 封存
-文件无 diff。没有启动模型、真实 OpenEvolve/ShinkaEvolve、WebAgent、provider、公司平台、
-远端 backend 或 campaign，也没有复写任何历史 measurement。
+最终离线验证：remote lifecycle/producer/Shinka focused 130 项；主仓全量 2262 项（基线
+2210 项加本轮及此前新增测试）；全 `src/famou`/`tests` Ruff、compileall、Specify
+prerequisites、`git diff --check` 均通过。074/076/078/082 的 595 个 Git 封存文件无 diff。
+没有启动模型、真实 OpenEvolve/ShinkaEvolve、WebAgent、provider、公司平台、远端 backend
+或 campaign，也没有复写任何历史 measurement。
 
 Feature 084/085 文档仍保持 Draft，未完成任务不要勾选，也不能把离线互操作宣称为有效解率
 提升。当前明确保留的后续项：普通 offspring/candidate 的完整 receipt/fingerprint schema；

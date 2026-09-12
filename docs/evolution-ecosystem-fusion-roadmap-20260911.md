@@ -2,11 +2,12 @@
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、模型、provider、远端服务、候选评测或真实
-campaign。当前 Feature 084/085 建立 verified seed、population-first 和协议边界，并实现
+campaign。当前 Feature 084/085 建立 verified seed、population-first 和协议边界，Feature
+086 又把已完成的远端 material observation 接到同一 exact-harness admission；仓库同时具备
 OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读离线结果 exporter，以及
-可供 OpenEvolve、ShinkaEvolve 等复用的 transport-free `ProducerResultEnvelope` →
-`SeedManifest` adapter；这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何
-项目的公开效果已由 Lunar 复现。
+可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
+这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
+复现。
 
 ## AlphaEvolve 与 OpenEvolve 的关系
 
@@ -35,6 +36,13 @@ Lunar exact evaluator；Shinka 的 score、correct、metrics、generation 与 SQ
 为 digest-only external evidence，parent IDs 只作有界 lineage，不获得 Lunar 的 score、rank
 或交付权限。当前只用离线 fixture 验证，未运行真实 Shinka、模型、网络或 Slurm。
 
+Feature 086 的 `remote_material_handoff` 复用这条边界处理 Feature 084 的
+`RemoteExperimentState`：只有经过可选 previous-state reconciliation、身份 pin 匹配、状态为
+`completed` 且带有 `candidate_source` 的 observation 才能在内存中转换为 producer envelope。
+本地 material root 仍由 descriptor-based regular-file、大小、UTF-8、路径 confinement 和
+SHA-256 检查保护，随后统一调用注入的 exact evaluator。远端 ID、时间戳、attempt 和任何
+score-like evidence 只保留摘要；bridge 不含网络、subprocess、scheduler 或 backend 调用。
+
 ## 项目映射
 
 | 项目 | 公开定位 | 对 Lunar 的合适接法 | 优先级 |
@@ -60,8 +68,8 @@ Lunar exact evaluator；Shinka 的 score、correct、metrics、generation 与 SQ
 
 ### 1. Material producer adapter
 
-`src/famou/producer_handoff.py` 提供通用的 `ProducerResultEnvelope`、`ProducerMaterial` 和
-`admit_producer_result`；它为有稳定 CLI/runner 的框架定义一个共享 material 边界，不要为每个
+`src/famou/producer_handoff.py` 提供通用的 `ProducerResultEnvelope`、`ProducerMaterial`、
+`admit_producer_envelope` 和文件入口 `admit_producer_result`；它为有稳定 CLI/runner 的框架定义一个共享 material 边界，不要为每个
 框架增加一套 Lunar strategy 状态。请求只包含固定 contract digest、bounded budget、run-scoped
 output root 和 producer identity；结果只允许包含 terminal/unknown 状态、opaque producer run ID、
 候选 material `{path, size, sha256}`、lineage 和 bounded external evidence。所有外部 evidence
@@ -99,6 +107,10 @@ timeout、unknown 与无效候选分开记录。不能把外部框架的 retry �
 和幂等身份；超时、断连或缺少实验 ID 时保持 `unknown`，先 reconcile，禁止盲目重建。
 `sync` 只带回 material 和外部 evidence，随后仍回到第一层的本地 exact-harness admission。
 
+Feature 086 的 bridge 是这一回路的离线最后一跳：它只接受 caller 已经取得并 reconciled 的
+completed state 和本地同步文件，不执行 `sync`，也不把 completed 生命周期状态解释成
+`EvaluationReport`。因此 remote backend 的未知、失败或取消状态仍然只能停在生命周期层。
+
 famou-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远端实验适合这一层。
 默认 population 构造不能自动联网、发现服务或实例化 remote backend。
 
@@ -120,8 +132,9 @@ famou-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远�
 2. 把现有 OpenEvolve one-shot wrapper 收敛为首个 `EvolutionMaterialProducer`，补 producer
    fingerprint、lineage、bounded output、timeout/cancel 和同一 exact-harness receipt；当前
    wrapper 与通用 envelope 均已由离线 fixture 验证。
-3. 继续用固定离线 fixture 验证 ShinkaEvolve 的显式 best/program exporter 与 OpenEvolve
-   producer 输出能进入同一 `lunar-producer-result-v1` admission；不启动真实模型或外部框架。
+3. 已用固定离线 fixture 验证 ShinkaEvolve 的显式 best/program exporter、OpenEvolve producer
+   输出和 completed remote material observation 能进入同一 `lunar-producer-result-v1` admission；
+   不启动真实模型或外部框架。
 4. 为 SkyDiscover/LLM4AD 增加 benchmark/task envelope，使用相同 contract、输入、模型、
    evaluator 和物理尝试预算进行比较。
 5. 只移植经上述对照有收益的原生算法模块。多文件、Agent/workflow、训练型候选和远端服务
@@ -129,4 +142,6 @@ famou-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远�
 
 完成这些边界只证明互操作和评分权威一致，不证明任何框架提高 Lunar 的有效解率。效果结论
 需要新的预注册真实测量；历史 Feature 051/074/076/078/082 的 protocol、manifest、receipt
-和统计保持原字节。
+和统计保持原字节。普通 offspring/candidate 的完整 receipt、contract/evaluator/dependency/
+environment fingerprint 仍应在独立 Feature 087 中定义，不能借 Feature 086 混入既有 archive
+schema。

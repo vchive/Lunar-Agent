@@ -31,6 +31,7 @@ from typing import Any
 
 from .evolution import MAX_SOURCE_BYTES
 from .producer_handoff import (
+    MAX_PRODUCER_BUDGET_FIELDS,
     MAX_PRODUCER_ENVELOPE_BYTES,
     MAX_PRODUCER_LINEAGE_ITEMS,
     MAX_PRODUCER_MATERIALS,
@@ -914,6 +915,31 @@ def _canonical_envelope_bytes(envelope: ProducerResultEnvelope) -> bytes:
     return encoded
 
 
+def _bounded_budget(value: object) -> dict[str, int | float]:
+    """Detach a caller mapping with a hard iteration bound before envelope validation."""
+
+    if isinstance(value, (str, bytes)) or not isinstance(value, Mapping):
+        _raise(SHINKA_BUDGET_INVALID)
+    result: dict[str, int | float] = {}
+    try:
+        iterator = iter(value)
+        for _ in range(MAX_PRODUCER_BUDGET_FIELDS + 1):
+            try:
+                key = next(iterator)
+            except StopIteration:
+                break
+            if not isinstance(key, str) or key in result:
+                _raise(SHINKA_BUDGET_INVALID)
+            result[key] = value[key]  # type: ignore[index]
+        else:
+            _raise(SHINKA_BUDGET_INVALID)
+    except ShinkaHandoffError:
+        raise
+    except Exception:  # noqa: BLE001 - arbitrary adapter mappings are untrusted
+        _raise(SHINKA_BUDGET_INVALID)
+    return result
+
+
 def export_shinka_result(
     results_root: str | os.PathLike[str],
     export_root: str | os.PathLike[str],
@@ -1012,13 +1038,8 @@ def export_shinka_result(
         envelope_budget: dict[str, int | float]
         if budget is None:
             envelope_budget = {"top_k": len(materials)}
-        elif isinstance(budget, Mapping):
-            try:
-                envelope_budget = dict(budget)
-            except Exception:  # noqa: BLE001 - a caller-supplied mapping is untrusted
-                _raise(SHINKA_BUDGET_INVALID)
         else:
-            _raise(SHINKA_BUDGET_INVALID)
+            envelope_budget = _bounded_budget(budget)
         try:
             envelope = ProducerResultEnvelope(
                 schema_version="1",

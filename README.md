@@ -986,6 +986,22 @@ after checking exact UTF-8 bytes against the database row. Call `admit_producer_
 to bounded external evidence and never become Lunar iteration, score, or rank authority. The
 exporter does not launch ShinkaEvolve, a model, a scheduler, or a remote backend.
 
+A completed observation from the transport-free remote lifecycle can use
+`famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
+only a reconciled `completed` state with pinned producer identity and `candidate_source` references,
+then routes every local file through the same exact evaluator and receipt path. Remote experiment
+timestamps, attempts, raw state identity, and any external score-like observations are reduced to
+provenance digests. A validated generic-safe experiment ID may remain as the opaque
+`producer_run_id` provenance label; it never becomes a score or candidate identity. The bridge
+never calls a backend or treats remote completion as a local result. The
+transport-free lifecycle state currently does not carry the submit contract digest, so callers must
+bind the completed observation to the intended contract themselves; the bridge binds the supplied
+contract to local re-evaluation. Remote material references currently carry no parent lineage and
+therefore enter the generic envelope with an empty lineage tuple. Missing, changed, symlinked, or
+digest-mismatched files fail closed. If every local evaluation is unusable, the bridge preserves
+the generic `SeedAdmissionError(code="no_usable_seeds")` result semantics. A supplied staging root
+must be a sibling tree disjoint from the material root, including resolved filesystem aliases.
+
 The same benchmark can use Lunar-Agent's repository-owned runtime instead of command adapters. A
 one-shot comparison uses:
 

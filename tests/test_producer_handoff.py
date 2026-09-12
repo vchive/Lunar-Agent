@@ -31,6 +31,7 @@ from famou.producer_handoff import (
     ProducerHandoffError,
     ProducerMaterial,
     ProducerResultEnvelope,
+    admit_producer_envelope,
     admit_producer_result,
     declared_producer_environment_sha256,
     parse_producer_envelope,
@@ -175,6 +176,43 @@ def test_terminal_noncompleted_envelopes_round_trip_without_materials() -> None:
         )
         assert ProducerResultEnvelope.from_dict(envelope.to_dict()) == envelope
         assert parse_producer_envelope(json.dumps(envelope.to_dict())) == envelope
+
+
+def test_object_admission_revalidates_forged_frozen_envelope(tmp_path: Path) -> None:
+    contract = _contract()
+    root = tmp_path / "producer"
+    material = _material(root, "candidate.py", "answer = 1\n")
+    _envelope(root, contract, [material])
+    envelope = ProducerResultEnvelope.from_dict(json.loads((root / "producer-result.json").read_text()))
+    calls: list[Path] = []
+
+    object.__setattr__(envelope, "external_evidence", {"unexpected": "raw"})
+    with pytest.raises(ProducerHandoffError) as caught:
+        admit_producer_envelope(
+            root,
+            envelope,
+            contract,
+            lambda path, supplied: calls.append(path) or _report(0.5),
+            evaluator_fingerprint=EVALUATOR_SHA,
+            producer_fingerprint=PRODUCER_SHA,
+        )
+    assert caught.value.code == PRODUCER_ENVELOPE_SCHEMA_INVALID
+    assert calls == []
+
+    envelope = ProducerResultEnvelope.from_dict(json.loads((root / "producer-result.json").read_text()))
+    forged_material = envelope.materials[0]
+    object.__setattr__(forged_material, "path", "../outside.py")
+    with pytest.raises(ProducerHandoffError) as caught:
+        admit_producer_envelope(
+            root,
+            envelope,
+            contract,
+            lambda path, supplied: calls.append(path) or _report(0.5),
+            evaluator_fingerprint=EVALUATOR_SHA,
+            producer_fingerprint=PRODUCER_SHA,
+        )
+    assert caught.value.code == PRODUCER_MATERIAL_PATH_UNSAFE
+    assert calls == []
 
 
 def test_envelope_pathlike_and_huge_budget_use_fixed_boundaries(tmp_path: Path) -> None:

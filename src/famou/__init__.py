@@ -119,6 +119,7 @@ from .producer_handoff import (
     ProducerHandoffError,
     ProducerMaterial,
     ProducerResultEnvelope,
+    admit_producer_envelope,
     admit_producer_result,
     declared_producer_environment_sha256,
     parse_producer_envelope,
@@ -137,6 +138,28 @@ from .remote_evolution import (
     RemoteSubmitRequest,
     RemoteSyncRequest,
     reconcile_remote_state,
+)
+from .remote_evolution import (
+    cancel as remote_cancel,
+)
+from .remote_evolution import (
+    continue_experiment as remote_continue_experiment,
+)
+from .remote_evolution import (
+    status as remote_status,
+)
+from .remote_evolution import (
+    submit as remote_submit,
+)
+from .remote_evolution import (
+    sync as remote_sync,
+)
+from .remote_material_handoff import (
+    RemoteMaterialHandoffError,
+    admit_remote_materials,
+    admit_remote_state,
+    build_remote_producer_envelope,
+    remote_state_to_producer_envelope,
 )
 from .seed_handoff import (
     AdmittedSeed,
@@ -260,6 +283,7 @@ __all__ = [
     "RemoteEvolutionError",
     "RemoteExperimentReference",
     "RemoteExperimentState",
+    "RemoteMaterialHandoffError",
     "RemoteMaterialReference",
     "RemoteStatusRequest",
     "RemoteSubmitRequest",
@@ -291,13 +315,17 @@ __all__ = [
     "WorkflowManifest",
     "WorkflowState",
     "admit_openevolve_result",
+    "admit_producer_envelope",
     "admit_producer_result",
+    "admit_remote_materials",
+    "admit_remote_state",
     "admit_seed_manifest",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_candidate_manifest",
     "build_effect_kit",
     "build_private_input_profile",
+    "build_remote_producer_envelope",
     "build_round_feedback",
     "build_strategy",
     "canonical_profile_json",
@@ -319,6 +347,12 @@ __all__ = [
     "producer_bundle_dependency_sha256",
     "profile_sha256",
     "reconcile_remote_state",
+    "remote_cancel",
+    "remote_continue_experiment",
+    "remote_state_to_producer_envelope",
+    "remote_status",
+    "remote_submit",
+    "remote_sync",
     "run_effect_preflight",
     "run_harness_adapter",
     "run_subject_adapter",

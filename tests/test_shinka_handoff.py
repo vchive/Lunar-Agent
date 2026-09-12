@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
 import famou.shinka_handoff as shinka_module
-from famou.producer_handoff import ProducerResultEnvelope
+from famou.algorithm import AlgorithmProblemContract, EvaluationReport
+from famou.producer_handoff import (
+    MAX_PRODUCER_BUDGET_FIELDS,
+    ProducerResultEnvelope,
+    admit_producer_result,
+)
 from famou.shinka_handoff import (
     SHINKA_DATABASE_CODE_MISMATCH,
     SHINKA_DATABASE_MISSING,
@@ -31,6 +37,40 @@ from famou.shinka_handoff import (
 
 CONTRACT_SHA = "c" * 64
 PRODUCER_SHA = "b" * 64
+EVALUATOR_SHA = "e" * 64
+
+
+def _admission_contract() -> AlgorithmProblemContract:
+    return AlgorithmProblemContract.from_dict(
+        {
+            "schema_version": "1",
+            "problem_id": "shinka-admission-fixture",
+            "problem_type": "routing",
+            "statement": "Find a deterministic route.",
+            "inputs": [{"path": "items.csv", "format": "csv", "fields": {"id": "item id"}}],
+            "decision_variables": ["route order"],
+            "objective": {"name": "quality", "direction": "maximize"},
+            "hard_constraints": [],
+            "soft_constraints": [],
+            "success_criteria": ["Every item is served."],
+            "deliverables": ["route source"],
+            "evolution": {"strategy": "population", "max_rounds": 2, "stagnation_rounds": 1},
+        }
+    )
+
+
+def _admission_report(score: float, *, valid: int = 1) -> EvaluationReport:
+    return EvaluationReport.from_dict(
+        {
+            "schema_version": "1",
+            "evaluator_id": "shinka-local-exact",
+            "validity": valid,
+            "quality": score if valid else None,
+            "combined_score": score if valid else 0,
+            "detailed_scores": {"quality": {"value": score, "direction": "maximize"}},
+            "error_info": [] if valid else [{"code": "invalid", "message": "fixture invalid"}],
+        }
+    )
 
 
 def _create_db(root: Path, *, name: str = "programs.sqlite") -> sqlite3.Connection:
@@ -581,3 +621,120 @@ def test_rollback_journal_sidecar_is_rejected_without_mutation(tmp_path: Path) -
         _export(root, tmp_path / "export")
     assert caught.value.code == SHINKA_DATABASE_WAL_UNSUPPORTED
     assert journal.read_bytes() == b"journal-bytes"
+
+
+def test_shinka_export_converges_on_generic_local_admission(tmp_path: Path) -> None:
+    """SQLite material and a generic envelope share Lunar's exact-evaluator authority."""
+
+    results_root = tmp_path / "run"
+    connection = _create_db(results_root)
+    parent_code = "answer = 1\n"
+    good_code = "answer = 2\n"
+    bad_code = "answer = 3\n"
+    _insert(connection, "root", parent_code, generation=0, score=1.0)
+    _insert(
+        connection,
+        "good",
+        good_code,
+        parent_id="root",
+        generation=1,
+        score=9999.0,
+        correct=1,
+    )
+    _insert(
+        connection,
+        "bad",
+        bad_code,
+        parent_id="root",
+        generation=2,
+        score=10000.0,
+        correct=0,
+    )
+    connection.execute("ALTER TABLE programs ADD COLUMN feedback TEXT")
+    connection.execute("UPDATE programs SET feedback = 'private producer prose'")
+    connection.commit()
+    connection.close()
+    _write_generation(results_root, 0, parent_code)
+    _write_generation(results_root, 1, good_code)
+    _write_generation(results_root, 2, bad_code)
+
+    contract = _admission_contract()
+    export_root = tmp_path / "export"
+    export_shinka_result(
+        results_root,
+        export_root,
+        contract_sha256=contract.digest(),
+        producer_fingerprint=PRODUCER_SHA,
+        producer_run_id="sqlite-fixture",
+        top_k=None,
+        program_ids=("good", "bad"),
+    )
+    exported_envelope = (export_root / "producer-result.json").read_text(encoding="utf-8")
+    assert "private producer prose" not in exported_envelope
+    assert "9999.0" not in exported_envelope
+    assert "10000.0" not in exported_envelope
+
+    evaluated: list[str] = []
+
+    def evaluator(path: Path, supplied: AlgorithmProblemContract) -> EvaluationReport:
+        assert supplied == contract
+        source = path.read_text(encoding="utf-8")
+        evaluated.append(source)
+        if source == good_code:
+            return _admission_report(0.42)
+        return _admission_report(999999.0, valid=0)
+
+    result = admit_producer_result(
+        export_root,
+        contract,
+        evaluator,
+        evaluator_fingerprint=EVALUATOR_SHA,
+        producer_fingerprint=PRODUCER_SHA,
+        producer_id="shinka",
+        staging_root=tmp_path / "staging",
+    )
+
+    assert evaluated == [good_code, bad_code]
+    assert len(result.admitted) == 1
+    assert result.admitted[0].evaluation.combined_score == 0.42
+    assert result.admitted[0].draft.metadata["seed_handoff"]["lineage"] == ["root"]
+    assert result.rejected[0].code == "local_evaluation_invalid"
+    external_evidence = result.admitted[0].provenance.external_evidence
+    assert set(external_evidence) == {"present", "score_present", "payload_sha256"}
+    assert external_evidence["present"] is True
+    assert external_evidence["score_present"] is True
+    assert len(external_evidence["payload_sha256"]) == 64
+    canonical_metadata = json.dumps(result.admitted[0].draft.metadata, sort_keys=True)
+    assert "9999.0" not in canonical_metadata
+    assert "10000.0" not in canonical_metadata
+
+
+def test_shinka_budget_mapping_is_bounded_before_export_creation(tmp_path: Path) -> None:
+    root = tmp_path / "run"
+    connection = _create_db(root)
+    _insert(connection, "program", "answer = 1\n")
+    connection.commit()
+    connection.close()
+    _write_generation(root, 0, "answer = 1\n")
+
+    class OversizedMapping(Mapping[str, int]):
+        def __iter__(self):
+            return iter(f"field_{index}" for index in range(MAX_PRODUCER_BUDGET_FIELDS + 1))
+
+        def __len__(self) -> int:
+            return MAX_PRODUCER_BUDGET_FIELDS + 1
+
+        def __getitem__(self, key: str) -> int:
+            return 1
+
+    export = tmp_path / "export"
+    with pytest.raises(ShinkaHandoffError) as caught:
+        export_shinka_result(
+            root,
+            export,
+            contract_sha256=CONTRACT_SHA,
+            producer_fingerprint=PRODUCER_SHA,
+            budget=OversizedMapping(),
+        )
+    assert caught.value.code == "shinka_budget_invalid"
+    assert not export.exists()
