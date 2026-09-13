@@ -1,10 +1,68 @@
 # Lunar-Agent 交接记录
 
-更新时间：2026-09-13
+更新时间：2026-09-14
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
+
+## 最新续作：Feature 087 ordinary candidate integrity
+
+Feature 087 已为普通 `population` 候选补齐离线、可恢复的完整性边界。每个新候选都以
+canonical `CandidateReceipt` 绑定 source、lineage、规范化 evaluator report、contract、
+evaluator、dependency、environment、runner 和 generator identity；可选 `execution.json`
+也以精确 digest 绑定。archive line 保存 compact integrity projection，state 保存统一
+authority 和 archive digest；credential-shaped `evaluator_kind` 会在 config/context、
+authority 和 receipt 层全部拒绝。source 与 execution evidence 的 no-follow descriptor 从评测前
+持有到完整 publication 结束，并在 receipt、record、目录 fsync、archive append/fsync
+边界重复核对；evaluator 返回的嵌套 report 会立即深复制，避免回调返回后再被修改。
+
+普通候选 publication 现在按 source → receipt → record → archive 的顺序落盘，archive 与
+outcome append 在写前检查总大小不会超过 reader 上限。append 或 fsync 失败会回滚到旧长度，
+再次 fsync，并在截断及目录 fsync 后确认当前路径仍指向 held inode 和旧 size；若 publication
+与 rollback 都无法确认，则固定抛出
+`ordinary_candidate_archive_publication_unknown`，保留 orphan source/record/receipt 供诊断，
+但不让其进入 canonical archive、resume population 或 controller index。evaluator/worker
+失败仍不生成 receipt。`CommandCandidateRunner` 在正常 leader 退出后也会清理同 PGID
+descendants。
+
+resume 在 generator/evaluator 调用前校验 config、authority、source、execution、receipt、
+record、archive、outcome、state、lineage、island 与 active population；新版 integrity state
+缺少 config 也会 fail closed；非法 parent 结构即使 receipt/record/archive 的完整绑定被同步
+重算仍会拒绝。现代 ordinary-integrity state 的 `active_ids`、`best_candidate_id`、`rng_seed`、
+`last_migration_iteration` 和 `stagnation` 会从已验证 archive 按 seed/iteration 顺序重放
+rank/trim/migrate/best/stagnation 规则后重建；替换、迁移/停滞水位漂移、bool/float 数值类型绕过
+及与 projection 冲突的 status 均以 `population state projection mismatch` fail closed。marker
+仍可见时，需要 outcome binding 的现代 checkpoint 不能通过同时删除整组字段和 journal 降级为
+legacy；不完整 pending batch 和空 seed population 保留原有更具体错误的优先级。ordinary
+marker 一旦由 pending state 建立，后续 state 会单调保留；seeded 首批 offspring 全失败且没有
+ordinary record
+时也不能丢 marker，带 modern marker + `seed_admission` 的 state 必须保留 outcome binding，
+因此 marker 仍可见时删除 outcome 整组会 fail closed。若协调删除 marker 三字段、完整
+outcome/failed binding 和 journal，seed-only archive 与真实 Feature 084 pre-ordinary checkpoint
+不可区分，不在 Feature 087 的无外部承诺边界内。旧普通 archive 可以只读，
+但不能作为 active population 静默恢复。完整 pending batch 可以在不重放 callback 的情况下
+finalize；不完整 batch fail closed。controller 只索引 canonical sidecars；失败路径只允许
+state digest 已绑定且完整验证的普通 archive 前缀，并跳过未提交 seed sidecar，避免伪 seed
+证据进入 ledger；generic indexing hook 永不直接发布 population seed，seed evidence 仍只走
+独立 commit gate。同一 `(path, kind)` 的既有 ledger rows 若 digest 或 size 冲突也会 fail
+closed，不会用首条记录掩盖冲突。
+
+最终离线验证：087 聚焦三文件 212 项（3.69 秒），主仓全量 2408 项（65.02 秒）；Ruff、
+compileall、Specify prerequisites、`git diff --check` 均通过，074/076/078/082 共 595 个 Git
+封存文件无 diff，两路独立终审无剩余实现或行为 blocker。没有启动模型、
+provider、WebAgent、OpenEvolve/ShinkaEvolve、远端服务或 campaign，也没有新的效果、有效解率
+或 WebAgent 持平声明。保留的系统边界包括：同用户进程
+仍可能在最后一次 publication 校验后再次改写路径；resume 会拒绝没有同步重算或替换全部
+hash-bound artifacts 的 drift，但 receipt 没有外部签名/HMAC，不能对能一致改写
+source/receipt/record/archive/state 的同用户进程提供真实性保证。父路径组件核验与完整路径
+`open()` 之间仍有系统级 TOCTOU；controller 异常前缀搜索是低频 O(n²) 路径；首次 state 尚未
+写入时恢复已发布初始候选会固定报
+`ordinary_candidate_integrity_state_missing`。纯 seed、尚未开始 ordinary transaction 的
+checkpoint 仍属于 Feature 084；state 对任意字段没有独立外部承诺，空初始化
+`candidate_failed` 的 running/failed status 与 error 若被协调改写，不能只靠该 state 判别。
+projection replay 依赖当前 rank/trim/migrate/family 规则，后续算法变化必须升级 integrity
+schema 或显式迁移。
 
 ## 最新续作：Feature 086 remote material handoff
 

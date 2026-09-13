@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -412,6 +413,7 @@ def test_population_initial_generator_failure_keeps_offspring_retry_semantics(
     tmp_path: Path,
 ) -> None:
     generated: list[int] = []
+    config = EvolutionConfig(max_rounds=1, population_size=1)
 
     def generate(request):
         generated.append(request.iteration)
@@ -425,16 +427,194 @@ def test_population_initial_generator_failure_keeps_offspring_retry_semantics(
             tmp_path,
             generate,
             lambda path, contract: _report(1),
-            EvolutionConfig(max_rounds=1, population_size=1),
+            config,
         )
     ).run()
 
-    records = CandidateArchive(tmp_path).records()
+    archive = CandidateArchive(tmp_path)
+    records = archive.records()
     assert generated == [0, 1]
     assert result.status == "completed"
     assert result.iterations == 1
     assert len(records) == 1
+    assert records[0].parent_id is None
+    assert records[0].generation == 0
     assert records[0].iteration == 1
+
+    evolution_root = tmp_path / "evolution"
+    before_resume = {
+        path.relative_to(evolution_root).as_posix(): path.read_bytes()
+        for path in evolution_root.rglob("*")
+        if path.is_file()
+    }
+    resumed = PopulationStrategy(
+        EvolutionContext(
+            _contract(),
+            tmp_path,
+            lambda request: pytest.fail(
+                f"terminal delayed-root resume generated iteration {request.iteration}"
+            ),
+            lambda path, contract: pytest.fail(
+                "terminal delayed-root resume evaluated a candidate"
+            ),
+            config,
+        )
+    ).resume()
+
+    assert resumed.to_dict() == result.to_dict()
+    assert {
+        path.relative_to(evolution_root).as_posix(): path.read_bytes()
+        for path in evolution_root.rglob("*")
+        if path.is_file()
+    } == before_resume
+
+
+def test_population_resume_accepts_multiple_journaled_delayed_roots(
+    tmp_path: Path,
+) -> None:
+    generated: list[int] = []
+    config = EvolutionConfig(
+        max_rounds=1,
+        population_size=2,
+        offspring_per_iteration=2,
+        num_islands=2,
+    )
+
+    def generate(request):
+        generated.append(request.iteration)
+        if request.iteration == 0:
+            raise RuntimeError("initial generation failed")
+        return CandidateDraft(
+            f"offspring_attempt = {generated.count(request.iteration)}\n"
+        )
+
+    result = PopulationStrategy(
+        EvolutionContext(
+            _contract(),
+            tmp_path,
+            generate,
+            lambda path, contract: _report(1),
+            config,
+        )
+    ).run()
+
+    archive = CandidateArchive(tmp_path)
+    records = archive.records()
+    assert generated == [0, 0, 1, 1]
+    assert result.status == "completed"
+    assert len(records) == 2
+    assert {item.island_id for item in records} == {0, 1}
+    assert all(
+        item.parent_id is None and item.generation == 0 and item.iteration == 1
+        for item in records
+    )
+    assert [item.candidate_id for item in archive.offspring_outcomes()] == [
+        item.candidate_id for item in records
+    ]
+
+    resumed = PopulationStrategy(
+        EvolutionContext(
+            _contract(),
+            tmp_path,
+            lambda request: pytest.fail(
+                f"multiple delayed-root resume generated iteration {request.iteration}"
+            ),
+            lambda path, contract: pytest.fail(
+                "multiple delayed-root resume evaluated a candidate"
+            ),
+            config,
+        )
+    ).resume()
+
+    assert resumed.to_dict() == result.to_dict()
+
+
+def test_population_resume_rejects_parentless_offspring_with_nonempty_baseline(
+    tmp_path: Path,
+) -> None:
+    config = EvolutionConfig(max_rounds=1, population_size=1)
+    PopulationStrategy(
+        EvolutionContext(
+            _contract(),
+            tmp_path,
+            lambda request: CandidateDraft(f"iteration = {request.iteration}\n"),
+            lambda path, contract: _report(1),
+            config,
+        )
+    ).run()
+
+    root = tmp_path / "evolution"
+    archive_path = root / "archive.jsonl"
+    archive_records = [
+        json.loads(line) for line in archive_path.read_text(encoding="utf-8").splitlines()
+    ]
+    child = next(item for item in archive_records if item["iteration"] == 1)
+    candidate_id = child["candidate_id"]
+    candidate_root = root / "candidates" / candidate_id
+
+    receipt_path = candidate_root / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["parent_id"] = None
+    receipt["generation"] = 0
+    receipt_payload = {
+        key: value for key, value in receipt.items() if key != "receipt_sha256"
+    }
+    receipt["receipt_sha256"] = evolution_module._canonical_sha256(receipt_payload)
+    receipt_path.write_text(
+        json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    child["parent_id"] = None
+    child["generation"] = 0
+    child["receipt_sha256"] = receipt["receipt_sha256"]
+    child["integrity"]["parent_id"] = None
+    child["integrity"]["generation"] = 0
+    child["integrity"]["receipt_sha256"] = receipt["receipt_sha256"]
+    (candidate_root / "record.json").write_text(
+        json.dumps(child, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    archive_path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
+            for item in archive_records
+        ),
+        encoding="utf-8",
+    )
+
+    state_path = root / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["candidate_archive_sha256"] = evolution_module._canonical_sha256(
+        archive_records
+    )
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    callbacks = {"generate": 0, "evaluate": 0}
+
+    def must_not_generate(request):
+        callbacks["generate"] += 1
+        pytest.fail(f"forged parentless resume generated iteration {request.iteration}")
+
+    def must_not_evaluate(path, contract):
+        del path, contract
+        callbacks["evaluate"] += 1
+        pytest.fail("forged parentless resume evaluated a candidate")
+
+    with pytest.raises(EvolutionError, match="ordinary_candidate_lineage_mismatch"):
+        PopulationStrategy(
+            EvolutionContext(
+                _contract(),
+                tmp_path,
+                must_not_generate,
+                must_not_evaluate,
+                config,
+            )
+        ).resume()
+    assert callbacks == {"generate": 0, "evaluate": 0}
 
 
 def test_population_counts_structured_invalid_evaluation_as_evaluated(
@@ -618,6 +798,227 @@ def test_population_resume_finalizes_complete_outcomes_without_replay(
     assert final_state["iteration"] == 1
     assert final_state["outcome_watermark"] == 1
     assert "pending_offspring" not in final_state
+
+
+def test_population_tied_seed_complete_pending_resume_uses_archive_best_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"one.py": "score = 1\n", "two.py": "score = 1.0\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=2)
+    workspace = tmp_path / "workspace"
+    config = EvolutionConfig(
+        max_rounds=1,
+        stagnation_rounds=10,
+        population_size=2,
+        offspring_per_iteration=1,
+        num_islands=2,
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+    strategy = PopulationStrategy(
+        EvolutionContext(
+            contract,
+            workspace,
+            lambda request: CandidateDraft("score = 0.5\n"),
+            lambda path, supplied: _report(0.5),
+            config,
+            initial_seeds=seeds,
+        )
+    )
+
+    def crash_before_finish(state, active):
+        del state, active
+        raise RuntimeError("simulated crash before tied-seed batch finish")
+
+    monkeypatch.setattr(strategy, "_finish_offspring_batch", crash_before_finish)
+    with pytest.raises(RuntimeError, match="simulated crash before tied-seed batch finish"):
+        strategy.run()
+
+    archive = CandidateArchive(workspace)
+    pending = archive.read_state()
+    archive_best = archive.best()
+    assert archive_best is not None
+    tuple_tiebreak_best = max(
+        seeds,
+        key=lambda seed: (seed.evaluation.combined_score, seed.candidate_id),
+    )
+    assert pending["pending_offspring"]["iteration"] == 1
+    assert len(archive.offspring_outcomes()) == 1
+    assert pending["best_candidate_id"] == archive_best.candidate_id
+    assert archive_best.candidate_id != tuple_tiebreak_best.candidate_id
+
+    fresh_seeds = _admitted_initial_seeds(manifest, contract, num_islands=2)
+    resumed = PopulationStrategy(
+        EvolutionContext(
+            contract,
+            workspace,
+            lambda request: pytest.fail("tied-seed pending resume generated"),
+            lambda path, supplied: pytest.fail("tied-seed pending resume evaluated"),
+            config,
+            initial_seeds=fresh_seeds,
+        )
+    ).resume()
+
+    assert resumed.status == "completed"
+    assert resumed.iterations == 1
+    assert "pending_offspring" not in archive.read_state()
+
+
+def test_population_complete_pending_resume_rejects_reordered_archive_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A complete batch cannot launder reordering of the pre-batch archive."""
+
+    config = EvolutionConfig(
+        max_rounds=1,
+        stagnation_rounds=10,
+        population_size=2,
+        offspring_per_iteration=1,
+        rng_seed=7,
+    )
+    original_write = CandidateArchive.write_state
+
+    def crash_before_final_state(self, payload):
+        if (
+            payload.get("status") == "running"
+            and payload.get("iteration") == 1
+            and payload.get("outcome_watermark") == 1
+        ):
+            raise RuntimeError("simulated crash before reordered final state")
+        original_write(self, payload)
+
+    monkeypatch.setattr(CandidateArchive, "write_state", crash_before_final_state)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        PopulationStrategy(
+            EvolutionContext(
+                _contract(),
+                tmp_path,
+                lambda request: CandidateDraft(f"iteration = {request.iteration}\n"),
+                lambda path, contract: _report(1),
+                config,
+            )
+        ).run()
+
+    archive_path = tmp_path / "evolution" / "archive.jsonl"
+    lines = archive_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    records = [json.loads(line) for line in lines]
+    assert [item["iteration"] for item in records] == [0, 0, 1]
+    archive_path.write_text(
+        "\n".join((lines[1], lines[0], lines[2])) + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(CandidateArchive, "write_state", original_write)
+    callbacks = {"generate": 0, "evaluate": 0}
+
+    def must_not_generate(request):
+        callbacks["generate"] += 1
+        pytest.fail(f"reordered pending resume generated iteration {request.iteration}")
+
+    def must_not_evaluate(path, contract):
+        del path, contract
+        callbacks["evaluate"] += 1
+        pytest.fail("reordered pending resume evaluated a candidate")
+
+    with pytest.raises(EvolutionError, match="ordinary_candidate_archive_mismatch"):
+        PopulationStrategy(
+            EvolutionContext(
+                _contract(),
+                tmp_path,
+                must_not_generate,
+                must_not_evaluate,
+                config,
+            )
+        ).resume()
+    assert callbacks == {"generate": 0, "evaluate": 0}
+
+
+def test_seeded_population_resume_finalizes_complete_integrity_batch_without_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"candidate.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    workspace = tmp_path / "workspace"
+    config = EvolutionConfig(
+        max_rounds=1,
+        stagnation_rounds=10,
+        population_size=1,
+        offspring_per_iteration=2,
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+    generate_calls = 0
+    evaluate_calls = 0
+
+    def generate(request):
+        nonlocal generate_calls
+        generate_calls += 1
+        return CandidateDraft(f"iteration = {request.iteration}\ncall = {generate_calls}\n")
+
+    def evaluate(path, supplied):
+        nonlocal evaluate_calls
+        del path, supplied
+        evaluate_calls += 1
+        return _report(float(evaluate_calls + 1))
+
+    original_write = CandidateArchive.write_state
+
+    def crash_before_final_state(self, payload):
+        if (
+            payload.get("status") == "running"
+            and payload.get("iteration") == 1
+            and payload.get("outcome_watermark") == 1
+        ):
+            raise RuntimeError("simulated seeded crash before final state")
+        original_write(self, payload)
+
+    monkeypatch.setattr(CandidateArchive, "write_state", crash_before_final_state)
+    with pytest.raises(RuntimeError, match="simulated seeded crash"):
+        PopulationStrategy(
+            EvolutionContext(
+                contract,
+                workspace,
+                generate,
+                evaluate,
+                config,
+                initial_seeds=seeds,
+            )
+        ).run()
+
+    state = json.loads((workspace / "evolution" / "state.json").read_text())
+    assert state["pending_offspring"]["attempt_count"] == 2
+    assert state["candidate_integrity_schema_version"] == "1"
+    assert len(CandidateArchive(workspace).offspring_outcomes()) == 2
+    calls_before_resume = (generate_calls, evaluate_calls)
+
+    monkeypatch.setattr(CandidateArchive, "write_state", original_write)
+    fresh_seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    resumed = PopulationStrategy(
+        EvolutionContext(
+            contract,
+            workspace,
+            lambda request: pytest.fail("seeded resume replayed generation"),
+            lambda path, supplied: pytest.fail("seeded resume replayed evaluation"),
+            config,
+            initial_seeds=fresh_seeds,
+        )
+    ).resume()
+
+    assert resumed.status == "completed"
+    assert resumed.iterations == 1
+    assert (generate_calls, evaluate_calls) == calls_before_resume
 
 
 @pytest.mark.parametrize(
@@ -835,6 +1236,135 @@ def test_population_atomically_commits_verified_initial_seeds_before_offspring(
         record = json.loads((candidate_dir / "record.json").read_text(encoding="utf-8"))
         assert record["candidate_id"] == seed.candidate_id
         assert record["seed_handoff_evidence"]["handoff_sha256"] == seed.handoff_sha256
+
+
+@pytest.mark.parametrize(
+    ("context_field", "changed_value"),
+    [
+        ("evaluator_kind", "callback"),
+        ("dependency_sha256", "e" * 64),
+        ("environment_sha256", "f" * 64),
+    ],
+)
+def test_population_rejects_seed_and_ordinary_authority_mismatch_before_mutation(
+    tmp_path: Path,
+    context_field: str,
+    changed_value: str,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"candidate.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    workspace = tmp_path / "workspace"
+    callbacks = {"generate": 0, "evaluate": 0}
+
+    def generate(request):
+        del request
+        callbacks["generate"] += 1
+        return CandidateDraft("score = 2\n")
+
+    def evaluate(path, supplied):
+        del path, supplied
+        callbacks["evaluate"] += 1
+        return _report(2)
+
+    context_values = {
+        "evaluator_kind": None,
+        "dependency_sha256": None,
+        "environment_sha256": None,
+    }
+    context_values[context_field] = changed_value
+    with pytest.raises(EvolutionError, match="^verified_seed_context_mismatch$"):
+        PopulationStrategy(
+            EvolutionContext(
+                contract,
+                workspace,
+                generate,
+                evaluate,
+                EvolutionConfig(
+                    max_rounds=1,
+                    population_size=1,
+                    evaluator_fingerprint=SEED_EVALUATOR_SHA,
+                ),
+                initial_seeds=seeds,
+                **context_values,
+            )
+        ).run()
+
+    assert callbacks == {"generate": 0, "evaluate": 0}
+    assert not (workspace / "evolution" / "archive.jsonl").exists()
+
+
+def test_seeded_population_rejects_uncommitted_seed_marker_record(
+    tmp_path: Path,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"candidate.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    workspace = tmp_path / "workspace"
+    config = EvolutionConfig(
+        max_rounds=1,
+        population_size=1,
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+    result = PopulationStrategy(
+        EvolutionContext(
+            contract,
+            workspace,
+            lambda request: pytest.fail("cancelled seeded run generated"),
+            lambda path, supplied: pytest.fail("cancelled seeded run evaluated"),
+            config,
+            cancelled=lambda: True,
+            initial_seeds=seeds,
+        )
+    ).run()
+    assert result.status == "cancelled"
+
+    archive_path = workspace / "evolution" / "archive.jsonl"
+    committed = json.loads(archive_path.read_text(encoding="utf-8"))
+    forged = dict(committed)
+    forged["candidate_id"] = "seed-forged"
+    forged["evaluation"] = _report(999)
+    archive_path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n"
+            for item in (committed, forged)
+        ),
+        encoding="utf-8",
+    )
+
+    fresh_seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    callbacks = {"generate": 0, "evaluate": 0}
+
+    def must_not_generate(request):
+        del request
+        callbacks["generate"] += 1
+        pytest.fail("uncommitted seed marker resume generated")
+
+    def must_not_evaluate(path, supplied):
+        del path, supplied
+        callbacks["evaluate"] += 1
+        pytest.fail("uncommitted seed marker resume evaluated")
+
+    with pytest.raises(EvolutionError, match="^verified_seed_resume_mismatch$"):
+        PopulationStrategy(
+            EvolutionContext(
+                contract,
+                workspace,
+                must_not_generate,
+                must_not_evaluate,
+                config,
+                initial_seeds=fresh_seeds,
+            )
+        ).resume()
+    assert callbacks == {"generate": 0, "evaluate": 0}
 
 
 def test_population_seed_commit_preserves_controller_contract_bytes(
@@ -1236,6 +1766,81 @@ def test_population_seeded_resume_revalidates_unchanged_admissions(
     assert (archive_path.read_bytes(), state_path.read_bytes()) == before
 
 
+def test_seeded_failed_only_batch_retains_integrity_marker_and_cannot_downgrade(
+    tmp_path: Path,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"seed.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    workspace = tmp_path / "workspace"
+    config = EvolutionConfig(
+        max_rounds=1,
+        population_size=1,
+        offspring_per_iteration=1,
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+
+    def fail_offspring_generation(request):
+        del request
+        raise RuntimeError("offspring generation failed")
+
+    result = PopulationStrategy(
+        EvolutionContext(
+            contract,
+            workspace,
+            fail_offspring_generation,
+            lambda path, supplied: pytest.fail("failed-only offspring was evaluated"),
+            config,
+            initial_seeds=seeds,
+        )
+    ).run()
+
+    archive = CandidateArchive(workspace)
+    state = archive.read_state()
+    assert result.status == "failed"
+    assert result.error == "offspring_batch_failed"
+    assert state["candidate_integrity_schema_version"] == "1"
+    assert state["failed_offspring_iteration"] == 1
+    assert len(archive.offspring_outcomes()) == 1
+
+    for field in (
+        "outcome_schema_version",
+        "outcome_start_iteration",
+        "outcome_watermark",
+        "outcome_watermark_sha256",
+        "outcome_archive_baseline_sha256",
+        "failed_offspring_iteration",
+        "failed_offspring_sha256",
+    ):
+        state.pop(field)
+    state["status"] = "running"
+    state["error"] = None
+    archive.state_path.write_text(
+        json.dumps(state, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    archive.offspring_outcomes_path.unlink()
+
+    fresh_seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    with pytest.raises(EvolutionError, match="^population_outcome_state_mismatch$"):
+        PopulationStrategy(
+            EvolutionContext(
+                contract,
+                workspace,
+                lambda request: pytest.fail("downgraded seed batch replayed generation"),
+                lambda path, supplied: pytest.fail(
+                    "downgraded seed batch replayed evaluation"
+                ),
+                config,
+                initial_seeds=fresh_seeds,
+            )
+        ).resume()
+
+
 def test_population_seeded_resume_requires_fresh_admissions(tmp_path: Path) -> None:
     contract = _contract()
     manifest = _seed_manifest(
@@ -1510,6 +2115,35 @@ def test_command_candidate_runner_records_success_evidence(tmp_path: Path) -> No
     evidence = json.loads((tmp_path / "execution.json").read_text(encoding="utf-8"))
     assert evidence["status"] == "succeeded"
     assert evidence["stdout_bytes"] == len(b"candidate ran")
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX process groups")
+def test_command_candidate_runner_cleans_descendants_after_success(tmp_path: Path) -> None:
+    runner_script = tmp_path / "runner.py"
+    runner_script.write_text(
+        "import os, pathlib, time\n"
+        "pid = os.fork()\n"
+        "if pid == 0:\n"
+        "    descriptor = os.open(os.devnull, os.O_RDWR)\n"
+        "    os.dup2(descriptor, 0)\n"
+        "    os.dup2(descriptor, 1)\n"
+        "    os.dup2(descriptor, 2)\n"
+        "    time.sleep(0.2)\n"
+        "    pathlib.Path('late-descendant.txt').write_text('escaped')\n"
+        "    os._exit(0)\n"
+        "os._exit(0)\n",
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("pass\n", encoding="utf-8")
+    runner = CommandCandidateRunner((sys.executable, str(runner_script)), timeout_seconds=1)
+
+    execution = runner.run(candidate, tmp_path)
+    time.sleep(0.4)
+
+    assert execution.status == "succeeded"
+    assert execution.exit_code == 0
+    assert not (tmp_path / "late-descendant.txt").exists()
 
 
 @pytest.mark.parametrize("mode", ["nonzero", "timeout", "output"])

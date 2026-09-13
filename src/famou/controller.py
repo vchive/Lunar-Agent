@@ -50,15 +50,25 @@ from .evaluator import (
     evaluate_output_contract,
 )
 from .evolution import (
+    CANDIDATE_INTEGRITY_SCHEMA_VERSION,
+    MAX_ARCHIVE_LINE_BYTES,
     MAX_STATE_BYTES,
+    ORDINARY_RECEIPT_FILENAME,
+    ORDINARY_RECORD_FILENAME,
+    CandidateArchive,
     CandidateEvaluator,
     CandidateExecution,
     CandidateGenerator,
+    CandidateIntegrityAuthority,
+    CandidateReceipt,
     CommandCandidateRunner,
     EvolutionConfig,
     EvolutionContext,
     EvolutionError,
+    PopulationStrategy,
     StrategyResult,
+    _canonical_json_bytes,
+    _read_bounded_regular_file,
     build_strategy,
 )
 from .memory import MemoryStore
@@ -288,6 +298,300 @@ class LocalController:
             copied.append(relative)
         return tuple(copied)
 
+    def _index_evolution_candidate_integrity_artifacts(
+        self,
+        run: Run,
+        task_id: str,
+        ordinary_strategy: PopulationStrategy | None = None,
+        *,
+        allow_uncommitted_state: bool = False,
+    ) -> None:
+        """Index published candidate record/receipt sidecars exactly once.
+
+        Candidate sidecars are durable evidence rather than executable outputs.  The archive is
+        the authority for which candidate directories are visible, so orphan files under
+        ``evolution/candidates`` are ignored.  Imported ``seed-*`` records retain their existing
+        artifact kinds; ordinary records receive distinct kinds so consumers cannot confuse a
+        verified seed receipt with a native population receipt.  Repeated controller resumes use
+        the same ``(path, kind)`` key and do not append duplicate ledger rows.  A changed digest
+        for an already indexed key is treated as an integrity conflict and is never silently
+        replaced.
+        """
+
+        if not isinstance(run, Run):
+            raise EvolutionError("evolution candidate artifact run is invalid")
+        archive = CandidateArchive(run.workspace)
+        workspace = Path(run.workspace).expanduser().resolve(strict=False)
+        candidates_root = archive.candidates_root
+        records = archive.records()
+        if candidates_root.is_symlink() or not candidates_root.is_dir():
+            if records:
+                raise EvolutionError("evolution candidate artifact tree is invalid")
+            return
+
+        ordinary_records = [
+            candidate
+            for candidate in records
+            if candidate.strategy == "population" and not archive._is_seed_candidate(candidate)
+        ]
+        if ordinary_records:
+            if allow_uncommitted_state:
+                if ordinary_strategy is not None:
+                    state = ordinary_strategy._load_state()
+                    authority = ordinary_strategy.integrity_authority
+                    try:
+                        ordinary_strategy._validate_outcome_history(state)
+                    except EvolutionError:
+                        # A candidate archive line can be durable while the following outcome or
+                        # state write fails. Index only the prefix already bound by the last state
+                        # digest; leave the unjournaled suffix invisible to the evidence ledger.
+                        marker_names = {
+                            "candidate_integrity_schema_version",
+                            "candidate_integrity_authority",
+                            "candidate_archive_sha256",
+                        }
+                        if (
+                            marker_names.intersection(state) != marker_names
+                            or state.get("candidate_integrity_schema_version")
+                            != CANDIDATE_INTEGRITY_SCHEMA_VERSION
+                        ):
+                            raise
+                        state_authority = CandidateIntegrityAuthority.from_dict(
+                            state["candidate_integrity_authority"]
+                        )
+                        if state_authority.to_dict() != authority.to_dict():
+                            raise EvolutionError(
+                                "ordinary_candidate_integrity_authority_mismatch"
+                            )
+                        committed_digest = state.get("candidate_archive_sha256")
+                        prefix_lengths = [
+                            length
+                            for length in range(len(records) + 1)
+                            if archive._candidate_archive_digest(records[:length])
+                            == committed_digest
+                        ]
+                        if not prefix_lengths:
+                            raise EvolutionError("ordinary_candidate_archive_mismatch")
+                        records = records[: max(prefix_lengths)]
+                        pending = ordinary_strategy._pending_offspring(state)
+                        committed_outcomes = archive.offspring_outcomes()
+                        if pending is not None:
+                            committed_outcomes = tuple(
+                                item
+                                for item in committed_outcomes
+                                if item.iteration < pending[0]
+                            )
+                        ordinary_strategy._validate_outcome_history(
+                            state,
+                            records=records,
+                            outcomes=committed_outcomes,
+                        )
+                    allowed_delayed_roots = ordinary_strategy._allowed_delayed_root_ids(
+                        state,
+                        records,
+                        outcome_history_validated=True,
+                    )
+                else:
+                    projection = ordinary_records[0].integrity
+                    authority_names = {
+                        "schema_version",
+                        "contract_sha256",
+                        "evaluator_kind",
+                        "evaluator_fingerprint",
+                        "dependency_sha256",
+                        "environment_sha256",
+                        "runner_fingerprint",
+                        "generator_fingerprint",
+                    }
+                    if not isinstance(projection, dict) or not authority_names <= set(projection):
+                        raise EvolutionError("ordinary_candidate_integrity_state_invalid")
+                    authority = CandidateIntegrityAuthority.from_dict(
+                        {name: projection[name] for name in authority_names}
+                    )
+                    allowed_delayed_roots = frozenset()
+                archive.validate_candidate_integrity(
+                    authority=authority,
+                    allowed_delayed_root_ids=allowed_delayed_roots,
+                    records=records,
+                )
+            elif ordinary_strategy is not None:
+                if ordinary_strategy.archive.workspace != archive.workspace:
+                    raise EvolutionError("evolution candidate artifact strategy is invalid")
+                ordinary_strategy.validate_ordinary_resume_integrity()
+            else:
+                # Keep the private hook safe for maintenance callers that do not have the strategy
+                # instance.  Normal controller paths pass it so delayed-root journal rules are
+                # validated by the full population preflight.
+                state = archive.read_state()
+                marker_names = {
+                    "candidate_integrity_schema_version",
+                    "candidate_integrity_authority",
+                    "candidate_archive_sha256",
+                }
+                if marker_names.intersection(state) != marker_names or (
+                    state.get("candidate_integrity_schema_version")
+                    != CANDIDATE_INTEGRITY_SCHEMA_VERSION
+                ):
+                    raise EvolutionError("ordinary_candidate_integrity_state_invalid")
+                try:
+                    authority = CandidateIntegrityAuthority.from_dict(
+                        state["candidate_integrity_authority"]
+                    )
+                except (TypeError, ValueError, EvolutionError) as exc:
+                    raise EvolutionError("ordinary_candidate_integrity_state_invalid") from exc
+                archive.validate_candidate_integrity(authority=authority)
+                if state.get("candidate_archive_sha256") != archive._candidate_archive_digest(
+                    records
+                ):
+                    raise EvolutionError("ordinary_candidate_archive_mismatch")
+
+        sidecar_kinds = {
+            "seed": {
+                ORDINARY_RECORD_FILENAME: "evolution_seed_record",
+                ORDINARY_RECEIPT_FILENAME: "evolution_seed_receipt",
+            },
+            "ordinary": {
+                ORDINARY_RECORD_FILENAME: "evolution_candidate_record",
+                ORDINARY_RECEIPT_FILENAME: "evolution_candidate_receipt",
+            },
+        }
+        candidate_artifact_kinds = {
+            kind for kinds in sidecar_kinds.values() for kind in kinds.values()
+        }
+
+        # Snapshot rows once.  ``Store.add_artifact`` is append-only and gives each insertion a
+        # random ID, so path/kind is the stable idempotency key at this boundary.  Historical or
+        # concurrent duplicate rows are tolerable only when their exact evidence identity agrees;
+        # otherwise a later valid row must not hide a conflicting one through insertion order.
+        existing_rows = self.store.list_artifacts(run.id)
+        existing: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in existing_rows:
+            path = row.get("path")
+            kind = row.get("kind")
+            if (
+                not isinstance(path, str)
+                or not isinstance(kind, str)
+                or kind not in candidate_artifact_kinds
+            ):
+                continue
+            key = (path, kind)
+            prior = existing.get(key)
+            if prior is not None and (
+                prior.get("sha256") != row.get("sha256")
+                or prior.get("size") != row.get("size")
+            ):
+                raise EvolutionError("evolution candidate artifact digest mismatch")
+            existing.setdefault(key, row)
+
+        artifacts = ArtifactStore(workspace, self.store, run.id)
+
+        for candidate in records:
+            # ``CandidateArchive`` validates candidate IDs and code paths while parsing the
+            # append-only archive.  Derive the sidecar directory from the recorded source path so
+            # nested filenames (for example ``src/main.py``) are indexed correctly.
+            candidate_id = candidate.candidate_id
+            is_seed = archive._is_seed_candidate(candidate)
+            if is_seed and candidate.strategy == "population":
+                # Population seed evidence has a separate commit gate in
+                # ``record_committed_seed_admission``. Archive metadata alone is never authority
+                # to publish seed sidecars into the evidence ledger, including on the controller
+                # exception path. OpenEvolve's seed-shaped terminal candidate retains this generic
+                # indexing path because it uses a different strategy transaction.
+                continue
+            kinds = sidecar_kinds["seed" if is_seed else "ordinary"]
+            source_path = workspace / candidate.code_path
+            candidate_root = candidates_root / candidate_id
+            try:
+                source_path.relative_to(candidate_root)
+                source_path.relative_to(workspace)
+            except ValueError:
+                # A malformed or tampered archive is handled by the strategy resume gate.  Do
+                # not let optional artifact indexing turn it into a path traversal operation.
+                if not is_seed:
+                    raise EvolutionError("ordinary_candidate_source_invalid")
+                continue
+            if self._raw_path_has_symlink(workspace, source_path) or not source_path.is_file():
+                if not is_seed:
+                    raise EvolutionError("ordinary_candidate_source_invalid")
+                continue
+            sidecar_dir = source_path.parent
+            try:
+                sidecar_dir.relative_to(candidate_root)
+            except ValueError:
+                if not is_seed:
+                    raise EvolutionError("ordinary_candidate_source_invalid")
+                continue
+            for filename, kind in kinds.items():
+                path = sidecar_dir / filename
+                relative = path.relative_to(workspace).as_posix()
+                if self._raw_path_has_symlink(workspace, path):
+                    # Symlinked evidence is intentionally not indexed.  The integrity gate will
+                    # reject it before a resume can invoke a generator or evaluator.
+                    if not is_seed:
+                        raise EvolutionError(f"ordinary_candidate_{filename.removesuffix('.json')}_invalid")
+                    continue
+                if not path.is_file():
+                    if not is_seed:
+                        raise EvolutionError(f"ordinary_candidate_{filename.removesuffix('.json')}_missing")
+                    continue
+                if is_seed:
+                    try:
+                        size = path.stat().st_size
+                    except OSError:
+                        continue
+                    if size > MAX_ARCHIVE_LINE_BYTES:
+                        continue
+                    content = path.read_bytes()
+                else:
+                    error = f"ordinary_candidate_{filename.removesuffix('.json')}_invalid"
+                    content = _read_bounded_regular_file(
+                        path,
+                        MAX_ARCHIVE_LINE_BYTES,
+                        error=error,
+                    )
+                    size = len(content)
+                    try:
+                        payload = json.loads(content.decode("utf-8"))
+                        if filename == ORDINARY_RECORD_FILENAME:
+                            if _canonical_json_bytes(payload) != _canonical_json_bytes(
+                                candidate.to_dict()
+                            ):
+                                raise EvolutionError("ordinary_candidate_record_mismatch")
+                        else:
+                            receipt = CandidateReceipt.from_dict(payload)
+                            if receipt.receipt_sha256 != candidate.receipt_sha256:
+                                raise EvolutionError("ordinary_candidate_receipt_mismatch")
+                    except EvolutionError:
+                        raise
+                    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                        raise EvolutionError(error) from exc
+                digest = hashlib.sha256(content).hexdigest()
+                prior = existing.get((relative, kind))
+                if prior is not None:
+                    if prior.get("sha256") != digest or prior.get("size") != size:
+                        raise EvolutionError("evolution candidate artifact digest mismatch")
+                    continue
+                if is_seed:
+                    artifact_id = artifacts.record(path, task_id, kind=kind)
+                else:
+                    # Record the exact no-follow bounded snapshot validated above; a second
+                    # path.read_bytes() would reopen a race before the ledger insert.
+                    artifact_id = self.store.add_artifact(
+                        run.id,
+                        task_id,
+                        relative,
+                        digest,
+                        size,
+                        kind,
+                    )
+                existing[(relative, kind)] = {
+                    "id": artifact_id,
+                    "path": relative,
+                    "kind": kind,
+                    "sha256": digest,
+                    "size": size,
+                }
+
     def run_evolution(
         self,
         run_id: str,
@@ -359,6 +663,44 @@ class LocalController:
                 raise EvolutionError(
                     "verified seeds require dependency and environment fingerprints"
                 )
+            archive = CandidateArchive(run.workspace)
+            existing_state = archive.read_state()
+            existing_records = archive.records()
+            if existing_state or existing_records:
+                seed_summary = existing_state.get("seed_admission")
+                if not isinstance(seed_summary, dict):
+                    raise EvolutionError("verified_seed_cannot_modify_existing_population")
+
+                # Re-admitting a manifest invokes the exact evaluator.  Validate every existing
+                # ordinary candidate and its journal first with inert callback boundaries so a
+                # tampered mixed archive cannot cause evaluator work before failing closed.
+                def reject_preflight_generation(request):
+                    del request
+                    raise EvolutionError("ordinary integrity preflight generated")
+
+                def reject_preflight_evaluation(path, supplied):
+                    del path, supplied
+                    raise EvolutionError("ordinary integrity preflight evaluated")
+
+                preflight = PopulationStrategy(
+                    EvolutionContext(
+                        contract=contract,
+                        workspace=Path(run.workspace),
+                        generate=reject_preflight_generation,
+                        evaluate=reject_preflight_evaluation,
+                        config=evolution_config,
+                        evaluator_kind=seed_evaluator_kind,
+                        dependency_sha256=seed_dependency_sha256,
+                        environment_sha256=seed_environment_sha256,
+                    )
+                )
+                preflight.validate_ordinary_resume_integrity()
+                marker = read_bounded_evolution_json(
+                    archive.seed_commit_path,
+                    "verified_seed_commit_evidence_mismatch",
+                )
+                if marker.get("admission_sha256") != seed_summary.get("admission_sha256"):
+                    raise EvolutionError("verified_seed_commit_evidence_mismatch")
             try:
                 admission = admit_seed_manifest(
                     seed_manifest,
@@ -427,7 +769,9 @@ class LocalController:
                     or path.stat().st_size > MAX_STATE_BYTES
                 ):
                     raise EvolutionError(code)
-                payload = json.loads(path.read_text(encoding="utf-8"))
+                payload = json.loads(
+                    _read_bounded_regular_file(path, MAX_STATE_BYTES, error=code).decode("utf-8")
+                )
             except EvolutionError:
                 raise
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -473,20 +817,25 @@ class LocalController:
                 raise EvolutionError("verified_seed_commit_evidence_mismatch")
 
             artifacts = ArtifactStore(run.workspace, self.store, run.id)
-            evidence_paths = [
-                ("evolution/seed-commit.json", "evolution_seed_commit"),
-                *(
+            archived = {
+                candidate.candidate_id: candidate
+                for candidate in CandidateArchive(run.workspace).records()
+            }
+            if any(candidate_id not in archived for candidate_id in candidate_ids):
+                raise EvolutionError("verified_seed_commit_evidence_mismatch")
+            evidence_paths = [("evolution/seed-commit.json", "evolution_seed_commit")]
+            for candidate_id in candidate_ids:
+                source = Path(run.workspace) / archived[candidate_id].code_path
+                try:
+                    sidecar_parent = source.parent.relative_to(Path(run.workspace)).as_posix()
+                except ValueError as exc:
+                    raise EvolutionError("verified_seed_commit_evidence_mismatch") from exc
+                evidence_paths.extend(
                     (
-                        f"evolution/candidates/{candidate_id}/{name}",
-                        kind,
+                        (f"{sidecar_parent}/record.json", "evolution_seed_record"),
+                        (f"{sidecar_parent}/receipt.json", "evolution_seed_receipt"),
                     )
-                    for candidate_id in candidate_ids
-                    for name, kind in (
-                        ("record.json", "evolution_seed_record"),
-                        ("receipt.json", "evolution_seed_receipt"),
-                    )
-                ),
-            ]
+                )
             existing = {
                 (item["path"], item["kind"])
                 for item in self.store.list_artifacts(run.id)
@@ -550,6 +899,12 @@ class LocalController:
                 evaluate=evaluator,
                 config=evolution_config,
                 initial_seeds=admitted_seeds,
+                # Bind native offspring receipts to the same evaluator/dependency/environment
+                # authority as an admitted seed batch.  For ordinary runs these remain unset and
+                # the evolution layer resolves its path-free native protocol defaults.
+                evaluator_kind=seed_evaluator_kind if admitted_seeds else None,
+                dependency_sha256=seed_dependency_sha256 if admitted_seeds else None,
+                environment_sha256=seed_environment_sha256 if admitted_seeds else None,
                 cancelled=lambda: (
                     (latest := self.store.get_run(run_id)) is None
                     or latest.status == RunStatus.CANCELLED
@@ -565,6 +920,11 @@ class LocalController:
                 strategy = configured_strategy(admitted_seeds, summary)
                 result = strategy.resume()
                 record_committed_seed_admission(summary)
+                self._index_evolution_candidate_integrity_artifacts(
+                    run,
+                    evolution_task.id,
+                    strategy if isinstance(strategy, PopulationStrategy) else None,
+                )
                 return run, result
             except EvolutionError:
                 raise
@@ -579,8 +939,14 @@ class LocalController:
                 try:
                     require_terminal_strategy_state(latest)
                     admitted_seeds, summary = adjudicate_initial_seeds()
-                    result = configured_strategy(admitted_seeds, summary).resume()
+                    strategy = configured_strategy(admitted_seeds, summary)
+                    result = strategy.resume()
                     record_committed_seed_admission(summary)
+                    self._index_evolution_candidate_integrity_artifacts(
+                        latest,
+                        evolution_task.id,
+                        strategy if isinstance(strategy, PopulationStrategy) else None,
+                    )
                     return latest, result
                 except EvolutionError:
                     raise
@@ -597,11 +963,17 @@ class LocalController:
             },
             task_id=evolution_task.id,
         )
+        strategy = None
         try:
             admitted_seeds, summary = adjudicate_initial_seeds()
             strategy = configured_strategy(admitted_seeds, summary)
             result = strategy.resume() if resume else strategy.run()
             record_committed_seed_admission(summary)
+            self._index_evolution_candidate_integrity_artifacts(
+                run,
+                evolution_task.id,
+                strategy if isinstance(strategy, PopulationStrategy) else None,
+            )
             result_path = Path(run.workspace) / "evolution" / "result.json"
             result_path.write_text(
                 json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
@@ -668,19 +1040,6 @@ class LocalController:
                     for item in self.store.list_artifacts(run.id)
                 ):
                     artifacts.record(path, evolution_task.id, kind=kind)
-            for filename, kind in (
-                ("record.json", "evolution_seed_record"),
-                ("receipt.json", "evolution_seed_receipt"),
-            ):
-                for path in sorted(execution_root.glob(f"seed-*/{filename}")):
-                    if path.is_symlink() or not path.is_file():
-                        continue
-                    relative = path.relative_to(Path(run.workspace)).as_posix()
-                    if not any(
-                        item["path"] == relative and item["kind"] == kind
-                        for item in self.store.list_artifacts(run.id)
-                    ):
-                        artifacts.record(path, evolution_task.id, kind=kind)
             self.store.append_event(
                 run.id,
                 "evolution_finished",
@@ -709,6 +1068,17 @@ class LocalController:
             settled = self.store.settle_run(run.id)
             return settled or run, result
         except Exception as exc:
+            try:
+                self._index_evolution_candidate_integrity_artifacts(
+                    run,
+                    evolution_task.id,
+                    strategy if isinstance(strategy, PopulationStrategy) else None,
+                    allow_uncommitted_state=True,
+                )
+            except Exception as indexing_exc:  # noqa: BLE001 - preserve the original failure
+                # Preserve the strategy/storage failure. This best-effort pass only prevents a
+                # fully validated published prefix from disappearing from the evidence ledger.
+                del indexing_exc
             error = " ".join(str(exc).split())[-2_000:] or "evolution failed"
             self.store.append_event(
                 run.id,

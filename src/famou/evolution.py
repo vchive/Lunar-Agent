@@ -16,12 +16,13 @@ import random
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -40,12 +41,29 @@ MAX_SOURCE_BYTES = 512 * 1024
 MAX_METADATA_BYTES = 8 * 1024
 MAX_ARCHIVE_LINE_BYTES = 64 * 1024
 MAX_STATE_BYTES = 64 * 1024
+MAX_ARCHIVE_BYTES = MAX_STATE_BYTES * 128
 MAX_EXTERNAL_RESULT_BYTES = 64 * 1024
 MAX_ERROR_BYTES = 2_000
 MAX_COMMAND_ARGS = 32
 MAX_EXECUTION_OUTPUT_BYTES = 16 * 1024
 MAX_EXECUTION_ERROR_BYTES = 512
 MAX_EXECUTION_ARTIFACTS = 32
+ORDINARY_CANDIDATE_RECEIPT_SCHEMA_VERSION = "1"
+CANDIDATE_INTEGRITY_SCHEMA_VERSION = "1"
+LEGACY_CANDIDATE_INTEGRITY_ERROR = "ordinary_candidate_integrity_required"
+ORDINARY_RECEIPT_FILENAME = "receipt.json"
+ORDINARY_RECORD_FILENAME = "record.json"
+ORDINARY_EXECUTION_FILENAME = "execution.json"
+_RESERVED_CANDIDATE_SOURCE_BASENAMES = frozenset(
+    {
+        ORDINARY_RECORD_FILENAME,
+        ORDINARY_RECEIPT_FILENAME,
+        ORDINARY_EXECUTION_FILENAME,
+        f".{ORDINARY_RECORD_FILENAME}.tmp",
+        f".{ORDINARY_RECEIPT_FILENAME}.tmp",
+        f".{ORDINARY_EXECUTION_FILENAME}.tmp",
+    }
+)
 _SEED_STAGE_NAME = ".evolution-seed-stage-v1"
 _SEED_BACKUP_NAME = ".evolution-seed-backup-v1"
 # Process creation and interpreter startup can consume a few tens of milliseconds even for an
@@ -57,6 +75,10 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_OUTPUT = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|"
     r"api[_-]?key\s*[:=]\s*\S+)"
+)
+_CREDENTIAL_METADATA_KEY = re.compile(
+    r"(?i)(?:^|[_-])(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth(?:orization)?|"
+    r"password|passwd|secret|credential|bearer|private[_-]?key|token)(?:$|[_-])"
 )
 _OFFSPRING_OUTCOME_CODES = frozenset(
     {
@@ -87,9 +109,155 @@ class _InitialCandidateFailure(EvolutionError):
         super().__init__(code)
 
 
+class _CandidateArchivePublicationUnknown(EvolutionError):
+    """The archive append could not be durably confirmed or rolled back."""
+
+
 def _bounded_error(error: object) -> str:
     text = " ".join(str(error).split())
     return text[-MAX_ERROR_BYTES:] if text else "unknown evolution error"
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    """Encode a bounded evidence value without permitting ambiguous JSON constants."""
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _canonical_sha256(value: object) -> str:
+    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+
+
+def _protocol_identity(label: str, payload: Mapping[str, Any] | None = None) -> str:
+    body: dict[str, Any] = {"protocol": label, "schema_version": "1"}
+    if payload:
+        body.update(payload)
+    return _canonical_sha256(body)
+
+
+def _native_dependency_identity() -> str:
+    # This is a declared protocol identity, not a claim about transitive packages.  Callers that
+    # can attest a stronger bundle may provide ``dependency_sha256`` explicitly.
+    return _protocol_identity("lunar-native-candidate-dependencies-v1")
+
+
+def _native_environment_identity() -> str:
+    # Keep the fallback path-free and reproducible across machines running the same interpreter
+    # family.  Host names, environment variables, and credentials never enter the digest.
+    return _protocol_identity(
+        "lunar-native-candidate-environment-v1",
+        {
+            "implementation": sys.implementation.name,
+            "python": [sys.version_info.major, sys.version_info.minor, sys.version_info.micro],
+            "platform": sys.platform,
+        },
+    )
+
+
+def _native_evaluator_identity() -> str:
+    return _protocol_identity("lunar-native-candidate-evaluator-v1")
+
+
+def _native_generator_identity() -> str:
+    return _protocol_identity("lunar-native-candidate-generator-v1")
+
+
+def _native_runner_identity() -> str:
+    return _protocol_identity("lunar-native-candidate-runner-none-v1")
+
+
+def _normalize_receipt_error_codes(value: object) -> tuple[dict[str, str], ...]:
+    """Project evaluator errors without retaining evaluator prose or secrets."""
+
+    if not isinstance(value, (list, tuple)) or len(value) > 32:
+        raise EvolutionError("ordinary_candidate_receipt_invalid")
+    normalized: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {"code", "message"}:
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        code = item.get("code")
+        if not isinstance(code, str):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        normalized.append({"code": code, "message": "local evaluator reported an error"})
+    return tuple(normalized)
+
+
+def _sanitized_evaluation(report: EvaluationReport) -> EvaluationReport:
+    """Return a report safe to persist in ordinary candidate evidence."""
+
+    if not isinstance(report, EvaluationReport):
+        raise EvolutionError("ordinary_candidate_receipt_invalid")
+    try:
+        errors = _normalize_receipt_error_codes(report.error_info)
+        # Frozen dataclasses do not freeze nested dictionaries.  Take a canonical deep snapshot
+        # so a callback cannot mutate its returned report after the evaluator boundary and change
+        # receipt or archive bytes underneath an already computed digest.
+        detailed_scores = json.loads(_canonical_json_bytes(report.detailed_scores).decode("utf-8"))
+        return EvaluationReport(
+            schema_version=report.schema_version,
+            evaluator_id=report.evaluator_id,
+            validity=report.validity,
+            quality=report.quality,
+            combined_score=report.combined_score,
+            detailed_scores=detailed_scores,
+            error_info=errors,
+        )
+    except (TypeError, ValueError, EvolutionError) as exc:
+        raise EvolutionError("ordinary_candidate_receipt_invalid") from exc
+
+
+def _sanitize_metadata(value: object, *, depth: int = 0) -> Any:
+    """Normalize ordinary metadata before it crosses the durable archive boundary."""
+
+    if depth > 8:
+        raise EvolutionError("ordinary_candidate_metadata_invalid")
+    if value is None or isinstance(value, (str, bool, int)):
+        if isinstance(value, str):
+            value = _SECRET_OUTPUT.sub("[REDACTED]", value)
+            if any(ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in value):
+                raise EvolutionError("ordinary_candidate_metadata_invalid")
+            if len(value.encode("utf-8")) > 4_096:
+                raise EvolutionError("ordinary_candidate_metadata_invalid")
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise EvolutionError("ordinary_candidate_metadata_invalid")
+        return float(value)
+    if isinstance(value, Mapping):
+        if len(value) > 64:
+            raise EvolutionError("ordinary_candidate_metadata_invalid")
+        output: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not _SAFE_ID.fullmatch(key):
+                raise EvolutionError("ordinary_candidate_metadata_invalid")
+            if _SECRET_OUTPUT.search(key) or _CREDENTIAL_METADATA_KEY.search(key):
+                # Keys cannot be redacted without risking collisions, so reject a credential-like
+                # key before metadata reaches the record, archive, or controller event boundary.
+                raise EvolutionError("ordinary_candidate_metadata_invalid")
+            output[key] = _sanitize_metadata(item, depth=depth + 1)
+        return output
+    if isinstance(value, (list, tuple)):
+        if len(value) > 64:
+            raise EvolutionError("ordinary_candidate_metadata_invalid")
+        return [_sanitize_metadata(item, depth=depth + 1) for item in value]
+    raise EvolutionError("ordinary_candidate_metadata_invalid")
+
+
+def _validate_ordinary_metadata(value: object) -> dict[str, Any]:
+    """Return bounded ordinary metadata while reserving verified-seed identity markers."""
+
+    normalized = _sanitize_metadata(value)
+    if not isinstance(normalized, dict):
+        raise EvolutionError("ordinary_candidate_metadata_invalid")
+    if "seed_handoff" in normalized:
+        raise EvolutionError("ordinary_candidate_seed_identity_reserved")
+    return normalized
 
 
 def _bounded_output(value: object, limit: int = MAX_EXECUTION_OUTPUT_BYTES) -> str:
@@ -137,6 +305,260 @@ def _reject_symlink_components(path: Path, stop: Path, field_name: str) -> None:
         if current.is_symlink():
             raise EvolutionError(f"{field_name} must not contain a symlink")
         current = current.parent
+
+
+def _read_bounded_regular_file(path: Path, limit: int, *, error: str) -> bytes:
+    """Read at most ``limit`` bytes from one no-follow regular-file descriptor."""
+
+    descriptor: int | None = None
+    try:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        descriptor = os.open(path, flags)
+        information = os.fstat(descriptor)
+        if not stat.S_ISREG(information.st_mode) or information.st_size > limit:
+            raise EvolutionError(error)
+        chunks: list[bytes] = []
+        remaining = limit + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        content = b"".join(chunks)
+        if len(content) > limit:
+            raise EvolutionError(error)
+        final_information = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(final_information.st_mode)
+            or final_information.st_size > limit
+            or final_information.st_size != len(content)
+            or final_information.st_size != information.st_size
+            or final_information.st_mtime_ns != information.st_mtime_ns
+            or final_information.st_ctime_ns != information.st_ctime_ns
+        ):
+            raise EvolutionError(error)
+        return content
+    except EvolutionError:
+        raise
+    except OSError as exc:
+        raise EvolutionError(error) from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+@dataclass
+class _HeldRegularFileSnapshot:
+    """One no-follow regular file held open across an untrusted callback boundary."""
+
+    path: Path
+    descriptor: int
+    content: bytes
+    information: os.stat_result
+    limit: int
+    error: str
+
+    @classmethod
+    def open(cls, path: Path, limit: int, *, error: str) -> _HeldRegularFileSnapshot:
+        descriptor: int | None = None
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0),
+            )
+            before = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or before.st_size > limit
+            ):
+                raise EvolutionError(error)
+            chunks: list[bytes] = []
+            remaining = limit + 1
+            while remaining > 0:
+                chunk = os.read(descriptor, min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            content = b"".join(chunks)
+            after = os.fstat(descriptor)
+            if len(content) > limit or not cls._same_snapshot(before, after, len(content)):
+                raise EvolutionError(error)
+            current = os.stat(path, follow_symlinks=False)
+            if not cls._same_path_identity(after, current):
+                raise EvolutionError(error)
+            snapshot = cls(path, descriptor, content, after, limit, error)
+            descriptor = None
+            return snapshot
+        except EvolutionError:
+            raise
+        except OSError as exc:
+            raise EvolutionError(error) from exc
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _same_snapshot(
+        before: os.stat_result,
+        after: os.stat_result,
+        content_size: int,
+    ) -> bool:
+        return (
+            stat.S_ISREG(after.st_mode)
+            and after.st_nlink == 1
+            and after.st_size == content_size
+            and after.st_size == before.st_size
+            and after.st_dev == before.st_dev
+            and after.st_ino == before.st_ino
+            and after.st_mode == before.st_mode
+            and after.st_mtime_ns == before.st_mtime_ns
+            and after.st_ctime_ns == before.st_ctime_ns
+        )
+
+    @staticmethod
+    def _same_path_identity(held: os.stat_result, current: os.stat_result) -> bool:
+        return (
+            stat.S_ISREG(current.st_mode)
+            and current.st_nlink == 1
+            and current.st_dev == held.st_dev
+            and current.st_ino == held.st_ino
+            and current.st_mode == held.st_mode
+            and current.st_size == held.st_size
+            and current.st_mtime_ns == held.st_mtime_ns
+            and current.st_ctime_ns == held.st_ctime_ns
+        )
+
+    def validate(self, expected: bytes) -> None:
+        """Reject content, metadata, inode, or path replacement during the held interval."""
+
+        try:
+            os.lseek(self.descriptor, 0, os.SEEK_SET)
+            chunks: list[bytes] = []
+            remaining = self.limit + 1
+            while remaining > 0:
+                chunk = os.read(self.descriptor, min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            content = b"".join(chunks)
+            after = os.fstat(self.descriptor)
+            current = os.stat(self.path, follow_symlinks=False)
+            if (
+                len(content) > self.limit
+                or content != self.content
+                or content != expected
+                or not self._same_snapshot(self.information, after, len(content))
+                or not self._same_path_identity(after, current)
+            ):
+                raise EvolutionError(self.error)
+        except EvolutionError:
+            raise
+        except OSError as exc:
+            raise EvolutionError(self.error) from exc
+
+    def close(self) -> None:
+        descriptor, self.descriptor = self.descriptor, -1
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _fsync_directory(path: Path, *, error: str) -> None:
+    """Durably publish directory-entry changes without following the directory itself."""
+
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise EvolutionError(error)
+        os.fsync(descriptor)
+    except EvolutionError:
+        raise
+    except OSError as exc:
+        raise EvolutionError(error) from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _fsync_directory_chain(start: Path, stop: Path, *, error: str) -> None:
+    """Fsync a newly created directory chain from its leaf through ``stop``."""
+
+    current = start
+    stop = stop.resolve(strict=False)
+    try:
+        current.resolve(strict=False).relative_to(stop)
+    except ValueError as exc:
+        raise EvolutionError(error) from exc
+    while True:
+        _fsync_directory(current, error=error)
+        if current.resolve(strict=False) == stop:
+            return
+        if current == current.parent:
+            raise EvolutionError(error)
+        current = current.parent
+
+
+def _rollback_appended_regular_file(
+    descriptor: int,
+    root_descriptor: int,
+    entry_name: str,
+    previous_size: int,
+) -> None:
+    """Restore an append and confirm the directory entry still names the held inode."""
+
+    def validate_identity() -> None:
+        held = os.fstat(descriptor)
+        current = os.stat(
+            entry_name,
+            dir_fd=root_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(held.st_mode)
+            or not stat.S_ISREG(current.st_mode)
+            or held.st_nlink != 1
+            or current.st_nlink != 1
+            or held.st_size != previous_size
+            or current.st_size != previous_size
+            or (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise OSError("append rollback identity changed")
+
+    os.ftruncate(descriptor, previous_size)
+    os.fsync(descriptor)
+    validate_identity()
+    os.fsync(root_descriptor)
+    validate_identity()
 
 
 @dataclass(frozen=True)
@@ -396,16 +818,52 @@ def _write_execution_evidence(workspace: Path, execution: CandidateExecution) ->
     workspace = raw_workspace.resolve(strict=False)
     workspace.mkdir(parents=True, exist_ok=True)
     evidence = workspace / "execution.json"
-    if evidence.exists() and evidence.is_symlink():
+    if evidence.is_symlink() or (evidence.exists() and not evidence.is_file()):
         raise EvolutionError("candidate execution evidence must not be a symlink")
     temporary = workspace / ".execution.json.tmp"
-    if temporary.exists() and temporary.is_symlink():
+    if temporary.exists() or temporary.is_symlink():
         raise EvolutionError("candidate execution temporary evidence must not be a symlink")
-    temporary.write_text(
-        json.dumps(execution.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(evidence)
+    content = (
+        json.dumps(execution.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    descriptor: int | None = None
+    created = False
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        created = True
+        view = memoryview(content)
+        written = 0
+        while written < len(view):
+            count = os.write(descriptor, view[written:])
+            if count <= 0:
+                raise OSError("candidate execution evidence write made no progress")
+            written += count
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        os.replace(temporary, evidence)
+    except OSError as exc:
+        raise EvolutionError("candidate execution evidence could not be persisted") from exc
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if created and (temporary.exists() or temporary.is_symlink()):
+            try:
+                if not temporary.is_symlink() and temporary.is_file():
+                    temporary.unlink()
+            except OSError:
+                pass
     return evidence
 
 
@@ -435,6 +893,30 @@ def _collect_declared_artifacts(workspace: Path) -> tuple[str, ...]:
             raise EvolutionError("execution artifact must be a regular file")
         output.append(relative)
     return tuple(output)
+
+
+def _kill_candidate_process_group(process: subprocess.Popen[str]) -> bool:
+    """Best-effort terminal cleanup for the private session created by a candidate run."""
+
+    kill_group = getattr(os, "killpg", None)
+    if callable(kill_group):
+        try:
+            # ``start_new_session=True`` makes the child's PID the stable process-group ID. Using
+            # it directly still reaches descendants after the original process has already exited.
+            kill_group(process.pid, signal.SIGKILL)
+            return True
+        except ProcessLookupError:
+            return True
+        except OSError:
+            return False
+    if process.poll() is not None:
+        # Without a process-group primitive an exited parent leaves descendant cleanup uncertain.
+        return False
+    try:
+        process.kill()
+        return True
+    except (OSError, ProcessLookupError):
+        return process.poll() is not None
 
 
 class CommandCandidateRunner:
@@ -536,6 +1018,7 @@ class CommandCandidateRunner:
             )
             stdout, stderr = process.communicate(timeout=float(effective_timeout))
             exit_code = process.returncode
+            cleanup_confirmed = _kill_candidate_process_group(process)
             output_overflow = (
                 len(str(stdout).encode("utf-8")) > self.max_output_bytes
                 or len(str(stderr).encode("utf-8")) > self.max_output_bytes
@@ -544,16 +1027,15 @@ class CommandCandidateRunner:
             stderr = _bounded_output(stderr, self.max_output_bytes).strip()
             if output_overflow:
                 error = "output_limit_exceeded"
+            elif not cleanup_confirmed:
+                error = "candidate_process_cleanup_failed"
             elif exit_code == 0:
                 status = "succeeded"
             else:
                 error = "candidate_process_failed"
         except subprocess.TimeoutExpired as exc:
             if process is not None:
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                except (AttributeError, OSError, ProcessLookupError):
-                    process.kill()
+                _kill_candidate_process_group(process)
                 raw_stdout, raw_stderr = process.communicate()
                 stdout = _bounded_output(raw_stdout, self.max_output_bytes).strip()
                 stderr = _bounded_output(raw_stderr, self.max_output_bytes).strip()
@@ -708,6 +1190,9 @@ class EvolutionConfig:
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
     runner_fingerprint: str | None = None
+    evaluator_kind: str | None = None
+    dependency_sha256: str | None = None
+    environment_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if self.strategy == "loop":
@@ -748,11 +1233,19 @@ class EvolutionConfig:
             ("generator_fingerprint", self.generator_fingerprint),
             ("evaluator_fingerprint", self.evaluator_fingerprint),
             ("runner_fingerprint", self.runner_fingerprint),
+            ("dependency_sha256", self.dependency_sha256),
+            ("environment_sha256", self.environment_sha256),
         ):
             if fingerprint is not None and (
                 not isinstance(fingerprint, str) or not _SHA256.fullmatch(fingerprint)
             ):
                 raise ValueError(f"{name} must be a lowercase SHA-256 hex digest or null")
+        if self.evaluator_kind is not None and (
+            not isinstance(self.evaluator_kind, str)
+            or not _SAFE_ID.fullmatch(self.evaluator_kind)
+            or _SECRET_OUTPUT.search(self.evaluator_kind)
+        ):
+            raise ValueError("evaluator_kind must be a safe identifier or null")
         if self.strategy == "openevolve":
             if not self.command:
                 raise ValueError("openevolve strategy requires an explicit command")
@@ -785,6 +1278,12 @@ class EvolutionConfig:
             payload["evaluator_fingerprint"] = self.evaluator_fingerprint
         if self.runner_fingerprint is not None:
             payload["runner_fingerprint"] = self.runner_fingerprint
+        if self.evaluator_kind is not None:
+            payload["evaluator_kind"] = self.evaluator_kind
+        if self.dependency_sha256 is not None:
+            payload["dependency_sha256"] = self.dependency_sha256
+        if self.environment_sha256 is not None:
+            payload["environment_sha256"] = self.environment_sha256
         return payload
 
 
@@ -823,6 +1322,251 @@ class PopulationConfig:
 
 
 @dataclass(frozen=True)
+class CandidateReceipt:
+    """Canonical, evaluator-bound receipt for an ordinary candidate.
+
+    The shape intentionally mirrors the verified seed receipt while adding the local lineage and
+    runner identities needed by native population candidates.  It is kept in this module so the
+    ordinary path does not create a dependency cycle with ``seed_handoff``.
+    """
+
+    schema_version: str
+    candidate_id: str
+    source_sha256: str
+    contract_sha256: str
+    evaluator_kind: str
+    evaluator_fingerprint: str
+    dependency_sha256: str
+    environment_sha256: str
+    runner_fingerprint: str
+    generator_fingerprint: str
+    parent_id: str | None
+    generation: int
+    iteration: int
+    island_id: int | None
+    report_schema_version: str
+    evaluator_id: str
+    validity: int
+    quality: float | None
+    combined_score: float
+    detailed_scores: dict[str, dict[str, Any]]
+    error_info: tuple[dict[str, str], ...]
+    receipt_sha256: str
+    execution_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.schema_version != ORDINARY_CANDIDATE_RECEIPT_SCHEMA_VERSION:
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        _safe_id(self.candidate_id, "candidate receipt candidate_id")
+        for name in (
+            "source_sha256",
+            "contract_sha256",
+            "evaluator_fingerprint",
+            "dependency_sha256",
+            "environment_sha256",
+            "runner_fingerprint",
+            "generator_fingerprint",
+            "receipt_sha256",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _SHA256.fullmatch(value):
+                raise EvolutionError("ordinary_candidate_receipt_invalid")
+        _safe_id(self.evaluator_kind, "candidate receipt evaluator_kind")
+        if _SECRET_OUTPUT.search(self.evaluator_kind):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        if self.parent_id is not None:
+            _safe_id(self.parent_id, "candidate receipt parent_id")
+        for name in ("generation", "iteration"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise EvolutionError("ordinary_candidate_receipt_invalid")
+        if self.island_id is not None and (
+            isinstance(self.island_id, bool)
+            or not isinstance(self.island_id, int)
+            or self.island_id < 0
+        ):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        if self.report_schema_version != "1":
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        if self.execution_sha256 is not None and (
+            not isinstance(self.execution_sha256, str)
+            or not _SHA256.fullmatch(self.execution_sha256)
+        ):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        try:
+            report = EvaluationReport(
+                schema_version=self.report_schema_version,
+                evaluator_id=self.evaluator_id,
+                validity=self.validity,
+                quality=self.quality,
+                combined_score=self.combined_score,
+                detailed_scores=self.detailed_scores,
+                error_info=self.error_info,
+            )
+        except (TypeError, ValueError, EvolutionError) as exc:
+            raise EvolutionError("ordinary_candidate_receipt_invalid") from exc
+        normalized = _sanitized_evaluation(report)
+        if tuple(self.error_info) != normalized.error_info:
+            # ``from_report`` canonicalizes messages before constructing the receipt.  Parsed
+            # receipts must already contain that canonical projection; otherwise changing prose
+            # could be hidden by normalization before the receipt digest is checked.
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        object.__setattr__(self, "quality", normalized.quality)
+        object.__setattr__(self, "combined_score", normalized.combined_score)
+        object.__setattr__(self, "detailed_scores", normalized.detailed_scores)
+        object.__setattr__(self, "error_info", tuple(normalized.error_info))
+        if self.receipt_sha256 != _canonical_sha256(self.canonical_payload()):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+
+    def canonical_payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "candidate_id": self.candidate_id,
+            "source_sha256": self.source_sha256,
+            "contract_sha256": self.contract_sha256,
+            "evaluator_kind": self.evaluator_kind,
+            "evaluator_fingerprint": self.evaluator_fingerprint,
+            "dependency_sha256": self.dependency_sha256,
+            "environment_sha256": self.environment_sha256,
+            "runner_fingerprint": self.runner_fingerprint,
+            "generator_fingerprint": self.generator_fingerprint,
+            "parent_id": self.parent_id,
+            "generation": self.generation,
+            "iteration": self.iteration,
+            "island_id": self.island_id,
+            "report_schema_version": self.report_schema_version,
+            "evaluator_id": self.evaluator_id,
+            "validity": self.validity,
+            "quality": self.quality,
+            "combined_score": self.combined_score,
+            "detailed_scores": self.detailed_scores,
+            "error_info": list(self.error_info),
+            "execution_sha256": self.execution_sha256,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.canonical_payload(), "receipt_sha256": self.receipt_sha256}
+
+    @classmethod
+    def from_report(
+        cls,
+        report: EvaluationReport,
+        *,
+        candidate_id: str,
+        source_sha256: str,
+        contract_sha256: str,
+        evaluator_kind: str,
+        evaluator_fingerprint: str,
+        dependency_sha256: str,
+        environment_sha256: str,
+        runner_fingerprint: str,
+        generator_fingerprint: str,
+        parent_id: str | None,
+        generation: int,
+        iteration: int,
+        island_id: int | None,
+        execution_sha256: str | None = None,
+    ) -> CandidateReceipt:
+        normalized = _sanitized_evaluation(report)
+        payload = {
+            "schema_version": ORDINARY_CANDIDATE_RECEIPT_SCHEMA_VERSION,
+            "candidate_id": candidate_id,
+            "source_sha256": source_sha256,
+            "contract_sha256": contract_sha256,
+            "evaluator_kind": evaluator_kind,
+            "evaluator_fingerprint": evaluator_fingerprint,
+            "dependency_sha256": dependency_sha256,
+            "environment_sha256": environment_sha256,
+            "runner_fingerprint": runner_fingerprint,
+            "generator_fingerprint": generator_fingerprint,
+            "parent_id": parent_id,
+            "generation": generation,
+            "iteration": iteration,
+            "island_id": island_id,
+            "report_schema_version": normalized.schema_version,
+            "evaluator_id": normalized.evaluator_id,
+            "validity": normalized.validity,
+            "quality": normalized.quality,
+            "combined_score": normalized.combined_score,
+            "detailed_scores": normalized.detailed_scores,
+            "error_info": list(normalized.error_info),
+            "execution_sha256": execution_sha256,
+        }
+        return cls(**payload, receipt_sha256=_canonical_sha256(payload))
+
+    @classmethod
+    def from_dict(cls, value: object) -> CandidateReceipt:
+        if not isinstance(value, dict):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        required = {
+            "schema_version",
+            "candidate_id",
+            "source_sha256",
+            "contract_sha256",
+            "evaluator_kind",
+            "evaluator_fingerprint",
+            "dependency_sha256",
+            "environment_sha256",
+            "runner_fingerprint",
+            "generator_fingerprint",
+            "parent_id",
+            "generation",
+            "iteration",
+            "island_id",
+            "report_schema_version",
+            "evaluator_id",
+            "validity",
+            "quality",
+            "combined_score",
+            "detailed_scores",
+            "error_info",
+            "receipt_sha256",
+            "execution_sha256",
+        }
+        if set(value) != required:
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        errors = value["error_info"]
+        if not isinstance(errors, list):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        return cls(
+            schema_version=value["schema_version"],
+            candidate_id=value["candidate_id"],
+            source_sha256=value["source_sha256"],
+            contract_sha256=value["contract_sha256"],
+            evaluator_kind=value["evaluator_kind"],
+            evaluator_fingerprint=value["evaluator_fingerprint"],
+            dependency_sha256=value["dependency_sha256"],
+            environment_sha256=value["environment_sha256"],
+            runner_fingerprint=value["runner_fingerprint"],
+            generator_fingerprint=value["generator_fingerprint"],
+            parent_id=value["parent_id"],
+            generation=value["generation"],
+            iteration=value["iteration"],
+            island_id=value["island_id"],
+            report_schema_version=value["report_schema_version"],
+            evaluator_id=value["evaluator_id"],
+            validity=value["validity"],
+            quality=value["quality"],
+            combined_score=value["combined_score"],
+            detailed_scores=value["detailed_scores"],
+            error_info=tuple(errors),
+            receipt_sha256=value["receipt_sha256"],
+            execution_sha256=value["execution_sha256"],
+        )
+
+    def evaluation_report(self) -> EvaluationReport:
+        return EvaluationReport(
+            schema_version=self.report_schema_version,
+            evaluator_id=self.evaluator_id,
+            validity=self.validity,
+            quality=self.quality,
+            combined_score=self.combined_score,
+            detailed_scores=self.detailed_scores,
+            error_info=self.error_info,
+        )
+
+
+@dataclass(frozen=True)
 class Candidate:
     candidate_id: str
     code_path: str
@@ -834,6 +1578,11 @@ class Candidate:
     evaluation: EvaluationReport
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
+    # Optional additive projection.  Historical/manual candidates intentionally leave these
+    # fields unset; newly persisted ordinary candidates always populate them.
+    source_sha256: str | None = None
+    receipt_sha256: str | None = None
+    integrity: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _safe_id(self.candidate_id, "candidate_id")
@@ -851,9 +1600,32 @@ class Candidate:
         encoded = json.dumps(self.metadata, ensure_ascii=False, sort_keys=True).encode("utf-8")
         if len(encoded) > MAX_METADATA_BYTES:
             raise ValueError("candidate metadata exceeds the bounded metadata limit")
+        if self.source_sha256 is not None and (
+            not isinstance(self.source_sha256, str) or not _SHA256.fullmatch(self.source_sha256)
+        ):
+            raise ValueError("candidate source_sha256 must be a lowercase SHA-256 digest or null")
+        if self.receipt_sha256 is not None and (
+            not isinstance(self.receipt_sha256, str) or not _SHA256.fullmatch(self.receipt_sha256)
+        ):
+            raise ValueError("candidate receipt_sha256 must be a lowercase SHA-256 digest or null")
+        if (self.source_sha256 is None) != (self.receipt_sha256 is None):
+            raise ValueError("candidate source and receipt digests must be supplied together")
+        if self.integrity is not None:
+            if not isinstance(self.integrity, dict):
+                raise ValueError("candidate integrity projection must be an object or null")
+            encoded_integrity = json.dumps(
+                self.integrity,
+                ensure_ascii=False,
+                sort_keys=True,
+                allow_nan=False,
+            ).encode("utf-8")
+            if len(encoded_integrity) > 4 * 1024:
+                raise ValueError("candidate integrity projection exceeds the bounded limit")
+            if self.source_sha256 is None or self.receipt_sha256 is None:
+                raise ValueError("candidate integrity projection requires receipt digests")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "candidate_id": self.candidate_id,
             "code_path": self.code_path,
             "parent_id": self.parent_id,
@@ -865,6 +1637,11 @@ class Candidate:
             "metadata": self.metadata,
             "created_at": self.created_at,
         }
+        if self.source_sha256 is not None:
+            payload["source_sha256"] = self.source_sha256
+            payload["receipt_sha256"] = self.receipt_sha256
+            payload["integrity"] = self.integrity or {}
+        return payload
 
     @classmethod
     def from_dict(cls, value: object) -> Candidate:
@@ -881,6 +1658,9 @@ class Candidate:
             evaluation=EvaluationReport.from_dict(value.get("evaluation")),
             metadata=value.get("metadata", {}),  # type: ignore[arg-type]
             created_at=value.get("created_at", time.time()),  # type: ignore[arg-type]
+            source_sha256=value.get("source_sha256"),  # type: ignore[arg-type]
+            receipt_sha256=value.get("receipt_sha256"),  # type: ignore[arg-type]
+            integrity=value.get("integrity"),  # type: ignore[arg-type]
         )
 
 
@@ -1237,6 +2017,12 @@ class EvolutionContext:
     # callers that do not need a ledger can leave this unset.
     observe: Callable[[str, dict[str, Any]], None] = lambda event, payload: None
     initial_seeds: Sequence[AdmittedSeedInput] = ()
+    # Optional explicit identities for ordinary candidate receipts.  They are separate from the
+    # strategy knobs so a controller can bind seed/evaluator authority without changing legacy
+    # configuration JSON.  ``None`` selects the documented native protocol identity.
+    evaluator_kind: str | None = None
+    dependency_sha256: str | None = None
+    environment_sha256: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -1246,6 +2032,179 @@ class EvolutionContext:
         if len(seeds) > 32:
             raise ValueError("initial_seeds exceeds the bounded seed limit")
         object.__setattr__(self, "initial_seeds", seeds)
+        for name, value in (
+            ("dependency_sha256", self.dependency_sha256),
+            ("environment_sha256", self.environment_sha256),
+        ):
+            if value is not None and (
+                not isinstance(value, str) or not _SHA256.fullmatch(value)
+            ):
+                raise ValueError(f"{name} must be a lowercase SHA-256 digest or null")
+        if self.evaluator_kind is not None and (
+            not isinstance(self.evaluator_kind, str)
+            or not _SAFE_ID.fullmatch(self.evaluator_kind)
+            or _SECRET_OUTPUT.search(self.evaluator_kind)
+        ):
+            raise ValueError("evaluator_kind must be a safe identifier or null")
+
+
+@dataclass(frozen=True)
+class CandidateIntegrityAuthority:
+    """Uniform authority tuple persisted with a native evolution run."""
+
+    schema_version: str
+    contract_sha256: str
+    evaluator_kind: str
+    evaluator_fingerprint: str
+    dependency_sha256: str
+    environment_sha256: str
+    runner_fingerprint: str
+    generator_fingerprint: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != CANDIDATE_INTEGRITY_SCHEMA_VERSION:
+            raise EvolutionError("ordinary_candidate_integrity_invalid")
+        for name in (
+            "contract_sha256",
+            "evaluator_fingerprint",
+            "dependency_sha256",
+            "environment_sha256",
+            "runner_fingerprint",
+            "generator_fingerprint",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _SHA256.fullmatch(value):
+                raise EvolutionError("ordinary_candidate_integrity_invalid")
+        if (
+            not isinstance(self.evaluator_kind, str)
+            or not _SAFE_ID.fullmatch(self.evaluator_kind)
+            or _SECRET_OUTPUT.search(self.evaluator_kind)
+        ):
+            raise EvolutionError("ordinary_candidate_integrity_invalid")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "contract_sha256": self.contract_sha256,
+            "evaluator_kind": self.evaluator_kind,
+            "evaluator_fingerprint": self.evaluator_fingerprint,
+            "dependency_sha256": self.dependency_sha256,
+            "environment_sha256": self.environment_sha256,
+            "runner_fingerprint": self.runner_fingerprint,
+            "generator_fingerprint": self.generator_fingerprint,
+        }
+
+    @property
+    def digest(self) -> str:
+        return _canonical_sha256(self.to_dict())
+
+    @classmethod
+    def from_dict(cls, value: object) -> CandidateIntegrityAuthority:
+        if not isinstance(value, dict):
+            raise EvolutionError("ordinary_candidate_integrity_invalid")
+        required = {
+            "schema_version",
+            "contract_sha256",
+            "evaluator_kind",
+            "evaluator_fingerprint",
+            "dependency_sha256",
+            "environment_sha256",
+            "runner_fingerprint",
+            "generator_fingerprint",
+        }
+        if set(value) != required:
+            raise EvolutionError("ordinary_candidate_integrity_invalid")
+        return cls(
+            schema_version=value["schema_version"],
+            contract_sha256=value["contract_sha256"],
+            evaluator_kind=value["evaluator_kind"],
+            evaluator_fingerprint=value["evaluator_fingerprint"],
+            dependency_sha256=value["dependency_sha256"],
+            environment_sha256=value["environment_sha256"],
+            runner_fingerprint=value["runner_fingerprint"],
+            generator_fingerprint=value["generator_fingerprint"],
+        )
+
+
+def _seed_authority_hint(context: EvolutionContext, name: str) -> object | None:
+    """Read an authority field from the first admitted seed without importing its concrete type."""
+
+    if not context.initial_seeds:
+        return None
+    try:
+        receipt = context.initial_seeds[0].receipt
+        payload = receipt.to_dict()
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return payload.get(name) if isinstance(payload, dict) else None
+
+
+def resolve_candidate_integrity_authority(context: EvolutionContext) -> CandidateIntegrityAuthority:
+    """Resolve explicit identities, falling back to declared native protocol identities."""
+
+    config = context.config
+
+    def choose(context_value: object | None, config_value: object | None, seed_name: str, fallback: str) -> str:
+        if (
+            context_value is not None
+            and config_value is not None
+            and context_value != config_value
+        ):
+            raise EvolutionError("ordinary_candidate_integrity_invalid")
+        for value in (context_value, config_value, _seed_authority_hint(context, seed_name)):
+            if value is not None:
+                if not isinstance(value, str):
+                    raise EvolutionError("ordinary_candidate_integrity_invalid")
+                return value
+        return fallback
+
+    contract_sha256 = context.contract.digest()
+    evaluator_kind = choose(
+        context.evaluator_kind,
+        config.evaluator_kind,
+        "evaluator_kind",
+        "native",
+    )
+    evaluator_fingerprint = choose(
+        config.evaluator_fingerprint,
+        None,
+        "evaluator_fingerprint",
+        _native_evaluator_identity(),
+    )
+    dependency_sha256 = choose(
+        context.dependency_sha256,
+        config.dependency_sha256,
+        "dependency_sha256",
+        _native_dependency_identity(),
+    )
+    environment_sha256 = choose(
+        context.environment_sha256,
+        config.environment_sha256,
+        "environment_sha256",
+        _native_environment_identity(),
+    )
+    runner_fingerprint = choose(
+        config.runner_fingerprint,
+        None,
+        "runner_fingerprint",
+        _native_runner_identity(),
+    )
+    generator_fingerprint = choose(
+        config.generator_fingerprint,
+        None,
+        "generator_fingerprint",
+        _native_generator_identity(),
+    )
+    return CandidateIntegrityAuthority(
+        schema_version=CANDIDATE_INTEGRITY_SCHEMA_VERSION,
+        contract_sha256=contract_sha256,
+        evaluator_kind=evaluator_kind,
+        evaluator_fingerprint=evaluator_fingerprint,
+        dependency_sha256=dependency_sha256,
+        environment_sha256=environment_sha256,
+        runner_fingerprint=runner_fingerprint,
+        generator_fingerprint=generator_fingerprint,
+    )
 
 
 _SEED_RECEIPT_FIELDS = frozenset(
@@ -1836,20 +2795,73 @@ class CandidateArchive:
             if path.exists() and path.is_symlink():
                 raise EvolutionError("evolution archive directory must not be a symlink")
             path.mkdir(parents=True, exist_ok=True)
+        # Candidate/source fsync chains end at ``evolution``. Sync the complete layout through the
+        # workspace too, so the first creation of that root cannot be lost while later files appear
+        # durable only inside an uncommitted directory entry.
+        _fsync_directory_chain(
+            self.candidates_root,
+            self.workspace,
+            error="evolution archive directory could not be persisted",
+        )
 
     def records(self) -> list[Candidate]:
         if not self.archive_path.exists():
+            if self.archive_path.is_symlink():
+                raise EvolutionError("evolution archive is invalid or exceeds the bounded size")
             return []
-        if self.archive_path.is_symlink() or self.archive_path.stat().st_size > MAX_STATE_BYTES * 128:
+        if (
+            self.archive_path.is_symlink()
+            or not self.archive_path.is_file()
+            or self.archive_path.stat().st_size > MAX_ARCHIVE_BYTES
+        ):
             raise EvolutionError("evolution archive is invalid or exceeds the bounded size")
         records: list[Candidate] = []
         seen: set[str] = set()
-        for line in self.archive_path.read_text(encoding="utf-8").splitlines():
+        archive_content = _read_bounded_regular_file(
+            self.archive_path,
+            MAX_ARCHIVE_BYTES,
+            error="evolution archive is invalid or exceeds the bounded size",
+        ).decode("utf-8")
+        for line in archive_content.splitlines():
             if len(line.encode("utf-8")) > MAX_ARCHIVE_LINE_BYTES:
                 raise EvolutionError("evolution archive record is too large")
             if not line.strip():
                 continue
-            candidate = Candidate.from_dict(json.loads(line))
+            payload = json.loads(line)
+            modern_record = False
+            if isinstance(payload, dict):
+                integrity_fields = {"source_sha256", "receipt_sha256", "integrity"}
+                if integrity_fields & set(payload):
+                    modern_record = True
+                    ordinary_fields = {
+                        "candidate_id",
+                        "code_path",
+                        "parent_id",
+                        "generation",
+                        "iteration",
+                        "strategy",
+                        "island_id",
+                        "evaluation",
+                        "metadata",
+                        "created_at",
+                        *integrity_fields,
+                    }
+                    if set(payload) != ordinary_fields:
+                        raise EvolutionError("ordinary_candidate_record_invalid")
+            candidate = Candidate.from_dict(payload)
+            if modern_record:
+                try:
+                    if _canonical_json_bytes(payload) != _canonical_json_bytes(
+                        candidate.to_dict()
+                    ):
+                        raise EvolutionError("ordinary_candidate_record_invalid")
+                except (TypeError, ValueError) as exc:
+                    raise EvolutionError("ordinary_candidate_record_invalid") from exc
+            if candidate.strategy == "population":
+                has_seed_metadata = "seed_handoff" in candidate.metadata
+                has_seed_id = candidate.candidate_id.startswith("seed-")
+                if has_seed_metadata != has_seed_id:
+                    raise EvolutionError("verified_seed_identity_mismatch")
             if candidate.candidate_id in seen:
                 raise EvolutionError("evolution archive contains a duplicate candidate id")
             seen.add(candidate.candidate_id)
@@ -1865,11 +2877,16 @@ class CandidateArchive:
         try:
             if path.is_symlink() or not path.is_file():
                 raise EvolutionError("population_outcomes_invalid")
-            if path.stat().st_size > MAX_STATE_BYTES * 128:
+            if path.stat().st_size > MAX_ARCHIVE_BYTES:
                 raise EvolutionError("population_outcomes_invalid")
             outcomes: list[OffspringOutcome] = []
             seen: set[tuple[int, int]] = set()
-            for line in path.read_text(encoding="utf-8").splitlines():
+            content = _read_bounded_regular_file(
+                path,
+                MAX_ARCHIVE_BYTES,
+                error="population_outcomes_invalid",
+            ).decode("utf-8")
+            for line in content.splitlines():
                 if not line.strip():
                     continue
                 if len(line.encode("utf-8")) > MAX_ARCHIVE_LINE_BYTES:
@@ -1904,15 +2921,85 @@ class CandidateArchive:
         )
         if len(line.encode("utf-8")) > MAX_ARCHIVE_LINE_BYTES:
             raise EvolutionError("population_outcomes_invalid")
-        if self.offspring_outcomes_path.is_symlink():
-            raise EvolutionError("population_outcomes_invalid")
+        descriptor: int | None = None
+        root_descriptor: int | None = None
+        append_started = False
+        pre_append_size = 0
         try:
-            with self.offspring_outcomes_path.open("a", encoding="utf-8") as handle:
-                handle.write(line + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+            root_descriptor = os.open(
+                self.root,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            descriptor = os.open(
+                self.offspring_outcomes_path.name,
+                os.O_WRONLY
+                | os.O_APPEND
+                | os.O_CREAT
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                raise EvolutionError("population_outcomes_invalid")
+            pre_append_size = before.st_size
+            encoded_line = (line + "\n").encode("utf-8")
+            if pre_append_size + len(encoded_line) > MAX_ARCHIVE_BYTES:
+                raise EvolutionError("population_outcomes_invalid")
+            append_started = True
+            view = memoryview(encoded_line)
+            written = 0
+            while written < len(view):
+                count = os.write(descriptor, view[written:])
+                if count <= 0:
+                    raise OSError("outcome append made no progress")
+                written += count
+            os.fsync(descriptor)
+            after = os.fstat(descriptor)
+            current = os.stat(
+                self.offspring_outcomes_path.name,
+                dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(after.st_mode)
+                or after.st_nlink != 1
+                or after.st_size != pre_append_size + len(encoded_line)
+                or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)
+            ):
+                raise OSError("outcome publication identity changed")
+            os.fsync(root_descriptor)
+        except EvolutionError:
+            raise
         except OSError as exc:
+            if descriptor is not None and append_started:
+                try:
+                    if root_descriptor is None:
+                        raise OSError("outcome append root descriptor is unavailable")
+                    _rollback_appended_regular_file(
+                        descriptor,
+                        root_descriptor,
+                        self.offspring_outcomes_path.name,
+                        pre_append_size,
+                    )
+                except OSError as rollback_exc:
+                    raise EvolutionError("population_outcome_publication_unknown") from rollback_exc
             raise EvolutionError("population_outcome_persist_failed") from exc
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            if root_descriptor is not None:
+                try:
+                    os.close(root_descriptor)
+                except OSError:
+                    pass
 
     def next_id(self) -> str:
         numbers = []
@@ -1925,16 +3012,442 @@ class CandidateArchive:
     def candidate_source_path(self, candidate_id: str, filename: str) -> Path:
         _safe_id(candidate_id, "candidate_id")
         relative = _safe_relative_path(filename, "candidate filename")
+        if Path(relative).name in _RESERVED_CANDIDATE_SOURCE_BASENAMES:
+            # Sidecars and their deterministic private temporary names live beside the source.
+            # Reserving those basenames prevents source/evidence aliasing and partial commits.
+            raise EvolutionError("candidate filename is reserved for integrity evidence")
         if self.archive_path.exists() and self.archive_path.is_symlink():
             raise EvolutionError("evolution archive must not be a symlink")
         candidate_dir = self.candidates_root / candidate_id
         _reject_symlink_components(candidate_dir, self.candidates_root, "candidate path")
-        result = _confined(self.workspace, candidate_dir / relative, "candidate path")
-        _reject_symlink_components(result.parent, candidate_dir, "candidate path")
-        record_path = result.parent / "record.json"
-        if record_path.exists() and record_path.is_symlink():
+        raw_result = candidate_dir / relative
+        # Check the lexical path before resolving it.  Resolving first would turn a malicious
+        # source symlink into an apparently safe regular path and could redirect a write outside
+        # the candidate directory.
+        _reject_symlink_components(raw_result, self.candidates_root, "candidate path")
+        if raw_result.is_symlink():
+            raise EvolutionError("candidate path must not contain a symlink")
+        result = _confined(self.workspace, raw_result, "candidate path")
+        try:
+            result.relative_to(candidate_dir.resolve(strict=False))
+        except ValueError as exc:
+            raise EvolutionError("candidate path escapes candidate directory") from exc
+        record_path = raw_result.parent / ORDINARY_RECORD_FILENAME
+        if record_path.is_symlink():
             raise EvolutionError("candidate record must not be a symlink")
         return result
+
+    @staticmethod
+    def _atomic_write_bytes(path: Path, content: bytes, *, error: str) -> None:
+        """Write one private file and publish it with a same-directory replace."""
+
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise EvolutionError(error)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.tmp")
+        if temporary.exists() or temporary.is_symlink():
+            raise EvolutionError(error)
+        try:
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                # O_EXCL prevents a pre-planted hardlink from being opened; O_NOFOLLOW also
+                # documents and enforces the no-link contract on platforms that provide it.
+                0o600,
+            )
+            try:
+                view = memoryview(content)
+                written = 0
+                while written < len(view):
+                    count = os.write(descriptor, view[written:])
+                    if count <= 0:
+                        raise OSError("private write made no progress")
+                    written += count
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            os.replace(temporary, path)
+            _fsync_directory(path.parent, error=error)
+        except OSError as exc:
+            try:
+                if temporary.exists() and not temporary.is_symlink():
+                    temporary.unlink()
+            except OSError:
+                pass
+            raise EvolutionError(error) from exc
+
+    def candidate_receipt_path(
+        self,
+        candidate_id: str,
+        source_path: str | Path | None = None,
+    ) -> Path:
+        """Return the receipt sidecar path for a candidate source.
+
+        The historical one-argument form resolves to ``candidates/<id>/receipt.json``.  Ordinary
+        candidates may use a nested source filename, in which case persistence places sidecars
+        beside that source (for example ``src/main.py`` -> ``src/receipt.json``).  Accepting an
+        optional source path keeps the public form compatible while allowing resume validation to
+        address nested candidates without guessing or following links.
+        """
+        _safe_id(candidate_id, "candidate_id")
+        candidate_dir = self.candidates_root / candidate_id
+        _reject_symlink_components(candidate_dir, self.candidates_root, "candidate receipt path")
+        if source_path is None:
+            raw_result = candidate_dir / ORDINARY_RECEIPT_FILENAME
+        else:
+            raw_source = Path(source_path).expanduser()
+            if not raw_source.is_absolute():
+                raw_source = self.workspace / raw_source
+            _reject_symlink_components(raw_source, self.candidates_root, "candidate receipt path")
+            try:
+                source = _confined(self.workspace, raw_source, "candidate receipt path")
+                source.relative_to(candidate_dir.resolve(strict=False))
+            except ValueError as exc:
+                raise EvolutionError("candidate receipt path escapes candidate directory") from exc
+            raw_result = source.parent / ORDINARY_RECEIPT_FILENAME
+        _reject_symlink_components(raw_result, self.candidates_root, "candidate receipt path")
+        if raw_result.is_symlink():
+            raise EvolutionError("candidate receipt must not be a symlink")
+        result = _confined(self.workspace, raw_result, "candidate receipt path")
+        try:
+            result.relative_to(candidate_dir.resolve(strict=False))
+        except ValueError as exc:
+            raise EvolutionError("candidate receipt path escapes candidate directory") from exc
+        return result
+
+    def _candidate_execution_sha256(
+        self,
+        source_path: Path,
+        *,
+        expected_sha256: str | None = None,
+    ) -> str | None:
+        """Return a bounded regular execution-evidence digest beside ``source_path``.
+
+        A missing file is valid only when no digest was claimed.  If a file is present, callers
+        always receive its digest so persistence can bind it and resume can reject an unbound file.
+        The checks happen before reading bytes to avoid following symlinks or blocking on special
+        files supplied at the evaluator boundary.
+        """
+
+        if expected_sha256 is not None and (
+            not isinstance(expected_sha256, str) or not _SHA256.fullmatch(expected_sha256)
+        ):
+            raise EvolutionError("ordinary_candidate_execution_mismatch")
+        snapshot = self._candidate_execution_snapshot(source_path)
+        if snapshot is None:
+            if expected_sha256 is not None:
+                raise EvolutionError("ordinary_candidate_execution_mismatch")
+            return None
+        try:
+            snapshot.validate(snapshot.content)
+            digest = hashlib.sha256(snapshot.content).hexdigest()
+            if expected_sha256 is not None and digest != expected_sha256:
+                raise EvolutionError("ordinary_candidate_execution_mismatch")
+            return digest
+        except EvolutionError:
+            raise
+        except OSError as exc:
+            raise EvolutionError("ordinary_candidate_execution_mismatch") from exc
+        finally:
+            snapshot.close()
+
+    def _candidate_execution_snapshot(
+        self,
+        source_path: Path,
+    ) -> _HeldRegularFileSnapshot | None:
+        """Open optional execution evidence without following links or losing file identity."""
+
+        raw_path = source_path.parent / ORDINARY_EXECUTION_FILENAME
+        present = raw_path.exists() or raw_path.is_symlink()
+        if not present:
+            return None
+        try:
+            _reject_symlink_components(
+                raw_path,
+                self.candidates_root,
+                "ordinary candidate execution path",
+            )
+            if raw_path.is_symlink() or not raw_path.is_file():
+                raise EvolutionError("ordinary_candidate_execution_mismatch")
+            path = _confined(
+                self.workspace,
+                raw_path,
+                "ordinary candidate execution path",
+            )
+            return _HeldRegularFileSnapshot.open(
+                path,
+                MAX_ARCHIVE_LINE_BYTES,
+                error="ordinary_candidate_execution_mismatch",
+            )
+        except EvolutionError:
+            raise
+        except OSError as exc:
+            raise EvolutionError("ordinary_candidate_execution_mismatch") from exc
+
+    def _default_candidate_authority(self) -> CandidateIntegrityAuthority:
+        state = self.read_state()
+        existing = state.get("candidate_integrity_authority")
+        if existing is not None:
+            return CandidateIntegrityAuthority.from_dict(existing)
+        contract_sha256 = state.get("contract_sha256")
+        if not isinstance(contract_sha256, str) or not _SHA256.fullmatch(contract_sha256):
+            contract_sha256 = _protocol_identity("lunar-unknown-contract-v1")
+        return CandidateIntegrityAuthority(
+            schema_version=CANDIDATE_INTEGRITY_SCHEMA_VERSION,
+            contract_sha256=contract_sha256,
+            evaluator_kind="native",
+            evaluator_fingerprint=_native_evaluator_identity(),
+            dependency_sha256=_native_dependency_identity(),
+            environment_sha256=_native_environment_identity(),
+            runner_fingerprint=_native_runner_identity(),
+            generator_fingerprint=_native_generator_identity(),
+        )
+
+    def _candidate_archive_digest(self, records: Sequence[Candidate] | None = None) -> str:
+        if records is None:
+            records = self.records()
+        records = tuple(candidate for candidate in records if not self._is_seed_candidate(candidate))
+        # ``records()`` preserves the append order of archive.jsonl.  The Feature 087 state
+        # digest binds that order so rearranging otherwise valid records cannot produce the same
+        # ordinary archive identity.  Keep PopulationStrategy._candidate_digest unchanged: it is
+        # part of the older offspring-outcome schema and deliberately canonicalizes by ID.
+        return _canonical_sha256([candidate.to_dict() for candidate in records])
+
+    @staticmethod
+    def _is_seed_candidate(candidate: Candidate) -> bool:
+        # The ``seed-`` prefix is an identity convention, not proof of admission.  Trusting it
+        # alone would let a forged ordinary population record bypass receipt validation simply by
+        # choosing a seed-looking ID.  A committed seed always carries the validated handoff
+        # metadata; a missing/tampered marker therefore falls into the ordinary fail-closed path.
+        return "seed_handoff" in candidate.metadata
+
+    def read_candidate_receipt(
+        self,
+        candidate_id: str,
+        source_path: str | Path | None = None,
+    ) -> CandidateReceipt:
+        if source_path is None:
+            # Preserve the original root-sidecar lookup for callers that do not have an archive
+            # record yet.  Once a candidate is published, derive the sidecar location from its
+            # recorded source path so nested filenames are handled correctly.
+            try:
+                matches = [
+                    item for item in self.records() if item.candidate_id == candidate_id
+                ]
+            except (EvolutionError, OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                matches = []
+            if len(matches) == 1:
+                source_path = self.workspace / matches[0].code_path
+        path = self.candidate_receipt_path(candidate_id, source_path)
+        if not path.exists() or path.is_symlink() or not path.is_file():
+            raise EvolutionError("ordinary_candidate_receipt_missing")
+        if path.stat().st_size > MAX_ARCHIVE_LINE_BYTES:
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        try:
+            payload = json.loads(
+                _read_bounded_regular_file(
+                    path,
+                    MAX_ARCHIVE_LINE_BYTES,
+                    error="ordinary_candidate_receipt_invalid",
+                ).decode("utf-8")
+            )
+            return CandidateReceipt.from_dict(payload)
+        except EvolutionError:
+            raise
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise EvolutionError("ordinary_candidate_receipt_invalid") from exc
+
+    def validate_candidate_integrity(
+        self,
+        *,
+        authority: CandidateIntegrityAuthority | Mapping[str, Any] | None = None,
+        require_all: bool = True,
+        allowed_delayed_root_ids: Iterable[str] = (),
+        records: Sequence[Candidate] | None = None,
+    ) -> tuple[Candidate, ...]:
+        """Validate all ordinary candidate sidecars and source/record bindings.
+
+        Imported seed candidates are intentionally delegated to their existing verified-seed gate.
+        ``require_all=False`` is useful for read-only inspection of a mixed historical archive.
+        """
+
+        if records is None:
+            validated_records = tuple(self.records())
+        else:
+            validated_records = tuple(records)
+            if any(not isinstance(candidate, Candidate) for candidate in validated_records):
+                raise EvolutionError("ordinary_candidate_integrity_mismatch")
+        ordinary = [
+            candidate
+            for candidate in validated_records
+            if candidate.strategy == "population" and not self._is_seed_candidate(candidate)
+        ]
+        if not ordinary:
+            return validated_records
+        if authority is None:
+            expected = self._default_candidate_authority()
+        elif isinstance(authority, CandidateIntegrityAuthority):
+            expected = authority
+        else:
+            expected = CandidateIntegrityAuthority.from_dict(dict(authority))
+        try:
+            delayed_roots = frozenset(allowed_delayed_root_ids)
+        except TypeError as exc:
+            raise EvolutionError("ordinary_candidate_lineage_mismatch") from exc
+        if any(not isinstance(item, str) or not _SAFE_ID.fullmatch(item) for item in delayed_roots):
+            raise EvolutionError("ordinary_candidate_lineage_mismatch")
+        seen_by_id: dict[str, Candidate] = {}
+        for candidate in validated_records:
+            is_ordinary = (
+                candidate.strategy == "population" and not self._is_seed_candidate(candidate)
+            )
+            if not is_ordinary:
+                seen_by_id[candidate.candidate_id] = candidate
+                continue
+            if (
+                candidate.source_sha256 is None
+                or candidate.receipt_sha256 is None
+                or candidate.integrity is None
+            ):
+                if require_all:
+                    raise EvolutionError(LEGACY_CANDIDATE_INTEGRITY_ERROR)
+                seen_by_id[candidate.candidate_id] = candidate
+                continue
+            # Ordinary population lineage is part of the receipt authority.  Keep the checks
+            # independent from the source/receipt bytes so a caller cannot rewrite every durable
+            # projection around a non-existent or cross-strategy parent and make it look valid.
+            if candidate.strategy != "population" or candidate.island_id is None:
+                raise EvolutionError("ordinary_candidate_lineage_mismatch")
+            parent_id = candidate.parent_id
+            if parent_id is None:
+                if candidate.generation != 0 or (
+                    candidate.iteration != 0
+                    and candidate.candidate_id not in delayed_roots
+                ):
+                    raise EvolutionError("ordinary_candidate_lineage_mismatch")
+            else:
+                # Parentage is causal: an append-only child may reference only a population
+                # candidate already published earlier in the archive.
+                parent = seen_by_id.get(parent_id)
+                if (
+                    parent is None
+                    or parent.strategy != "population"
+                    or parent.evaluation.validity != 1
+                    or parent.candidate_id == candidate.candidate_id
+                    or candidate.generation != parent.generation + 1
+                    or candidate.iteration <= parent.iteration
+                ):
+                    raise EvolutionError("ordinary_candidate_lineage_mismatch")
+            try:
+                candidate_root = self.candidates_root / candidate.candidate_id
+                raw_source_path = self.workspace / candidate.code_path
+                try:
+                    raw_source_path.relative_to(candidate_root)
+                except ValueError as exc:
+                    raise EvolutionError("ordinary_candidate_source_invalid") from exc
+                _reject_symlink_components(
+                    raw_source_path,
+                    self.candidates_root,
+                    "ordinary candidate source path",
+                )
+                if raw_source_path.is_symlink() or not raw_source_path.is_file():
+                    raise EvolutionError("ordinary_candidate_source_invalid")
+                source_path = _confined(
+                    self.workspace,
+                    raw_source_path,
+                    "ordinary candidate source path",
+                )
+                if source_path.is_symlink() or not source_path.is_file():
+                    raise EvolutionError("ordinary_candidate_source_invalid")
+                source_bytes = _read_bounded_regular_file(
+                    source_path,
+                    MAX_SOURCE_BYTES,
+                    error="ordinary_candidate_source_mismatch",
+                )
+                source_digest = hashlib.sha256(source_bytes).hexdigest()
+                if source_digest != candidate.source_sha256:
+                    raise EvolutionError("ordinary_candidate_source_mismatch")
+                receipt = self.read_candidate_receipt(
+                    candidate.candidate_id,
+                    source_path=source_path,
+                )
+                if receipt.receipt_sha256 != candidate.receipt_sha256:
+                    raise EvolutionError("ordinary_candidate_receipt_mismatch")
+                if (
+                    receipt.candidate_id != candidate.candidate_id
+                    or receipt.source_sha256 != source_digest
+                    or receipt.contract_sha256 != expected.contract_sha256
+                    or receipt.evaluator_kind != expected.evaluator_kind
+                    or receipt.evaluator_fingerprint != expected.evaluator_fingerprint
+                    or receipt.dependency_sha256 != expected.dependency_sha256
+                    or receipt.environment_sha256 != expected.environment_sha256
+                    or receipt.runner_fingerprint != expected.runner_fingerprint
+                    or receipt.generator_fingerprint != expected.generator_fingerprint
+                    or receipt.parent_id != candidate.parent_id
+                    or receipt.generation != candidate.generation
+                    or receipt.iteration != candidate.iteration
+                    or receipt.island_id != candidate.island_id
+                    or _canonical_json_bytes(receipt.evaluation_report().to_dict())
+                    != _canonical_json_bytes(candidate.evaluation.to_dict())
+                ):
+                    raise EvolutionError("ordinary_candidate_integrity_mismatch")
+                integrity = candidate.integrity
+                expected_projection = {
+                    **expected.to_dict(),
+                    "candidate_id": candidate.candidate_id,
+                    "parent_id": candidate.parent_id,
+                    "generation": candidate.generation,
+                    "iteration": candidate.iteration,
+                    "island_id": candidate.island_id,
+                    "receipt_sha256": receipt.receipt_sha256,
+                    "source_sha256": source_digest,
+                }
+                if _canonical_json_bytes(integrity) != _canonical_json_bytes(
+                    expected_projection
+                ):
+                    raise EvolutionError("ordinary_candidate_integrity_mismatch")
+                raw_record_path = raw_source_path.parent / ORDINARY_RECORD_FILENAME
+                _reject_symlink_components(
+                    raw_record_path,
+                    self.candidates_root,
+                    "ordinary candidate record path",
+                )
+                if raw_record_path.is_symlink() or not raw_record_path.is_file():
+                    raise EvolutionError("ordinary_candidate_record_missing")
+                record_path = _confined(
+                    self.workspace,
+                    raw_record_path,
+                    "ordinary candidate record path",
+                )
+                if record_path.stat().st_size > MAX_ARCHIVE_LINE_BYTES:
+                    raise EvolutionError("ordinary_candidate_record_invalid")
+                record_payload = json.loads(
+                    _read_bounded_regular_file(
+                        record_path,
+                        MAX_ARCHIVE_LINE_BYTES,
+                        error="ordinary_candidate_record_invalid",
+                    ).decode("utf-8")
+                )
+                if _canonical_json_bytes(record_payload) != _canonical_json_bytes(
+                    candidate.to_dict()
+                ):
+                    raise EvolutionError("ordinary_candidate_record_mismatch")
+                execution_sha256 = self._candidate_execution_sha256(
+                    source_path,
+                    expected_sha256=receipt.execution_sha256,
+                )
+                if execution_sha256 != receipt.execution_sha256:
+                    raise EvolutionError("ordinary_candidate_execution_mismatch")
+            except EvolutionError:
+                raise
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise EvolutionError("ordinary_candidate_integrity_mismatch") from exc
+            seen_by_id[candidate.candidate_id] = candidate
+        return validated_records
 
     def persist(
         self,
@@ -1947,44 +3460,353 @@ class CandidateArchive:
         parent_id: str | None = None,
         island_id: int | None = None,
         evaluation: EvaluationReport,
+        integrity_authority: CandidateIntegrityAuthority | Mapping[str, Any] | None = None,
+        execution_sha256: str | None = None,
+        source_snapshot: _HeldRegularFileSnapshot | None = None,
+        execution_snapshot: _HeldRegularFileSnapshot | None = None,
     ) -> Candidate:
-        self._ensure_layout()
         if strategy == "loop":
             raise EvolutionError("loop_strategy_retired: legacy loop archives are read-only")
         if strategy not in {"population", "openevolve"}:
             raise EvolutionError("unsupported candidate strategy")
+        if candidate_id is not None:
+            _safe_id(candidate_id, "candidate_id")
+            if strategy == "population" and candidate_id.startswith("seed-"):
+                raise EvolutionError("ordinary_candidate_seed_identity_reserved")
+        self._ensure_layout()
+        existing_records = self.records()
         candidate_id = candidate_id or self.next_id()
-        if any(item.candidate_id == candidate_id for item in self.records()):
+        if any(item.candidate_id == candidate_id for item in existing_records):
             raise EvolutionError(f"candidate id already exists: {candidate_id}")
         path = self.candidate_source_path(candidate_id, draft.filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(draft.source, encoding="utf-8")
-        candidate = Candidate(
-            candidate_id=candidate_id,
-            code_path=path.relative_to(self.workspace).as_posix(),
-            parent_id=parent_id,
-            generation=generation,
-            iteration=iteration,
-            strategy=strategy,
-            island_id=island_id,
-            evaluation=evaluation,
-            metadata=draft.metadata,
-        )
-        line = json.dumps(candidate.to_dict(), ensure_ascii=False, sort_keys=True)
+        if path.parent.exists() and any(
+            (path.parent / name).exists() or (path.parent / name).is_symlink()
+            for name in (ORDINARY_RECORD_FILENAME, ORDINARY_RECEIPT_FILENAME)
+        ):
+            # Execution-aware evaluators may legitimately create execution.json, data/raw, and
+            # output artifacts beside the source.  A pre-existing record/receipt, however, means
+            # this candidate directory was already published or partially committed.
+            raise EvolutionError("ordinary_candidate_staging_conflict")
+        source_bytes = draft.source.encode("utf-8")
+        source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+        normalized_evaluation = _sanitized_evaluation(evaluation)
+        if strategy == "population":
+            if integrity_authority is None:
+                authority = self._default_candidate_authority()
+            elif isinstance(integrity_authority, CandidateIntegrityAuthority):
+                authority = integrity_authority
+            else:
+                authority = CandidateIntegrityAuthority.from_dict(dict(integrity_authority))
+            state = self.read_state()
+            marker_names = {
+                "candidate_integrity_schema_version",
+                "candidate_integrity_authority",
+                "candidate_archive_sha256",
+            }
+            present_markers = marker_names.intersection(state)
+            if present_markers and present_markers != marker_names:
+                raise EvolutionError("ordinary_candidate_integrity_state_invalid")
+            if present_markers:
+                if (
+                    state.get("candidate_integrity_schema_version")
+                    != CANDIDATE_INTEGRITY_SCHEMA_VERSION
+                ):
+                    raise EvolutionError("ordinary_candidate_integrity_state_invalid")
+                try:
+                    state_authority = CandidateIntegrityAuthority.from_dict(
+                        state["candidate_integrity_authority"]
+                    )
+                except (TypeError, ValueError, EvolutionError) as exc:
+                    raise EvolutionError("ordinary_candidate_integrity_state_invalid") from exc
+                if state_authority.to_dict() != authority.to_dict():
+                    raise EvolutionError("ordinary_candidate_integrity_authority_mismatch")
+            if authority.contract_sha256 != state.get(
+                "contract_sha256", authority.contract_sha256
+            ):
+                raise EvolutionError("ordinary_candidate_integrity_mismatch")
+            authority_fields = set(authority.to_dict())
+            for existing_candidate in existing_records:
+                if existing_candidate.strategy != "population" or self._is_seed_candidate(
+                    existing_candidate
+                ):
+                    continue
+                projection = existing_candidate.integrity
+                if not isinstance(projection, dict) or not authority_fields <= set(projection):
+                    raise EvolutionError(LEGACY_CANDIDATE_INTEGRITY_ERROR)
+                try:
+                    archived_authority = CandidateIntegrityAuthority.from_dict(
+                        {name: projection[name] for name in authority_fields}
+                    )
+                    archived_receipt = self.read_candidate_receipt(
+                        existing_candidate.candidate_id,
+                        source_path=self.workspace / existing_candidate.code_path,
+                    )
+                except (KeyError, TypeError, ValueError, EvolutionError) as exc:
+                    raise EvolutionError("ordinary_candidate_integrity_mismatch") from exc
+                if archived_authority.to_dict() != authority.to_dict() or any(
+                    getattr(archived_receipt, name) != getattr(authority, name)
+                    for name in authority_fields
+                ):
+                    raise EvolutionError("ordinary_candidate_integrity_authority_mismatch")
+            metadata = _validate_ordinary_metadata(draft.metadata)
+            if execution_snapshot is None:
+                execution_sha256 = self._candidate_execution_sha256(
+                    path,
+                    expected_sha256=execution_sha256,
+                )
+            else:
+                expected_execution_path = path.parent / ORDINARY_EXECUTION_FILENAME
+                if execution_snapshot.path != expected_execution_path:
+                    raise EvolutionError("ordinary_candidate_execution_mismatch")
+                execution_snapshot.validate(execution_snapshot.content)
+                observed_execution_sha256 = hashlib.sha256(
+                    execution_snapshot.content
+                ).hexdigest()
+                if (
+                    execution_sha256 is not None
+                    and execution_sha256 != observed_execution_sha256
+                ):
+                    raise EvolutionError("ordinary_candidate_execution_mismatch")
+                execution_sha256 = observed_execution_sha256
+            receipt = CandidateReceipt.from_report(
+                normalized_evaluation,
+                candidate_id=candidate_id,
+                source_sha256=source_sha256,
+                contract_sha256=authority.contract_sha256,
+                evaluator_kind=authority.evaluator_kind,
+                evaluator_fingerprint=authority.evaluator_fingerprint,
+                dependency_sha256=authority.dependency_sha256,
+                environment_sha256=authority.environment_sha256,
+                runner_fingerprint=authority.runner_fingerprint,
+                generator_fingerprint=authority.generator_fingerprint,
+                parent_id=parent_id,
+                generation=generation,
+                iteration=iteration,
+                island_id=island_id,
+                execution_sha256=execution_sha256,
+            )
+            projection = {
+                **authority.to_dict(),
+                "candidate_id": candidate_id,
+                "parent_id": parent_id,
+                "generation": generation,
+                "iteration": iteration,
+                "island_id": island_id,
+                "receipt_sha256": receipt.receipt_sha256,
+                "source_sha256": source_sha256,
+            }
+            candidate = Candidate(
+                candidate_id=candidate_id,
+                code_path=path.relative_to(self.workspace).as_posix(),
+                parent_id=parent_id,
+                generation=generation,
+                iteration=iteration,
+                strategy=strategy,
+                island_id=island_id,
+                evaluation=normalized_evaluation,
+                metadata=metadata,
+                source_sha256=source_sha256,
+                receipt_sha256=receipt.receipt_sha256,
+                integrity=projection,
+            )
+            receipt_text = json.dumps(
+                receipt.to_dict(),
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+                allow_nan=False,
+            ) + "\n"
+            if len(receipt_text.encode("utf-8")) > MAX_ARCHIVE_LINE_BYTES:
+                raise EvolutionError("ordinary_candidate_receipt_too_large")
+        else:
+            candidate = Candidate(
+                candidate_id=candidate_id,
+                code_path=path.relative_to(self.workspace).as_posix(),
+                parent_id=parent_id,
+                generation=generation,
+                iteration=iteration,
+                strategy=strategy,
+                island_id=island_id,
+                evaluation=normalized_evaluation,
+                metadata=draft.metadata,
+            )
+            receipt_text = None
+        line = json.dumps(candidate.to_dict(), ensure_ascii=False, sort_keys=True, allow_nan=False)
         if len(line.encode("utf-8")) > MAX_ARCHIVE_LINE_BYTES:
             raise EvolutionError("candidate record exceeds the bounded archive record size")
-        record_path = path.parent / "record.json"
+        if path.exists() or path.is_symlink():
+            _reject_symlink_components(path, self.candidates_root, "candidate path")
+            if path.is_symlink() or not path.is_file():
+                raise EvolutionError("ordinary_candidate_source_persist_failed")
+            staged_source = _read_bounded_regular_file(
+                path,
+                MAX_SOURCE_BYTES,
+                error="ordinary_candidate_source_persist_failed",
+            )
+            if staged_source != source_bytes:
+                raise EvolutionError("ordinary_candidate_source_changed")
+        else:
+            self._atomic_write_bytes(
+                path,
+                source_bytes,
+                error="ordinary_candidate_source_persist_failed",
+            )
+
+        def validate_publication_inputs() -> None:
+            if source_snapshot is None:
+                current_source = _read_bounded_regular_file(
+                    path,
+                    MAX_SOURCE_BYTES,
+                    error="ordinary_candidate_source_changed",
+                )
+                if current_source != source_bytes:
+                    raise EvolutionError("ordinary_candidate_source_changed")
+            else:
+                if source_snapshot.path != path:
+                    raise EvolutionError("ordinary_candidate_source_changed")
+                source_snapshot.validate(source_bytes)
+            if strategy != "population":
+                return
+            if execution_snapshot is None:
+                observed_execution = self._candidate_execution_sha256(path)
+            else:
+                if execution_snapshot.path != path.parent / ORDINARY_EXECUTION_FILENAME:
+                    raise EvolutionError("ordinary_candidate_execution_mismatch")
+                execution_snapshot.validate(execution_snapshot.content)
+                observed_execution = hashlib.sha256(execution_snapshot.content).hexdigest()
+            if observed_execution != execution_sha256:
+                raise EvolutionError("ordinary_candidate_execution_mismatch")
+
+        validate_publication_inputs()
+        record_path = path.parent / ORDINARY_RECORD_FILENAME
         if self.archive_path.exists() and self.archive_path.is_symlink():
             raise EvolutionError("evolution archive must not be a symlink")
         if record_path.exists() and record_path.is_symlink():
             raise EvolutionError("candidate record must not be a symlink")
-        temporary_record = record_path.with_name(".record.json.tmp")
-        temporary_record.write_text(line + "\n", encoding="utf-8")
-        temporary_record.replace(record_path)
-        with self.archive_path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        if receipt_text is not None:
+            self._atomic_write_bytes(
+                path.parent / ORDINARY_RECEIPT_FILENAME,
+                receipt_text.encode("utf-8"),
+                error="ordinary_candidate_receipt_persist_failed",
+            )
+            validate_publication_inputs()
+        self._atomic_write_bytes(
+            record_path,
+            (line + "\n").encode("utf-8"),
+            error="ordinary_candidate_record_persist_failed",
+        )
+        validate_publication_inputs()
+        _fsync_directory_chain(
+            path.parent,
+            self.root,
+            error="ordinary_candidate_sidecar_persist_failed",
+        )
+        validate_publication_inputs()
+        descriptor: int | None = None
+        root_descriptor: int | None = None
+        append_started = False
+        pre_append_size = 0
+        try:
+            if self.archive_path.is_symlink() or (
+                self.archive_path.exists() and not self.archive_path.is_file()
+            ):
+                raise EvolutionError("evolution archive must not be a symlink")
+            root_descriptor = os.open(
+                self.root,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            descriptor = os.open(
+                self.archive_path.name,
+                os.O_WRONLY
+                | os.O_APPEND
+                | os.O_CREAT
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                raise EvolutionError("evolution archive must be a private regular file")
+            pre_append_size = before.st_size
+            encoded_line = (line + "\n").encode("utf-8")
+            if pre_append_size + len(encoded_line) > MAX_ARCHIVE_BYTES:
+                raise EvolutionError(
+                    "evolution archive is invalid or exceeds the bounded size"
+                )
+            append_started = True
+            view = memoryview(encoded_line)
+            written = 0
+            while written < len(view):
+                count = os.write(descriptor, view[written:])
+                if count <= 0:
+                    raise OSError("archive append made no progress")
+                written += count
+            validate_publication_inputs()
+            os.fsync(descriptor)
+            validate_publication_inputs()
+            after = os.fstat(descriptor)
+            current = os.stat(
+                self.archive_path.name,
+                dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(after.st_mode)
+                or after.st_nlink != 1
+                or after.st_size != pre_append_size + len(encoded_line)
+                or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)
+            ):
+                raise OSError("archive publication identity changed")
+            os.fsync(root_descriptor)
+            validate_publication_inputs()
+        except EvolutionError:
+            if descriptor is not None and append_started:
+                try:
+                    if root_descriptor is None:
+                        raise OSError("archive append root descriptor is unavailable")
+                    _rollback_appended_regular_file(
+                        descriptor,
+                        root_descriptor,
+                        self.archive_path.name,
+                        pre_append_size,
+                    )
+                except OSError as rollback_exc:
+                    raise _CandidateArchivePublicationUnknown(
+                        "ordinary_candidate_archive_publication_unknown"
+                    ) from rollback_exc
+            raise
+        except OSError as exc:
+            if descriptor is None or not append_started:
+                raise EvolutionError("ordinary_candidate_archive_persist_failed") from exc
+            try:
+                if root_descriptor is None:
+                    raise OSError("archive append root descriptor is unavailable")
+                _rollback_appended_regular_file(
+                    descriptor,
+                    root_descriptor,
+                    self.archive_path.name,
+                    pre_append_size,
+                )
+            except OSError as rollback_exc:
+                raise _CandidateArchivePublicationUnknown(
+                    "ordinary_candidate_archive_publication_unknown"
+                ) from rollback_exc
+            raise EvolutionError("ordinary_candidate_archive_persist_failed") from exc
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            if root_descriptor is not None:
+                try:
+                    os.close(root_descriptor)
+                except OSError:
+                    pass
         return candidate
 
     def _seed_authority(
@@ -2289,7 +4111,16 @@ class CandidateArchive:
 
             archive = {item.candidate_id: item for item in self.records()}
             expected_ids = {item.candidate.candidate_id for item in prepared}
-            if set(marker["candidate_ids"]) != expected_ids or not expected_ids <= set(archive):
+            archived_seed_ids = {
+                candidate.candidate_id
+                for candidate in archive.values()
+                if self._is_seed_candidate(candidate)
+            }
+            if (
+                set(marker["candidate_ids"]) != expected_ids
+                or archived_seed_ids != expected_ids
+                or not expected_ids <= set(archive)
+            ):
                 raise EvolutionError("verified_seed_resume_mismatch")
             persisted_seed_candidates = [
                 archive[candidate_id].to_dict() for candidate_id in sorted(expected_ids)
@@ -2368,18 +4199,49 @@ class CandidateArchive:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         if len(encoded.encode("utf-8")) > MAX_STATE_BYTES:
             raise EvolutionError("evolution state exceeds the bounded state size")
-        if self.state_path.exists() and self.state_path.is_symlink():
-            raise EvolutionError("evolution state must not be a symlink")
-        temporary = self.state_path.with_name(".state.json.tmp")
-        temporary.write_text(encoded, encoding="utf-8")
-        temporary.replace(self.state_path)
+        if (
+            (self.state_path.exists() or self.state_path.is_symlink())
+            and (self.state_path.is_symlink() or not self.state_path.is_file())
+        ):
+            raise EvolutionError("evolution state must be a regular file")
+        temporary = self.state_path.with_name(f".{self.state_path.name}.tmp")
+        if temporary.is_symlink() or (temporary.exists() and not temporary.is_file()):
+            raise EvolutionError("evolution state persist failed")
+        if temporary.exists():
+            try:
+                # A regular fixed temp can remain after fsync and before replace. Unlinking this
+                # workspace entry is safe even when it is a hardlink to another pathname.
+                temporary.unlink()
+                _fsync_directory(
+                    self.state_path.parent,
+                    error="evolution state persist failed",
+                )
+            except OSError as exc:
+                raise EvolutionError("evolution state persist failed") from exc
+        self._atomic_write_bytes(
+            self.state_path,
+            encoded.encode("utf-8"),
+            error="evolution state persist failed",
+        )
 
     def read_state(self) -> dict[str, Any]:
         if not self.state_path.exists():
+            if self.state_path.is_symlink():
+                raise EvolutionError("evolution state is invalid or exceeds the bounded size")
             return {}
-        if self.state_path.is_symlink() or self.state_path.stat().st_size > MAX_STATE_BYTES:
+        if (
+            self.state_path.is_symlink()
+            or not self.state_path.is_file()
+            or self.state_path.stat().st_size > MAX_STATE_BYTES
+        ):
             raise EvolutionError("evolution state is invalid or exceeds the bounded size")
-        payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        payload = json.loads(
+            _read_bounded_regular_file(
+                self.state_path,
+                MAX_STATE_BYTES,
+                error="evolution state is invalid or exceeds the bounded size",
+            ).decode("utf-8")
+        )
         if not isinstance(payload, dict):
             raise EvolutionError("evolution state must be an object")
         return payload
@@ -2416,10 +4278,18 @@ class CandidateArchive:
 
 def _report(value: EvaluationReport | dict[str, Any]) -> EvaluationReport:
     if isinstance(value, EvaluationReport):
-        return value
-    if isinstance(value, dict):
-        return EvaluationReport.from_dict(value)
-    raise EvolutionError("evaluator must return an EvaluationReport or object")
+        payload = value.to_dict()
+    elif isinstance(value, dict):
+        payload = value
+    else:
+        raise EvolutionError("evaluator must return an EvaluationReport or object")
+    try:
+        # EvaluationReport is frozen only at its top level. Snapshot nested score/error mappings at
+        # the callback return boundary so a producer-owned object cannot change later durable bytes.
+        snapshot = json.loads(_canonical_json_bytes(payload).decode("utf-8"))
+        return EvaluationReport.from_dict(snapshot)
+    except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EvolutionError("evaluator returned an invalid EvaluationReport") from exc
 
 
 def _invalid_report(message: object) -> EvaluationReport:
@@ -2537,6 +4407,11 @@ class _BaseStrategy:
         self.context = context
         self.archive = CandidateArchive(context.workspace)
         self.config = context.config
+        self.integrity_authority = resolve_candidate_integrity_authority(context)
+        # Keep the evaluator's structured feedback available to a generator during this live
+        # process while persisting only the receipt-safe projection.  The map is deliberately
+        # in-memory and is empty on resume, so evaluator prose cannot cross the durable boundary.
+        self._transient_evaluations: dict[str, EvaluationReport] = {}
         self._bind_observer(context.generate)
         self._bind_observer(context.evaluate)
 
@@ -2565,6 +4440,24 @@ class _BaseStrategy:
             # treat as already discarded; a later resume must never infer a candidate from it.
             pass
 
+    def _generation_candidate(self, candidate: Candidate | None) -> Candidate | None:
+        """Overlay live evaluator feedback without changing the canonical archive record."""
+
+        if candidate is None:
+            return None
+        evaluation = self._transient_evaluations.get(candidate.candidate_id)
+        if evaluation is None:
+            return candidate
+        return replace(candidate, evaluation=evaluation)
+
+    def _generation_records(self) -> tuple[Candidate, ...]:
+        """Return archive records with process-local feedback overlays for the next proposal."""
+
+        return tuple(
+            self._generation_candidate(candidate)  # type: ignore[arg-type]
+            for candidate in self.archive.records()
+        )
+
     def _persist(
         self,
         draft: CandidateDraft,
@@ -2575,32 +4468,93 @@ class _BaseStrategy:
         island_id: int | None,
     ) -> Candidate:
         candidate_id = self.archive.next_id()
+        source_snapshot: _HeldRegularFileSnapshot | None = None
+        execution_snapshot: _HeldRegularFileSnapshot | None = None
+        # Candidate IDs are derived only from published archive lines.  Remove any unarchived
+        # tree left by an earlier local crash before reusing the ID so stale execution evidence or
+        # outputs cannot be attributed to the new evaluator call.
+        self._discard_unarchived_candidate(candidate_id)
         try:
             path = self.archive.candidate_source_path(candidate_id, draft.filename)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(draft.source, encoding="utf-8")
+            source_bytes = draft.source.encode("utf-8")
+            self.archive._atomic_write_bytes(
+                path,
+                source_bytes,
+                error="ordinary_candidate_source_changed",
+            )
+            _reject_symlink_components(path, self.archive.candidates_root, "candidate path")
+            source_snapshot = _HeldRegularFileSnapshot.open(
+                path,
+                MAX_SOURCE_BYTES,
+                error="ordinary_candidate_source_changed",
+            )
+            if source_snapshot.content != source_bytes:
+                raise EvolutionError("ordinary_candidate_source_changed")
         except Exception:  # noqa: BLE001 - candidate staging is a fixed boundary
+            if source_snapshot is not None:
+                source_snapshot.close()
             self._discard_unarchived_candidate(candidate_id)
             raise _InitialCandidateFailure("candidate_failed") from None
         try:
             evaluation = _report(self.context.evaluate(path, self.context.contract))
         except Exception as exc:  # noqa: BLE001 - evaluator is an injected boundary
+            if source_snapshot is not None:
+                source_snapshot.close()
             self._discard_unarchived_candidate(candidate_id)
             # Do not persist evaluator exception prose in either the synthetic report or
             # candidate metadata. Initialization has no offspring journal entry, so the caller
             # records the same fixed code in terminal state when the whole initial population
             # fails.
             raise _InitialCandidateFailure(_evaluator_failure_code(exc)) from None
-        candidate = self.archive.persist(
-            draft,
-            candidate_id=candidate_id,
-            strategy=self.name,
-            iteration=iteration,
-            generation=generation,
-            parent_id=parent.candidate_id if parent else None,
-            island_id=island_id,
-            evaluation=evaluation,
-        )
+        try:
+            _reject_symlink_components(path, self.archive.candidates_root, "candidate path")
+            assert source_snapshot is not None
+            source_snapshot.validate(source_bytes)
+            execution_snapshot = self.archive._candidate_execution_snapshot(path)
+            if execution_snapshot is None:
+                execution_digest = None
+            else:
+                execution_snapshot.validate(execution_snapshot.content)
+                execution_digest = hashlib.sha256(execution_snapshot.content).hexdigest()
+        except (OSError, EvolutionError):
+            if source_snapshot is not None:
+                source_snapshot.close()
+            if execution_snapshot is not None:
+                execution_snapshot.close()
+            self._discard_unarchived_candidate(candidate_id)
+            raise _InitialCandidateFailure("candidate_failed") from None
+        try:
+            candidate = self.archive.persist(
+                draft,
+                candidate_id=candidate_id,
+                strategy=self.name,
+                iteration=iteration,
+                generation=generation,
+                parent_id=parent.candidate_id if parent else None,
+                island_id=island_id,
+                evaluation=evaluation,
+                integrity_authority=self.integrity_authority,
+                execution_sha256=execution_digest,
+                source_snapshot=source_snapshot,
+                execution_snapshot=execution_snapshot,
+            )
+        except _CandidateArchivePublicationUnknown:
+            # The complete source and sidecars are the only recoverable evidence when an archive
+            # append cannot be confirmed or rolled back.  Never delete them in this ambiguity.
+            raise
+        except Exception:  # noqa: BLE001 - persistence has one fixed candidate outcome
+            if source_snapshot is not None:
+                source_snapshot.close()
+            if execution_snapshot is not None:
+                execution_snapshot.close()
+            self._discard_unarchived_candidate(candidate_id)
+            raise _InitialCandidateFailure("candidate_failed") from None
+        finally:
+            if source_snapshot is not None:
+                source_snapshot.close()
+            if execution_snapshot is not None:
+                execution_snapshot.close()
+        self._transient_evaluations[candidate.candidate_id] = evaluation
         try:
             self.context.observe("candidate", candidate.to_dict())
         except Exception as exc:  # noqa: BLE001 - optional audit sink
@@ -2618,6 +4572,30 @@ class _BaseStrategy:
             **extra,
         }
         existing = self.archive.read_state()
+        # Imported seed and OpenEvolve transactions retain their established state shape.  Once a
+        # native ordinary candidate is being prepared, attach the additive integrity markers to
+        # subsequent snapshots.  ``pending_offspring`` is emitted before the first offspring is
+        # staged, so a seeded run still has an authority/digest baseline if it crashes after a
+        # complete candidate batch but before its final state snapshot.  The seed-only commit
+        # snapshot remains byte-compatible because it has neither ordinary records nor pending
+        # offspring.
+        if self.name == "population" and (
+            not self.context.initial_seeds
+            or "pending_offspring" in extra
+            or existing.get("candidate_integrity_schema_version")
+            == CANDIDATE_INTEGRITY_SCHEMA_VERSION
+            or any(
+                not self.archive._is_seed_candidate(candidate)
+                for candidate in self.archive.records()
+            )
+        ):
+            payload.update(
+                {
+                    "candidate_integrity_schema_version": CANDIDATE_INTEGRITY_SCHEMA_VERSION,
+                    "candidate_integrity_authority": self.integrity_authority.to_dict(),
+                    "candidate_archive_sha256": self.archive._candidate_archive_digest(),
+                }
+            )
         seed_admission = existing.get("seed_admission")
         if seed_admission is not None:
             payload["seed_admission"] = seed_admission
@@ -2653,10 +4631,193 @@ class _BaseStrategy:
         digest = state.get("contract_sha256")
         if digest != self.context.contract.digest():
             raise EvolutionError("evolution state contract digest does not match the supplied contract")
+        stored_config_present = "config" in state
         stored_config = state.get("config")
-        if stored_config is not None and stored_config != self.config.to_dict():
-            raise EvolutionError("evolution state configuration does not match the supplied configuration")
+        if (
+            CANDIDATE_INTEGRITY_SCHEMA_VERSION
+            == state.get("candidate_integrity_schema_version")
+            and (not stored_config_present or stored_config is None)
+        ) or (
+            stored_config is not None
+            and _canonical_json_bytes(stored_config)
+            != _canonical_json_bytes(self.config.to_dict())
+        ):
+            raise EvolutionError(
+                "evolution state configuration does not match the supplied configuration"
+            )
         return state
+
+    def _allowed_delayed_root_ids(
+        self,
+        state: Mapping[str, Any],
+        records: Sequence[Candidate],
+        *,
+        outcome_history_validated: bool,
+    ) -> frozenset[str]:
+        """Return lineage exceptions proven by a strategy-specific durable journal."""
+
+        del state, records, outcome_history_validated
+        return frozenset()
+
+    def _pending_candidate_archive_extension_matches(
+        self,
+        state: Mapping[str, Any],
+        records: Sequence[Candidate],
+    ) -> bool:
+        """Accept only the exact evaluated suffix of a completely published pending batch."""
+
+        pending = state.get("pending_offspring")
+        if not isinstance(pending, dict):
+            return False
+        attempt_count = pending.get("attempt_count")
+        target_iteration = pending.get("iteration")
+        if (
+            isinstance(attempt_count, bool)
+            or not isinstance(attempt_count, int)
+            or isinstance(target_iteration, bool)
+            or not isinstance(target_iteration, int)
+        ):
+            return False
+        try:
+            outcomes = sorted(
+                (
+                    item
+                    for item in self.archive.offspring_outcomes()
+                    if item.iteration == target_iteration
+                ),
+                key=lambda item: item.attempt,
+            )
+        except EvolutionError:
+            return False
+        if len(outcomes) != attempt_count or [item.attempt for item in outcomes] != list(
+            range(attempt_count)
+        ):
+            return False
+        evaluated_ids = [
+            item.candidate_id for item in outcomes if item.code == "evaluated"
+        ]
+        if any(candidate_id is None for candidate_id in evaluated_ids):
+            return False
+        evaluated_id_set = set(evaluated_ids)
+        baseline = [
+            candidate
+            for candidate in records
+            if candidate.candidate_id not in evaluated_id_set
+        ]
+        if state.get("candidate_archive_sha256") != self.archive._candidate_archive_digest(
+            baseline
+        ):
+            return False
+        current_ids = [
+            candidate.candidate_id
+            for candidate in records
+            if not self.archive._is_seed_candidate(candidate)
+        ]
+        baseline_ids = [
+            candidate.candidate_id
+            for candidate in baseline
+            if not self.archive._is_seed_candidate(candidate)
+        ]
+        return current_ids == [*baseline_ids, *evaluated_ids]
+
+    def _validate_candidate_integrity_state(
+        self,
+        state: Mapping[str, Any],
+        *,
+        outcome_history_validated: bool = False,
+    ) -> None:
+        """Check ordinary candidate evidence before any resume-side selection or evaluation."""
+
+        records = self.archive.records()
+        ordinary = [
+            candidate
+            for candidate in records
+            if candidate.strategy == "population"
+            and not self.archive._is_seed_candidate(candidate)
+        ]
+        schema_present = "candidate_integrity_schema_version" in state
+        authority_present = "candidate_integrity_authority" in state
+        digest_present = "candidate_archive_sha256" in state
+        if schema_present != authority_present or schema_present != digest_present:
+            # Once any Feature 087 marker appears the group is atomic, including zero-candidate
+            # cancellation/failure states.  Silently accepting a partial group would let context
+            # authority drift before the first successful candidate.
+            raise EvolutionError("ordinary_candidate_integrity_state_invalid")
+        if not schema_present:
+            if ordinary or (state and "seed_admission" not in state):
+                # Every unseeded population state emitted by this implementation carries the
+                # marker group, including cancellation before the first candidate.  Requiring it
+                # on any non-empty unseeded state prevents an attacker from stripping the whole
+                # group and reclassifying a modern zero-candidate run as legacy state.
+                raise EvolutionError(LEGACY_CANDIDATE_INTEGRITY_ERROR)
+            return
+        if state.get("candidate_integrity_schema_version") != CANDIDATE_INTEGRITY_SCHEMA_VERSION:
+            raise EvolutionError("ordinary_candidate_integrity_state_invalid")
+        authority = CandidateIntegrityAuthority.from_dict(
+            state["candidate_integrity_authority"]
+        )
+        if authority.to_dict() != self.integrity_authority.to_dict():
+            raise EvolutionError("ordinary_candidate_integrity_authority_mismatch")
+        if not ordinary:
+            # Seed-only archives use their own receipt/commit protocol.  Any ordinary markers are
+            # still checked when present so a forged mixed state cannot silently pass.
+            expected_digest = self.archive._candidate_archive_digest(records)
+            if state["candidate_archive_sha256"] != expected_digest:
+                raise EvolutionError("ordinary_candidate_integrity_state_invalid")
+            return
+        # A process may have published only a prefix of the configured offspring attempts before
+        # it lost the ability to write the next outcome.  The append-only outcome gate owns that
+        # recovery decision and must report its established ``population_iteration_incomplete``
+        # error; do not turn the deliberately stale archive watermark into a new integrity error
+        # before that gate gets to inspect the durable prefix.  The pending shape and bounds have
+        # already been checked by ``_validate_outcome_history`` immediately before this method.
+        pending = state.get("pending_offspring")
+        if isinstance(pending, dict):
+            attempt_count = pending.get("attempt_count")
+            target_iteration = pending.get("iteration")
+            try:
+                completed = sum(
+                    item.iteration == target_iteration
+                    for item in self.archive.offspring_outcomes()
+                )
+            except EvolutionError:
+                completed = attempt_count
+            if (
+                isinstance(attempt_count, int)
+                and not isinstance(attempt_count, bool)
+                and isinstance(target_iteration, int)
+                and not isinstance(target_iteration, bool)
+                and completed < attempt_count
+            ):
+                return
+        delayed_root_ids = self._allowed_delayed_root_ids(
+            state,
+            records,
+            outcome_history_validated=outcome_history_validated,
+        )
+        self.archive.validate_candidate_integrity(
+            authority=authority,
+            allowed_delayed_root_ids=delayed_root_ids,
+        )
+        if any(
+            candidate.strategy == "population"
+            and not self.archive._is_seed_candidate(candidate)
+            and (
+                candidate.island_id is None
+                or candidate.island_id >= self.config.num_islands
+            )
+            for candidate in ordinary
+        ):
+            raise EvolutionError("ordinary_candidate_lineage_mismatch")
+        expected_digest = self.archive._candidate_archive_digest(records)
+        if (
+            state.get("candidate_archive_sha256") != expected_digest
+            and not self._pending_candidate_archive_extension_matches(state, records)
+        ):
+            # A process can die after a complete pending batch has published its candidate/archive
+            # line but before the final state snapshot.  The outcome journal will finalize only
+            # the exact evaluated suffix; an incomplete or reordered prefix remains fail-closed.
+            raise EvolutionError("ordinary_candidate_archive_mismatch")
 
     def _terminal(self, state: dict[str, Any]) -> StrategyResult | None:
         status = state.get("status")
@@ -2693,8 +4854,14 @@ class LoopStrategy:
 
 def _tokens(candidate: Candidate, workspace: Path) -> set[str]:
     try:
-        path = _confined(workspace, workspace / candidate.code_path, "candidate code path")
-        text = path.read_text(encoding="utf-8")[:MAX_SOURCE_BYTES]
+        raw_path = workspace / candidate.code_path
+        _reject_symlink_components(raw_path, workspace, "candidate code path")
+        path = _confined(workspace, raw_path, "candidate code path")
+        text = _read_bounded_regular_file(
+            path,
+            MAX_SOURCE_BYTES,
+            error="candidate code path is invalid",
+        ).decode("utf-8")
     except (OSError, UnicodeDecodeError, EvolutionError):
         return set()
     return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", text))
@@ -2730,6 +4897,66 @@ class PopulationStrategy(_BaseStrategy):
     def _candidate_digest(candidates: Iterable[Candidate]) -> str:
         ordered = sorted(candidates, key=lambda item: item.candidate_id)
         return _canonical_seed_sha256([item.to_dict() for item in ordered])
+
+    def _allowed_delayed_root_ids(
+        self,
+        state: Mapping[str, Any],
+        records: Sequence[Candidate],
+        *,
+        outcome_history_validated: bool,
+    ) -> frozenset[str]:
+        """Recognize journal-proven roots created while the active population is empty.
+
+        Initialization or an earlier batch can publish only invalid candidates. Since invalid
+        records never enter ``active_ids``, the next complete offspring batch legitimately has no
+        parent and emits generation-zero roots. Bind every exception to an evaluated journal entry
+        and require that no valid population candidate existed before that batch.
+        """
+
+        if not outcome_history_validated or state.get("outcome_schema_version") != "1":
+            return frozenset()
+        try:
+            outcomes = self.archive.offspring_outcomes()
+            pending = self._pending_offspring(dict(state))
+        except (EvolutionError, TypeError, ValueError):
+            return frozenset()
+        start_iteration = state.get("outcome_start_iteration")
+        watermark = state.get("outcome_watermark")
+        if (
+            isinstance(start_iteration, bool)
+            or not isinstance(start_iteration, int)
+            or isinstance(watermark, bool)
+            or not isinstance(watermark, int)
+        ):
+            return frozenset()
+
+        complete_iterations = set(range(start_iteration, watermark + 1))
+        if pending is not None:
+            pending_outcomes = [item for item in outcomes if item.iteration == pending[0]]
+            if len(pending_outcomes) == pending[1]:
+                complete_iterations.add(pending[0])
+        evaluated = {
+            (item.iteration, item.candidate_id)
+            for item in outcomes
+            if item.iteration in complete_iterations
+            and item.code == "evaluated"
+            and item.candidate_id is not None
+        }
+        return frozenset(
+            candidate.candidate_id
+            for candidate in records
+            if candidate.strategy == "population"
+            and candidate.parent_id is None
+            and candidate.generation == 0
+            and candidate.iteration > 0
+            and (candidate.iteration, candidate.candidate_id) in evaluated
+            and not any(
+                earlier.strategy == "population"
+                and earlier.iteration < candidate.iteration
+                and earlier.evaluation.validity == 1
+                for earlier in records
+            )
+        )
 
     def _capacity(self, island: int) -> int:
         base, remainder = divmod(self.config.population_size, self.config.num_islands)
@@ -2770,13 +4997,18 @@ class PopulationStrategy(_BaseStrategy):
         seeds: Sequence[AdmittedSeedInput],
     ) -> dict[str, Any]:
         active = self._initial_seed_active(seeds)
-        prepared = _prepare_initial_seeds(seeds)
+        prepared = tuple(
+            sorted(
+                _prepare_initial_seeds(seeds),
+                key=lambda item: item.candidate.candidate_id,
+            )
+        )
+        # Seed publication writes this same candidate-ID order to the archive. Keep ties aligned
+        # with CandidateArchive.best(), whose score-only max retains the first archive record, so
+        # every state written before or after the seed transaction has one canonical projection.
         best_seed = max(
             (item.candidate for item in prepared),
-            key=lambda candidate: (
-                candidate.evaluation.combined_score,
-                candidate.candidate_id,
-            ),
+            key=lambda candidate: candidate.evaluation.combined_score,
         )
         state = self._state_payload(
             "running",
@@ -2806,8 +5038,52 @@ class PopulationStrategy(_BaseStrategy):
             del exc
         return committed_state
 
+    def _validate_seed_integrity_authority(
+        self,
+        seeds: Sequence[AdmittedSeedInput],
+    ) -> None:
+        """Require explicit ordinary authority inputs to agree with imported seed receipts.
+
+        Seed admission has its own receipt protocol, but any ordinary offspring created after that
+        admission must remain under the same evaluator contract. ``EvolutionContext`` exposes
+        optional authority overrides for controller integrations; without this check a caller
+        could supply a different evaluator kind or dependency/environment identity while reusing
+        otherwise valid seeds. Compare only fields carried by the seed receipt and leave runner/
+        generator identities to the native ordinary authority.
+        """
+
+        shared_fields = (
+            "contract_sha256",
+            "evaluator_kind",
+            "evaluator_fingerprint",
+            "dependency_sha256",
+            "environment_sha256",
+        )
+        for seed in seeds:
+            try:
+                payload = seed.receipt.to_dict()
+            except Exception as exc:
+                raise EvolutionError("verified_seed_invalid") from exc
+            if not isinstance(payload, dict):
+                raise EvolutionError("verified_seed_invalid")
+            for field_name in shared_fields:
+                try:
+                    expected = payload.get(field_name)
+                except Exception as exc:
+                    raise EvolutionError("verified_seed_invalid") from exc
+                if expected is None:
+                    raise EvolutionError("verified_seed_invalid")
+                if expected != getattr(self.integrity_authority, field_name):
+                    raise EvolutionError("verified_seed_context_mismatch")
+
     def _seed_resume_gate(self, state: dict[str, Any]) -> dict[str, Any]:
         seeds = tuple(self.context.initial_seeds)
+        if seeds:
+            self._validate_seed_integrity_authority(seeds)
+        existing = self.archive.records()
+        has_archived_seed = any(
+            self.archive._is_seed_candidate(candidate) for candidate in existing
+        )
         has_summary = "seed_admission" in state
         has_marker = self.archive.seed_commit_path.exists() or self.archive.seed_commit_path.is_symlink()
         if has_marker != has_summary:
@@ -2824,20 +5100,241 @@ class PopulationStrategy(_BaseStrategy):
                 )
             elif seeds:
                 raise EvolutionError("verified_seed_cannot_modify_existing_population")
+            elif has_archived_seed:
+                # A seed-looking archive record is not admission evidence.  Without both the
+                # state summary and commit marker it must not bypass ordinary receipt validation
+                # or enter ranking as an imported candidate.
+                raise EvolutionError("verified_seed_resume_requires_initial_seeds")
             return state
         if has_marker:
             raise EvolutionError("verified_seed_resume_mismatch")
         if seeds:
             return self._commit_initial_seeds(seeds)
-        existing = self.archive.records()
         if any("seed_handoff" in candidate.metadata for candidate in existing):
             raise EvolutionError("verified_seed_resume_requires_initial_seeds")
+        if existing:
+            # A non-empty archive without a state snapshot is an ambiguous publication window.
+            # Do not infer an active population from it, even when the files happen to contain
+            # modern-looking projections.
+            if any(
+                not self.archive._is_seed_candidate(candidate)
+                and (candidate.source_sha256 is None or candidate.receipt_sha256 is None)
+                for candidate in existing
+            ):
+                raise EvolutionError(LEGACY_CANDIDATE_INTEGRITY_ERROR)
+            raise EvolutionError("ordinary_candidate_integrity_state_missing")
         return state
 
+    def _reconstruct_population_projection(
+        self,
+        state: Mapping[str, Any],
+        records: Sequence[Candidate],
+    ) -> tuple[dict[int, list[str]], str | None, int, int]:
+        """Replay deterministic active, best, migration, and stagnation state."""
+
+        current_iteration = state.get("iteration", 0)
+        if (
+            isinstance(current_iteration, bool)
+            or not isinstance(current_iteration, int)
+            or current_iteration < 0
+        ):
+            raise EvolutionError("population state projection mismatch")
+        active = {island: [] for island in range(self.config.num_islands)}
+        seeds = [candidate for candidate in records if self.archive._is_seed_candidate(candidate)]
+        initial = [
+            candidate
+            for candidate in records
+            if candidate.strategy == "population"
+            and not self.archive._is_seed_candidate(candidate)
+            and candidate.iteration == 0
+        ]
+        if seeds and initial:
+            raise EvolutionError("population state projection mismatch")
+
+        if seeds:
+            for candidate in sorted(seeds, key=lambda item: item.candidate_id):
+                island = candidate.island_id
+                if (
+                    candidate.strategy != "population"
+                    or candidate.evaluation.validity != 1
+                    or island is None
+                    or island not in active
+                    or len(active[island]) >= self._capacity(island)
+                ):
+                    raise EvolutionError("population state projection mismatch")
+                active[island].append(candidate.candidate_id)
+        else:
+            for candidate in initial:
+                island = candidate.island_id
+                if island is None or island not in active:
+                    raise EvolutionError("population state projection mismatch")
+                active[island].append(candidate.candidate_id)
+            self._trim(active)
+
+        initial_valid_scores = [
+            candidate.evaluation.combined_score
+            for candidate in records
+            if candidate.strategy == "population"
+            and candidate.iteration == 0
+            and candidate.evaluation.validity == 1
+        ]
+        best_score = max(initial_valid_scores, default=None)
+        stagnation = 0
+        last_migration_iteration = 0
+        for iteration in range(1, current_iteration + 1):
+            batch = [
+                candidate
+                for candidate in records
+                if candidate.strategy == "population"
+                and not self.archive._is_seed_candidate(candidate)
+                and candidate.iteration == iteration
+            ]
+            if not batch:
+                raise EvolutionError("population state projection mismatch")
+            for candidate in batch:
+                island = candidate.island_id
+                if island is None or island not in active:
+                    raise EvolutionError("population state projection mismatch")
+                active[island].append(candidate.candidate_id)
+            self._trim(active)
+            if self._migrate(active, iteration):
+                last_migration_iteration = iteration
+            iteration_valid_scores = [
+                candidate.evaluation.combined_score
+                for candidate in batch
+                if candidate.evaluation.validity == 1
+            ]
+            visible_scores = list(iteration_valid_scores)
+            if best_score is not None:
+                visible_scores.append(best_score)
+            current_score = max(visible_scores, default=None)
+            if current_score is not None and (
+                best_score is None or current_score > best_score
+            ):
+                stagnation = 0
+            else:
+                stagnation += 1
+            best_score = current_score
+
+        visible_valid = [
+            candidate
+            for candidate in records
+            if candidate.strategy == "population"
+            and candidate.iteration <= current_iteration
+            and candidate.evaluation.validity == 1
+        ]
+        best_candidate_id = (
+            max(
+                visible_valid,
+                key=lambda candidate: candidate.evaluation.combined_score,
+            ).candidate_id
+            if visible_valid
+            else None
+        )
+        return active, best_candidate_id, last_migration_iteration, stagnation
+
+    def _validate_reconstructed_status(
+        self,
+        state: Mapping[str, Any],
+        *,
+        active: Mapping[int, Sequence[str]],
+        best_candidate_id: str | None,
+        stagnation: int,
+    ) -> None:
+        """Reject status values that contradict a deterministic modern checkpoint."""
+
+        status = state.get("status")
+        iteration = state.get("iteration")
+        if status == "running":
+            # A process can stop after the final running checkpoint is durable but before the
+            # immediately following completed/stagnated state write. Resume may finish that
+            # transition without replay.
+            error = state.get("error")
+            impossible_terminal_error = error in {
+                "cancelled",
+                "no valid candidate",
+                "offspring_batch_failed",
+            }
+            empty_evaluator_failure = (
+                iteration == 0
+                and best_candidate_id is None
+                and not any(active.values())
+                and "outcome_schema_version" not in state
+                and error in {"evaluator_timeout", "worker_unknown", "run_failed"}
+            )
+            if impossible_terminal_error or empty_evaluator_failure:
+                raise EvolutionError("population state projection mismatch")
+            return
+        if status == "completed":
+            valid = (
+                iteration == self.config.max_rounds
+                and stagnation < self.config.stagnation_rounds
+                and best_candidate_id is not None
+            )
+        elif status == "stagnated":
+            valid = (
+                isinstance(iteration, int)
+                and not isinstance(iteration, bool)
+                and iteration > 0
+                and stagnation >= self.config.stagnation_rounds
+                and best_candidate_id is not None
+            )
+        elif status == "cancelled":
+            valid = (
+                isinstance(iteration, int)
+                and not isinstance(iteration, bool)
+                and iteration < self.config.max_rounds
+                and state.get("error") == "cancelled"
+            )
+        elif status == "failed":
+            failed_batch = (
+                "failed_offspring_iteration" in state
+                and "failed_offspring_sha256" in state
+            )
+            initialization_failure = (
+                iteration == 0
+                and best_candidate_id is None
+                and not any(active.values())
+                and "outcome_schema_version" not in state
+                and state.get("error")
+                in {
+                    "candidate_failed",
+                    "evaluator_timeout",
+                    "worker_unknown",
+                    "run_failed",
+                }
+            )
+            exhausted_without_valid_candidate = (
+                iteration == self.config.max_rounds
+                and best_candidate_id is None
+            )
+            stagnated_without_valid_candidate = (
+                isinstance(iteration, int)
+                and not isinstance(iteration, bool)
+                and iteration > 0
+                and stagnation >= self.config.stagnation_rounds
+                and best_candidate_id is None
+            )
+            valid = state.get("error") is not None and (
+                failed_batch
+                or initialization_failure
+                or exhausted_without_valid_candidate
+                or stagnated_without_valid_candidate
+            )
+        else:
+            valid = False
+        if not valid:
+            raise EvolutionError("population state projection mismatch")
+
     def _active(self, state: dict[str, Any]) -> dict[int, list[str]]:
+        if not state:
+            return {i: [] for i in range(self.config.num_islands)}
         raw = state.get("active_ids", {})
         if not isinstance(raw, dict):
-            return {i: [] for i in range(self.config.num_islands)}
+            raise EvolutionError("population state active_ids must contain string arrays")
+        expected_keys = {str(index) for index in range(self.config.num_islands)}
+        if set(raw) != expected_keys:
+            raise EvolutionError("population state active_ids must contain every island")
         active: dict[int, list[str]] = {}
         for i in range(self.config.num_islands):
             ids = raw.get(str(i), [])
@@ -2854,9 +5351,76 @@ class PopulationStrategy(_BaseStrategy):
             rng_seed=self.config.rng_seed,
             last_migration_iteration=int(state.get("last_migration_iteration", 0)),
         )
-        known_ids = {candidate.candidate_id for candidate in self.archive.records()}
-        if any(candidate_id not in known_ids for ids in active.values() for candidate_id in ids):
+        records_by_id = {
+            candidate.candidate_id: candidate for candidate in self.archive.records()
+        }
+        if any(
+            candidate_id not in records_by_id
+            for ids in active.values()
+            for candidate_id in ids
+        ):
             raise EvolutionError("population state references an unknown candidate")
+        if any(
+            records_by_id[candidate_id].evaluation.validity != 1
+            for ids in active.values()
+            for candidate_id in ids
+        ):
+            raise EvolutionError("population state references an invalid candidate")
+        best_candidate_id = state.get("best_candidate_id")
+        if best_candidate_id is not None and (
+            best_candidate_id not in records_by_id
+            or records_by_id[best_candidate_id].evaluation.validity != 1
+        ):
+            raise EvolutionError("population state best candidate is invalid")
+        if "seed_admission" in state and not any(active.values()):
+            # Preserve the established seed-specific failure reported by the caller immediately
+            # after this parser; it is already terminal and runs before seed re-evaluation.
+            return active
+        if state.get("candidate_integrity_schema_version") == CANDIDATE_INTEGRITY_SCHEMA_VERSION:
+            pending = self._pending_offspring(state)
+            if pending is not None:
+                completed = sum(
+                    item.iteration == pending[0]
+                    for item in self.archive.offspring_outcomes()
+                )
+                if completed < pending[1]:
+                    # The existing incomplete-batch gate owns this state and fails before any
+                    # callback. Avoid reading baseline source files for rank reconstruction until
+                    # the integrity validator has admitted the complete archive prefix.
+                    return active
+            if state.get("schema_version") != "1":
+                raise EvolutionError("population state projection mismatch")
+            expected_active, expected_best, expected_migration, expected_stagnation = (
+                self._reconstruct_population_projection(state, tuple(records_by_id.values()))
+            )
+            required_projection = {
+                "best_candidate_id",
+                "rng_seed",
+                "last_migration_iteration",
+                "stagnation",
+            }
+            if not required_projection <= set(state):
+                raise EvolutionError("population state projection mismatch")
+            stored_rng_seed = state["rng_seed"]
+            stored_migration = state["last_migration_iteration"]
+            stored_stagnation = state["stagnation"]
+            if (
+                active != expected_active
+                or best_candidate_id != expected_best
+                or type(stored_rng_seed) is not type(self.config.rng_seed)
+                or stored_rng_seed != self.config.rng_seed
+                or type(stored_migration) is not int
+                or stored_migration != expected_migration
+                or type(stored_stagnation) is not int
+                or stored_stagnation != expected_stagnation
+            ):
+                raise EvolutionError("population state projection mismatch")
+            self._validate_reconstructed_status(
+                state,
+                active=active,
+                best_candidate_id=expected_best,
+                stagnation=expected_stagnation,
+            )
         return active
 
     def _candidates(self, ids: Iterable[str]) -> list[Candidate]:
@@ -2931,7 +5495,7 @@ class PopulationStrategy(_BaseStrategy):
                 if elite.candidate_id not in selected_ids:
                     selected.append(elite)
                     selected_ids.add(elite.candidate_id)
-            for candidate in ranked:
+            for candidate in valid:
                 if len(selected) >= capacity:
                     break
                 if candidate.candidate_id not in selected_ids:
@@ -3040,10 +5604,26 @@ class PopulationStrategy(_BaseStrategy):
             raise EvolutionError("population_pending_batch_invalid")
         return iteration, attempt_count
 
-    def _validate_outcome_history(self, state: dict[str, Any]) -> None:
-        outcomes = self.archive.offspring_outcomes()
-        records = self.archive.records()
-        if any(candidate.strategy != "population" for candidate in records):
+    def _validate_outcome_history(
+        self,
+        state: dict[str, Any],
+        *,
+        records: Sequence[Candidate] | None = None,
+        outcomes: Sequence[OffspringOutcome] | None = None,
+    ) -> None:
+        if outcomes is None:
+            validated_outcomes = tuple(self.archive.offspring_outcomes())
+        else:
+            validated_outcomes = tuple(outcomes)
+            if any(not isinstance(item, OffspringOutcome) for item in validated_outcomes):
+                raise EvolutionError("population_outcome_state_mismatch")
+        if records is None:
+            validated_records = tuple(self.archive.records())
+        else:
+            validated_records = tuple(records)
+            if any(not isinstance(candidate, Candidate) for candidate in validated_records):
+                raise EvolutionError("population_outcome_state_mismatch")
+        if any(candidate.strategy != "population" for candidate in validated_records):
             raise EvolutionError("population_outcome_state_mismatch")
         pending = self._pending_offspring(state)
         failed_iteration = state.get("failed_offspring_iteration")
@@ -3059,15 +5639,34 @@ class PopulationStrategy(_BaseStrategy):
         present_binding_fields = binding_fields.intersection(state)
         if not present_binding_fields:
             current_iteration = state.get("iteration", 0)
+            modern_integrity_state = (
+                state.get("candidate_integrity_schema_version")
+                == CANDIDATE_INTEGRITY_SCHEMA_VERSION
+            )
+            modern_binding_required = modern_integrity_state and (
+                "seed_admission" in state
+                or (
+                    isinstance(current_iteration, int)
+                    and not isinstance(current_iteration, bool)
+                    and current_iteration > 0
+                )
+                or any(candidate.iteration > 0 for candidate in validated_records)
+                or state.get("status") in {"completed", "stagnated"}
+                or (
+                    state.get("status") == "failed"
+                    and state.get("error") == "offspring_batch_failed"
+                )
+            )
             if (
-                outcomes
+                validated_outcomes
                 or pending is not None
                 or failed_iteration is not None
                 or failed_digest is not None
+                or modern_binding_required
                 or isinstance(current_iteration, bool)
                 or not isinstance(current_iteration, int)
                 or current_iteration < 0
-                or any(candidate.iteration > current_iteration for candidate in records)
+                or any(candidate.iteration > current_iteration for candidate in validated_records)
             ):
                 raise EvolutionError("population_outcome_state_mismatch")
             # Population states written before the outcome journal was introduced remain
@@ -3130,7 +5729,7 @@ class PopulationStrategy(_BaseStrategy):
             raise EvolutionError("population_outcome_state_mismatch")
 
         grouped: dict[int, list[OffspringOutcome]] = {}
-        for outcome in outcomes:
+        for outcome in validated_outcomes:
             if (
                 outcome.iteration < start_iteration
                 or outcome.attempt >= self.config.offspring_per_iteration
@@ -3150,13 +5749,13 @@ class PopulationStrategy(_BaseStrategy):
 
         completed_prefix = [
             item
-            for item in outcomes
+            for item in validated_outcomes
             if start_iteration <= item.iteration <= watermark
         ]
         if self._outcome_digest(completed_prefix) != watermark_digest:
             raise EvolutionError("population_outcome_state_mismatch")
         baseline = [
-            candidate for candidate in records if candidate.iteration < start_iteration
+            candidate for candidate in validated_records if candidate.iteration < start_iteration
         ]
         if self._candidate_digest(baseline) != baseline_digest:
             raise EvolutionError("population_outcome_state_mismatch")
@@ -3187,8 +5786,8 @@ class PopulationStrategy(_BaseStrategy):
             ):
                 raise EvolutionError("population_outcome_state_mismatch")
 
-        candidates_by_id = {item.candidate_id: item for item in records}
-        evaluated = [item for item in outcomes if item.code == "evaluated"]
+        candidates_by_id = {item.candidate_id: item for item in validated_records}
+        evaluated = [item for item in validated_outcomes if item.code == "evaluated"]
         evaluated_ids = [item.candidate_id for item in evaluated]
         if len(evaluated_ids) != len(set(evaluated_ids)):
             raise EvolutionError("population_outcome_state_mismatch")
@@ -3208,7 +5807,7 @@ class PopulationStrategy(_BaseStrategy):
             candidate.strategy == "population"
             and candidate.iteration >= start_iteration
             and candidate.candidate_id not in evaluated_id_set
-            for candidate in records
+            for candidate in validated_records
         ):
             raise EvolutionError("population_outcome_state_mismatch")
         for iteration, iteration_outcomes in grouped.items():
@@ -3219,7 +5818,7 @@ class PopulationStrategy(_BaseStrategy):
             ]
             archived_ids = [
                 candidate.candidate_id
-                for candidate in records
+                for candidate in validated_records
                 if candidate.iteration == iteration
             ]
             if archived_ids != expected_ids:
@@ -3284,12 +5883,15 @@ class PopulationStrategy(_BaseStrategy):
     ) -> OffspringOutcome:
         island = attempt % self.config.num_islands
         try:
-            parent = self._select_parent(active, island)
+            selected_parent = self._select_parent(active, island)
+            selected_inspirations = self._inspirations(active, island, selected_parent)
             request = GenerationRequest(
                 iteration=iteration,
-                parent=parent,
-                inspirations=self._inspirations(active, island, parent),
-                archive=tuple(self.archive.records()),
+                parent=self._generation_candidate(selected_parent),
+                inspirations=tuple(
+                    self._generation_candidate(item) for item in selected_inspirations
+                ),
+                archive=self._generation_records(),
                 workspace=self.context.workspace,
             )
         except Exception:  # noqa: BLE001 - no narrower attempt result exists yet
@@ -3300,46 +5902,20 @@ class PopulationStrategy(_BaseStrategy):
         except Exception:  # noqa: BLE001 - generator prose must not enter durable state
             return OffspringOutcome(iteration, attempt, island, "candidate_failed")
 
-        candidate_id: str | None = None
         try:
-            candidate_id = self.archive.next_id()
-            path = self.archive.candidate_source_path(candidate_id, draft.filename)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(draft.source, encoding="utf-8")
-        except Exception:  # noqa: BLE001 - candidate setup has one controlled outcome
-            if candidate_id is not None:
-                self._discard_unarchived_candidate(candidate_id)
-            return OffspringOutcome(iteration, attempt, island, "candidate_failed")
-
-        try:
-            evaluation = _report(self.context.evaluate(path, self.context.contract))
-        except Exception as exc:  # noqa: BLE001 - evaluator is an injected boundary
-            self._discard_unarchived_candidate(candidate_id)
-            return OffspringOutcome(
-                iteration,
-                attempt,
-                island,
-                _evaluator_failure_code(exc),
-            )
-
-        try:
-            candidate = self.archive.persist(
+            candidate = self._persist(
                 draft,
-                candidate_id=candidate_id,
-                strategy=self.name,
                 iteration=iteration,
-                generation=(parent.generation + 1 if parent else 0),
-                parent_id=parent.candidate_id if parent else None,
+                generation=(selected_parent.generation + 1 if selected_parent else 0),
+                parent=selected_parent,
                 island_id=island,
-                evaluation=evaluation,
             )
+        except _CandidateArchivePublicationUnknown:
+            raise
+        except _InitialCandidateFailure as exc:
+            return OffspringOutcome(iteration, attempt, island, exc.code)
         except Exception:  # noqa: BLE001 - persistence failure is controlled and prose-free
-            self._discard_unarchived_candidate(candidate_id)
             return OffspringOutcome(iteration, attempt, island, "candidate_failed")
-        try:
-            self.context.observe("candidate", candidate.to_dict())
-        except Exception as exc:  # noqa: BLE001 - optional observer cannot change the outcome
-            del exc
         return OffspringOutcome(
             iteration,
             attempt,
@@ -3510,8 +6086,99 @@ class PopulationStrategy(_BaseStrategy):
         self._trim(active)
         return bool(moves)
 
+    def _validate_ordinary_resume_evidence(self, state: dict[str, Any]) -> None:
+        """Validate ordinary state, journal, and candidates without invoking seed admission."""
+
+        # Recognize a legacy ordinary archive before the outcome journal so historical files
+        # receive the fixed migration error even when their old watermark no longer describes the
+        # new archive representation.
+        records = self.archive.records()
+        if any(
+            candidate.strategy == "population"
+            and (
+                candidate.source_sha256 is None
+                or candidate.receipt_sha256 is None
+                or candidate.integrity is None
+            )
+            for candidate in records
+        ):
+            self._validate_candidate_integrity_state(state)
+        # Validate the append-only offspring journal first.  This preserves its established
+        # failure codes for incomplete/tampered batches; candidate sidecars are checked immediately
+        # afterwards, before any generator or evaluator callback can run.
+        self._validate_outcome_history(state)
+        self._validate_candidate_integrity_state(
+            state,
+            outcome_history_validated=True,
+        )
+
+    def validate_ordinary_resume_integrity(self) -> None:
+        """Check existing ordinary evidence without generating, evaluating, or admitting seeds.
+
+        Controller integrations use this narrow preflight before a supplied seed manifest is
+        locally re-evaluated on resume.  Seed receipts retain their separate admission gate.
+        """
+
+        state = self._load_state()
+        self._validate_ordinary_resume_evidence(state)
+        active = self._active(state)
+        if "seed_admission" in state and not any(active.values()):
+            raise EvolutionError("verified_seed_active_population_missing")
+        pending = self._pending_offspring(state)
+        if pending is None:
+            return
+        completed = sum(
+            item.iteration == pending[0]
+            for item in self.archive.offspring_outcomes()
+        )
+        if completed != pending[1]:
+            # Seed re-admission invokes the evaluator, so an incomplete ordinary batch must stop
+            # at this read-only preflight rather than waiting for the later resume path.
+            raise EvolutionError("population_iteration_incomplete")
+
+        # Validate the remaining nonmutating completion invariants as well.  The real resume keeps
+        # ownership of ranking, migration, and the final state write.
+        target_iteration, attempt_count = pending
+        outcomes = sorted(
+            (
+                item
+                for item in self.archive.offspring_outcomes()
+                if item.iteration == target_iteration
+            ),
+            key=lambda item: item.attempt,
+        )
+        if len(outcomes) != attempt_count or [item.attempt for item in outcomes] != list(
+            range(attempt_count)
+        ):
+            raise EvolutionError("population_iteration_incomplete")
+        records = self.archive.records()
+        by_id = {candidate.candidate_id: candidate for candidate in records}
+        evaluated = [item for item in outcomes if item.code == "evaluated"]
+        evaluated_ids = [item.candidate_id for item in evaluated]
+        current_iteration = int(state.get("iteration", 0))
+        if len(evaluated_ids) != len(set(evaluated_ids)) or any(
+            candidate_id not in by_id
+            or by_id[candidate_id].strategy != "population"
+            or by_id[candidate_id].iteration != target_iteration
+            or by_id[candidate_id].island_id != outcome.island_id
+            for outcome, candidate_id in zip(evaluated, evaluated_ids, strict=True)
+        ):
+            raise EvolutionError("population_outcome_state_mismatch")
+        current_batch_candidates = {
+            candidate.candidate_id
+            for candidate in records
+            if candidate.strategy == "population"
+            and candidate.iteration > current_iteration
+        }
+        active_ids = {item for ids in active.values() for item in ids}
+        if current_batch_candidates != set(evaluated_ids) or any(
+            candidate_id in active_ids for candidate_id in evaluated_ids
+        ):
+            raise EvolutionError("population_outcome_state_mismatch")
+
     def run(self) -> StrategyResult:
         state = self._seed_resume_gate(self._load_state())
+        self._validate_ordinary_resume_evidence(state)
         active = self._active(state)
         if "seed_admission" in state and not any(active.values()):
             raise EvolutionError("verified_seed_active_population_missing")
@@ -3526,21 +6193,50 @@ class PopulationStrategy(_BaseStrategy):
         if not any(active.values()):
             existing = self.archive.records()
             if existing:
-                for index, candidate in enumerate(existing[-self.config.population_size :]):
+                eligible = [
+                    candidate
+                    for candidate in existing
+                    if candidate.evaluation.validity == 1
+                ]
+                for index, candidate in enumerate(eligible[-self.config.population_size :]):
                     active[index % self.config.num_islands].append(candidate.candidate_id)
             else:
                 initialization_error: str | None = None
                 evaluator_failure: str | None = None
                 for index in range(self.config.population_size):
                     if self._cancelled():
-                        self._state("cancelled", iteration, active_ids={str(k): v for k, v in active.items()}, error="cancelled")
+                        self._trim(active)
+                        current = self.archive.best()
+                        self._state(
+                            "cancelled",
+                            iteration,
+                            active_ids={str(k): v for k, v in active.items()},
+                            stagnation=stagnation,
+                            error="cancelled",
+                            best_candidate_id=(
+                                current.candidate_id if current else None
+                            ),
+                            rng_seed=self.config.rng_seed,
+                            last_migration_iteration=migration_watermark,
+                        )
                         return self.archive.result(self.name, "cancelled", iteration, "cancelled")
-                    request = GenerationRequest(iteration=0, parent=None, inspirations=(), archive=tuple(self.archive.records()), workspace=self.context.workspace)
+                    request = GenerationRequest(
+                        iteration=0,
+                        parent=None,
+                        inspirations=(),
+                        archive=self._generation_records(),
+                        workspace=self.context.workspace,
+                    )
                     try:
                         drafts = _drafts(self.context.generate(request))
                         draft = drafts[0]
                         candidate = self._persist(draft, iteration=0, generation=0, parent=None, island_id=index % self.config.num_islands)
-                        active[index % self.config.num_islands].append(candidate.candidate_id)
+                        if candidate.evaluation.validity == 1:
+                            active[index % self.config.num_islands].append(
+                                candidate.candidate_id
+                            )
+                    except _CandidateArchivePublicationUnknown:
+                        raise
                     except _InitialCandidateFailure as exc:
                         # Keep only the fixed evaluator outcome; the exception chain may contain
                         # provider or credential text and must never cross the durable boundary.
@@ -3583,21 +6279,40 @@ class PopulationStrategy(_BaseStrategy):
         state = self.archive.read_state()
         if iteration > 0 and stagnation >= self.config.stagnation_rounds:
             current = self.archive.best()
+            terminal_status = "stagnated" if current is not None else "failed"
+            terminal_error = error or (
+                "no valid candidate" if terminal_status == "failed" else None
+            )
             self._state(
-                "stagnated",
+                terminal_status,
                 iteration,
                 active_ids={str(key): value for key, value in active.items()},
                 stagnation=stagnation,
-                error=error,
+                error=terminal_error,
                 best_candidate_id=current.candidate_id if current else None,
                 rng_seed=self.config.rng_seed,
                 last_migration_iteration=migration_watermark,
             )
-            return self.archive.result(self.name, "stagnated", iteration, error)
+            return self.archive.result(
+                self.name,
+                terminal_status,
+                iteration,
+                terminal_error,
+            )
 
         while iteration < self.config.max_rounds:
             if self._cancelled():
-                self._state("cancelled", iteration, active_ids={str(k): v for k, v in active.items()}, stagnation=stagnation, error="cancelled")
+                current = self.archive.best()
+                self._state(
+                    "cancelled",
+                    iteration,
+                    active_ids={str(k): v for k, v in active.items()},
+                    stagnation=stagnation,
+                    error="cancelled",
+                    best_candidate_id=current.candidate_id if current else None,
+                    rng_seed=self.config.rng_seed,
+                    last_migration_iteration=migration_watermark,
+                )
                 return self.archive.result(self.name, "cancelled", iteration, "cancelled")
             state = self._begin_offspring_batch(state, active)
             target_iteration, _ = self._pending_offspring(state) or (iteration + 1, 0)
@@ -3624,17 +6339,26 @@ class PopulationStrategy(_BaseStrategy):
             error = state.get("error")
             current = self.archive.best()
             if stagnation >= self.config.stagnation_rounds:
+                terminal_status = "stagnated" if current is not None else "failed"
+                terminal_error = error or (
+                    "no valid candidate" if terminal_status == "failed" else None
+                )
                 self._state(
-                    "stagnated",
+                    terminal_status,
                     iteration,
                     active_ids={str(k): v for k, v in active.items()},
                     stagnation=stagnation,
-                    error=error,
+                    error=terminal_error,
                     best_candidate_id=current.candidate_id if current else None,
                     rng_seed=self.config.rng_seed,
                     last_migration_iteration=migration_watermark,
                 )
-                return self.archive.result(self.name, "stagnated", iteration, error)
+                return self.archive.result(
+                    self.name,
+                    terminal_status,
+                    iteration,
+                    terminal_error,
+                )
 
         status = "completed" if self.archive.best() is not None else "failed"
         final_error = error or ("no valid candidate" if status == "failed" else None)
@@ -4039,6 +6763,8 @@ __all__ = [
     "CandidateExecution",
     "CandidateGenerator",
     "CandidateInputArtifact",
+    "CandidateIntegrityAuthority",
+    "CandidateReceipt",
     "CandidateRunner",
     "CommandCandidateEvaluator",
     "CommandCandidateGenerator",
@@ -4061,5 +6787,6 @@ __all__ = [
     "build_strategy",
     "config_from_contract",
     "contract_candidate_runner_fingerprint",
+    "resolve_candidate_integrity_authority",
     "stage_candidate_inputs",
 ]

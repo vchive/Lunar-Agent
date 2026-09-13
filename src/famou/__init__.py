@@ -85,6 +85,8 @@ from .evolution import (
     CandidateDraft,
     CandidateExecution,
     CandidateInputArtifact,
+    CandidateIntegrityAuthority,
+    CandidateReceipt,
     CandidateRunner,
     CommandCandidateEvaluator,
     CommandCandidateGenerator,
@@ -106,6 +108,7 @@ from .evolution import (
     build_strategy,
     config_from_contract,
     contract_candidate_runner_fingerprint,
+    resolve_candidate_integrity_authority,
     stage_candidate_inputs,
 )
 from .model_profile import UsageLedger, UsageSnapshot
@@ -228,6 +231,8 @@ __all__ = [
     "CandidateDraft",
     "CandidateExecution",
     "CandidateInputArtifact",
+    "CandidateIntegrityAuthority",
+    "CandidateReceipt",
     "CandidateRunner",
     "Checkpoint",
     "CommandAgentAdapter",
@@ -353,6 +358,7 @@ __all__ = [
     "remote_status",
     "remote_submit",
     "remote_sync",
+    "resolve_candidate_integrity_authority",
     "run_effect_preflight",
     "run_harness_adapter",
     "run_subject_adapter",
