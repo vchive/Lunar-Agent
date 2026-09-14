@@ -782,6 +782,14 @@ def build_parser() -> argparse.ArgumentParser:
     diagnostic_parser.add_argument("evolution_run_id")
     _add_home(diagnostic_parser)
     _add_json(diagnostic_parser)
+    export_parser = subparsers.add_parser(
+        "export-materialization-evidence", help="export a sanitized materialization evidence bundle",
+    )
+    export_parser.add_argument("parent_run_id")
+    export_parser.add_argument("evolution_run_id")
+    export_parser.add_argument("--output", required=True)
+    _add_home(export_parser)
+    _add_json(export_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3722,6 +3730,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(format_materialization_diagnostic(payload))
             return 2 if payload["status"] in {"busy", "unavailable"} else 0
+        if args.command == "export-materialization-evidence":
+            from .materialization_evidence_bundle import export_materialization_evidence
+
+            export_home = Path(args.home or os.environ.get("FAMOU_HOME", ".famou")).expanduser()
+            payload = export_materialization_evidence(
+                export_home / "state.db", args.parent_run_id, args.evolution_run_id, Path(args.output),
+            )
+            _emit(payload, args.json)
+            return 0
         config = _config(args)
         if args.command == "init":
             _emit({"home": str(config.home), "status": "initialized"}, args.json)

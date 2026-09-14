@@ -445,7 +445,7 @@ def _assess(stages, values, matched, parent, child, task_id):
             stage["state"] = "present" if any_records else "absent"
 
 
-def diagnose_materialization(database: Path, parent_id: str, child_id: str) -> dict:
+def diagnose_materialization(database: Path, parent_id: str, child_id: str, *, _snapshot_data: dict | None = None) -> dict:
     """Report observations only; never call Store writers, candidate code or recovery APIs."""
     valid_ids = all(isinstance(value, str) and _SAFE_ID.fullmatch(value) for value in (parent_id, child_id))
     report = {
@@ -456,7 +456,7 @@ def diagnose_materialization(database: Path, parent_id: str, child_id: str) -> d
     try:
         if not valid_ids or parent_id == child_id:
             raise _Unavailable("diagnostic_run_identity_invalid")
-        snapshot = diagnostic_snapshot(database, parent_id, child_id)
+        snapshot = _snapshot_data if _snapshot_data is not None else diagnostic_snapshot(database, parent_id, child_id)
         runs = {run["id"]: run for run in snapshot["runs"]}
         if set(runs) != {parent_id, child_id}:
             raise _Unavailable("diagnostic_runs_missing")

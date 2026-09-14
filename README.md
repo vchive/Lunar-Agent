@@ -194,6 +194,12 @@ read from a private snapshot so source records and directory entries remain unch
 always set `recovery_eligibility` to `not_assessed`; an attention or unavailable result preserves
 evidence for normal resume and manual diagnosis.
 
+Feature [094](specs/094-materialization-evidence-bundle/) adds
+`export-materialization-evidence PARENT CHILD --output FILE`. It writes a bounded, no-clobber,
+脱敏 bundle containing the 093 report and protocol identity/hash summaries. The command uses the
+same private database/WAL snapshot before normal storage initialization; it never writes the run
+workspace or database and never authorizes recovery.
+
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.
 Contracts without `outputs` keep the existing source-only result. `evolve CONTRACT` remains

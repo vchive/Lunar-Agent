@@ -240,6 +240,13 @@ or guaranteed completion. Surviving candidate processes are not identified or ki
     records, and always marks `recovery_eligibility` as `not_assessed`. Source contents, directory
     entries and business records are preserved (ordinary read access-time changes are outside the
     guarantee). Missing, changing, busy or unsafe evidence is reported without reconstructing it.
+20. `export-materialization-evidence` preserves a bounded review bundle outside both run
+    workspaces. It is dispatched before configuration initialization, reuses the private DB/WAL
+    snapshot and 093 observation, and writes only a no-clobber O_EXCL file after fsync. Events are
+    represented by identity/type and payload size/digest; artifacts by identity/kind and size/
+    digest. Goals, commands, candidate/output bytes, logs and raw payloads are excluded. The
+    bundle remains observational with `recovery_eligibility: not_assessed` and cannot trigger
+    recovery or prove delivery success.
 Intent files/events are retained without GC; coordinated removal of all of them is not externally
 authenticated. The advisory locks coordinate these publishers, not unrelated same-user file writers.
 

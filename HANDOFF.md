@@ -6,6 +6,25 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 094 结项：materialization 证据包导出
+
+Feature 094 新增 `export-materialization-evidence PARENT CHILD --output FILE`，在普通 CLI
+初始化之前读取 093 私有数据库/WAL snapshot，并复用该快照生成五阶段诊断。它只导出固定
+schema 1 的诊断 report、event identity/type + payload size/SHA-256、artifact identity/kind
++ size/SHA-256；不导出 workspace、goal、命令、原始 payload、候选/输出字节或日志。报告
+仍固定 `recovery_eligibility: not_assessed`，证据包不提供恢复权限或成功证明。
+
+输出必须是显式目标，父目录必须已存在，拒绝目标/临时文件冲突、符号链接和任一 run
+workspace 内的路径。最多 256 KiB 的 canonical JSON 通过 O_EXCL 同目录临时文件写出并
+fsync，再 no-clobber link 到最终文件，最后同步目录；不会覆盖已有文件，也不写源数据库、
+workspace、事件、receipt 或锁。相同稳定现场导出到不同路径的 bytes 相同。busy/unavailable
+现场在目标创建前拒绝。
+
+聚焦验证 13 passed in 3.84s；Ruff、compileall、Specify 与 diff check 通过；主仓全量
+**3599 passed in 205.44s**。没有启动真实模型、provider、WebAgent、OpenEvolve/ShinkaEvolve、远端服务或
+campaign，也没有新增算法效果结论。剩余边界保持：bundle 是脱敏观察清单，不是认证的
+外部真实性证明；不解决 raw execution/未完整 prepared 的人工授权缺口，不推断存活进程。
+
 ## Feature 093 结项：只读 materialization 诊断
 
 Feature 093 新增 `diagnose-materialization PARENT_RUN_ID EVOLUTION_RUN_ID`，用于查看 090–092
