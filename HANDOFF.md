@@ -1,5 +1,15 @@
 # Lunar-Agent 交接记录
 
+## Feature 095 设计中：显式执行证据 attestation
+
+下一阶段拟处理 090 launch intent 后、091 execution preparation 前的未知窗口。设计要求
+操作者显式提供一次性、有界且 canonical 的 attestation，绑定 parent/child/task、launch
+intent、candidate/attempt、execution 字节指纹与 inode，并在现有生命周期锁下重新核验后
+才允许调用 091 登记。raw 或 temporary execution 不会自动升级；下游 output/terminal
+证据、指纹漂移、重复 nonce 和并发变化均 fail-closed。该 attestation 只是本机人工授权
+和审计记录，不提供外部身份认证、exactly-once 或成功交付保证。当前仅完成规格设计，
+尚未修改执行行为；详见 `specs/095-manual-execution-attestation/`。
+
 更新时间：2026-09-14
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  
 当前分支：`main`  
