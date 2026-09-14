@@ -11,7 +11,6 @@ import pytest
 
 import famou.evolution as evolution_module
 from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.artifacts import ArtifactStore
 from famou.cli import _status_payload, main
 from famou.config import Config
 from famou.controller import LocalController
@@ -1219,7 +1218,7 @@ def test_missing_marker_preserves_attempt_when_execution_node_cannot_be_inspecte
     assert controller.store.list_events(child.id) == child_events_before
 
 
-def test_missing_marker_rejects_crash_after_execution_before_artifact_record(
+def test_missing_marker_rejects_crash_after_execution_before_durable_preparation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1227,7 +1226,7 @@ def test_missing_marker_rejects_crash_after_execution_before_artifact_record(
         tmp_path, _counted_materialization_source(output=True)
     )
     original_run = CommandCandidateRunner.run
-    original_record = ArtifactStore.record
+    original_prepare = controller.store.prepare_materialization_execution
     calls = 0
 
     def counted_run(
@@ -1240,20 +1239,13 @@ def test_missing_marker_rejects_crash_after_execution_before_artifact_record(
         calls += 1
         return original_run(self, candidate_path, workspace, timeout)
 
-    def fail_execution_record(
-        self: ArtifactStore,
-        path: str | Path,
-        task_id: str,
-        kind: str = "result",
-    ) -> str:
-        if kind == "evolved_candidate_execution":
-            raise OSError("simulated crash before execution artifact record")
-        return original_record(self, path, task_id, kind)
+    def fail_execution_prepare(*args, **kwargs) -> None:
+        raise OSError("simulated interruption before durable execution preparation")
 
     monkeypatch.setattr(CommandCandidateRunner, "run", counted_run)
-    monkeypatch.setattr(ArtifactStore, "record", fail_execution_record)
+    monkeypatch.setattr(controller.store, "prepare_materialization_execution", fail_execution_prepare)
 
-    with pytest.raises(EvolutionError, match="artifact ledger digest mismatch"):
+    with pytest.raises(EvolutionError, match="^materialization_execution_not_prepared$"):
         controller.materialize_evolved_outputs(
             parent.id, child.id, _contract(), result, timeout_seconds=1
         )
@@ -1273,7 +1265,7 @@ def test_missing_marker_rejects_crash_after_execution_before_artifact_record(
         for item in controller.store.list_events(child.id)
     )
 
-    monkeypatch.setattr(ArtifactStore, "record", original_record)
+    monkeypatch.setattr(controller.store, "prepare_materialization_execution", original_prepare)
     parent_artifacts = controller.store.list_artifacts(parent.id)
     child_artifacts = controller.store.list_artifacts(child.id)
     parent_events = controller.store.list_events(parent.id)
@@ -1281,7 +1273,7 @@ def test_missing_marker_rejects_crash_after_execution_before_artifact_record(
 
     with pytest.raises(
         EvolutionError,
-        match="^materialization marker is missing from a recorded attempt$",
+        match="^materialization_execution_evidence_invalid$",
     ):
         controller.materialize_evolved_outputs(
             parent.id, child.id, _contract(), result, timeout_seconds=1

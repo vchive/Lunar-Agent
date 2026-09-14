@@ -189,6 +189,17 @@ inspectable.
     Before output or terminal recovery can write, an existing intent requires complete real
     execution evidence and its independently recorded artifact/event. An ambiguous runner
     exception preserves the attempt without inventing a pre-execution failure result.
+17. Returned final executions are compared with the exact canonical `execution.json` and launch
+    intent before the controller creates an execution journal under
+    `evolution/materialization/.execution-publication/`. It syncs execution bytes and directories,
+    then the journal, then an exact SQLite preparation receipt. A FULL-synchronous transaction
+    records the execution artifact, its artifact event, the unchanged `evolved_candidate_executed`
+    event and a commit acknowledgement. A durable completion receipt follows. Recovery under the
+    lifecycle lock may complete only an exact prepared, wholly absent batch without any
+    downstream output/terminal evidence. Partial batches and damaged completed records are
+    rejected. Complete batches may finish only their missing completion receipt. Modern journal
+    loss cannot downgrade to legacy replay. Existing execution validation and 088/089 recovery
+    run afterward; terminal validation also checks modern execution publication integrity.
 
 The output publication transaction defines logical delivery in SQLite; filesystem readers may see
 a prefix of final files before commit or until recovery runs after a crash. Reconciliation occurs
@@ -196,8 +207,9 @@ before terminal materialization replay and does not execute a candidate. Feature
 missing marker only from an exact durable terminal preparation; it never infers one from output or
 execution evidence alone. A crash before either publication's preparation is complete requires
 diagnosis of retained staging. Feature 090 prevents automatic relaunch during the
-candidate-launch-to-execution-evidence window but cannot reconstruct missing execution
-artifact/events or a terminal preparation after output commit. A durable intent does not prove
+candidate-launch-to-execution-evidence window. Feature 091 reconciles registration only after exact
+execution preparation; raw or missing execution bytes cannot authorize it. Neither protocol
+reconstructs a terminal preparation after output commit. A durable intent does not prove
 that Popen happened: interruption before runner entry can leave zero executions and still refuse
 retry. This is at most one authorized runner entry under the protocol, not exactly-once execution
 or guaranteed completion. Surviving candidate processes are not identified or killed on resume.

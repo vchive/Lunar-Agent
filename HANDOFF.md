@@ -6,6 +6,47 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 091 结项：可恢复的执行证据登记
+
+Feature 091 将最终 materialization 的 execution artifact 和事件改为可恢复的原子登记。
+新模块 `materialization_execution.py` 只在 final runner 正常返回之后，核对返回的
+`CandidateExecution`、原始 canonical `execution.json` 和 090 launch intent。先同步原始
+执行文件及目录链，再写 `evolution/materialization/.execution-publication/journal.json`
+并同步，之后以 FULL SQLite transaction 保存确定 ID 的 prepared 凭据。4 KiB journal
+绑定 parent/child/唯一 task、launch intent digest、execution path/digest/size/inode 和
+确定 artifact ID，不复制或重写原始 execution bytes。
+
+单个 FULL transaction 登记 execution artifact、artifact_recorded、原有形状的
+`evolved_candidate_executed` 和 `materialization_execution_committed`，之后保存 durable
+completion receipt。commit 抛异常必须重新查询完整快照；无法确认时保留现场，不能转成
+伪造的失败终态。prepare 和 commit 都在同一 SQLite snapshot 验证 090 intent、owner、
+整个 batch 和 artifact budget。既有 partial、duplicate 或 owner/content 漂移均拒绝。
+
+resume 复用 090 全生命周期锁，在 090 execution gate 和 088/089 任何恢复写入之前检查
+091。只有精确 FS journal + DB prepared、execution batch 完全不存在、没有 completion
+final/temp、也没有任何对应下游 output/terminal 凭据时，才允许续完登记。完整 committed
+batch 可以补缺失的 completion；保留完成凭据或下游凭据时删除执行记录不能触发重建。
+现代 journal 丢失而 reserved DB 证据还在时禁止降级；旧完整结果没有 091 证据时保持只读。
+终态验证也会检查现代执行登记完整性。没有 089 terminal preparation 时，即使 execution
+登记已恢复，controller 仍保留原有缺 marker 错误，不调用 runner、输出发布或新终态生成。
+
+最终离线验证：091 quickstart 七文件 359 项（64.02 秒），执行恢复与双进程两文件 98 项
+（26.19 秒），联合 Store 280 项（1.86 秒，含新 execution Store 87 项；聚焦集有重叠），
+主仓全量 3201 项（136.98 秒）；Ruff、compileall、Specify prerequisites 和
+`git diff --check` 通过。051/074/076/078/082 共 601 个 tracked 封存文件相对 `2e3cd95`
+无 diff。两路独立终审发现的 child output artifact 被删、仅剩事件时的下游识别遗漏已修复，
+补充 absent/prepared 两个回归并重新完成全量验证，最终无剩余 blocker。详情见
+`specs/091-recoverable-materialization-execution/validation.md`。本轮没有启动真实模型、
+provider、WebAgent、真实 OpenEvolve/ShinkaEvolve、远端服务或 campaign，也没有新增效果
+或 WebAgent 持平结论。
+
+剩余边界：execution.json 已存在但还没有完整 FS/DB prepared 时仍不自动补登记；缺失的
+原始 execution bytes 不能重建。execution 登记之后如何继续输出验证、发布并准备终态，
+以及 output commit 到 terminal preparation 之间的恢复，仍需下一轮协议。090 的至多一次
+runner 授权约束保持，不是 exactly-once 或保证最终完成；不推断/终止崩溃后未知进程。
+通用 runner 和普通演化候选路径未修改。journal/completion 不做 GC，协调删除所有完成、
+下游与 DB commit 凭据缺少外部真实性承诺；088 的文件系统前缀可见性边界保持。
+
 ## Feature 090 结项：候选启动意图持久化
 
 Feature 090 为最终候选交付补齐启动前的 durable intent，防止 controller 在 `Popen` 后、

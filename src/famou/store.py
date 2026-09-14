@@ -2100,6 +2100,286 @@ class Store:
             )
             raise ValueError(code) from None
 
+    def _materialization_execution_manifest(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+        execution: dict[str, Any], journal_sha256: str,
+    ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]:
+        from .evolution import CandidateExecution, EvolutionError
+
+        error = "materialization_execution_ledger_mismatch"
+        launch_event_id, launch_payload = self._materialization_launch_manifest(parent_id, child_id, task_id, intent)
+        if not isinstance(journal_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", journal_sha256) is None:
+            raise ValueError(error)
+        try:
+            if not isinstance(execution, dict):
+                raise TypeError(error)
+            normalized = CandidateExecution.from_dict(execution).to_dict()
+            if any(Path(path).as_posix() != path or any(part in {"", ".", ".."} for part in path.split("/"))
+                   for path in normalized["artifacts"]):
+                raise ValueError(error)
+            content = (json.dumps(execution, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+            canonical = (json.dumps(normalized, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+            if len(content) > 64 * 1024 or content != canonical:
+                raise ValueError(error)
+        except (TypeError, ValueError, RecursionError, EvolutionError):
+            raise ValueError(error) from None
+        suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+        identity = {
+            "parent_run_id": parent_id, "evolution_run_id": child_id, "owner_task_id": task_id,
+            "journal_sha256": journal_sha256, "launch_intent_sha256": launch_payload["intent_sha256"],
+            "artifact_id": "artifact-materialization-execution-" + suffix,
+            "path": intent["attempt_path"] + "/execution.json",
+            "sha256": hashlib.sha256(content).hexdigest(), "size": len(content),
+        }
+        return launch_event_id, launch_payload, normalized, identity
+
+    @staticmethod
+    def _materialization_execution_events(
+        parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+        execution: dict[str, Any], identity: dict[str, Any],
+    ) -> dict[str, tuple[str, dict[str, Any]]]:
+        suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+        executed_suffix = hashlib.sha256(f"{parent_id}\0{child_id}\0{intent['candidate_sha256']}".encode()).hexdigest()
+        return {
+            "event-materialization-execution-prepared-" + suffix: ("materialization_execution_prepared", identity),
+            "event-materialization-execution-artifact-recorded-" + suffix: (
+                "artifact_recorded", {key: identity[key] for key in ("artifact_id", "path", "sha256", "size")},
+            ),
+            "event-evolved-candidate-executed-" + executed_suffix: (
+                "evolved_candidate_executed", {
+                    "candidate_id": intent["candidate_id"], "candidate_sha256": intent["candidate_sha256"],
+                    "status": execution["status"], "exit_code": execution["exit_code"],
+                    "duration_ms": execution["duration_ms"], "evidence_path": identity["path"],
+                },
+            ),
+            "event-materialization-execution-committed-" + suffix: ("materialization_execution_committed", identity),
+        }
+
+    def _reject_materialization_execution_downstream(
+        self, connection: sqlite3.Connection, parent_id: str, child_id: str,
+    ) -> None:
+        """A later publication proves this execution batch must not be rebuilt."""
+        error = "materialization_execution_ledger_mismatch"
+        suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+        terminal_id = "artifact-materialization-publication-" + suffix
+        marker = "evolution/materialization/result.json"
+        ids = tuple(prefix + suffix for prefix in (
+            "event-evolved-outputs-promoted-", "event-output-publication-committed-",
+            "event-evolved-materialization-", "event-materialization-publication-prepared-",
+            "event-materialization-publication-committed-", "event-materialization-artifact-recorded-",
+        ))
+        rows = connection.execute(
+            "SELECT id, run_id, type, payload FROM events WHERE id IN (?, ?, ?, ?, ?, ?) "
+            "OR (run_id = ? AND type IN ('materialization_publication_prepared', "
+            "'materialization_publication_committed', 'artifact_recorded')) "
+            "OR (run_id = ? AND type IN ('evolved_outputs_promoted', 'output_publication_committed', "
+            "'evolved_candidate_materialized', 'artifact_recorded'))",
+            (*ids, child_id, parent_id),
+        ).fetchall()
+        for row in rows:
+            if row["id"] in ids or (row["run_id"] == child_id and row["type"] in {
+                "materialization_publication_prepared", "materialization_publication_committed",
+            }):
+                raise ValueError(error)
+            value = self._materialization_publication_json(row["payload"])
+            if row["type"] == "artifact_recorded":
+                path = value.get("path")
+                if row["run_id"] == child_id and (
+                    path == marker or value.get("artifact_id") == terminal_id
+                    or (isinstance(path, str) and path.startswith("output/"))
+                ):
+                    raise ValueError(error)
+                if row["run_id"] == parent_id and isinstance(path, str) and value.get("artifact_id") == (
+                    self._output_publication_artifact_id(parent_id, child_id, path)
+                ):
+                    raise ValueError(error)
+            elif value.get("evolution_run_id") == child_id:
+                raise ValueError(error)
+        artifacts = connection.execute(
+            "SELECT id, run_id, kind, path FROM artifacts WHERE id = ? "
+            "OR (run_id = ? AND (kind IN ('output', 'evolved_materialization') OR path = ?)) "
+            "OR (run_id = ? AND kind = 'output')", (terminal_id, child_id, marker, parent_id),
+        ).fetchall()
+        for row in artifacts:
+            if row["id"] == terminal_id or row["run_id"] == child_id or row["id"] == (
+                self._output_publication_artifact_id(parent_id, child_id, row["path"])
+            ):
+                raise ValueError(error)
+
+    def _inspect_materialization_execution(
+        self, connection: sqlite3.Connection, parent_id: str, child_id: str, task_id: str,
+        intent: dict[str, Any], execution: dict[str, Any], identity: dict[str, Any],
+        launch_event_id: str, launch_payload: dict[str, Any],
+    ) -> str:
+        error = "materialization_execution_ledger_mismatch"
+        if not self._inspect_materialization_launch(connection, parent_id, child_id, task_id, launch_event_id, launch_payload):
+            raise ValueError(error)
+        expected = self._materialization_execution_events(parent_id, child_id, task_id, intent, execution, identity)
+        rows = connection.execute(
+            "SELECT id, run_id, task_id, type, payload FROM events WHERE id IN (?, ?, ?, ?) "
+            "OR (run_id = ? AND type IN ('materialization_execution_prepared', "
+            "'materialization_execution_committed', 'evolved_candidate_executed', 'artifact_recorded'))",
+            (*expected, child_id),
+        ).fetchall()
+        matching: set[str] = set()
+        for row in rows:
+            value = self._materialization_publication_json(row["payload"])
+            relevant = row["id"] in expected or row["type"] in {
+                "materialization_execution_prepared", "materialization_execution_committed", "evolved_candidate_executed",
+            } or value.get("artifact_id") == identity["artifact_id"] or value.get("path") == identity["path"]
+            if not relevant:
+                continue
+            wanted = expected.get(row["id"])
+            if (
+                wanted is None or row["run_id"] != child_id or row["task_id"] != task_id or row["type"] != wanted[0]
+                or json.dumps(value, sort_keys=True, allow_nan=False) != json.dumps(wanted[1], sort_keys=True, allow_nan=False)
+            ):
+                raise ValueError(error)
+            matching.add(row["id"])
+        artifacts = connection.execute(
+            "SELECT id, run_id, task_id, path, sha256, size, kind FROM artifacts WHERE id = ? "
+            "OR (run_id = ? AND (path = ? OR kind = 'evolved_candidate_execution'))",
+            (identity["artifact_id"], child_id, identity["path"]),
+        ).fetchall()
+        prepared = next(iter(expected))
+        if prepared not in matching:
+            if matching or artifacts:
+                raise ValueError(error)
+            self._reject_materialization_execution_downstream(connection, parent_id, child_id)
+            return "absent"
+        if len(matching) == 1 and not artifacts:
+            self._reject_materialization_execution_downstream(connection, parent_id, child_id)
+            return "prepared"
+        if len(matching) != 4 or len(artifacts) != 1:
+            raise ValueError(error)
+        row = artifacts[0]
+        if (
+            row["id"] != identity["artifact_id"] or row["run_id"] != child_id or row["task_id"] != task_id
+            or row["kind"] != "evolved_candidate_execution" or row["path"] != identity["path"]
+            or row["sha256"] != identity["sha256"] or type(row["size"]) is not int or row["size"] != identity["size"]
+        ):
+            raise ValueError(error)
+        return "committed"
+
+    def has_materialization_execution(self, parent_id: str, child_id: str) -> bool:
+        """Probe only modern execution identities, preserving ordinary legacy replay."""
+        try:
+            self._materialization_launch_id(parent_id, child_id)
+            suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+            artifact_id = "artifact-materialization-execution-" + suffix
+            ids = tuple(prefix + suffix for prefix in (
+                "event-materialization-execution-prepared-", "event-materialization-execution-artifact-recorded-",
+                "event-materialization-execution-committed-",
+            ))
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                if connection.execute("SELECT 1 FROM artifacts WHERE id = ?", (artifact_id,)).fetchone():
+                    return True
+                rows = connection.execute(
+                    "SELECT id, type, payload FROM events WHERE id IN (?, ?, ?) OR (run_id = ? "
+                    "AND type IN ('materialization_execution_prepared', 'materialization_execution_committed', 'artifact_recorded'))",
+                    (*ids, child_id),
+                ).fetchall()
+                for row in rows:
+                    if row["id"] in ids or row["type"] in {"materialization_execution_prepared", "materialization_execution_committed"}:
+                        return True
+                    if self._materialization_publication_json(row["payload"]).get("artifact_id") == artifact_id:
+                        return True
+                return False
+        except Exception:  # noqa: BLE001 - unreadable state cannot authorize a legacy downgrade.
+            raise ValueError("materialization_execution_ledger_mismatch") from None
+
+    def materialization_execution_status(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *, journal_sha256: str,
+    ) -> str:
+        """Read exact launch, preparation and batch identity in one SQLite snapshot."""
+        try:
+            launch_id, launch, result, identity = self._materialization_execution_manifest(
+                parent_id, child_id, task_id, intent, execution, journal_sha256,
+            )
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                return self._inspect_materialization_execution(
+                    connection, parent_id, child_id, task_id, intent, result, identity, launch_id, launch,
+                )
+        except Exception:  # noqa: BLE001 - exact read failures expose only a safe integrity code.
+            raise ValueError("materialization_execution_ledger_mismatch") from None
+
+    def _write_materialization_execution(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *,
+        journal_sha256: str, max_artifact_bytes: int, commit: bool,
+    ) -> None:
+        try:
+            launch_id, launch, result, identity = self._materialization_execution_manifest(
+                parent_id, child_id, task_id, intent, execution, journal_sha256,
+            )
+            expected = self._materialization_execution_events(parent_id, child_id, task_id, intent, result, identity)
+            with closing(self._connect()) as connection, connection:
+                connection.execute("PRAGMA synchronous = FULL")
+                connection.execute("BEGIN IMMEDIATE")
+                status = self._inspect_materialization_execution(
+                    connection, parent_id, child_id, task_id, intent, result, identity, launch_id, launch,
+                )
+                if status == "committed":
+                    return
+                if commit and status != "prepared":
+                    raise ValueError("materialization_execution_ledger_mismatch")
+                if type(max_artifact_bytes) is not int or max_artifact_bytes < 1:
+                    raise ValueError("materialization_execution_budget_exceeded")
+                sizes = [row["size"] for row in connection.execute("SELECT size FROM artifacts WHERE run_id = ?", (child_id,))]
+                if any(type(size) is not int or size < 0 for size in sizes):
+                    raise ValueError("materialization_execution_ledger_mismatch")
+                if sum(sizes) + identity["size"] > max_artifact_bytes:
+                    raise ValueError("materialization_execution_budget_exceeded")
+                if not commit:
+                    if status == "prepared":
+                        return
+                    event_id = next(iter(expected))
+                    kind, payload = expected[event_id]
+                    if not self._append_event(connection, child_id, task_id, kind, payload, event_id):
+                        raise ValueError("materialization_execution_ledger_mismatch")
+                    return
+                connection.execute(
+                    "INSERT INTO artifacts(id,run_id,task_id,path,sha256,size,kind,created_at) "
+                    "VALUES(?,?,?,?,?,?,'evolved_candidate_execution',?)",
+                    (identity["artifact_id"], child_id, task_id, identity["path"], identity["sha256"], identity["size"], utc_now()),
+                )
+                for event_id, (kind, payload) in expected.items():
+                    if kind == "materialization_execution_prepared":
+                        continue
+                    if not self._append_event(connection, child_id, task_id, kind, payload, event_id):
+                        raise ValueError("materialization_execution_ledger_mismatch")
+        except Exception as exc:  # noqa: BLE001 - every failed write rolls back, including injected faults.
+            if isinstance(exc, ValueError) and str(exc) == "materialization_execution_budget_exceeded":
+                code = str(exc)
+            elif isinstance(exc, (TypeError, ValueError, RecursionError)):
+                code = "materialization_execution_ledger_mismatch"
+            else:
+                code = "materialization_execution_commit_failed"
+            raise ValueError(code) from None
+
+    def prepare_materialization_execution(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *,
+        journal_sha256: str, max_artifact_bytes: int,
+    ) -> None:
+        """Durably prepare a wholly absent execution batch after exact launch authorization."""
+        self._write_materialization_execution(
+            parent_id, child_id, task_id, intent, execution, journal_sha256=journal_sha256,
+            max_artifact_bytes=max_artifact_bytes, commit=False,
+        )
+
+    def commit_materialization_execution(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *,
+        journal_sha256: str, max_artifact_bytes: int,
+    ) -> None:
+        """Atomically register the prepared execution artifact and its complete event batch."""
+        self._write_materialization_execution(
+            parent_id, child_id, task_id, intent, execution, journal_sha256=journal_sha256,
+            max_artifact_bytes=max_artifact_bytes, commit=True,
+        )
+
     def discard_attempt_outputs(self, run_id: str, task_id: str, attempt_id: str) -> list[str]:
         """Remove late result/runtime metadata while retaining the prompt and audit event."""
         prefix = f"tasks/{task_id}/{attempt_id}/"

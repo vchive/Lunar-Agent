@@ -76,6 +76,12 @@ from .evolution import (
     _read_bounded_regular_file,
     build_strategy,
 )
+from .materialization_execution import (
+    MaterializationExecutionUncertain,
+    inspect_materialization_execution,
+    publish_materialization_execution,
+    recover_materialization_execution,
+)
 from .materialization_launch import (
     MaterializationLaunchUncertain,
     inspect_launch_intent,
@@ -1580,6 +1586,7 @@ class LocalController:
             "attempt_path": attempt_relative,
         }
         launch = inspect_launch_intent(self.store, child, launch_identity)
+        recover_materialization_execution(self.store, parent, child, launch_identity)
         if launch is not None:
             # No publication may conceal an unknown process launch. Require its independently
             # recorded execution before allowing existing output/terminal recovery to mutate.
@@ -1617,6 +1624,7 @@ class LocalController:
 
         def validate_terminal(payload: dict[str, Any]) -> None:
             current_launch = inspect_launch_intent(self.store, child, launch_identity)
+            inspect_materialization_execution(self.store, parent, child, launch_identity)
             if current_launch is not None and not payload.get("execution", {}).get("evidence_path"):
                 raise MaterializationLaunchUncertain("materialization_launch_outcome_unknown")
             self._validate_materialization_replay(
@@ -1703,29 +1711,7 @@ class LocalController:
                 raise MaterializationLaunchUncertain(
                     "materialization_launch_outcome_unknown"
                 ) from exc
-            execution_path = attempt / "execution.json"
-            ArtifactStore(child_root, self.store, child.id).record(
-                execution_path, child_task.id, kind="evolved_candidate_execution"
-            )
-            self.store.append_event(
-                child.id,
-                "evolved_candidate_executed",
-                {
-                    "candidate_id": result.best_candidate_id,
-                    "candidate_sha256": candidate_digest,
-                    "status": execution.status,
-                    "exit_code": execution.exit_code,
-                    "duration_ms": execution.duration_ms,
-                    "evidence_path": execution_path.relative_to(child_root).as_posix(),
-                },
-                task_id=child_task.id,
-                event_id=(
-                    "event-evolved-candidate-executed-"
-                    + hashlib.sha256(
-                        f"{parent.id}\0{child.id}\0{candidate_digest}".encode()
-                    ).hexdigest()
-                ),
-            )
+            publish_materialization_execution(self.store, parent, child, launch_identity, execution)
             if execution.status == "timed_out":
                 error = "candidate process timed out"
             elif execution.status != "succeeded":
@@ -1738,7 +1724,7 @@ class LocalController:
                     outputs = self._promote_evolved_outputs(
                         parent, child.id, attempt, contract.outputs
                     )
-        except (OutputPublicationUncertain, MaterializationLaunchUncertain):
+        except (OutputPublicationUncertain, MaterializationLaunchUncertain, MaterializationExecutionUncertain):
             # Unknown launch/commit state or unsafe rollback cannot become a terminal failure
             # claiming no execution or outputs. Preserve the attempt and its durable evidence.
             raise
