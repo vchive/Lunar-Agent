@@ -293,6 +293,31 @@ def recover_materialization_result(
         raise MaterializationPublicationError(_INVALID) from exc
 
 
+def inspect_materialization_result(
+    store: Store, parent: Run, child: Run, *, validate: Validator,
+) -> dict[str, Any] | None:
+    """Require an intact committed result without repairing any terminal evidence."""
+    try:
+        root = _root(child)
+        directory = _path(root, "evolution/materialization/.terminal-publication")
+        if not _present(directory):
+            if store.has_materialization_publication(parent.id, child.id):
+                raise MaterializationPublicationError(_INVALID)
+            return None
+        task_id = _owner(store, child)
+        journal, content, payload, digest = _load(root, parent, child, task_id)
+        _completion_state(directory, digest)
+        if (_status(store, parent, child, task_id, payload, digest) != "committed"
+            or not _marker_exists(root, journal, content)):
+            raise MaterializationPublicationError(_INVALID)
+        validate(_strict_json_loads(content))
+        return payload
+    except EvolutionError:
+        raise
+    except Exception as exc:
+        raise MaterializationPublicationError(_INVALID) from exc
+
+
 def publish_materialization_result(
     store: Store, parent: Run, child: Run, payload: dict[str, Any], *, validate: Validator,
 ) -> dict[str, Any]:

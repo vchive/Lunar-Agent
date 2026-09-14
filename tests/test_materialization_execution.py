@@ -130,6 +130,11 @@ def _assert_resume_refuses_without_writes(monkeypatch, controller, parent, child
 def _recover_registration_only(monkeypatch, controller, parent, child, result, outcome: str = "success") -> None:
     execution = (_attempt(child, result) / "execution.json").read_bytes()
     _forbid_execution_and_promotion(monkeypatch, controller)
+    # Exercise the 091 phase independently; 092 now continues delivery after it succeeds.
+    def stop_after_registration(*args, **kwargs):
+        raise EvolutionError("test stops after execution registration")
+
+    monkeypatch.setattr(controller, "_resume_materialization_delivery", stop_after_registration)
     for _ in range(2):
         with pytest.raises(EvolutionError):
             _materialize(controller, parent, child, result)

@@ -181,7 +181,10 @@ def _load(store: Store, parent: Run, child: Run, identity: dict[str, Any]) -> tu
 
 def _no_downstream(parent: Run, child: Run) -> None:
     root = _root(child)
-    for name in ("result.json", ".result.json.tmp", ".terminal-publication", ".terminal-publication.lock"):
+    for name in (
+        "result.json", ".result.json.tmp", ".terminal-publication", ".terminal-publication.lock",
+        ".delivery-publication",
+    ):
         if _present(_path(root, "evolution/materialization/" + name)):
             raise MaterializationExecutionUncertain(_INVALID)
     suffix = _digest(f"{parent.id}\0{child.id}".encode())

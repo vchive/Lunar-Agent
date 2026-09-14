@@ -6,6 +6,49 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 092 结项：执行后的交付恢复
+
+Feature 092 接通了完整 091 执行登记之后的输出验证、发布和终态完成。resume 在完整
+090/091 凭据存在且没有下游发布证据时，可以重新独立验证保留的原 attempt，准备 delivery
+plan 并继续交付，全程不调用候选 runner。新模块 `materialization_delivery.py` 在
+`evolution/materialization/.delivery-publication/` 保存最多 64 KiB 的 canonical plan，
+绑定 launch/execution digest、原 result 身份、execution projection、validation 和有序
+输出 path/format/fields/required/size/SHA-256。原输出文件、plan 和目录先同步，再用 FULL
+SQLite transaction 登记唯一 child task 的 `materialization_delivery_prepared` 事件。
+没有增加 artifact row、schema migration 或输出副本；artifact ID 和 owner 仍由 088
+在 parent lock 内选择和核验，保留其他 parent task 的合法复用记录。
+
+恢复先重新核验原始 execution、attempt validation 和计划内输出字节，再在 parent lock
+内比较 088 journal metadata。不存在 batch 才可调用原 promoter；已 committed 的 batch
+直接复用精确 projection，不重新发布。确认 rolled_back 时生成 outputs=[]、
+`error="output_publication_rolled_back"` 的明确失败终态。已准备/已提交的 089 终态优先
+按原协议恢复，callback 在任何终态写入前只读检查输出状态。089 完整后写最多 4 KiB 的
+delivery completion；final/temp 任一存在时，缺失 terminal rows 都不能自动重建。终态
+完整而仅缺 delivery completion 可以补完。092 FS/DB 证据也会阻止 091 重建已删执行 batch。
+
+现代执行完整但缺 plan 时，不会先运行可写的旧 088 recovery：没有精确终态授权的下游
+残片在 rollback 或新 plan 写入之前被拒绝。已有 exact prepared 089 仍保留历史恢复能力，
+先只读核验输出再完成原结果；完整旧 marker 可回放，不强制迁移。没有现代 091 的更早
+attempt 继续遵循原 088 恢复规则。独立审查发现并修正了原先先回滚再拒绝的排序缺陷，
+补充零写拒绝与旧 089 恢复两个回归，两路终审均无剩余 blocker。
+
+最终离线验证：092 quickstart 七文件 532 项（91.29 秒）；新增三文件共 249 项，包含
+controller/FS 94 项、真实双进程 1 项和 Store 154 项，已包含于聚焦与全量；联合 Store
+434 项（2.57 秒，与聚焦有重叠）；主仓全量 3450 项（173.17 秒）。Ruff、compileall、
+Specify prerequisites 和 `git diff --check` 通过。051/074/076/078/082 共 601 个 tracked
+封存文件相对 `6d6ad49` 无 diff，历史验证数字保持。验证记录见
+`specs/092-recoverable-materialization-delivery/validation.md`；README 与 architecture 已同步。
+本轮没有启动真实模型、provider、WebAgent、真实 OpenEvolve/ShinkaEvolve、远端服务或
+campaign，没有新增算法效果或 WebAgent 持平结论。
+
+剩余边界：raw execution bytes、未完整准备的 execution/delivery plan，以及 088/089
+缺少精确 preparation 的残片仍需诊断；缺失 candidate、execution 或 attempt output bytes
+不能重建。088 完整 journal 发布前的中断边界及整批 rollback 不重试保持。协议只保留
+090 的至多一次 runner 授权进入，不保证 exactly-once 或成功交付，不识别/终止未知存活
+进程。各 attempt 记录有界但尚无 GC；协调删除全部协议证据没有外部真实性保护，088 的
+文件系统前缀可见性边界保持。通用 runner 和普通演化候选路径未修改。后续应优先考虑
+保留现场的诊断/人工恢复入口及记录保留策略，再决定是否扩展未准备完成的自动恢复授权。
+
 ## Feature 091 结项：可恢复的执行证据登记
 
 Feature 091 将最终 materialization 的 execution artifact 和事件改为可恢复的原子登记。

@@ -32,6 +32,9 @@ def forbidden(*args, **kwargs):
     raise AssertionError("execution reconciliation repeated candidate work or output publication")
 CommandCandidateRunner.run = forbidden
 controller._promote_evolved_outputs = forbidden
+def stop_after_registration(*args, **kwargs):
+    raise EvolutionError("test stops after execution registration")
+controller._resume_materialization_delivery = stop_after_registration
 if mode == "first":
     original = controller.store.commit_materialization_execution
     def hold_before_commit(*args, **kwargs):

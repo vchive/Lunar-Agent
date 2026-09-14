@@ -2167,11 +2167,12 @@ class Store:
             "event-evolved-outputs-promoted-", "event-output-publication-committed-",
             "event-evolved-materialization-", "event-materialization-publication-prepared-",
             "event-materialization-publication-committed-", "event-materialization-artifact-recorded-",
+            "event-materialization-delivery-prepared-",
         ))
         rows = connection.execute(
-            "SELECT id, run_id, type, payload FROM events WHERE id IN (?, ?, ?, ?, ?, ?) "
+            "SELECT id, run_id, type, payload FROM events WHERE id IN (?, ?, ?, ?, ?, ?, ?) "
             "OR (run_id = ? AND type IN ('materialization_publication_prepared', "
-            "'materialization_publication_committed', 'artifact_recorded')) "
+            "'materialization_publication_committed', 'materialization_delivery_prepared', 'artifact_recorded')) "
             "OR (run_id = ? AND type IN ('evolved_outputs_promoted', 'output_publication_committed', "
             "'evolved_candidate_materialized', 'artifact_recorded'))",
             (*ids, child_id, parent_id),
@@ -2179,6 +2180,7 @@ class Store:
         for row in rows:
             if row["id"] in ids or (row["run_id"] == child_id and row["type"] in {
                 "materialization_publication_prepared", "materialization_publication_committed",
+                "materialization_delivery_prepared",
             }):
                 raise ValueError(error)
             value = self._materialization_publication_json(row["payload"])
@@ -2197,8 +2199,8 @@ class Store:
                 raise ValueError(error)
         artifacts = connection.execute(
             "SELECT id, run_id, kind, path FROM artifacts WHERE id = ? "
-            "OR (run_id = ? AND (kind IN ('output', 'evolved_materialization') OR path = ?)) "
-            "OR (run_id = ? AND kind = 'output')", (terminal_id, child_id, marker, parent_id),
+            "OR (run_id = ? AND (kind IN ('output', 'evolved_materialization') OR path = ? OR path LIKE 'output/%')) "
+            "OR run_id = ?", (terminal_id, child_id, marker, parent_id),
         ).fetchall()
         for row in artifacts:
             if row["id"] == terminal_id or row["run_id"] == child_id or row["id"] == (
@@ -2260,6 +2262,177 @@ class Store:
         ):
             raise ValueError(error)
         return "committed"
+
+    def _materialization_delivery_manifest(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+        execution: dict[str, Any], plan: dict[str, Any],
+    ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any], str, dict[str, Any]]:
+        error = "materialization_delivery_ledger_mismatch"
+        keys = {
+            "schema_version", "parent_run_id", "evolution_run_id", "task_id",
+            "launch_intent_sha256", "execution_journal_sha256", "execution_sha256", "result", "outputs",
+        }
+        if (
+            not isinstance(plan, dict) or set(plan) != keys or plan["schema_version"] != "1"
+            or plan["parent_run_id"] != parent_id or plan["evolution_run_id"] != child_id
+            or plan["task_id"] != task_id or not isinstance(plan["outputs"], list)
+            or len(plan["outputs"]) > MAX_OUTPUTS
+        ):
+            raise ValueError(error)
+        launch_id, launch, normalized, execution_identity = self._materialization_execution_manifest(
+            parent_id, child_id, task_id, intent, execution, plan["execution_journal_sha256"],
+        )
+        if (
+            plan["launch_intent_sha256"] != launch["intent_sha256"]
+            or plan["execution_sha256"] != execution_identity["sha256"]
+        ):
+            raise ValueError(error)
+        result, _ = self._materialization_publication_manifest(
+            parent_id, child_id, task_id, plan["result"], plan["execution_journal_sha256"],
+        )
+        expected_execution = {
+            "status": normalized["status"], "exit_code": normalized["exit_code"],
+            "duration_ms": normalized["duration_ms"], "evidence_path": execution_identity["path"],
+        }
+        validation = result["validation"]
+        if (
+            any(result[key] != intent[key] for key in (
+                "contract_sha256", "candidate_id", "candidate_path", "candidate_sha256", "attempt_path",
+            ))
+            or result["outputs"] != []
+            or json.dumps(result["execution"], sort_keys=True, allow_nan=False) != json.dumps(
+                expected_execution, sort_keys=True, allow_nan=False,
+            )
+            or set(validation) != {"passed", "evidence", "reason", "details"}
+            or type(validation["passed"]) is not bool or not isinstance(validation["evidence"], list)
+            or any(not isinstance(item, str) for item in validation["evidence"])
+            or not isinstance(validation["reason"], str) or not isinstance(validation["details"], dict)
+        ):
+            raise ValueError(error)
+        if result["status"] == "succeeded":
+            if normalized["status"] != "succeeded" or not validation["passed"] or result["error"] is not None:
+                raise ValueError(error)
+        elif plan["outputs"] or not isinstance(result["error"], str) or not result["error"]:
+            raise ValueError(error)
+        paths: set[str] = set()
+        for item in plan["outputs"]:
+            if not isinstance(item, dict) or set(item) != {"path", "format", "fields", "required", "size", "sha256"}:
+                raise ValueError(error)
+            if (
+                type(item["size"]) is not int or not 0 <= item["size"] <= 256 * 1024
+                or not isinstance(item["sha256"], str) or re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is None
+            ):
+                raise ValueError(error)
+            metadata = {key: item[key] for key in ("path", "format", "fields", "required")}
+            spec = OutputSpec.from_dict(metadata)
+            if spec.to_dict() != metadata or spec.path in paths:
+                raise ValueError(error)
+            paths.add(spec.path)
+        content = (json.dumps(plan, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+        if len(content) > 64 * 1024:
+            raise ValueError(error)
+        suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+        event_id = "event-materialization-delivery-prepared-" + suffix
+        payload = {
+            "parent_run_id": parent_id, "evolution_run_id": child_id, "owner_task_id": task_id,
+            "plan_path": "evolution/materialization/.delivery-publication/plan.json",
+            "plan_sha256": hashlib.sha256(content).hexdigest(), "plan_size": len(content),
+            "execution_journal_sha256": plan["execution_journal_sha256"],
+            "execution_sha256": execution_identity["sha256"],
+        }
+        return launch_id, launch, normalized, execution_identity, event_id, payload
+
+    def _inspect_materialization_delivery(
+        self, connection: sqlite3.Connection, parent_id: str, child_id: str, task_id: str,
+        intent: dict[str, Any], execution: dict[str, Any], execution_identity: dict[str, Any],
+        launch_id: str, launch: dict[str, Any], event_id: str, payload: dict[str, Any],
+    ) -> bool:
+        error = "materialization_delivery_ledger_mismatch"
+        if self._inspect_materialization_execution(
+            connection, parent_id, child_id, task_id, intent, execution, execution_identity, launch_id, launch,
+        ) != "committed":
+            raise ValueError(error)
+        rows = connection.execute(
+            "SELECT id, run_id, task_id, type, payload FROM events WHERE id = ? "
+            "OR (run_id = ? AND type = 'materialization_delivery_prepared')", (event_id, child_id),
+        ).fetchall()
+        if not rows:
+            self._reject_materialization_execution_downstream(connection, parent_id, child_id)
+            return False
+        if len(rows) != 1:
+            raise ValueError(error)
+        row = rows[0]
+        stored = self._materialization_publication_json(row["payload"])
+        if (
+            row["id"] != event_id or row["run_id"] != child_id or row["task_id"] != task_id
+            or row["type"] != "materialization_delivery_prepared"
+            or json.dumps(stored, sort_keys=True, allow_nan=False) != json.dumps(payload, sort_keys=True, allow_nan=False)
+        ):
+            raise ValueError(error)
+        return True
+
+    def has_materialization_delivery(self, parent_id: str, child_id: str) -> bool:
+        """Recognize only modern delivery evidence, including damaged reserved event IDs."""
+        try:
+            self._materialization_launch_id(parent_id, child_id)
+            suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+            event_id = "event-materialization-delivery-prepared-" + suffix
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.execute("BEGIN")
+                return connection.execute(
+                    "SELECT 1 FROM events WHERE id = ? "
+                    "OR (run_id = ? AND type = 'materialization_delivery_prepared') LIMIT 1", (event_id, child_id),
+                ).fetchone() is not None
+        except Exception:  # noqa: BLE001 - unreadable state cannot prove absence of delivery.
+            raise ValueError("materialization_delivery_ledger_mismatch") from None
+
+    def materialization_delivery_recorded(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+        execution: dict[str, Any], plan: dict[str, Any],
+    ) -> bool:
+        """Verify the exact plan and its complete launch/execution authority in one snapshot."""
+        try:
+            launch_id, launch, normalized, identity, event_id, payload = self._materialization_delivery_manifest(
+                parent_id, child_id, task_id, intent, execution, plan,
+            )
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                return self._inspect_materialization_delivery(
+                    connection, parent_id, child_id, task_id, intent, normalized, identity,
+                    launch_id, launch, event_id, payload,
+                )
+        except Exception:  # noqa: BLE001 - replay errors never include private ledger diagnostics.
+            raise ValueError("materialization_delivery_ledger_mismatch") from None
+
+    def record_materialization_delivery(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+        execution: dict[str, Any], plan: dict[str, Any],
+    ) -> None:
+        """Durably bind the immutable delivery plan before any output or terminal publication."""
+        try:
+            launch_id, launch, normalized, identity, event_id, payload = self._materialization_delivery_manifest(
+                parent_id, child_id, task_id, intent, execution, plan,
+            )
+            with closing(self._connect()) as connection, connection:
+                connection.execute("PRAGMA synchronous = FULL")
+                connection.execute("BEGIN IMMEDIATE")
+                if self._inspect_materialization_delivery(
+                    connection, parent_id, child_id, task_id, intent, normalized, identity,
+                    launch_id, launch, event_id, payload,
+                ):
+                    return
+                if not self._append_event(
+                    connection, child_id, task_id, "materialization_delivery_prepared", payload, event_id,
+                ):
+                    raise ValueError("materialization_delivery_ledger_mismatch")
+        except Exception as exc:  # noqa: BLE001 - failed writes roll back without exposing storage diagnostics.
+            code = (
+                "materialization_delivery_ledger_mismatch"
+                if isinstance(exc, (ValueError, TypeError, RecursionError))
+                else "materialization_delivery_commit_failed"
+            )
+            raise ValueError(code) from None
 
     def has_materialization_execution(self, parent_id: str, child_id: str) -> bool:
         """Probe only modern execution identities, preserving ordinary legacy replay."""

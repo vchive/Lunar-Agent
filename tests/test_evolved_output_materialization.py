@@ -221,7 +221,7 @@ def test_batch_database_failure_produces_replayable_failure_without_partial_outp
 
 
 @pytest.mark.parametrize("committed", [False, True])
-def test_unknown_publication_preserves_attempt_without_terminal_claim_or_reexecution(
+def test_unknown_publication_preserves_attempt_then_recovers_without_reexecution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, committed: bool,
 ) -> None:
     controller, parent, child, result, contract = _batch_materialization_fixture(tmp_path)
@@ -250,16 +250,17 @@ def test_unknown_publication_preserves_attempt_without_terminal_claim_or_reexecu
     assert len(outputs) == (2 if committed else 0)
     monkeypatch.setattr(CommandCandidateRunner, "run", lambda *a, **k: pytest.fail("reexecuted"))
     for _ in range(2):
-        with pytest.raises(EvolutionError, match="materialization marker is missing"):
-            controller.materialize_evolved_outputs(
-                parent.id, child.id, contract, result, timeout_seconds=1
-            )
-        assert not marker.exists()
+        recovered = controller.materialize_evolved_outputs(
+            parent.id, child.id, contract, result, timeout_seconds=1
+        )
+        assert recovered["status"] == ("succeeded" if committed else "failed")
+        assert bool(recovered["outputs"]) is committed
+        assert marker.exists()
         assert all((parent.workspace / spec.path).exists() == committed for spec in contract.outputs)
     assert (_materialization_attempt_path(child, result) / "execution-count.txt").read_text() == "1"
 
 
-def test_materialization_resume_reconciles_interrupted_batch_before_marker_gate(
+def test_materialization_resume_finishes_interrupted_batch_as_rolled_back_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     controller, parent, child, result, contract = _batch_materialization_fixture(tmp_path)
@@ -284,10 +285,11 @@ def test_materialization_resume_reconciles_interrupted_batch_before_marker_gate(
     assert not (parent.workspace / contract.outputs[1].path).exists()
     monkeypatch.setattr(CommandCandidateRunner, "run", lambda *a, **k: pytest.fail("reexecuted"))
     for _ in range(2):
-        with pytest.raises(EvolutionError, match="materialization marker is missing"):
-            controller.materialize_evolved_outputs(
-                parent.id, child.id, contract, result, timeout_seconds=1
-            )
+        recovered = controller.materialize_evolved_outputs(
+            parent.id, child.id, contract, result, timeout_seconds=1
+        )
+        assert recovered["status"] == "failed" and recovered["outputs"] == []
+        assert recovered["error"] == "output_publication_rolled_back"
         assert all(not (parent.workspace / spec.path).exists() for spec in contract.outputs)
     assert _publication_journal(parent, child).with_name("rolled-back.json").is_file()
     assert (_materialization_attempt_path(child, result) / "execution-count.txt").read_text() == "1"

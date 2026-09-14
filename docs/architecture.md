@@ -200,17 +200,36 @@ inspectable.
     rejected. Complete batches may finish only their missing completion receipt. Modern journal
     loss cannot downgrade to legacy replay. Existing execution validation and 088/089 recovery
     run afterward; terminal validation also checks modern execution publication integrity.
+18. Complete modern execution registration can begin delivery preparation when no downstream
+    evidence exists. Under the same lifecycle lock, independent output validation produces a
+    canonical plan under `evolution/materialization/.delivery-publication/`, bounded to 64 KiB.
+    It binds launch/execution digests, the existing result identity and validation, and ordered
+    output byte metadata. Original output bytes, the plan and directories are synced before a
+    FULL SQLite transaction records its exact `materialization_delivery_prepared` event. No
+    output copy or new artifact row is needed. Artifact IDs and owners remain selected by 088
+    under the parent lock, preserving legitimate reuse. Resume revalidates the original attempt
+    and compares plan metadata with the output journal before any output reconciliation. A
+    committed batch supplies the exact result projection; confirmed rollback creates a failed
+    terminal with `output_publication_rolled_back` and no outputs. An absent batch may publish
+    through the existing promoter. Exact prepared 089 results take precedence, with output
+    inspection before terminal writes. After terminal completion, a bounded receipt binds the
+    plan and result digests; its final or temporary presence forbids rebuilding deleted terminal
+    records. Without a delivery plan, exact older prepared/complete terminal results retain their
+    authorization after read-only output checks. For complete modern execution without a plan,
+    other downstream fragments stop recovery before output rollback or new delivery preparation.
+    Attempts without modern execution retain the older output recovery rules. 092 evidence also
+    prevents 091 batch rebuilding.
 
 The output publication transaction defines logical delivery in SQLite; filesystem readers may see
 a prefix of final files before commit or until recovery runs after a crash. Reconciliation occurs
 before terminal materialization replay and does not execute a candidate. Feature 089 can publish a
-missing marker only from an exact durable terminal preparation; it never infers one from output or
-execution evidence alone. A crash before either publication's preparation is complete requires
-diagnosis of retained staging. Feature 090 prevents automatic relaunch during the
+missing marker only from an exact durable terminal preparation. Feature 092 can create that
+preparation from its verified delivery plan and exact output outcome, including after output
+commit. Interrupted preparation and damaged publication evidence still require diagnosis of
+retained staging. Feature 090 prevents automatic relaunch during the
 candidate-launch-to-execution-evidence window. Feature 091 reconciles registration only after exact
-execution preparation; raw or missing execution bytes cannot authorize it. Neither protocol
-reconstructs a terminal preparation after output commit. A durable intent does not prove
-that Popen happened: interruption before runner entry can leave zero executions and still refuse
+execution preparation; raw or missing execution bytes cannot authorize it. A durable intent does
+not prove that Popen happened: interruption before runner entry can leave zero executions and still refuse
 retry. This is at most one authorized runner entry under the protocol, not exactly-once execution
 or guaranteed completion. Surviving candidate processes are not identified or killed on resume.
 Intent files/events are retained without GC; coordinated removal of all of them is not externally

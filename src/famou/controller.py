@@ -76,6 +76,12 @@ from .evolution import (
     _read_bounded_regular_file,
     build_strategy,
 )
+from .materialization_delivery import (
+    MaterializationDeliveryUncertain,
+    delivery_authority,
+    finish_materialization_delivery,
+    inspect_materialization_delivery,
+)
 from .materialization_execution import (
     MaterializationExecutionUncertain,
     inspect_materialization_execution,
@@ -94,7 +100,12 @@ from .materialization_publication import (
 )
 from .memory import MemoryStore
 from .models import Run, RunStatus
-from .output_publication import OutputPublicationUncertain, publish_outputs, recover_outputs
+from .output_publication import (
+    OutputPublicationUncertain,
+    publish_outputs,
+    recover_output_batch,
+    recover_outputs,
+)
 from .policy import MasterPolicy, PlanDocument, PlanPatch, PolicyDecision
 from .profiles import ProfileRegistry
 from .recovery import RecoveryPolicy, RecoveryProposal
@@ -1586,7 +1597,7 @@ class LocalController:
             "attempt_path": attempt_relative,
         }
         launch = inspect_launch_intent(self.store, child, launch_identity)
-        recover_materialization_execution(self.store, parent, child, launch_identity)
+        modern_execution = recover_materialization_execution(self.store, parent, child, launch_identity)
         if launch is not None:
             # No publication may conceal an unknown process launch. Require its independently
             # recorded execution before allowing existing output/terminal recovery to mutate.
@@ -1619,18 +1630,39 @@ class LocalController:
                     if not marker.exists() else "materialization_launch_outcome_unknown"
                 ) from exc
 
-        # Retain Feature 088 recovery for attempts with independently recorded execution.
-        recover_outputs(self.store, parent, child.id, contract.outputs)
-
         def validate_terminal(payload: dict[str, Any]) -> None:
             current_launch = inspect_launch_intent(self.store, child, launch_identity)
             inspect_materialization_execution(self.store, parent, child, launch_identity)
             if current_launch is not None and not payload.get("execution", {}).get("evidence_path"):
                 raise MaterializationLaunchUncertain("materialization_launch_outcome_unknown")
+            if modern_execution is not None and delivery is None:
+                # An old prepared terminal authorizes its own recovery, but cannot
+                # authorize rolling back an unrelated pending output publication.
+                status, outputs = recover_output_batch(
+                    self.store, parent, child.id, contract.outputs, reconcile=False,
+                )
+                if payload.get("status") == "succeeded":
+                    if ((payload.get("outputs") and (status != "committed" or list(outputs) != payload["outputs"]))
+                        or (not payload.get("outputs") and status is not None)):
+                        raise MaterializationDeliveryUncertain("materialization_delivery_evidence_invalid")
+                elif status not in {None, "rolled_back"}:
+                    raise MaterializationDeliveryUncertain("materialization_delivery_evidence_invalid")
             self._validate_materialization_replay(
                 payload, parent, child, contract, result, candidate_digest, attempt_relative,
             )
 
+        delivery = inspect_materialization_delivery(self.store, parent, child, launch_identity)
+        if delivery is not None:
+            if modern_execution is None:
+                raise MaterializationDeliveryUncertain("materialization_delivery_evidence_invalid")
+            return self._resume_materialization_delivery(
+                parent, child, contract, result, launch_identity, modern_execution, validate_terminal,
+            )
+
+        # Modern execution without a plan may recover an exact old terminal, or
+        # prepare delivery only after proving no downstream evidence exists.
+        if modern_execution is None:
+            recover_outputs(self.store, parent, child.id, contract.outputs)
         recovered = recover_materialization_result(
             self.store, parent, child, validate=validate_terminal,
         )
@@ -1638,15 +1670,7 @@ class LocalController:
             return recovered
         if marker.exists():
             payload = self._read_materialization_result(marker)
-            self._validate_materialization_replay(
-                payload,
-                parent,
-                child,
-                contract,
-                result,
-                candidate_digest,
-                attempt_relative,
-            )
+            validate_terminal(payload)
             self._record_materialization_result(
                 parent,
                 child,
@@ -1657,6 +1681,10 @@ class LocalController:
             )
             return payload
 
+        if modern_execution is not None:
+            return self._resume_materialization_delivery(
+                parent, child, contract, result, launch_identity, modern_execution, validate_terminal,
+            )
         self._validate_absent_materialization_marker(
             parent, child, result.best_candidate_id, candidate_digest, attempt_relative
         )
@@ -1712,19 +1740,13 @@ class LocalController:
                     "materialization_launch_outcome_unknown"
                 ) from exc
             publish_materialization_execution(self.store, parent, child, launch_identity, execution)
-            if execution.status == "timed_out":
-                error = "candidate process timed out"
-            elif execution.status != "succeeded":
-                error = f"candidate process failed: {execution.error or execution.exit_code}"
-            else:
-                validation = self._evaluate_evolved_outputs(contract.outputs, attempt)
-                if not validation.passed:
-                    error = validation.reason
-                else:
-                    outputs = self._promote_evolved_outputs(
-                        parent, child.id, attempt, contract.outputs
-                    )
-        except (OutputPublicationUncertain, MaterializationLaunchUncertain, MaterializationExecutionUncertain):
+            return self._resume_materialization_delivery(
+                parent, child, contract, result, launch_identity, execution, validate_terminal,
+            )
+        except (
+            OutputPublicationUncertain, MaterializationLaunchUncertain,
+            MaterializationExecutionUncertain, MaterializationDeliveryUncertain,
+        ):
             # Unknown launch/commit state or unsafe rollback cannot become a terminal failure
             # claiming no execution or outputs. Preserve the attempt and its durable evidence.
             raise
@@ -1761,6 +1783,60 @@ class LocalController:
         }
         return publish_materialization_result(
             self.store, parent, child, payload, validate=validate_terminal,
+        )
+
+    def _resume_materialization_delivery(
+        self, parent: Run, child: Run, contract: AlgorithmProblemContract, result: StrategyResult,
+        identity: dict[str, Any], execution: CandidateExecution, validate_terminal,
+    ) -> dict[str, Any]:
+        attempt = Path(child.workspace) / identity["attempt_path"]
+
+        def build_plan() -> dict[str, Any]:
+            _, _, authority = delivery_authority(self.store, parent, child, identity)
+            validation = Evaluation(False, (), "candidate execution did not start", {"kind": "output"})
+            error = None
+            metadata = []
+            if execution.status == "timed_out":
+                error = "candidate process timed out"
+            elif execution.status != "succeeded":
+                error = f"candidate process failed: {execution.error or execution.exit_code}"
+            else:
+                validation = self._evaluate_evolved_outputs(contract.outputs, attempt)
+                if not validation.passed:
+                    error = validation.reason
+                else:
+                    for spec in contract.outputs:
+                        source = self._confined_regular_file(attempt, spec.path)
+                        if source is None:
+                            if spec.required:
+                                raise MaterializationDeliveryUncertain("materialization_delivery_evidence_invalid")
+                            continue
+                        content = _read_bounded_regular_file(
+                            source, MAX_ARTIFACT_BYTES, error="materialization_delivery_evidence_invalid",
+                        )
+                        metadata.append({
+                            "path": spec.path, "format": spec.format, "fields": list(spec.fields),
+                            "required": spec.required, "size": len(content),
+                            "sha256": hashlib.sha256(content).hexdigest(),
+                        })
+            payload = {
+                "schema_version": "1", "status": "succeeded" if error is None else "failed",
+                "parent_run_id": parent.id, "evolution_run_id": child.id,
+                "contract_sha256": contract.digest(), "candidate_id": result.best_candidate_id,
+                "candidate_path": result.best_candidate_path, "candidate_sha256": identity["candidate_sha256"],
+                "attempt_path": identity["attempt_path"],
+                "execution": {"status": execution.status, "exit_code": execution.exit_code,
+                              "duration_ms": execution.duration_ms,
+                              "evidence_path": identity["attempt_path"] + "/execution.json"},
+                "validation": validation.as_dict(), "outputs": [], "error": error,
+            }
+            return {**authority, "result": payload, "outputs": metadata}
+
+        return finish_materialization_delivery(
+            self.store, parent, child, identity, execution, specs=contract.outputs,
+            build_plan=build_plan,
+            promote=lambda: self._promote_evolved_outputs(parent, child.id, attempt, contract.outputs),
+            validate=validate_terminal, sanitize=self._sanitize_error,
         )
 
     def _read_materialization_result(self, path: Path) -> dict[str, Any]:

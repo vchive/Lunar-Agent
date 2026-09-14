@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -337,28 +338,26 @@ def test_preexecution_failure_keeps_no_launch_intent_and_replays_normally(tmp_pa
 
 def test_legacy_complete_result_without_launch_evidence_is_still_read_only(tmp_path: Path, monkeypatch) -> None:
     controller, parent, child, result = _fixture(tmp_path)
-    def legacy_registration(store, parent, child, identity, execution):
-        # Produce actual pre-091 registration, with the old random artifact/event IDs.
-        relative = identity["attempt_path"] + "/execution.json"
-        content = (Path(child.workspace) / relative).read_bytes()
-        store.add_artifact(
-            child.id, identity["task_id"], relative, hashlib.sha256(content).hexdigest(),
-            len(content), "evolved_candidate_execution",
+    expected = _materialize(controller, parent, child, result)
+    # Construct the complete pre-090/091/092 format, including a legacy execution artifact ID.
+    artifact = next(row for row in controller.store.list_artifacts(child.id) if row["kind"] == "evolved_candidate_execution")
+    for name in (".execution-publication", ".delivery-publication"):
+        shutil.rmtree(_intent(child).parent / name)
+    with controller.store._connect() as connection:
+        connection.execute("UPDATE artifacts SET id = 'legacy-execution' WHERE id = ?", (artifact["id"],))
+        connection.execute(
+            "DELETE FROM events WHERE run_id = ? AND type IN "
+            "('materialization_execution_prepared', 'materialization_execution_committed', 'materialization_delivery_prepared')",
+            (child.id,),
         )
-        store.append_event(
-            child.id, "evolved_candidate_executed",
-            {"candidate_id": identity["candidate_id"], "candidate_sha256": identity["candidate_sha256"],
-             "status": execution.status, "exit_code": execution.exit_code,
-             "duration_ms": execution.duration_ms, "evidence_path": relative},
-            task_id=identity["task_id"], event_id="event-evolved-candidate-executed-" + hashlib.sha256(
-                f"{parent.id}\0{child.id}\0{identity['candidate_sha256']}".encode()
-            ).hexdigest(),
+        connection.execute(
+            "DELETE FROM events WHERE run_id = ? AND type = 'artifact_recorded' "
+            "AND json_extract(payload, '$.path') = ?", (child.id, artifact["path"]),
         )
-        return execution
-
-    with monkeypatch.context() as patch:
-        patch.setattr(controller_module, "publish_materialization_execution", legacy_registration)
-        expected = _materialize(controller, parent, child, result)
+        controller.store._append_event(
+            connection, child.id, artifact["task_id"], "artifact_recorded",
+            {"artifact_id": "legacy-execution", "path": artifact["path"], "sha256": artifact["sha256"], "size": artifact["size"]},
+        )
     # This reproduces the observable Feature 089 format: terminal receipts and execution
     # evidence exist, but the newer launch protocol did not yet exist.
     _intent(child).unlink()

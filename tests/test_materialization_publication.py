@@ -442,6 +442,12 @@ def test_complete_legacy_result_remains_a_read_only_replay(tmp_path: Path, monke
              "sha256": artifact["sha256"], "size": artifact["size"]},
         )
     shutil.rmtree(_directory(child))
+    # Strip the entire newer delivery protocol when constructing a legacy terminal fixture.
+    shutil.rmtree(Path(child.workspace) / "evolution/materialization/.delivery-publication")
+    with controller.store._connect() as connection:
+        connection.execute(
+            "DELETE FROM events WHERE run_id = ? AND type = 'materialization_delivery_prepared'", (child.id,),
+        )
     files = _filesystem_snapshot(Path(parent.workspace), Path(child.workspace))
     ledger = _database_snapshot(controller, parent, child)
     _forbid_execution_and_promotion(monkeypatch, controller)

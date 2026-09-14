@@ -345,20 +345,95 @@ def recover_outputs(
     store: Store, parent: Run, evolution_run_id: str, specs: tuple[OutputSpec, ...]
 ) -> str | None:
     """Reconcile a retained batch without creating an execution or terminal result."""
+    return recover_output_batch(store, parent, evolution_run_id, specs)[0]
+
+
+def _require_no_output_evidence(store: Store, parent: Run, child_id: str) -> None:
+    _require_no_publication(store, parent.id, child_id)
+    suffix = _key(parent.id, child_id)
+    reserved = {prefix + suffix for prefix in (
+        "event-evolved-outputs-promoted-", "event-output-publication-committed-",
+    )}
+    for event in store.list_events(parent.id):
+        payload = event.get("payload")
+        if event.get("id") in reserved or (
+            event.get("type") in {"evolved_outputs_promoted", "output_publication_committed"}
+            and isinstance(payload, dict) and payload.get("evolution_run_id") == child_id
+        ):
+            raise OutputPublicationUncertain(_INVALID)
+        if event.get("type") == "artifact_recorded" and isinstance(payload, dict):
+            path = payload.get("path")
+            if isinstance(path, str) and payload.get("artifact_id") == (
+                "artifact-output-publication-" + _digest(f"{parent.id}\0{child_id}\0{path}".encode())
+            ):
+                raise OutputPublicationUncertain(_INVALID)
+    for row in store.list_artifacts(parent.id):
+        if row["id"] == "artifact-output-publication-" + _digest(
+            f"{parent.id}\0{child_id}\0{row['path']}".encode()
+        ):
+            raise OutputPublicationUncertain(_INVALID)
+
+
+def _inspect_batch(
+    store: Store, parent: Run, child_id: str, specs: tuple[OutputSpec, ...], directory: Path,
+) -> tuple[str, tuple[dict[str, Any], ...]]:
+    journal, digest = _load(directory, parent, child_id, specs)
+    root = _root(parent)
+    entries = journal["entries"]
+    _verify_files(root, directory, entries)
+    outputs = tuple(entry["output"] for entry in entries)
+    committed = store.output_publication_committed(
+        parent.id, child_id, list(outputs), journal_sha256=digest,
+        owner_task_id=journal["owner_task_id"],
+    )
+    rollback = _encode({"journal_sha256": digest})
+    for name in ("rolled-back.json", ".rolled-back.json.tmp"):
+        path = directory / name
+        if _present(path) and (_read(path, MAX_JOURNAL_BYTES) != rollback or committed):
+            raise OutputPublicationUncertain(_INVALID)
+    if _present(directory / "rolled-back.json"):
+        if any(not entry["existed"] and _present(_target(root, entry["output"]["path"])) for entry in entries):
+            raise OutputPublicationUncertain(_INVALID)
+        return "rolled_back", outputs
+    if committed:
+        if any(not _present(_target(root, entry["output"]["path"])) for entry in entries):
+            raise OutputPublicationUncertain(_INVALID)
+        return "committed", outputs
+    return "uncommitted", outputs
+
+
+def recover_output_batch(
+    store: Store, parent: Run, evolution_run_id: str, specs: tuple[OutputSpec, ...], *,
+    expected_outputs: list[dict[str, Any]] | None = None, reconcile: bool = True,
+) -> tuple[str | None, tuple[dict[str, Any], ...]]:
+    """Inspect or reconcile a batch after checking delivery's byte metadata under the lock."""
     _validate_paths(specs)
     # Intake creates run records before the parent has needed a workspace on disk.
     if not _present(Path(parent.workspace).expanduser()):
-        _require_no_publication(store, parent.id, evolution_run_id)
-        return None
+        if expected_outputs is None:
+            _require_no_publication(store, parent.id, evolution_run_id)
+        else:
+            _require_no_output_evidence(store, parent, evolution_run_id)
+        return None, ()
     root = _root(parent)
     directory = _confined(root, f"{_ROOT}/{_key(parent.id, evolution_run_id)}")
     if not _present(directory):
-        _require_no_publication(store, parent.id, evolution_run_id)
-        return None
+        if expected_outputs is None:
+            _require_no_publication(store, parent.id, evolution_run_id)
+        else:
+            _require_no_output_evidence(store, parent, evolution_run_id)
+        return None, ()
     try:
         with _locked(root):
-            status, _ = _reconcile(store, parent, evolution_run_id, specs, directory)
-            return status
+            if expected_outputs is not None:
+                journal, _ = _load(directory, parent, evolution_run_id, specs)
+                metadata = [{key: value for key, value in entry["output"].items() if key != "artifact_id"}
+                            for entry in journal["entries"]]
+                if _encode(metadata) != _encode(expected_outputs):
+                    raise OutputPublicationUncertain(_INVALID)
+            if not reconcile:
+                return _inspect_batch(store, parent, evolution_run_id, specs, directory)
+            return _reconcile(store, parent, evolution_run_id, specs, directory)
     except OutputPublicationUncertain:
         raise
     except Exception as exc:

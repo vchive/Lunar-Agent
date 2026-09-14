@@ -145,7 +145,7 @@ oversized file, or conflicting destination makes the effective `solve` status fa
 
 Feature [088](specs/088-recoverable-output-publication/) makes a failed multi-file publication
 recoverable: a confirmed uncommitted batch removes only its own new links and preserves existing
-outputs. Resume reconciles the journal before reading the materialization result. Unknown commit
+outputs. Resume validates the batch before accepting a materialization result. Unknown commit
 state or changed evidence preserves the attempt and stops delivery. Filesystem readers can still
 observe a prefix during publication or until crash recovery runs; the atomic boundary is the
 SQLite batch. Staging and journal files are retained. Output recovery never reruns the candidate
@@ -156,8 +156,8 @@ recoverable. Lunar retains the validated result bytes and a database preparation
 publishing `result.json`. Resume can finish that exact pending result and register its artifact and
 events atomically, without executing the candidate again. A completion receipt prevents damaged
 completed results from being silently repaired. Old results remain subject to strict read-only
-validation. Interruptions before durable terminal preparation, including the process-launch to
-execution-evidence window, still require diagnosis.
+validation. Fragmented terminal preparation still requires diagnosis; the protocols below cover
+candidate launch, execution registration and earlier delivery phases.
 
 Feature [090](specs/090-durable-materialization-launch/) records and syncs a launch intent in the
 child workspace and SQLite before entering the final runner. A nonblocking child lock covers the
@@ -174,9 +174,17 @@ registration recoverable. After the runner returns, Lunar checks the exact execu
 launch intent, retains a journal, and records a preparation receipt. The execution artifact and
 its events then commit together. Resume can finish this pending registration without running the
 candidate; retained completion or downstream publication evidence prevents deleted records from
-being rebuilt. Raw `execution.json` alone never authorizes recovery. A missing terminal preparation
-still requires diagnosis after execution registration; this recovery does not publish new outputs
-or infer task completion.
+being rebuilt. Raw `execution.json` alone never authorizes recovery.
+
+Feature [092](specs/092-recoverable-materialization-delivery/) continues delivery from a complete
+modern execution registration. If no downstream publication exists, resume independently verifies
+the retained attempt and durably records a delivery plan before publishing. Once prepared, it
+reuses committed output evidence to finish the terminal result; confirmed output rollback produces
+an explicit failed result without republishing. The candidate never runs again during recovery.
+Damaged prepared or committed records stop recovery; an intact terminal can finish a missing
+delivery completion receipt. Exact older terminal preparations remain recoverable without
+migration. Interruptions before complete execution or delivery preparation can still require
+diagnosis; successful delivery is not guaranteed.
 
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.
