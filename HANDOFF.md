@@ -6,6 +6,36 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 093 结项：只读 materialization 诊断
+
+Feature 093 新增 `diagnose-materialization PARENT_RUN_ID EVOLUTION_RUN_ID`，用于查看 090–092
+保留的启动、执行登记、delivery plan、输出批次和终态凭据。命令在 CLI `_config()` 之前
+分派，不创建 home、数据库、Store、memory 或协议锁，也不调用 runner、promoter、rollback
+或任何 recovery/publish API。它把 state.db 和可选未 checkpoint 的 state.db-wal 以 no-follow
+有界复制到源目录之外的临时目录，只在副本上开启 SQLite；源内容、目录项和业务记录保持
+不变（普通读取造成的 atime 变化不在保证内）。源数据库 rollback journal、WAL/DB 超限、
+坏节点、访问失败或复制前后身份变化会返回固定 unavailable 错误，不输出底层异常或保留的
+goal/命令/日志内容。
+
+报告 schema 1 分别列出 `launch`、`execution`、`delivery`、`outputs`、`terminal` 五阶段，
+给出固定的 absent/present/incomplete/invalid/unavailable 观察状态、文件大小和 SHA-256、
+协议事件计数、artifact 计数及固定 issue codes。它会显示 prepared、fragment、legacy、
+临时和损坏节点，但不把结构存在称为 committed/successful，也永远输出
+`recovery_eligibility: not_assessed`。已有锁只以非阻塞共享方式打开；竞争返回 busy，不创建
+缺失锁。诊断生成报告的退出码与 materialization 成败无关：observed/attention_required 为
+0，busy/unavailable 为 2。报告只提供下一步保留证据并使用正常 resume 的固定提示。
+
+离线验证：snapshot 与诊断聚焦测试 **136 passed in 20.55s**（snapshot 57、报告/CLI 79）；
+覆盖 checkpoint/WAL、完整/中断/legacy/碎片、坏节点、敏感信息、锁竞争、缺失 home/workspace、
+并发变化、SQLite 与文件边界及源快照保持。Ruff、compileall、Specify prerequisites 和
+`git diff --check` 通过；主仓全量复测 **3586 passed in 201.05s**。
+没有启动真实模型、provider、WebAgent、OpenEvolve/ShinkaEvolve、远端服务或 campaign，也没有
+新增算法效果或 WebAgent 持平结论。
+
+剩余边界：诊断是有界观察清单，不是恢复校验器、授权或成功证明；不重建记录、不验证所有
+候选/输入/输出字节、不识别存活进程，也不认证外部 writer。数据库或文件系统在检查中持续变化
+时可能返回 unavailable，需要操作稳定后重试。临时诊断副本不会成为运行证据，记录仍无 GC。
+
 ## Feature 092 结项：执行后的交付恢复
 
 Feature 092 接通了完整 091 执行登记之后的输出验证、发布和终态完成。resume 在完整

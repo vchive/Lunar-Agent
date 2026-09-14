@@ -186,6 +186,14 @@ delivery completion receipt. Exact older terminal preparations remain recoverabl
 migration. Interruptions before complete execution or delivery preparation can still require
 diagnosis; successful delivery is not guaranteed.
 
+Feature [093](specs/093-readonly-materialization-diagnostics/) adds
+`diagnose-materialization PARENT_RUN_ID EVOLUTION_RUN_ID`. It reports bounded observations for
+launch, execution, delivery, outputs and terminal evidence without initializing the run, creating
+locks, invoking recovery, or running a candidate. The database and any uncheckpointed WAL are
+read from a private snapshot so source records and directory entries remain unchanged. Reports
+always set `recovery_eligibility` to `not_assessed`; an attention or unavailable result preserves
+evidence for normal resume and manual diagnosis.
+
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.
 Contracts without `outputs` keep the existing source-only result. `evolve CONTRACT` remains

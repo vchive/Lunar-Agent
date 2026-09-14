@@ -232,6 +232,14 @@ execution preparation; raw or missing execution bytes cannot authorize it. A dur
 not prove that Popen happened: interruption before runner entry can leave zero executions and still refuse
 retry. This is at most one authorized runner entry under the protocol, not exactly-once execution
 or guaranteed completion. Surviving candidate processes are not identified or killed on resume.
+19. `diagnose-materialization` is a strictly observational CLI path dispatched before normal
+    configuration initialization. It copies the bounded SQLite database and optional WAL to a
+    private temporary directory, then queries only the copy; it never creates source locks,
+    initializes storage, runs recovery or executes a candidate. The report separately inventories
+    launch, execution, delivery, output and terminal evidence, including partial and malformed
+    records, and always marks `recovery_eligibility` as `not_assessed`. Source contents, directory
+    entries and business records are preserved (ordinary read access-time changes are outside the
+    guarantee). Missing, changing, busy or unsafe evidence is reported without reconstructing it.
 Intent files/events are retained without GC; coordinated removal of all of them is not externally
 authenticated. The advisory locks coordinate these publishers, not unrelated same-user file writers.
 

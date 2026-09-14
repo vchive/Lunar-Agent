@@ -775,6 +775,13 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("run_id")
         _add_home(command_parser)
         _add_json(command_parser)
+    diagnostic_parser = subparsers.add_parser(
+        "diagnose-materialization", help="inspect retained delivery evidence without changing the run",
+    )
+    diagnostic_parser.add_argument("parent_run_id")
+    diagnostic_parser.add_argument("evolution_run_id")
+    _add_home(diagnostic_parser)
+    _add_json(diagnostic_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3699,6 +3706,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "effect-baseline":
             _emit(_effect_baseline(args), args.json)
             return 0
+        if args.command == "diagnose-materialization":
+            from .materialization_diagnostics import (
+                diagnose_materialization,
+                format_materialization_diagnostic,
+            )
+
+            # Avoid _config/Config.ensure/Store.initialize, including for a missing home.
+            diagnostic_home = Path(args.home or os.environ.get("FAMOU_HOME", ".famou")).expanduser()
+            payload = diagnose_materialization(
+                diagnostic_home / "state.db", args.parent_run_id, args.evolution_run_id,
+            )
+            if args.json:
+                _emit(payload, True)
+            else:
+                print(format_materialization_diagnostic(payload))
+            return 2 if payload["status"] in {"busy", "unavailable"} else 0
         config = _config(args)
         if args.command == "init":
             _emit({"home": str(config.home), "status": "initialized"}, args.json)
