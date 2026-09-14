@@ -1085,6 +1085,19 @@ to the background child. The public `prepare_producer_seed_manifest(...)` API pe
 read/validation step when Python integration is preferred. See the
 [operator guide](specs/096-producer-cli-warm-start/quickstart.md) for the complete workflow and limits.
 
+Feature [097](specs/097-benchmark-task-envelope/) adds a static `lunar-benchmark-task-v1`
+envelope for future SkyDiscover/LLM4AD comparisons:
+
+```bash
+lunar-agent benchmark-task validate task.json --contract contract.json \
+  --input-root ./public-input --model-profile-sha256 "$MODEL_PROFILE_SHA256" \
+  --evaluator-fingerprint "$EVALUATOR_SHA256" --json
+```
+
+Validation rechecks confined input bytes and caller pins, emitting only bounded envelope and
+comparison digests. It does not initialize Lunar storage or run an external framework, model or
+evaluator; framework scores and generation IDs remain outside Lunar score and iteration authority.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

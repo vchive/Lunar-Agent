@@ -23,6 +23,14 @@ fresh revalidation 和 detached 参数传递。使用方法见
 远端服务；不构成框架效果比较。下一层仍是 SkyDiscover/LLM4AD benchmark/task envelope
 与固定条件下的独立测量，多文件/repository/workflow candidate 另立契约。
 
+## 2026-09-14：benchmark/task envelope
+
+Feature 097 adds the offline `lunar-benchmark-task-v1` envelope and static
+`benchmark-task validate` command. It binds task, contract, input bytes, model/evaluator identities
+and physical budget for future SkyDiscover/LLM4AD comparisons. Admission is read-only and external
+scores or generation IDs never become Lunar scores or iterations. No external framework or model is
+launched; comparisons still require fixed conditions and a new pre-registered measurement.
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)

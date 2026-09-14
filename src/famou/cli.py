@@ -824,6 +824,22 @@ def build_parser() -> argparse.ArgumentParser:
     selection.add_argument("--program-id", action="append", dest="program_ids", help="select ordered IDs; repeat for more")
     selection.add_argument("--top-k", type=int, help="select top correct rows by producer score (default: 1)")
     _add_json(shinka_parser)
+    benchmark_task_parser = subparsers.add_parser(
+        "benchmark-task", help="validate a benchmark task envelope without initialization",
+    )
+    benchmark_task_commands = benchmark_task_parser.add_subparsers(
+        dest="benchmark_task_command", required=True,
+    )
+    validate_task_parser = benchmark_task_commands.add_parser(
+        "validate", help="validate task identity and input bytes",
+    )
+    validate_task_parser.add_argument("task", type=Path, help="benchmark task envelope JSON")
+    validate_task_parser.add_argument("--contract", type=Path, required=True, help="algorithm contract JSON")
+    validate_task_parser.add_argument("--input-root", type=Path, required=True, help="root containing declared input files")
+    validate_task_parser.add_argument("--model-profile-sha256", required=True, help="caller-pinned model profile digest")
+    validate_task_parser.add_argument("--evaluator-fingerprint", required=True, help="caller-pinned exact evaluator digest")
+    _add_home(validate_task_parser)
+    _add_json(validate_task_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3773,6 +3789,41 @@ def _export_shinka(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _benchmark_task_validate(args: argparse.Namespace) -> dict[str, object]:
+    from .benchmark_task import (
+        BenchmarkTaskError,
+        admit_benchmark_task_envelope,
+        parse_benchmark_task_envelope,
+    )
+
+    try:
+        content = _read_bounded_regular_file(
+            args.contract.expanduser(), MAX_CONTRACT_BYTES, error="benchmark_task_envelope_invalid",
+        )
+        contract = AlgorithmProblemContract.from_dict(_strict_json_loads(content))
+        envelope = parse_benchmark_task_envelope(args.task)
+        admitted = admit_benchmark_task_envelope(
+            envelope,
+            contract_sha256=contract.digest(),
+            input_root=args.input_root,
+            model_profile_sha256=args.model_profile_sha256,
+            evaluator_fingerprint=args.evaluator_fingerprint,
+        )
+    except BenchmarkTaskError:
+        raise
+    except (EvolutionError, OSError, TypeError, ValueError, RecursionError):
+        raise ValueError("benchmark_task_envelope_invalid") from None
+    return {
+        "status": "validated",
+        "task_key": envelope.task.key,
+        "task_revision_id": envelope.task.revision_id,
+        "envelope_sha256": admitted.envelope_sha256,
+        "comparison_sha256": admitted.comparison_sha256,
+        "contract_sha256": admitted.contract_sha256,
+        "input_count": len(admitted.inputs),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -3837,6 +3888,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "export-shinka-result":
             _emit(_export_shinka(args), args.json)
+            return 0
+        if args.command == "benchmark-task":
+            if args.benchmark_task_command != "validate":
+                raise ValueError("benchmark_task_envelope_invalid")
+            _emit(_benchmark_task_validate(args), args.json)
             return 0
         config = _config(args)
         if args.command == "init":

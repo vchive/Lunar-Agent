@@ -1,5 +1,14 @@
 # Lunar-Agent 交接记录
 
+## Feature 097：benchmark/task envelope（已完成）
+
+已开始实现面向 SkyDiscover/LLM4AD 的离线 `lunar-benchmark-task-v1` task envelope：严格规范化
+JSON、benchmark/task/contract/input/model/evaluator/budget 身份、稳定 envelope/comparison digest，
+以及只读输入字节和 caller pin admission。新增静态 `benchmark-task validate` CLI，在普通配置
+初始化前分派，不启动框架、模型、evaluator、scheduler 或远端服务。聚焦测试 **79 passed**，
+全量回归 **3842 passed**；本轮不运行真实 benchmark 或生成效果结论。详见
+`specs/097-benchmark-task-envelope/validation.md`。
+
 ## Feature 096：外部 producer CLI 热启动
 
 已打通用户可直接操作的 Shinka → Lunar population 工作流。新增
@@ -1555,7 +1564,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/096-producer-cli-warm-start
+specs/097-benchmark-task-envelope
 ```
 
 后续新功能必须：

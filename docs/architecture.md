@@ -295,6 +295,16 @@ revalidation uses the exact evaluator again. Detached startup forwards the origi
 and pins so the child reconstructs the same manifest. These flags never install, discover or run
 an external framework; ordinary generator/evaluator commands remain the caller's explicit choices.
 
+## Benchmark task envelopes
+
+Feature 097 defines `BenchmarkTaskEnvelope` as a static interchange boundary for
+SkyDiscover/LLM4AD-style tasks. Strict canonical JSON binds task and benchmark identity,
+contract/input digests, model and exact evaluator pins, candidate kind, and physical attempt budget.
+`admit_benchmark_task_envelope` only verifies caller pins and confined local input bytes; it never
+starts a producer, model, evaluator, scheduler or remote service. The comparison digest excludes
+framework names and run IDs so equivalent workloads can be compared without importing their result
+semantics. External scores and generation numbers remain outside Lunar score, rank and iteration state.
+
 ## Invocation and evolution seams
 
 The invocation seam and the search-strategy seam are deliberately independent:
