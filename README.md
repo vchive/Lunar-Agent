@@ -1104,6 +1104,11 @@ evaluator, candidate kind and physical budget. `BenchmarkComparisonPlan` and
 `admit_benchmark_comparison_plan(...)` only validate those identities and local input bytes; they
 do not run SkyDiscover, LLM4AD, Lunar or any evaluator, and they produce no effectiveness claim.
 
+Feature [099](specs/099-benchmark-comparison-result/) adds a bounded result receipt for that plan.
+It records per-arm status, counters, timing, finite score summaries and evidence digests, then
+checks that every planned arm appears exactly once. It remains measurement evidence and never
+updates Lunar candidate, score or iteration authority.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

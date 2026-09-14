@@ -38,6 +38,12 @@ contract, model, evaluator, candidate and physical budget across two or more arm
 read-only input/pin admission. This is preparation for later SkyDiscover/LLM4AD comparisons; no
 framework execution or effectiveness claim is included.
 
+## 2026-09-15：comparison result receipt
+
+Feature 099 adds a bounded result envelope for future fixed-condition measurements. It binds each
+per-arm summary to the 098 plan and preserves only evidence digests and finite summary metrics;
+parsing is read-only and does not run or score any external framework.
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)

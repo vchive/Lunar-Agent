@@ -311,6 +311,11 @@ budget fields, while framework labels and run IDs stay outside the identity. Adm
 097 read-only checks independently for every arm and keeps each arm's physical attempt budget
 isolated. It is a plan validator, not a framework runner or result comparator.
 
+Feature 099 adds `BenchmarkComparisonResult`, a strict offline receipt bound to that plan. It
+accepts only bounded per-arm summaries and evidence digests, derives a stable result identity, and
+rejects missing or extra arms. The receipt is measurement evidence; it does not import scores into
+Lunar state or execute any producer, model or evaluator.
+
 ## Invocation and evolution seams
 
 The invocation seam and the search-strategy seam are deliberately independent:
