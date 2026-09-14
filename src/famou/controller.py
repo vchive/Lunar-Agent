@@ -78,6 +78,7 @@ from .evolution import (
 )
 from .memory import MemoryStore
 from .models import Run, RunStatus
+from .output_publication import OutputPublicationUncertain, publish_outputs, recover_outputs
 from .policy import MasterPolicy, PlanDocument, PlanPatch, PolicyDecision
 from .profiles import ProfileRegistry
 from .recovery import RecoveryPolicy, RecoveryProposal
@@ -1509,6 +1510,10 @@ class LocalController:
             child, contract, result
         )
 
+        # Publication recovery reconciles only the output batch. The existing terminal-marker
+        # and execution gates below still decide whether this materialization may be returned.
+        recover_outputs(self.store, parent, child.id, contract.outputs)
+
         child_root = Path(child.workspace).expanduser().resolve(strict=False)
         candidate_digest = hashlib.sha256(candidate_bytes).hexdigest()
         attempt_relative = (
@@ -1623,6 +1628,10 @@ class LocalController:
                     outputs = self._promote_evolved_outputs(
                         parent, child.id, attempt, contract.outputs
                     )
+        except OutputPublicationUncertain:
+            # An unknown database commit or unsafe rollback cannot become a terminal failure
+            # claiming no promoted outputs. Preserve the attempt and its publication journal.
+            raise
         except (ArtifactError, EvolutionError, OSError, TypeError, ValueError) as exc:
             error = self._sanitize_error(exc)
 
@@ -2357,7 +2366,7 @@ class LocalController:
         attempt: Path,
         specs: tuple[OutputSpec, ...],
     ) -> tuple[dict[str, Any], ...]:
-        """Preflight every output, then atomically publish immutable parent bytes."""
+        """Preflight every output, then publish its recoverable file/ledger batch."""
         root = Path(parent.workspace).expanduser().resolve(strict=False)
         tasks = self.store.list_tasks(parent.id)
         owner = next(
@@ -2427,41 +2436,11 @@ class LocalController:
                 "materialized outputs would exceed the parent artifact byte budget"
             )
 
-        promoted: list[dict[str, Any]] = []
-        artifacts = ArtifactStore(root, self.store, parent.id)
-        for output, source, target, content, digest in prepared:
-            del source
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if not target.exists():
-                temporary = target.with_name(f".{target.name}.materializing")
-                if temporary.is_symlink():
-                    raise ArtifactError(f"algorithm output temporary path is symlinked: {output.path}")
-                temporary.write_bytes(content)
-                temporary.replace(target)
-            existing = latest.get(output.path)
-            artifact_id = existing["id"] if existing is not None else artifacts.record(
-                target, owner.id, kind="output"
-            )
-            promoted.append(
-                {
-                    "artifact_id": artifact_id,
-                    "path": output.path,
-                    "format": output.format,
-                    "fields": list(output.fields),
-                    "required": output.required,
-                    "size": len(content),
-                    "sha256": digest,
-                }
-            )
-        if promoted:
-            self.store.append_event(
-                parent.id,
-                "evolved_outputs_promoted",
-                {"evolution_run_id": evolution_run_id, "outputs": promoted},
-                task_id=owner.id,
-                event_id=promotion_event_id,
-            )
-        return tuple(promoted)
+        return publish_outputs(
+            self.store, parent, evolution_run_id, owner.id,
+            [(output, content) for output, _source, _target, content, _digest in prepared],
+            artifact_limit,
+        )
 
     def _observe_evolution(
         self, run_id: str, task_id: str, event: str, payload: dict[str, object]

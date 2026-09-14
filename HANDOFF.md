@@ -6,6 +6,40 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 088 结项：可恢复的演化输出批量发布
+
+Feature 088 补齐了上一轮记录的多 output 发布边界。父 workspace 的
+`.evolved-output-publications/` 保存同盘 staging、严格有界的不可变 journal 和 rollback
+acknowledgement。journal 绑定 parent/child/owner、完整输出 projection、原文件是否存在以及
+stage 的 device/inode。父级 flock 串行化发布与恢复；所有输出和完整 ledger 通过预检后，
+以 no-clobber hardlink 发布新文件，并在一个 FULL-synchronous SQLite 事务中登记全部新增
+output artifacts、artifact events、既有 `evolved_outputs_promoted` 和绑定 journal digest
+的 `output_publication_committed`。复用的文件和目录同样先 fsync；旧文件和其他父任务的
+合法 artifact ID/owner 保持不变。
+
+提交异常必须回查完整一致的数据库快照，不能直接视为未提交。只有确认未提交时才删除
+仍匹配 stage inode 和 digest 的本次新增链接，整批预检在任何删除之前完成；rollback
+中断后会补同步已删除路径的目录。commit/rollback 不可确认、journal/输出/ledger 漂移时保留
+现场并拒绝 terminal claim。恢复先于 materialization marker replay，验证 journal owner
+与数据库 owner；日志目录丢失但 SQLite acknowledgement 仍在时禁止降级。重复发布请求
+改变 bytes、owner 或输出集合也会拒绝。路径大小写/Unicode 别名、文件/目录前缀冲突和
+跨 volume 输出会在发布前拒绝。
+
+最终离线验证：088 聚焦四文件 196 项（15.30 秒），主仓全量 2787 项（83.45 秒）；Ruff、
+compileall、Specify prerequisites、`git diff --check` 均通过。051/074/076/078/082 共 601 个
+tracked 封存文件无 diff，独立终审无剩余 blocker。离线测试覆盖第二文件/第二 artifact/事件失败、commit
+后异常、不可查询的数据库、真实进程 `os._exit`、rollback 中断、双进程争锁、复用输出、
+日志丢失和完整性漂移。没有启动真实模型、provider、WebAgent、OpenEvolve/ShinkaEvolve、
+远端服务或 campaign，也没有新增效果提升或 WebAgent 持平结论。
+
+剩余边界：逻辑原子性交付以 SQLite batch 为准，任意文件系统读者在发布期间或 crash 后
+恢复前仍可看到部分路径。stage/journal 暂不 GC；完整 journal 发布前的中断保留现场并要求
+诊断，同一 evolution identity 的已回滚 batch 不会重新发布。恢复不会执行候选，也不会补造
+缺失的 terminal marker。`Popen` 到 durable execution evidence 的窗口，以及 terminal
+marker 与 materialization ledger/event 分开持久化的缺口仍未覆盖。flock 只协调本模块的
+发布者，不对其他同用户进程提供文件真实性保证。后续开发应分别为这两个窗口制定恢复协议，
+不要将本轮离线工程验证解释为新的算法效果测量。
+
 ## Feature 084/085 结项：verified seed 与 population-first
 
 Feature 084 与 Feature 085 已于 2026-09-14 完成实现、离线验证和独立终审。所有新演化任务
@@ -30,9 +64,10 @@ diff，独立终审无 P0/P1/P2 blocker。本次没有启动模型、provider、
 OpenEvolve/ShinkaEvolve、远端服务、company evaluator 或 campaign，也没有产生新的效果提升、
 有效解率提升或 WebAgent 持平结论。
 
-仍保留两个系统边界。Feature 036 的多 output 发布没有跨文件系统与 SQLite ledger 的整体事务；
+084/085 结项时仍保留两个系统边界。Feature 036 的多 output 发布没有跨文件系统与 SQLite ledger 的整体事务；
 第二个 output artifact 失败时可能残留前面已发布的文件和 ledger row。完整修复需要 Store 批量
-事务、同盘 staging、commit/rollback journal 与 crash recovery。另一个边界是 subprocess
+事务、同盘 staging、commit/rollback journal 与 crash recovery；此项已由上面的 Feature 088
+实现可恢复批量发布。另一个边界是 subprocess
 `Popen` 成功到 `.execution.json.tmp` durable publication 之间的硬崩溃窗口；在没有 durable
 pre-launch protocol 或独立事务的情况下，现有证据不能判定候选是否已经执行，因此不能声称
 严格 exactly-once。

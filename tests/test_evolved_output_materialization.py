@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import stat
 import sys
 from dataclasses import replace
@@ -25,6 +26,7 @@ from famou.evolution import (
     EvolutionError,
     StrategyResult,
 )
+from famou.output_publication import OutputPublicationUncertain
 from famou.runtime import MockRuntime, RuntimeResult
 
 
@@ -175,6 +177,141 @@ def _materialization_attempt_path(child, result: StrategyResult) -> Path:
         / "materialization"
         / f"{result.best_candidate_id}-{digest[:12]}"
     )
+
+
+def _batch_materialization_fixture(tmp_path: Path):
+    first = _contract().outputs[0]
+    contract = replace(_contract(), outputs=(first, replace(first, path="output/second.csv")))
+    source = _counted_materialization_source(output=True) + (
+        "Path('output/second.csv').write_text('item_id,route_id\\n2,B\\n')\n"
+    )
+    return (*_evolution_fixture(tmp_path, source, contract=contract), contract)
+
+
+def _publication_journal(parent, child) -> Path:
+    key = hashlib.sha256(f"{parent.id}\0{child.id}".encode()).hexdigest()
+    return parent.workspace / ".evolved-output-publications" / key / "journal.json"
+
+
+def test_batch_database_failure_produces_replayable_failure_without_partial_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, parent, child, result, contract = _batch_materialization_fixture(tmp_path)
+    with controller.store._connect() as connection:
+        connection.execute(
+            "CREATE TRIGGER fail_second_output BEFORE INSERT ON artifacts "
+            "WHEN NEW.kind = 'output' AND NEW.path = 'output/second.csv' "
+            "BEGIN SELECT RAISE(ABORT, 'fixture failure'); END"
+        )
+    materialized = controller.materialize_evolved_outputs(
+        parent.id, child.id, contract, result, timeout_seconds=1
+    )
+    assert materialized["status"] == "failed"
+    assert materialized["outputs"] == []
+    assert all(not (parent.workspace / spec.path).exists() for spec in contract.outputs)
+    assert not [row for row in controller.store.list_artifacts(parent.id) if row["kind"] == "output"]
+    assert not [event for event in controller.store.list_events(parent.id) if event["type"] in {
+        "evolved_outputs_promoted", "output_publication_committed",
+    }]
+    assert _publication_journal(parent, child).with_name("rolled-back.json").is_file()
+    monkeypatch.setattr(CommandCandidateRunner, "run", lambda *a, **k: pytest.fail("reexecuted"))
+    assert controller.materialize_evolved_outputs(
+        parent.id, child.id, contract, result, timeout_seconds=1
+    ) == materialized
+    assert (_materialization_attempt_path(child, result) / "execution-count.txt").read_text() == "1"
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_unknown_publication_preserves_attempt_without_terminal_claim_or_reexecution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, committed: bool,
+) -> None:
+    controller, parent, child, result, contract = _batch_materialization_fixture(tmp_path)
+
+    def unavailable(*args, **kwargs):
+        raise OSError("fixture database unavailable")
+
+    original_commit = controller.store.commit_output_publication
+    with monkeypatch.context() as patch:
+        def unknown_commit(*args, **kwargs):
+            if committed:
+                original_commit(*args, **kwargs)
+            patch.setattr(controller.store, "output_publication_committed", unavailable)
+            raise OSError("fixture commit outcome unavailable")
+
+        patch.setattr(controller.store, "commit_output_publication", unknown_commit)
+        with pytest.raises(OutputPublicationUncertain, match="output_publication_commit_unknown"):
+            controller.materialize_evolved_outputs(
+                parent.id, child.id, contract, result, timeout_seconds=1
+            )
+    marker = child.workspace / "evolution/materialization/result.json"
+    assert not marker.exists()
+    assert all((parent.workspace / spec.path).is_file() for spec in contract.outputs)
+    assert _publication_journal(parent, child).is_file()
+    outputs = [row for row in controller.store.list_artifacts(parent.id) if row["kind"] == "output"]
+    assert len(outputs) == (2 if committed else 0)
+    monkeypatch.setattr(CommandCandidateRunner, "run", lambda *a, **k: pytest.fail("reexecuted"))
+    for _ in range(2):
+        with pytest.raises(EvolutionError, match="materialization marker is missing"):
+            controller.materialize_evolved_outputs(
+                parent.id, child.id, contract, result, timeout_seconds=1
+            )
+        assert not marker.exists()
+        assert all((parent.workspace / spec.path).exists() == committed for spec in contract.outputs)
+    assert (_materialization_attempt_path(child, result) / "execution-count.txt").read_text() == "1"
+
+
+def test_materialization_resume_reconciles_interrupted_batch_before_marker_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, parent, child, result, contract = _batch_materialization_fixture(tmp_path)
+    original = os.link
+    first = parent.workspace / contract.outputs[0].path
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt(source, target, *args, **kwargs):
+        original(source, target, *args, **kwargs)
+        if Path(target) == first:
+            raise Interrupted
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", interrupt)
+        with pytest.raises(Interrupted):
+            controller.materialize_evolved_outputs(
+                parent.id, child.id, contract, result, timeout_seconds=1
+            )
+    assert first.is_file()
+    assert not (parent.workspace / contract.outputs[1].path).exists()
+    monkeypatch.setattr(CommandCandidateRunner, "run", lambda *a, **k: pytest.fail("reexecuted"))
+    for _ in range(2):
+        with pytest.raises(EvolutionError, match="materialization marker is missing"):
+            controller.materialize_evolved_outputs(
+                parent.id, child.id, contract, result, timeout_seconds=1
+            )
+        assert all(not (parent.workspace / spec.path).exists() for spec in contract.outputs)
+    assert _publication_journal(parent, child).with_name("rolled-back.json").is_file()
+    assert (_materialization_attempt_path(child, result) / "execution-count.txt").read_text() == "1"
+
+
+@pytest.mark.parametrize("drift", ["content", "missing_directory"])
+def test_cached_materialization_rejects_publication_journal_drift(
+    tmp_path: Path, drift: str,
+) -> None:
+    controller, parent, child, result = _evolution_fixture(
+        tmp_path, _counted_materialization_source(output=True)
+    )
+    materialized = controller.materialize_evolved_outputs(
+        parent.id, child.id, _contract(), result, timeout_seconds=1
+    )
+    journal = _publication_journal(parent, child)
+    if drift == "missing_directory":
+        shutil.rmtree(journal.parent)
+    else:
+        content = json.loads(journal.read_bytes())
+        content["entries"][0]["existed"] = True
+        journal.write_text(json.dumps(content, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+    _assert_cached_replay_rejected_without_writes(controller, parent, child, result, materialized)
 
 
 def _assert_cached_replay_rejected_without_writes(

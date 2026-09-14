@@ -136,11 +136,21 @@ Source-only contracts receive the same process gate without requiring output fil
 
 When the compiled contract declares `outputs`, Lunar-Agent then runs the selected best candidate
 once more in a separate final workspace. Search-time output is evidence only and is never promoted
-directly. The final candidate must recreate the exact declared files before their bytes are
-atomically promoted to the intake workspace. The response exposes this as
+directly. The final candidate must recreate the exact declared files before Lunar stages their
+bytes and journals the output batch in the intake workspace. Final paths use no-clobber links;
+all new artifact rows and promotion evidence commit in one SQLite transaction. The response exposes this as
 `evolution.materialization`; a failed process, timeout, missing/malformed output, symlink,
 oversized file, or conflicting destination makes the effective `solve` status fail and prevents
 `deliver`.
+
+Feature [088](specs/088-recoverable-output-publication/) makes a failed multi-file publication
+recoverable: a confirmed uncommitted batch removes only its own new links and preserves existing
+outputs. Resume reconciles the journal before reading the materialization result. Unknown commit
+state or changed evidence preserves the attempt and stops delivery. Filesystem readers can still
+observe a prefix during publication or until crash recovery runs; the atomic boundary is the
+SQLite batch. Staging and journal files are retained. Recovery never reruns the candidate or
+constructs a missing terminal result; the process-launch and terminal-result persistence gaps
+remain explicit limits.
 
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.

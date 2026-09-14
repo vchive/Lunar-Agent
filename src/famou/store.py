@@ -6,13 +6,17 @@ mutating operation emits an event, and event IDs are idempotency keys.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .algorithm import MAX_OUTPUTS, OutputSpec
 from .budget import BudgetSpec
 from .evaluator import validate_acceptance
 from .models import Attempt, Run, RunStatus, Task, TaskStatus
@@ -1338,6 +1342,304 @@ class Store:
                 {"artifact_id": artifact_id, "path": path, "sha256": sha256, "size": size},
             )
         return artifact_id
+
+    @staticmethod
+    def _output_publication_manifest(
+        run_id: str,
+        evolution_run_id: str,
+        outputs: list[dict[str, Any]],
+        journal_sha256: str,
+    ) -> list[dict[str, Any]]:
+        """Validate and detach the journal projection without touching output files."""
+        error = "output_publication_ledger_mismatch"
+        if (
+            any(not isinstance(value, str) or not value or "\0" in value
+                for value in (run_id, evolution_run_id))
+            or not isinstance(journal_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", journal_sha256) is None
+            or not isinstance(outputs, list)
+            or not 1 <= len(outputs) <= MAX_OUTPUTS
+        ):
+            raise ValueError(error)
+        keys = {"artifact_id", "path", "format", "fields", "required", "size", "sha256"}
+        paths: set[str] = set()
+        ids: set[str] = set()
+        for item in outputs:
+            if not isinstance(item, dict) or set(item) != keys:
+                raise ValueError(error)
+            artifact_id, digest, size = item["artifact_id"], item["sha256"], item["size"]
+            if (
+                not isinstance(artifact_id, str) or not artifact_id or "\0" in artifact_id
+                or not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                or type(size) is not int or not 0 <= size <= 256 * 1024
+            ):
+                raise ValueError(error)
+            try:
+                metadata = {key: item[key] for key in ("path", "format", "fields", "required")}
+                spec = OutputSpec.from_dict(metadata)
+                if spec.to_dict() != metadata:
+                    raise ValueError(error)
+            except (TypeError, ValueError):
+                raise ValueError(error) from None
+            if spec.path in paths or artifact_id in ids:
+                raise ValueError(error)
+            paths.add(spec.path)
+            ids.add(artifact_id)
+        return json.loads(json.dumps(outputs, allow_nan=False))
+
+    @staticmethod
+    def _output_publication_artifact_id(run_id: str, evolution_run_id: str, path: str) -> str:
+        return "artifact-output-publication-" + hashlib.sha256(
+            f"{run_id}\0{evolution_run_id}\0{path}".encode()
+        ).hexdigest()
+
+    @staticmethod
+    def _output_publication_event_payload(raw: str) -> dict[str, Any]:
+        def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("output_publication_ledger_mismatch")
+                result[key] = value
+            return result
+
+        def reject_number(value: str) -> Any:
+            raise ValueError("output_publication_ledger_mismatch")
+
+        payload = json.loads(
+            raw, object_pairs_hook=unique_object,
+            parse_constant=reject_number, parse_float=reject_number,
+        )
+        if not isinstance(payload, dict):
+            raise TypeError("output_publication_ledger_mismatch")
+        return payload
+
+    def _inspect_output_publication(
+        self,
+        connection: sqlite3.Connection,
+        run_id: str,
+        evolution_run_id: str,
+        outputs: list[dict[str, Any]],
+        journal_sha256: str,
+        task_id: str | None = None,
+    ) -> tuple[bool, list[dict[str, Any]]]:
+        """Inspect the complete batch in the caller's one SQLite snapshot."""
+        error = "output_publication_ledger_mismatch"
+        if connection.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,)).fetchone() is None:
+            raise ValueError(error)
+        task_ids = {
+            row["id"] for row in connection.execute("SELECT id FROM tasks WHERE run_id = ?", (run_id,))
+        }
+        if task_id is not None and task_id not in task_ids:
+            raise ValueError(error)
+        suffix = hashlib.sha256(f"{run_id}\0{evolution_run_id}".encode()).hexdigest()
+        expected_events = {
+            "event-evolved-outputs-promoted-" + suffix: (
+                "evolved_outputs_promoted", {"evolution_run_id": evolution_run_id, "outputs": outputs},
+            ),
+            "event-output-publication-committed-" + suffix: (
+                "output_publication_committed",
+                {"evolution_run_id": evolution_run_id, "journal_sha256": journal_sha256},
+            ),
+        }
+        event_rows = connection.execute(
+            "SELECT id, run_id, task_id, type, payload FROM events WHERE id IN (?, ?) "
+            "OR (run_id = ? AND type IN (?, ?))",
+            (*expected_events, run_id, "evolved_outputs_promoted", "output_publication_committed"),
+        ).fetchall()
+        matching_events: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+        for row in event_rows:
+            payload = self._output_publication_event_payload(row["payload"])
+            if row["id"] in expected_events or payload.get("evolution_run_id") == evolution_run_id:
+                matching_events.append((row, payload))
+        committed = bool(matching_events)
+        if committed:
+            if len(matching_events) != 2:
+                raise ValueError(error)
+            owner = matching_events[0][0]["task_id"]
+            if owner not in task_ids or (task_id is not None and owner != task_id):
+                raise ValueError(error)
+            for row, payload in matching_events:
+                expected = expected_events.get(row["id"])
+                if (
+                    expected is None or row["run_id"] != run_id or row["task_id"] != owner
+                    or row["type"] != expected[0]
+                    or json.dumps(payload, sort_keys=True) != json.dumps(expected[1], sort_keys=True)
+                ):
+                    raise ValueError(error)
+            task_id = owner
+
+        artifact_events = connection.execute(
+            "SELECT id, run_id, task_id, type, payload FROM events "
+            "WHERE run_id = ? AND type = 'artifact_recorded'", (run_id,),
+        ).fetchall()
+        parsed_artifact_events = [
+            (row, self._output_publication_event_payload(row["payload"])) for row in artifact_events
+        ]
+        missing: list[dict[str, Any]] = []
+        for item in outputs:
+            reserved_id = self._output_publication_artifact_id(run_id, evolution_run_id, item["path"])
+            rows = connection.execute(
+                "SELECT id, run_id, task_id, path, sha256, size, kind FROM artifacts "
+                "WHERE id = ? OR (run_id = ? AND path = ? AND kind = 'output')",
+                (item["artifact_id"], run_id, item["path"]),
+            ).fetchall()
+            if not rows:
+                if committed or item["artifact_id"] != reserved_id:
+                    raise ValueError(error)
+                missing.append(item)
+            elif len(rows) != 1:
+                raise ValueError(error)
+            else:
+                row = rows[0]
+                if (
+                    row["id"] != item["artifact_id"] or row["run_id"] != run_id
+                    or row["task_id"] not in task_ids or row["kind"] != "output"
+                    or row["path"] != item["path"] or row["sha256"] != item["sha256"]
+                    or type(row["size"]) is not int or row["size"] != item["size"]
+                    or (item["artifact_id"] == reserved_id
+                        and (not committed or row["task_id"] != task_id))
+                ):
+                    raise ValueError(error)
+            if item["artifact_id"] == reserved_id:
+                records = [
+                    (row, payload) for row, payload in parsed_artifact_events
+                    if payload.get("artifact_id") == reserved_id
+                ]
+                expected_payload = {
+                    key: item[key] for key in ("artifact_id", "path", "sha256", "size")
+                }
+                if (not committed and records) or (committed and (
+                    len(records) != 1 or records[0][0]["task_id"] != task_id
+                    or json.dumps(records[0][1], sort_keys=True)
+                    != json.dumps(expected_payload, sort_keys=True)
+                )):
+                    raise ValueError(error)
+        return committed, missing
+
+    def has_output_publication(self, run_id: str, evolution_run_id: str) -> bool:
+        """Detect commit evidence when its journal is missing, without treating it as valid.
+
+        A matching reserved event ID is evidence even if its type or owner was corrupted. This
+        probe must never downgrade a recorded publication to a legacy journal-free output.
+        """
+        try:
+            if any(
+                not isinstance(value, str) or not value or "\0" in value
+                for value in (run_id, evolution_run_id)
+            ):
+                raise ValueError("output_publication_ledger_mismatch")
+            event_id = "event-output-publication-committed-" + hashlib.sha256(
+                f"{run_id}\0{evolution_run_id}".encode()
+            ).hexdigest()
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                rows = connection.execute(
+                    "SELECT id, payload FROM events WHERE id = ? "
+                    "OR (run_id = ? AND type = 'output_publication_committed')",
+                    (event_id, run_id),
+                ).fetchall()
+                if any(row["id"] == event_id for row in rows):
+                    return True
+                found = False
+                for row in rows:
+                    payload = self._output_publication_event_payload(row["payload"])
+                    if (
+                        set(payload) != {"evolution_run_id", "journal_sha256"}
+                        or not isinstance(payload["evolution_run_id"], str)
+                        or not payload["evolution_run_id"] or "\0" in payload["evolution_run_id"]
+                        or not isinstance(payload["journal_sha256"], str)
+                        or re.fullmatch(r"[0-9a-f]{64}", payload["journal_sha256"]) is None
+                    ):
+                        raise ValueError("output_publication_ledger_mismatch")
+                    found = found or payload["evolution_run_id"] == evolution_run_id
+                return found
+        except Exception:  # noqa: BLE001 - an unreadable ledger cannot prove journal-free history.
+            raise ValueError("output_publication_ledger_mismatch") from None
+
+    def output_publication_committed(
+        self,
+        run_id: str,
+        evolution_run_id: str,
+        outputs: list[dict[str, Any]],
+        *,
+        owner_task_id: str,
+        journal_sha256: str,
+    ) -> bool:
+        """Read exact commit evidence without creating a database or output files."""
+        try:
+            manifest = self._output_publication_manifest(run_id, evolution_run_id, outputs, journal_sha256)
+            if not isinstance(owner_task_id, str) or not owner_task_id:
+                raise ValueError("output_publication_ledger_mismatch")
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                return self._inspect_output_publication(
+                    connection, run_id, evolution_run_id, manifest, journal_sha256,
+                    task_id=owner_task_id,
+                )[0]
+        except Exception:  # noqa: BLE001 - recovery must expose only a safe, fail-closed code.
+            raise ValueError("output_publication_ledger_mismatch") from None
+
+    def commit_output_publication(
+        self,
+        run_id: str,
+        task_id: str,
+        evolution_run_id: str,
+        outputs: list[dict[str, Any]],
+        *,
+        journal_sha256: str,
+        max_artifact_bytes: int,
+    ) -> None:
+        """Commit every output row and its evidence together, or roll back the whole batch."""
+        safe_errors = {
+            "output_publication_ledger_mismatch", "output_publication_budget_exceeded",
+        }
+        try:
+            manifest = self._output_publication_manifest(run_id, evolution_run_id, outputs, journal_sha256)
+            if not isinstance(task_id, str) or not task_id:
+                raise ValueError("output_publication_ledger_mismatch")
+            if type(max_artifact_bytes) is not int or max_artifact_bytes < 1:
+                raise ValueError("output_publication_budget_exceeded")
+            with closing(self._connect()) as connection, connection:
+                connection.execute("PRAGMA synchronous = FULL")
+                connection.execute("BEGIN IMMEDIATE")
+                committed, missing = self._inspect_output_publication(
+                    connection, run_id, evolution_run_id, manifest, journal_sha256, task_id,
+                )
+                if committed:
+                    return
+                sizes = [row["size"] for row in connection.execute(
+                    "SELECT size FROM artifacts WHERE run_id = ?", (run_id,),
+                )]
+                if any(type(size) is not int or size < 0 for size in sizes):
+                    raise ValueError("output_publication_ledger_mismatch")
+                if sum(sizes) + sum(item["size"] for item in missing) > max_artifact_bytes:
+                    raise ValueError("output_publication_budget_exceeded")
+                for item in missing:
+                    connection.execute(
+                        "INSERT INTO artifacts(id, run_id, task_id, path, sha256, size, kind, created_at) "
+                        "VALUES(?, ?, ?, ?, ?, ?, 'output', ?)",
+                        (item["artifact_id"], run_id, task_id, item["path"], item["sha256"], item["size"], utc_now()),
+                    )
+                    if not self._append_event(
+                        connection, run_id, task_id, "artifact_recorded",
+                        {key: item[key] for key in ("artifact_id", "path", "sha256", "size")},
+                    ):
+                        raise ValueError("output_publication_ledger_mismatch")
+                suffix = hashlib.sha256(f"{run_id}\0{evolution_run_id}".encode()).hexdigest()
+                for event_type, event_id, payload in (
+                    ("evolved_outputs_promoted", "event-evolved-outputs-promoted-" + suffix,
+                     {"evolution_run_id": evolution_run_id, "outputs": manifest}),
+                    ("output_publication_committed", "event-output-publication-committed-" + suffix,
+                     {"evolution_run_id": evolution_run_id, "journal_sha256": journal_sha256}),
+                ):
+                    if not self._append_event(connection, run_id, task_id, event_type, payload, event_id):
+                        raise ValueError("output_publication_ledger_mismatch")
+        except Exception as exc:  # noqa: BLE001 - rollback also covers injected/storage failures.
+            code = str(exc) if isinstance(exc, ValueError) and str(exc) in safe_errors else "output_publication_commit_failed"
+            raise ValueError(code) from None
 
     def discard_attempt_outputs(self, run_id: str, task_id: str, attempt_id: str) -> list[str]:
         """Remove late result/runtime metadata while retaining the prompt and audit event."""

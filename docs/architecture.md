@@ -159,6 +159,24 @@ inspectable.
     strategy state and candidate artifacts. Verified `input_data` rows are copied by digest into
     the child workspace. A deterministic link event makes resume idempotent and strategy setting
     changes fail closed. This is an orchestration convenience, not a service or a new strategy.
+14. Evolved output publication stages the complete verified batch under the parent workspace's
+    `.evolved-output-publications/` directory. A bounded immutable journal binds the parent, child,
+    owner, output metadata and staged file identities. A parent-wide process lock serializes
+    publishers. Final paths use no-clobber hard links, and SQLite commits all new artifacts,
+    artifact events, the existing promotion event and a journal-digest acknowledgement in one
+    FULL-synchronous transaction. Existing identical output files and ledger owners are preserved.
+    Every destination file and its directories are synced before commit.
+    Recovery validates the whole batch and database snapshot before keeping committed outputs or
+    removing uncommitted links proven to belong to this attempt. Unknown state or changed evidence
+    stops delivery and retains the attempt. A missing journal cannot silently bypass an existing
+    commit acknowledgement. Staging, journals and rollback acknowledgements are retained.
+
+The output publication transaction defines logical delivery in SQLite; filesystem readers may see
+a prefix of final files before commit or until recovery runs after a crash. Reconciliation occurs
+before terminal materialization replay and does not execute a candidate or create a missing result
+marker. A crash before the complete journal is persisted requires diagnosis of retained staging.
+The candidate-launch-to-execution-evidence window and the terminal marker/ledger gap remain outside
+Feature 088. The advisory lock coordinates these publishers, not unrelated same-user file writers.
 
 ## Deliberate boundary versus WebAgent
 
