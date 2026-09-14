@@ -19,6 +19,7 @@ from .agents import (
 )
 from .algorithm import OutputSpec
 from .benchmark import (
+    ACTIVE_BENCHMARK_STRATEGIES,
     BENCHMARK_STRATEGIES,
     BenchmarkConfig,
     BenchmarkError,
@@ -205,6 +206,7 @@ from .workflow_checkpoint import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "ACTIVE_BENCHMARK_STRATEGIES",
     "BENCHMARK_STRATEGIES",
     "AdmittedSeed",
     "AgentAdapter",

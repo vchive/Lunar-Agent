@@ -86,7 +86,18 @@ ALGORITHM_FAMILY_REPERTOIRES: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 PROVENANCE_VALUES = frozenset({"user_confirmed", "data_observed", "explicit_assumption"})
 VERIFICATION_VALUES = frozenset({"independent", "partial", "solver"})
-EVOLUTION_STRATEGIES = frozenset({"loop", "population", "openevolve"})
+ACTIVE_EVOLUTION_STRATEGIES = frozenset({"population", "openevolve"})
+HISTORICAL_EVOLUTION_STRATEGIES = frozenset({"loop"})
+# Historical contracts and candidate records still deserialize ``loop``.  New execution
+# boundaries must validate against ``ACTIVE_EVOLUTION_STRATEGIES`` instead.
+EVOLUTION_STRATEGIES = ACTIVE_EVOLUTION_STRATEGIES | HISTORICAL_EVOLUTION_STRATEGIES
+LOOP_STRATEGY_RETIRED = "loop_strategy_retired"
+LOOP_STRATEGY_RETIREMENT_HINT = (
+    "legacy loop runs are read-only; use population or explicit openevolve"
+)
+LOOP_STRATEGY_RETIRED_MESSAGE = (
+    f"{LOOP_STRATEGY_RETIRED}: {LOOP_STRATEGY_RETIREMENT_HINT}"
+)
 OUTPUT_FORMATS = frozenset({"json", "jsonl", "csv", "text"})
 _SECRET_RE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*\S+)"
@@ -593,6 +604,8 @@ def materialize_algorithm_workspace(
     root: str | Path, contract: AlgorithmProblemContract, plan_id: str, plan_version: int
 ) -> Path:
     """Create the fixed role directories and write a digest-bearing manifest."""
+    if contract.evolution.strategy == "loop":
+        raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
     raw_root = Path(root).expanduser()
     if raw_root.is_symlink():
         raise ValueError("algorithm workspace root must not be a symlink")

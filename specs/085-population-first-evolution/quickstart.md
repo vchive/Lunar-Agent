@@ -78,13 +78,17 @@ count must become two, and the stable `seed-*` candidate/receipt must still veri
 ## Offline regression checks
 
 ```bash
-.venv/bin/python -m pytest -q \
+.venv/bin/python -m pytest -o addopts='' -q \
   tests/test_seed_handoff.py tests/test_remote_evolution.py \
   tests/test_algorithm.py tests/test_evolution.py tests/test_cli.py \
+  tests/test_population_defaults.py \
   tests/test_conversational_evolution.py tests/test_benchmark.py \
-  tests/test_agent_loop.py tests/test_deep_effect_trial.py
-.venv/bin/ruff check src/famou tests
-bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
+  tests/test_agent_loop.py tests/test_deep_effect_trial.py \
+  tests/test_evolved_output_materialization.py
+.venv/bin/ruff check src tests
+SPECIFY_FEATURE_DIRECTORY="$PWD/specs/085-population-first-evolution" \
+  bash .specify/scripts/bash/check-prerequisites.sh \
+  --json --require-tasks --include-tasks
 git diff --check
 ```
 

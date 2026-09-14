@@ -61,5 +61,6 @@ the bridge preserves the generic `SeedAdmissionError(code="no_usable_seeds")` re
 The material root is read through the existing descriptor-based regular-file, size, UTF-8,
 symlink, FIFO, path-confinement, and SHA-256 checks. The bridge does not fetch references or prove
 remote evaluator correctness, dependencies, billing, or transport delivery. Ordinary offspring
-receipt/fingerprint completeness remains deferred to Feature 087. Features 084 and 085 remain
-Draft, and the 074/076/078/082 sealed measurement artifacts remain byte-for-byte untouched.
+receipt/fingerprint completeness remains deferred to Feature 087. Feature 086 did not itself close
+Features 084 or 085; their later independent closure is recorded in their own validation results.
+The 074/076/078/082 sealed measurement artifacts remain byte-for-byte untouched.

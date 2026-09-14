@@ -27,8 +27,10 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from .algorithm import (
+    ACTIVE_EVOLUTION_STRATEGIES,
     ALGORITHM_FAMILY_REPERTOIRES,
     EVOLUTION_STRATEGIES,
+    LOOP_STRATEGY_RETIRED_MESSAGE,
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
     AlgorithmProblemContract,
@@ -89,6 +91,9 @@ _OFFSPRING_OUTCOME_CODES = frozenset(
         "run_failed",
     }
 )
+_MISSING_STRATEGY = object()
+_WORKSPACE_STRATEGY_INVALID = "evolution_workspace_strategy_invalid"
+_WORKSPACE_STRATEGY_MISMATCH = "evolution_workspace_strategy_mismatch"
 
 
 class EvolutionError(RuntimeError):
@@ -128,6 +133,34 @@ def _canonical_json_bytes(value: object) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _strict_json_loads(value: str | bytes) -> object:
+    """Decode JSON while rejecting duplicate object keys and non-finite constants."""
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = item
+        return result
+
+    def reject_nonfinite(_value: str) -> object:
+        raise ValueError("non-finite JSON number")
+
+    def parse_finite_float(value: str) -> float:
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("non-finite JSON number")
+        return result
+
+    return json.loads(
+        value,
+        object_pairs_hook=reject_duplicate_keys,
+        parse_constant=reject_nonfinite,
+        parse_float=parse_finite_float,
+    )
 
 
 def _canonical_sha256(value: object) -> str:
@@ -827,7 +860,6 @@ def _write_execution_evidence(workspace: Path, execution: CandidateExecution) ->
         json.dumps(execution.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     ).encode("utf-8")
     descriptor: int | None = None
-    created = False
     try:
         descriptor = os.open(
             temporary,
@@ -838,7 +870,13 @@ def _write_execution_evidence(workspace: Path, execution: CandidateExecution) ->
             | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
-        created = True
+        # The runner creates this node only after the candidate process has returned. Publish the
+        # directory entry first so even a later partial write is durable execution evidence and
+        # must block a replay.
+        _fsync_directory(
+            workspace,
+            error="candidate execution evidence could not be persisted",
+        )
         view = memoryview(content)
         written = 0
         while written < len(view):
@@ -850,18 +888,16 @@ def _write_execution_evidence(workspace: Path, execution: CandidateExecution) ->
         os.close(descriptor)
         descriptor = None
         os.replace(temporary, evidence)
+        _fsync_directory(
+            workspace,
+            error="candidate execution evidence could not be persisted",
+        )
     except OSError as exc:
         raise EvolutionError("candidate execution evidence could not be persisted") from exc
     finally:
         if descriptor is not None:
             try:
                 os.close(descriptor)
-            except OSError:
-                pass
-        if created and (temporary.exists() or temporary.is_symlink()):
-            try:
-                if not temporary.is_symlink() and temporary.is_file():
-                    temporary.unlink()
             except OSError:
                 pass
     return evidence
@@ -1196,8 +1232,8 @@ class EvolutionConfig:
 
     def __post_init__(self) -> None:
         if self.strategy == "loop":
-            raise ValueError("loop_strategy_retired: use population or explicit openevolve; legacy loop runs are read-only")
-        if self.strategy not in {"population", "openevolve"}:
+            raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if self.strategy not in ACTIVE_EVOLUTION_STRATEGIES:
             raise ValueError("strategy must be population or openevolve")
         for name, value, maximum in (
             ("max_rounds", self.max_rounds, 10_000),
@@ -1676,6 +1712,13 @@ class StrategyResult:
     archive_path: str
     error: str | None = None
     best_candidate_path: str | None = None
+
+    def __post_init__(self) -> None:
+        # ``loop`` remains representable for read-only historical results.  Runtime callers may
+        # construct only one of the known active or historical identities; an arbitrary label must
+        # never flow into materialization or a benchmark projection as if it were a strategy.
+        if self.strategy not in EVOLUTION_STRATEGIES:
+            raise ValueError("strategy result is unsupported")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2531,11 +2574,15 @@ def _seed_admission_summary(
 class CandidateArchive:
     """Append-only candidate records and atomic strategy state for one run."""
 
-    def __init__(self, workspace: str | Path) -> None:
+    def __init__(
+        self,
+        workspace: str | Path,
+        *,
+        requested_strategy: str | None = None,
+    ) -> None:
         raw_workspace = Path(workspace).expanduser()
         if raw_workspace.is_symlink():
             raise EvolutionError("evolution workspace must not be a symlink")
-        raw_workspace.mkdir(parents=True, exist_ok=True)
         self.workspace = raw_workspace.resolve()
         self.root = self.workspace / "evolution"
         self.candidates_root = self.root / "candidates"
@@ -2545,6 +2592,8 @@ class CandidateArchive:
         self.seed_commit_path = self.root / "seed-commit.json"
         self.seed_stage_path = self.workspace / _SEED_STAGE_NAME
         self.seed_backup_path = self.workspace / _SEED_BACKUP_NAME
+        self._preflight_seed_recovery_strategy(requested_strategy)
+        raw_workspace.mkdir(parents=True, exist_ok=True)
         self._recover_seed_publication()
         for path in (self.root, self.candidates_root):
             if path.is_symlink():
@@ -2553,6 +2602,128 @@ class CandidateArchive:
     @staticmethod
     def _path_present(path: Path) -> bool:
         return path.exists() or path.is_symlink()
+
+    def _preflight_seed_recovery_strategy(self, requested_strategy: str | None) -> None:
+        """Read every visible recovery tree before mkdir, replace, or cleanup.
+
+        A strategy constructor supplies its identity so recovery artifacts cannot cross an
+        active strategy boundary before callbacks can be bound. Ordinary root-only validation
+        remains with the existing resume paths and their more specific integrity errors.
+        """
+
+        if requested_strategy == "loop":
+            raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if requested_strategy is not None and requested_strategy not in ACTIVE_EVOLUTION_STRATEGIES:
+            raise EvolutionError("unsupported candidate strategy")
+        recovering = self._path_present(self.seed_stage_path) or self._path_present(
+            self.seed_backup_path
+        )
+        if not recovering:
+            return
+
+        operational: set[str] = set()
+        contracts: set[str] = set()
+        operational_error: str | None = None
+        contract_error: str | None = None
+        for tree in (self.root, self.seed_stage_path, self.seed_backup_path):
+            if not self._path_present(tree):
+                continue
+            # The same read-only evidence parser is used by all archive writers. Repoint a
+            # temporary view rather than changing this archive's root during the scan.
+            view = CandidateArchive.__new__(CandidateArchive)
+            view.workspace = self.workspace
+            view.root = tree
+            view.candidates_root = tree / "candidates"
+            view.archive_path = tree / "archive.jsonl"
+            view.offspring_outcomes_path = tree / "offspring-outcomes.jsonl"
+            view.state_path = tree / "state.json"
+            view.seed_commit_path = tree / "seed-commit.json"
+            found, tagged_contracts, found_error, tagged_contract_error = (
+                view._workspace_strategy_evidence()
+            )
+            operational.update(found)
+            contracts.update(tagged_contracts)
+            operational_error = operational_error or found_error
+            contract_error = contract_error or tagged_contract_error
+
+        if "loop" in operational or "loop" in contracts:
+            raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if (
+            operational_error is not None
+            or contract_error is not None
+            or len(operational) > 1
+            or len(contracts) > 1
+        ):
+            raise EvolutionError(
+                operational_error or contract_error or _WORKSPACE_STRATEGY_INVALID
+            )
+        if requested_strategy is not None and operational and requested_strategy not in operational:
+            raise EvolutionError(_WORKSPACE_STRATEGY_MISMATCH)
+
+    @classmethod
+    def preflight_new_run_workspace(
+        cls,
+        workspace: str | Path,
+        contract: AlgorithmProblemContract,
+    ) -> bool:
+        """Check an explicit workspace without creating, recovering, or rewriting it.
+
+        A new ledger run may reuse an absent/empty evolution directory or the exact canonical
+        contract-only prefix left by an interrupted setup. Any operational or unrecognized
+        evolution evidence belongs to an existing run and must be handled through resume.
+        """
+
+        if not isinstance(contract, AlgorithmProblemContract):
+            raise TypeError("contract must be an AlgorithmProblemContract")
+        raw_workspace = Path(workspace).expanduser()
+        if raw_workspace.is_symlink() or (
+            raw_workspace.exists() and not raw_workspace.is_dir()
+        ):
+            raise EvolutionError(_WORKSPACE_STRATEGY_INVALID)
+        if not raw_workspace.exists():
+            return False
+
+        try:
+            workspace_entries = tuple(raw_workspace.iterdir())
+        except OSError as exc:
+            raise EvolutionError(_WORKSPACE_STRATEGY_INVALID) from exc
+        if any(
+            path.name.startswith(".evolution-seed-stage-")
+            or path.name.startswith(".evolution-seed-backup-")
+            for path in workspace_entries
+        ):
+            raise EvolutionError("verified_seed_recovery_ambiguous")
+
+        view = cls.__new__(cls)
+        view.workspace = raw_workspace.resolve()
+        view.root = view.workspace / "evolution"
+        view.candidates_root = view.root / "candidates"
+        view.archive_path = view.root / "archive.jsonl"
+        view.offspring_outcomes_path = view.root / "offspring-outcomes.jsonl"
+        view.state_path = view.root / "state.json"
+        view.seed_commit_path = view.root / "seed-commit.json"
+        view.seed_stage_path = view.workspace / _SEED_STAGE_NAME
+        view.seed_backup_path = view.workspace / _SEED_BACKUP_NAME
+
+        if not cls._path_present(view.root):
+            return False
+        if view.root.is_symlink() or not view.root.is_dir():
+            raise EvolutionError(_WORKSPACE_STRATEGY_INVALID)
+
+        # Inspect recognized evidence first so a historical loop keeps its fixed retirement code.
+        view._guard_active_write(contract.evolution.strategy)
+        try:
+            root_entries = tuple(view.root.iterdir())
+        except OSError as exc:
+            raise EvolutionError(_WORKSPACE_STRATEGY_INVALID) from exc
+        if not root_entries:
+            return False
+        if len(root_entries) != 1 or root_entries[0].name != "contract.json":
+            raise EvolutionError(_WORKSPACE_STRATEGY_INVALID)
+        _, stored_digest = view._canonical_contract_snapshot(root_entries[0])
+        if stored_digest != contract.digest():
+            raise EvolutionError(_WORKSPACE_STRATEGY_MISMATCH)
+        return True
 
     @staticmethod
     def _canonical_contract_snapshot(path: Path) -> tuple[bytes, str]:
@@ -2637,8 +2808,10 @@ class CandidateArchive:
                 or entries["seed-commit.json"].stat().st_size > MAX_ARCHIVE_LINE_BYTES
             ):
                 raise EvolutionError("verified_seed_recovery_ambiguous")
-            marker = json.loads(entries["seed-commit.json"].read_text(encoding="utf-8"))
-            state = json.loads(entries["state.json"].read_text(encoding="utf-8"))
+            marker = _strict_json_loads(
+                entries["seed-commit.json"].read_text(encoding="utf-8")
+            )
+            state = _strict_json_loads(entries["state.json"].read_text(encoding="utf-8"))
             if not isinstance(marker, dict) or set(marker) != {
                 "schema_version",
                 "admission_sha256",
@@ -2678,7 +2851,7 @@ class CandidateArchive:
                 for line in archive_lines
             ):
                 raise EvolutionError("verified_seed_recovery_ambiguous")
-            candidates = [Candidate.from_dict(json.loads(line)) for line in archive_lines]
+            candidates = [Candidate.from_dict(_strict_json_loads(line)) for line in archive_lines]
             population_seed_tree = bool(candidates) and all(
                 candidate.parent_id is None
                 and candidate.generation == 0
@@ -2701,6 +2874,13 @@ class CandidateArchive:
                 [candidate.candidate_id for candidate in candidates] != candidate_ids
                 or not (population_seed_tree or openevolve_seed_tree)
                 or state.get("strategy") != expected_strategy
+                or (
+                    "config" in state
+                    and (
+                        not isinstance(state["config"], dict)
+                        or state["config"].get("strategy") != expected_strategy
+                    )
+                )
                 or state.get("iteration") != expected_iteration
                 or marker["seed_candidates_sha256"]
                 != _canonical_seed_sha256([candidate.to_dict() for candidate in candidates])
@@ -2804,6 +2984,324 @@ class CandidateArchive:
             error="evolution archive directory could not be persisted",
         )
 
+    def _workspace_strategy_evidence(
+        self,
+    ) -> tuple[frozenset[str], frozenset[str], str | None, str | None]:
+        """Read strategy evidence without creating or changing archive entries."""
+
+        operational: set[str] = set()
+        contract_strategies: set[str] = set()
+        operational_error: str | None = None
+        contract_error: str | None = None
+
+        def mark_operational_invalid(error: str = _WORKSPACE_STRATEGY_INVALID) -> None:
+            nonlocal operational_error
+            if operational_error is None:
+                operational_error = error
+
+        def mark_contract_invalid(error: str = _WORKSPACE_STRATEGY_INVALID) -> None:
+            nonlocal contract_error
+            if contract_error is None:
+                contract_error = error
+
+        def observe(
+            value: object,
+            destination: set[str],
+            mark_invalid: Callable[[], None],
+        ) -> None:
+            if isinstance(value, str) and value in EVOLUTION_STRATEGIES:
+                destination.add(value)
+            else:
+                mark_invalid()
+
+        if self._path_present(self.state_path):
+            try:
+                state = _strict_json_loads(
+                    _read_bounded_regular_file(
+                        self.state_path,
+                        MAX_STATE_BYTES,
+                        error=_WORKSPACE_STRATEGY_INVALID,
+                    ).decode("utf-8")
+                )
+                if not isinstance(state, dict):
+                    raise EvolutionError(_WORKSPACE_STRATEGY_INVALID)
+                if "strategy" not in state:
+                    mark_operational_invalid()
+                else:
+                    observe(state["strategy"], operational, mark_operational_invalid)
+                if "config" in state:
+                    config = state["config"]
+                    if not isinstance(config, dict) or "strategy" not in config:
+                        mark_operational_invalid()
+                    else:
+                        observe(config["strategy"], operational, mark_operational_invalid)
+            except (
+                EvolutionError,
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ):
+                mark_operational_invalid()
+
+        contract_path = self.root / "contract.json"
+        if self._path_present(contract_path):
+            try:
+                contract_content = _read_bounded_regular_file(
+                    contract_path,
+                    MAX_SOURCE_BYTES,
+                    error="verified_seed_contract_invalid",
+                )
+                contract_payload = _strict_json_loads(contract_content.decode("utf-8"))
+                if isinstance(contract_payload, dict):
+                    raw_evolution = contract_payload.get("evolution")
+                    if isinstance(raw_evolution, dict) and "strategy" in raw_evolution:
+                        observe(
+                            raw_evolution["strategy"],
+                            contract_strategies,
+                            mark_contract_invalid,
+                        )
+                contract = AlgorithmProblemContract.from_dict(contract_payload)
+                observe(
+                    contract.evolution.strategy,
+                    contract_strategies,
+                    mark_contract_invalid,
+                )
+            except EvolutionError as exc:
+                mark_contract_invalid(str(exc))
+            except (
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ):
+                mark_contract_invalid()
+
+        result_path = self.root / "result.json"
+        if self._path_present(result_path):
+            try:
+                result_content = _read_bounded_regular_file(
+                    result_path,
+                    MAX_STATE_BYTES,
+                    error=_WORKSPACE_STRATEGY_INVALID,
+                )
+                result_payload = _strict_json_loads(result_content.decode("utf-8"))
+                if isinstance(result_payload, dict) and "strategy" in result_payload:
+                    observe(
+                        result_payload["strategy"],
+                        operational,
+                        mark_operational_invalid,
+                    )
+                expected_fields = {
+                    "strategy",
+                    "status",
+                    "iterations",
+                    "evaluated_candidates",
+                    "valid_candidates",
+                    "best_candidate_id",
+                    "best_score",
+                    "best_candidate_path",
+                    "archive_path",
+                    "error",
+                }
+                if not isinstance(result_payload, dict) or set(result_payload) != expected_fields:
+                    mark_operational_invalid()
+                else:
+                    result = StrategyResult(**result_payload)
+                    canonical = (
+                        json.dumps(
+                            result.to_dict(),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            indent=2,
+                            allow_nan=False,
+                        )
+                        + "\n"
+                    ).encode("utf-8")
+                    if (
+                        result_payload != result.to_dict()
+                        or result_content != canonical
+                        or result.status
+                        not in {"running", "completed", "stagnated", "cancelled", "failed"}
+                        or any(
+                            isinstance(value, bool)
+                            or not isinstance(value, int)
+                            or value < 0
+                            for value in (
+                                result.iterations,
+                                result.evaluated_candidates,
+                                result.valid_candidates,
+                            )
+                        )
+                        or result.valid_candidates > result.evaluated_candidates
+                        or (
+                            result.best_score is not None
+                            and (
+                                isinstance(result.best_score, bool)
+                                or not isinstance(result.best_score, (int, float))
+                                or not math.isfinite(float(result.best_score))
+                            )
+                        )
+                        or (result.error is not None and not isinstance(result.error, str))
+                    ):
+                        mark_operational_invalid()
+                    if result.best_candidate_id is not None:
+                        _safe_id(result.best_candidate_id, "best candidate id")
+                    if result.best_candidate_path is not None:
+                        _safe_relative_path(result.best_candidate_path, "best candidate path")
+                    _safe_relative_path(result.archive_path, "result archive path")
+            except (
+                EvolutionError,
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ):
+                mark_operational_invalid()
+
+        if self._path_present(self.archive_path):
+            try:
+                archive_content = _read_bounded_regular_file(
+                    self.archive_path,
+                    MAX_ARCHIVE_BYTES,
+                    error="evolution archive is invalid or exceeds the bounded size",
+                ).decode("utf-8")
+                for line in archive_content.splitlines():
+                    if not line.strip():
+                        continue
+                    payload = _strict_json_loads(line)
+                    if not isinstance(payload, dict) or "strategy" not in payload:
+                        mark_operational_invalid()
+                        continue
+                    observe(
+                        payload["strategy"],
+                        operational,
+                        mark_operational_invalid,
+                    )
+                # Preserve the reader's complete structural checks while translating malformed
+                # strategy evidence into one stable fail-closed writer error below.
+                self.records()
+            except EvolutionError as exc:
+                # Keep the ordinary-integrity reader's stable diagnosis when strategy parsing
+                # itself succeeded. Duplicate/non-finite strategy evidence is rejected earlier
+                # by the strict decoder and remains the generic workspace-strategy error.
+                mark_operational_invalid(str(exc))
+            except (
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ):
+                mark_operational_invalid()
+
+        if self._path_present(self.offspring_outcomes_path):
+            try:
+                outcomes_content = _read_bounded_regular_file(
+                    self.offspring_outcomes_path,
+                    MAX_ARCHIVE_BYTES,
+                    error=_WORKSPACE_STRATEGY_INVALID,
+                ).decode("utf-8")
+                for line in outcomes_content.splitlines():
+                    if not line.strip():
+                        continue
+                    if len(line.encode("utf-8")) > MAX_ARCHIVE_LINE_BYTES:
+                        raise EvolutionError(_WORKSPACE_STRATEGY_INVALID)
+                    _strict_json_loads(line)
+                self.offspring_outcomes()
+                operational.add("population")
+            except (
+                EvolutionError,
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ):
+                mark_operational_invalid()
+
+        return (
+            frozenset(operational),
+            frozenset(contract_strategies),
+            operational_error,
+            contract_error,
+        )
+
+    def _guard_active_write(self, strategy: object = _MISSING_STRATEGY) -> str | None:
+        """Reject retired, malformed, or cross-strategy workspaces before mutation."""
+
+        if strategy is not _MISSING_STRATEGY:
+            if strategy == "loop":
+                raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+            if not isinstance(strategy, str) or strategy not in ACTIVE_EVOLUTION_STRATEGIES:
+                raise EvolutionError("unsupported candidate strategy")
+
+        operational, contract_strategies, operational_error, contract_error = (
+            self._workspace_strategy_evidence()
+        )
+        if "loop" in operational or "loop" in contract_strategies:
+            raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if (
+            operational_error is not None
+            or contract_error is not None
+            or len(operational) > 1
+            or len(contract_strategies) > 1
+        ):
+            raise EvolutionError(
+                operational_error or contract_error or _WORKSPACE_STRATEGY_INVALID
+            )
+        if (
+            strategy is not _MISSING_STRATEGY
+            and operational
+            and strategy not in operational
+        ):
+            raise EvolutionError(_WORKSPACE_STRATEGY_MISMATCH)
+        if operational:
+            return next(iter(operational))
+        active_contract = contract_strategies.intersection(ACTIVE_EVOLUTION_STRATEGIES)
+        if strategy is _MISSING_STRATEGY and len(active_contract) == 1:
+            return next(iter(active_contract))
+        return strategy if isinstance(strategy, str) else None
+
+    @staticmethod
+    def _guard_seed_state_strategy(
+        state: object,
+        canonical_strategy: object,
+    ) -> None:
+        """Bind a seed transaction's state tag to its canonical candidate strategy."""
+
+        if canonical_strategy == "loop":
+            raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if (
+            not isinstance(canonical_strategy, str)
+            or canonical_strategy not in ACTIVE_EVOLUTION_STRATEGIES
+        ):
+            raise EvolutionError("verified_seed_state_invalid")
+        if not isinstance(state, dict) or "strategy" not in state:
+            raise EvolutionError("verified_seed_state_invalid")
+        state_strategy = state["strategy"]
+        if state_strategy == "loop":
+            raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if "config" in state:
+            config = state["config"]
+            if not isinstance(config, dict) or "strategy" not in config:
+                raise EvolutionError("verified_seed_state_invalid")
+            config_strategy = config["strategy"]
+            if config_strategy == "loop":
+                raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+            if (
+                not isinstance(config_strategy, str)
+                or config_strategy not in ACTIVE_EVOLUTION_STRATEGIES
+                or config_strategy != state_strategy
+                or config_strategy != canonical_strategy
+            ):
+                raise EvolutionError("verified_seed_state_invalid")
+        if state_strategy != canonical_strategy:
+            raise EvolutionError("verified_seed_state_invalid")
+
     def records(self) -> list[Candidate]:
         if not self.archive_path.exists():
             if self.archive_path.is_symlink():
@@ -2906,6 +3404,7 @@ class CandidateArchive:
     def append_offspring_outcome(self, outcome: OffspringOutcome) -> None:
         if not isinstance(outcome, OffspringOutcome):
             raise TypeError("outcome must be an OffspringOutcome")
+        self._guard_active_write("population")
         self._ensure_layout()
         if any(
             item.iteration == outcome.iteration and item.attempt == outcome.attempt
@@ -3465,10 +3964,9 @@ class CandidateArchive:
         source_snapshot: _HeldRegularFileSnapshot | None = None,
         execution_snapshot: _HeldRegularFileSnapshot | None = None,
     ) -> Candidate:
-        if strategy == "loop":
-            raise EvolutionError("loop_strategy_retired: legacy loop archives are read-only")
-        if strategy not in {"population", "openevolve"}:
-            raise EvolutionError("unsupported candidate strategy")
+        self._guard_active_write(strategy)
+        if strategy == "openevolve":
+            raise EvolutionError("openevolve_candidate_requires_verified_seed_commit")
         if candidate_id is not None:
             _safe_id(candidate_id, "candidate_id")
             if strategy == "population" and candidate_id.startswith("seed-"):
@@ -3868,6 +4366,16 @@ class CandidateArchive:
             raise EvolutionError("verified_seed_context_mismatch")
         return content
 
+    def _preflight_seed_commit_root(self, contract_sha256: str) -> bytes | None:
+        """Validate every durable root prerequisite before external seed production."""
+
+        contract_content = self._seed_contract_for_commit(contract_sha256)
+        if self._path_present(self.seed_stage_path) or self._path_present(
+            self.seed_backup_path
+        ):
+            raise EvolutionError("verified_seed_recovery_ambiguous")
+        return contract_content
+
     def commit_initial_seeds(
         self,
         seeds: Sequence[AdmittedSeedInput],
@@ -3885,6 +4393,9 @@ class CandidateArchive:
         failed publication.
         """
 
+        self._guard_active_write(canonical_strategy)
+        self._guard_seed_state_strategy(state, canonical_strategy)
+
         prepared = _prepare_initial_seeds(
             seeds,
             canonical_strategy=canonical_strategy,
@@ -3894,7 +4405,7 @@ class CandidateArchive:
             contract_sha256=contract_sha256,
             evaluator_fingerprint=evaluator_fingerprint,
         )
-        contract_content = self._seed_contract_for_commit(contract_sha256)
+        contract_content = self._preflight_seed_commit_root(contract_sha256)
         if not isinstance(state, dict) or "seed_admission" in state:
             raise EvolutionError("verified_seed_state_invalid")
         candidate_ids = {item.candidate.candidate_id for item in prepared}
@@ -3969,8 +4480,6 @@ class CandidateArchive:
             allow_nan=False,
         ) + "\n"
 
-        if self._path_present(self.seed_stage_path) or self._path_present(self.seed_backup_path):
-            raise EvolutionError("verified_seed_recovery_ambiguous")
         try:
             self.seed_stage_path.mkdir(mode=0o700)
         except OSError as exc:
@@ -4078,6 +4587,8 @@ class CandidateArchive:
         """Fail closed unless fresh admissions exactly match the persisted seed transaction."""
 
         try:
+            self._guard_active_write(canonical_strategy)
+            self._guard_seed_state_strategy(state, canonical_strategy)
             prepared = _prepare_initial_seeds(
                 seeds,
                 canonical_strategy=canonical_strategy,
@@ -4195,9 +4706,42 @@ class CandidateArchive:
         return max(valid, key=lambda candidate: candidate.evaluation.combined_score)
 
     def write_state(self, payload: dict[str, Any]) -> None:
-        self._ensure_layout()
-        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-        if len(encoded.encode("utf-8")) > MAX_STATE_BYTES:
+        strategy = payload.get("strategy", _MISSING_STRATEGY)
+        selected_strategy = self._guard_active_write(strategy)
+        selected_strategy = selected_strategy or "population"
+        if "config" in payload:
+            config = payload["config"]
+            if not isinstance(config, dict) or "strategy" not in config:
+                raise EvolutionError(_WORKSPACE_STRATEGY_INVALID)
+            config_strategy = config["strategy"]
+            if config_strategy == "loop":
+                raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+            if (
+                not isinstance(config_strategy, str)
+                or config_strategy not in ACTIVE_EVOLUTION_STRATEGIES
+            ):
+                raise EvolutionError(_WORKSPACE_STRATEGY_INVALID)
+            if config_strategy != selected_strategy:
+                raise EvolutionError(_WORKSPACE_STRATEGY_MISMATCH)
+        state_payload = (
+            payload
+            if strategy is not _MISSING_STRATEGY
+            else {**payload, "strategy": selected_strategy}
+        )
+        try:
+            encoded = (
+                json.dumps(
+                    state_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    indent=2,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
+            raise EvolutionError("evolution state must be finite JSON") from exc
+        if len(encoded) > MAX_STATE_BYTES:
             raise EvolutionError("evolution state exceeds the bounded state size")
         if (
             (self.state_path.exists() or self.state_path.is_symlink())
@@ -4207,6 +4751,7 @@ class CandidateArchive:
         temporary = self.state_path.with_name(f".{self.state_path.name}.tmp")
         if temporary.is_symlink() or (temporary.exists() and not temporary.is_file()):
             raise EvolutionError("evolution state persist failed")
+        self._ensure_layout()
         if temporary.exists():
             try:
                 # A regular fixed temp can remain after fsync and before replace. Unlinking this
@@ -4220,7 +4765,7 @@ class CandidateArchive:
                 raise EvolutionError("evolution state persist failed") from exc
         self._atomic_write_bytes(
             self.state_path,
-            encoded.encode("utf-8"),
+            encoded,
             error="evolution state persist failed",
         )
 
@@ -4248,6 +4793,19 @@ class CandidateArchive:
 
     def result(self, strategy: str, status: str, iterations: int, error: str | None = None) -> StrategyResult:
         records = self.records()
+        if strategy not in EVOLUTION_STRATEGIES:
+            raise EvolutionError("unsupported evolution result strategy")
+        state = self.read_state()
+        state_strategy = state.get("strategy") if state else None
+        archived_strategies = {candidate.strategy for candidate in records}
+        if state and state_strategy != strategy:
+            if "loop" in {state_strategy, strategy}:
+                raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+            raise EvolutionError("evolution result strategy does not match the persisted state")
+        if archived_strategies - {strategy}:
+            if "loop" in archived_strategies or strategy == "loop":
+                raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+            raise EvolutionError("evolution result strategy does not match the candidate archive")
         best = self.best()
         best_path: str | None = None
         if best is not None:
@@ -4404,8 +4962,16 @@ class _BaseStrategy:
     name: Literal["population", "openevolve"]
 
     def __init__(self, context: EvolutionContext) -> None:
+        if context.contract.evolution.strategy == "loop":
+            raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if context.config.strategy != self.name:
+            raise EvolutionError(_WORKSPACE_STRATEGY_MISMATCH)
         self.context = context
-        self.archive = CandidateArchive(context.workspace)
+        self.archive = CandidateArchive(context.workspace, requested_strategy=self.name)
+        # Root-only evidence does not enter seed-recovery preflight. Inspect it before resolving
+        # adapters or binding observers so a retired, malformed, or cross-strategy workspace can
+        # never trigger generator/evaluator behavior on a fresh strategy object.
+        self.archive._guard_active_write(self.name)
         self.config = context.config
         self.integrity_authority = resolve_candidate_integrity_authority(context)
         # Keep the evaluator's structured feedback available to a generator during this live
@@ -4840,10 +5406,7 @@ class LoopStrategy:
 
     @staticmethod
     def _retired() -> EvolutionError:
-        return EvolutionError(
-            "loop_strategy_retired: legacy loop runs are read-only; use population or an "
-            "explicit external backend"
-        )
+        return EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
 
     def run(self) -> StrategyResult:
         raise self._retired()
@@ -6608,7 +7171,14 @@ class OpenEvolveStrategy(_BaseStrategy):
             raise EvolutionError("openevolve_resume_mismatch") from exc
 
     def run(self) -> StrategyResult:
+        # A producer launch is an external effect even though it uses a private temporary
+        # directory. Validate any existing workspace identity before starting that process.
+        self.archive._guard_active_write(self.name)
         state = self._load_state()
+        if not state:
+            # Admission publishes one atomic seed tree. Prove that the exact final commit shape is
+            # currently possible before paying the irreversible cost of an external producer run.
+            self.archive._preflight_seed_commit_root(self.context.contract.digest())
         if state.get("status") == "completed":
             if "seed_admission" not in state:
                 raise EvolutionError("openevolve_resume_mismatch")
@@ -6617,6 +7187,10 @@ class OpenEvolveStrategy(_BaseStrategy):
         terminal = self._terminal(state)
         if terminal:
             return terminal
+        # OpenEvolve publishes a completed seed tree atomically and never checkpoints a running
+        # state. A non-terminal state cannot be committed by this path; do not launch its producer.
+        if state:
+            raise EvolutionError("openevolve_resume_mismatch")
         command = self.config.command
         executable = Path(command[0])
         if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
@@ -6714,6 +7288,8 @@ class OpenEvolveStrategy(_BaseStrategy):
 def build_strategy(context: EvolutionContext) -> EvolutionStrategy:
     """Construct the strategy selected by an explicit context configuration."""
 
+    if context.contract.evolution.strategy == "loop":
+        raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
     if context.config.strategy == "population":
         return PopulationStrategy(context)
     if context.config.strategy == "openevolve":

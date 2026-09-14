@@ -143,7 +143,11 @@ def test_problem_contract_rejects_duplicate_ids_and_secrets() -> None:
 
 
 def test_workspace_manifest_is_hashed_and_confined(tmp_path: Path) -> None:
-    contract = AlgorithmProblemContract.from_dict(_contract())
+    contract = AlgorithmProblemContract.from_dict(
+        _contract(
+            evolution={"strategy": "population", "max_rounds": 5, "stagnation_rounds": 3}
+        )
+    )
     manifest_path = materialize_algorithm_workspace(tmp_path / "run", contract, "plan-1", 2)
     expected = hashlib.sha256(
         json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -163,7 +167,34 @@ def test_workspace_rejects_symlinked_role_directory(tmp_path: Path) -> None:
     outside.mkdir()
     (root / "solve").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="symlink"):
-        materialize_algorithm_workspace(root, AlgorithmProblemContract.from_dict(_contract()), "plan-1", 1)
+        materialize_algorithm_workspace(
+            root,
+            AlgorithmProblemContract.from_dict(
+                _contract(
+                    evolution={
+                        "strategy": "population",
+                        "max_rounds": 5,
+                        "stagnation_rounds": 3,
+                    }
+                )
+            ),
+            "plan-1",
+            1,
+        )
+
+
+def test_workspace_rejects_legacy_loop_contract_before_mutation(tmp_path: Path) -> None:
+    root = tmp_path / "run"
+
+    with pytest.raises(ValueError, match="^loop_strategy_retired:"):
+        materialize_algorithm_workspace(
+            root,
+            AlgorithmProblemContract.from_dict(_contract()),
+            "plan-1",
+            1,
+        )
+
+    assert not root.exists()
 
 
 def test_evaluation_report_enforces_validity_first() -> None:
@@ -209,16 +240,19 @@ def test_evaluation_report_rejects_negative_or_nonfinite_scores() -> None:
 
 
 def test_algorithm_problem_is_preserved_and_materialized_on_run(tmp_path: Path) -> None:
+    active_contract = _contract(
+        evolution={"strategy": "population", "max_rounds": 5, "stagnation_rounds": 3}
+    )
     document = PlanDocument.from_dict(
         {
             "plan_id": "algorithm-plan",
             "goal": "solve routing",
             "tasks": [{"id": "solve", "title": "Solve", "prompt": "write a result"}],
-            "algorithm_problem": _contract(),
+            "algorithm_problem": active_contract,
         }
     )
     assert document.algorithm_problem is not None
-    assert document.algorithm_problem["evolution"]["strategy"] == "loop"
+    assert document.algorithm_problem["evolution"]["strategy"] == "population"
     controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
     run = controller.start_plan(document)
     manifest = run.workspace / "algorithm-workspace.json"

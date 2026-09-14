@@ -13,7 +13,11 @@ from famou.agent_evolution import (
 )
 from famou.agent_loop import AgentLoopRuntime
 from famou.agents import AgentResult, RuntimeAgentAdapter
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
+from famou.algorithm import (
+    LOOP_STRATEGY_RETIRED_MESSAGE,
+    AlgorithmProblemContract,
+    EvaluationReport,
+)
 from famou.config import Config
 from famou.controller import LocalController
 from famou.evolution import (
@@ -660,6 +664,107 @@ def test_controller_rejects_new_legacy_loop_run_before_workspace_creation(
 
     assert not workspace.exists()
     assert controller.store.get_run_by_workspace(workspace) is None
+
+
+@pytest.mark.parametrize(
+    ("evidence", "expected"),
+    [
+        ("loop_contract", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("different_contract", "evolution_workspace_strategy_mismatch"),
+        ("population_state", "evolution_workspace_strategy_mismatch"),
+        ("unknown_archive", "evolution_workspace_strategy_invalid"),
+        ("mixed_archive", "evolution_workspace_strategy_invalid"),
+        ("historical_result", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("seed_commit", "evolution_workspace_strategy_invalid"),
+        ("candidate_tree", "evolution_workspace_strategy_invalid"),
+    ],
+)
+def test_controller_rejects_preexisting_evolution_evidence_before_run_creation(
+    tmp_path: Path,
+    evidence: str,
+    expected: str,
+) -> None:
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    workspace = tmp_path / evidence
+    root = workspace / "evolution"
+    root.mkdir(parents=True)
+    requested = _contract("openevolve")
+    if evidence in {"loop_contract", "different_contract"}:
+        existing = _contract("loop" if evidence == "loop_contract" else "population")
+        (root / "contract.json").write_text(
+            json.dumps(existing.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+    elif evidence == "population_state":
+        (root / "state.json").write_text(
+            '{"strategy":"population"}\n', encoding="utf-8"
+        )
+    elif evidence == "unknown_archive":
+        (root / "archive.jsonl").write_text(
+            '{"strategy":"future"}\n', encoding="utf-8"
+        )
+    elif evidence == "mixed_archive":
+        (root / "archive.jsonl").write_text(
+            '{"strategy":"population"}\n{"strategy":"openevolve"}\n',
+            encoding="utf-8",
+        )
+    elif evidence == "historical_result":
+        (root / "result.json").write_text(
+            '{"strategy":"loop","status":"completed"}\n', encoding="utf-8"
+        )
+    elif evidence == "seed_commit":
+        (root / "seed-commit.json").write_text("{}\n", encoding="utf-8")
+    else:
+        candidate_root = root / "candidates" / "orphan"
+        candidate_root.mkdir(parents=True)
+        (candidate_root / "record.json").write_text(
+            '{"strategy":"loop"}\n', encoding="utf-8"
+        )
+    before = {
+        path.relative_to(workspace).as_posix(): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(EvolutionError) as caught:
+        controller.create_evolution_run(requested, workspace=workspace)
+
+    assert str(caught.value) == expected
+    assert controller.store.get_run_by_workspace(workspace) is None
+    assert {
+        path.relative_to(workspace).as_posix(): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("layout", ["workspace_only", "empty_root", "same_contract"])
+def test_controller_accepts_safe_preexisting_new_run_workspace(
+    tmp_path: Path,
+    layout: str,
+) -> None:
+    controller = LocalController(Config(tmp_path / f".{layout}"), MockRuntime())
+    workspace = tmp_path / layout
+    workspace.mkdir()
+    sentinel = workspace / "input.txt"
+    sentinel.write_text("preserve\n", encoding="utf-8")
+    contract = _contract("openevolve")
+    root = workspace / "evolution"
+    if layout != "workspace_only":
+        root.mkdir()
+    canonical = (
+        json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
+        + "\n"
+    )
+    if layout == "same_contract":
+        (root / "contract.json").write_text(canonical, encoding="utf-8")
+
+    run = controller.create_evolution_run(contract, workspace=workspace)
+
+    assert run.workspace == workspace.resolve()
+    assert sentinel.read_text(encoding="utf-8") == "preserve\n"
+    assert (root / "contract.json").read_text(encoding="utf-8") == canonical
 
 
 def test_controller_records_one_deterministic_failure_event_for_malformed_seed_manifest(

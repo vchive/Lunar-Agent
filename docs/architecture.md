@@ -10,7 +10,7 @@ flowchart TD
     P[Parent agent / user\nCLI, Codex, OpenClaw, Hermes] --> C[LocalController]
     C --> R[DomainRouter\ngeneral / data / research / coding]
     R --> PR[ProfileRegistry\nSolver + Evaluator]
-    C --> AP[AlgorithmProblemContract\noptional · loop / population / openevolve]
+    C --> AP[AlgorithmProblemContract\noptional · population / explicit openevolve\nloop is historical read-only]
     R --> B[BudgetSpec\ntasks · attempts · tools · time · bytes]
     C --> M[MasterPolicy\nanswer / ask_user / execute_plan]
     M -->|complex goal| PD[PlanDocument vN\nconstraints · evidence · acceptance]
@@ -66,7 +66,7 @@ RuntimeAgentAdapter (one fresh instance per role)
         ↓
 AgentCandidateGenerator / AgentCandidateEvaluator
         ↓
-loop or population strategy → canonical candidate archive
+population or explicit openevolve strategy → canonical candidate archive
 ```
 
 This profile is the internal Agent skeleton for standalone Lunar-Agent use. It is intentionally small,
@@ -92,8 +92,9 @@ bounded by tool-step, workspace, timeout, and artifact limits.
 4. A plan may additionally carry an `algorithm_problem` contract. It is validated before durable
    execution, stored in the immutable plan revision, and materializes six fixed local role
    directories plus a digest-bearing `algorithm-workspace.json`. The strategy layer consumes this
- contract through one runtime-neutral seam: `loop` is the default, `population` is a bounded local
-   search, and `openevolve` is an explicitly configured local subprocess. Optional `OutputSpec`
+   contract through one runtime-neutral seam: `population` is the default bounded local search, and
+   `openevolve` is an explicitly configured local subprocess material producer. The historical
+   `loop` tag remains readable, but new plans and evolution runs reject it. Optional `OutputSpec`
    entries make Solver data files explicit and inject independent `output_valid` checks into
    generated algorithm plans.
 5. A caller may use `delegate`/`LocalController.run_agent` for a role-bearing worker. The explicit
@@ -177,7 +178,7 @@ The invocation seam and the search-strategy seam are deliberately independent:
 | Seam | Supported forms | Durable authority |
 | --- | --- | --- |
 | Invocation | direct local CLI; `delegate` with an explicit Agent command; parent-Agent child process with `--json`; detached handle followed by `resume` | SQLite run/plan ledger and run workspace |
-| Evolution | `loop` (default); `population` (opt-in); Agent-backed generation; Agent-backed evaluation; `openevolve` (optional local command) | shared problem contract, candidate archive, validity-first report, and relative result handoff |
+| Evolution | `population` (default); Agent-backed generation; Agent-backed evaluation; `openevolve` (explicit local command); historical `loop` artifacts are read-only | shared problem contract, candidate archive, validity-first report, and relative result handoff |
 
 In direct mode, the owner supplies the goal and observes the result. In child-process mode, a
 parent such as Codex, Hermes, or OpenClaw supplies stdin/arguments and consumes bounded JSON
@@ -205,11 +206,12 @@ role adapters run the selected strategy there. The intake's `evolution_linked` e
 the child ID, contract digest, and strategy, so polling or resuming cannot duplicate the child or
 leak prompts, commands, endpoints, or credentials.
 
-`loop` and `population` are implemented as library strategies over the same append-only archive.
-Each loop round receives a fresh generation request and returns best-so-far from all valid history;
-population maintains bounded active IDs, objective-aware score/novelty selection, optional islands,
-and ring migration while retaining the full archive. `AgentCandidateGenerator` adapts an explicit
-role-bearing solver Agent to the generation seam, while `AgentCandidateEvaluator` adapts a separate
+`population` is the active native library strategy over the append-only archive. It maintains
+bounded active IDs, objective-aware score/novelty selection, optional islands, and ring migration
+while retaining the full archive. `LoopStrategy` remains an importable, non-mutating compatibility
+stub whose `run()` and `resume()` calls fail with `loop_strategy_retired`; historical loop contracts,
+candidates, archives, and benchmark results remain readable. `AgentCandidateGenerator` adapts an
+explicit role-bearing solver Agent to the generation seam, while `AgentCandidateEvaluator` adapts a separate
 evaluator Agent that must return one strict JSON `EvaluationReport`. The report is parsed and
 validated by Lunar-Agent before validity-first selection; evaluator prose, status claims, and
 malformed JSON are never accepted as evidence. The solver and evaluator may be different commands
@@ -272,15 +274,16 @@ timeouts, and emits one entry for every configured outer round. The projection i
 validated durable records only; it cannot supply or alter evaluator scores.
 
 The `benchmark` command is a thin orchestration layer above this seam. It validates one canonical
-contract, creates isolated `strategies/<name>` workspaces, and runs the selected native strategies
-or the explicit OpenEvolve adapter with one common `EvolutionConfig`. A failure in one strategy is
-captured in that strategy's report entry while the remaining comparisons continue. The benchmark
-does not merge archives, change selection rules, or treat elapsed time as a quality score; it exposes
-both so a human or parent Agent can make the tradeoff explicit. OpenEvolve receives the same budget
-projection in its generated config, but its executable and result envelope remain independently
-validated by `OpenEvolveStrategy`.
+contract, creates isolated `strategies/<name>` workspaces, and runs population or the explicit
+OpenEvolve adapter with one common budget and evaluator identity. Each strategy receives a fresh
+evaluator adapter, so mutable runtime state and factory failures remain isolated. A failure in one
+strategy is captured in that strategy's report entry while the remaining comparisons continue. The
+benchmark does not merge archives, change selection rules, or treat elapsed time as a quality score;
+it exposes both so a human or parent Agent can make the tradeoff explicit. OpenEvolve receives the
+same budget projection in its generated config, but its executable and result envelope remain
+independently validated by `OpenEvolveStrategy`.
 
-For native strategies, benchmark factories may instead construct a fresh repository-owned runtime
+For population, benchmark factories may instead construct a fresh repository-owned runtime
 for each solver/evaluator role. The one-shot profile uses `RuntimeAgentAdapter` directly; the
 tool-capable profile wraps an explicit OpenAI-compatible runtime in `AgentLoopRuntime`. The profile
 descriptor and loop settings are included in the report, while endpoint, model, command, and API
@@ -319,7 +322,8 @@ Cross-round learning is likewise archive-derived. A structured Agent candidate m
 experiment plan—hypothesis, change tags, and target metric directions—but it cannot declare its own
 outcome. Once the candidate is independently evaluated, prompt construction joins it with its
 persisted parent and derives a verified experiment card from `EvaluationReport` scores and metrics.
-Recent cards and bounded tag outcome counts are shared by loop and population. Because this memory
+Recent cards and bounded tag outcome counts are derived for active population runs and remain
+readable from historical loop archives. Because this memory
 is a pure projection of `archive.jsonl`, process recovery needs no transcript replay, second
 knowledge store, reflection model, or mutable `insights.md` file.
 
@@ -338,7 +342,7 @@ GenerationRequest + archive-derived experiment memory
 
 The directive names exact parent/inspiration/repair evidence, bounded evaluator error codes, proven
 change tags, and tags with only measured non-successes. It is prompt guidance, not a new strategy
-authority: population selection, loop budgets, evaluator validity, and archive ranking are
+authority: population selection and budgets, evaluator validity, and archive ranking are
 unchanged. A fresh process derives the same directive from `GenerationRequest` and `archive.jsonl`,
 so adaptive allocation adds neither a model-planner call nor mutable orchestration state.
 

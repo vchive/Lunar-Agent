@@ -8,8 +8,8 @@
 - [x] T086-04 Add failure-first offline tests for lifecycle, reconciliation, identity, material
   integrity, score authority, and no-backend-call boundaries.
 - [x] T086-05 Add a Shinka exporter → generic producer admission integration fixture.
-- [x] T086-06 Run focused/full verification, record limits, and keep 084/085 Draft and sealed
-  measurement artifacts unchanged.
+- [x] T086-06 Run focused/full verification, record limits, leave 084/085 closure to their own later
+  implementation and review gate, and keep sealed measurement artifacts unchanged.
 
 No task starts a model, provider, real OpenEvolve/ShinkaEvolve run, remote service, scheduler, or
 campaign.

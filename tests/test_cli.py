@@ -212,6 +212,18 @@ def _write_evolution_commands(root: Path) -> tuple[Path, Path]:
     return generator, evaluator
 
 
+def _write_call_marker_command(root: Path, name: str) -> tuple[str, Path]:
+    marker = root / f"{name}.called"
+    command = root / f"{name}.py"
+    command.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('called', encoding='utf-8')\n"
+        "raise SystemExit(97)\n",
+        encoding="utf-8",
+    )
+    return shlex.join((sys.executable, str(command))), marker
+
+
 def _write_seed_manifest(
     root: Path,
     contract_path: Path,
@@ -724,6 +736,7 @@ def test_cli_seed_manifest_requires_explicit_exact_identity_options(
     _write_evolution_contract(contract_path, max_rounds=1)
     manifest = tmp_path / "manifest.json"
     manifest.write_text("{}", encoding="utf-8")
+    missing_identity_workspace = tmp_path / "missing-identity-workspace"
 
     assert (
         main(
@@ -732,6 +745,8 @@ def test_cli_seed_manifest_requires_explicit_exact_identity_options(
                 str(contract_path),
                 "--seed-manifest",
                 str(manifest),
+                "--workspace",
+                str(missing_identity_workspace),
                 "--json",
                 "--home",
                 str(tmp_path / "missing-identities"),
@@ -740,6 +755,9 @@ def test_cli_seed_manifest_requires_explicit_exact_identity_options(
         == 2
     )
     assert "seed-dependency-sha256" in json.loads(capsys.readouterr().err)["error"]
+    assert not missing_identity_workspace.exists()
+
+    missing_evaluator_workspace = tmp_path / "missing-evaluator-workspace"
 
     assert (
         main(
@@ -754,6 +772,8 @@ def test_cli_seed_manifest_requires_explicit_exact_identity_options(
                 "e" * 64,
                 "--generator-command",
                 sys.executable,
+                "--workspace",
+                str(missing_evaluator_workspace),
                 "--json",
                 "--home",
                 str(tmp_path / "missing-evaluator"),
@@ -762,6 +782,70 @@ def test_cli_seed_manifest_requires_explicit_exact_identity_options(
         == 2
     )
     assert "exact harness" in json.loads(capsys.readouterr().err)["error"]
+    assert not missing_evaluator_workspace.exists()
+
+
+def test_cli_evolve_rejects_over_capacity_verified_seeds_before_generator(
+    tmp_path: Path, capsys
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    generator, evaluator = _write_evolution_commands(tmp_path)
+    evaluator_command = (sys.executable, str(evaluator))
+    manifest, _source = _write_seed_manifest(
+        tmp_path,
+        contract_path,
+        evaluator_command,
+        dependency_sha256="d" * 64,
+        environment_sha256="e" * 64,
+    )
+    extra = tmp_path / "second-seed.py"
+    extra.write_text("def solve():\n    return 2\n", encoding="utf-8")
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    second = {
+        **payload["seeds"][0],
+        "source_path": extra.name,
+        "source_sha256": hashlib.sha256(extra.read_bytes()).hexdigest(),
+    }
+    payload["seeds"].append(second)
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    generator_called = tmp_path / "generator-called"
+    generator.write_text(
+        f"from pathlib import Path\nPath({str(generator_called)!r}).write_text('called')\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "over-capacity-workspace"
+    home = tmp_path / "over-capacity-home"
+    assert main(
+        [
+            "evolve",
+            str(contract_path),
+            "--seed-manifest",
+            str(manifest),
+            "--seed-dependency-sha256",
+            "d" * 64,
+            "--seed-environment-sha256",
+            "e" * 64,
+            "--generator-command",
+            shlex.join((sys.executable, str(generator))),
+            "--evaluator-command",
+            shlex.join(evaluator_command),
+            "--population-size",
+            "1",
+            "--workspace",
+            str(workspace),
+            "--json",
+            "--home",
+            str(home),
+        ]
+    ) == 2
+    assert json.loads(capsys.readouterr().err)["error"] == "verified_seed_population_capacity_exceeded"
+    assert not generator_called.exists()
+    assert not (workspace / "evolution" / "archive.jsonl").exists()
+    assert not (workspace / "evolution" / "state.json").exists()
+    run = Store(home / "state.db").get_run_by_workspace(workspace)
+    assert run is not None
+    assert run.status.value == "failed"
 
 
 def test_cli_evolve_can_use_explicit_agent_as_candidate_generator(tmp_path: Path, capsys) -> None:
@@ -1141,7 +1225,7 @@ def test_cli_benchmark_compares_native_strategies(tmp_path: Path, capsys) -> Non
 def test_cli_benchmark_includes_explicit_openevolve(tmp_path: Path, capsys) -> None:
     contract_path = tmp_path / "contract.json"
     _write_evolution_contract(contract_path, max_rounds=1)
-    generator, evaluator = _write_evolution_commands(tmp_path)
+    _generator, evaluator = _write_evolution_commands(tmp_path)
     wrapper = tmp_path / "openevolve-wrapper.py"
     wrapper.write_text(
         "import json, pathlib, sys\n"
@@ -1161,8 +1245,6 @@ def test_cli_benchmark_includes_explicit_openevolve(tmp_path: Path, capsys) -> N
                 str(contract_path),
                 "--strategy",
                 "openevolve",
-                "--generator-command",
-                f"{sys.executable} {generator}",
                 "--evaluator-command",
                 f"{sys.executable} {evaluator}",
                 "--openevolve-command",
@@ -1183,6 +1265,8 @@ def test_cli_benchmark_includes_explicit_openevolve(tmp_path: Path, capsys) -> N
     payload = json.loads(capsys.readouterr().out)
     assert [item["strategy"] for item in payload["runs"]] == ["openevolve"]
     assert all(item["status"] == "completed" for item in payload["runs"])
+    assert payload["config"]["evaluator_kind"] == "exact_harness"
+    assert payload["config"]["generator_fingerprint"] is None
     assert "openevolve" in payload["config"]["strategy_commands_sha256"]
 
 
@@ -1267,6 +1351,96 @@ def test_cli_benchmark_rejects_runtime_openevolve_mix(tmp_path: Path, capsys) ->
         == 2
     )
     assert "cannot be combined" in json.loads(capsys.readouterr().err)["error"]
+
+
+def test_cli_benchmark_rejects_unused_generator_for_openevolve_only(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, max_rounds=1)
+    workspace = tmp_path / "benchmark"
+
+    assert (
+        main(
+            [
+                "benchmark",
+                str(contract_path),
+                "--strategy",
+                "openevolve",
+                "--generator-command",
+                sys.executable,
+                "--evaluator-command",
+                sys.executable,
+                "--openevolve-command",
+                sys.executable,
+                "--workspace",
+                str(workspace),
+                "--json",
+                "--home",
+                str(tmp_path / "home"),
+            ]
+        )
+        == 2
+    )
+    assert json.loads(capsys.readouterr().err)["error"] == (
+        "--generator-command requires --strategy population"
+    )
+    assert not workspace.exists()
+
+
+@pytest.mark.parametrize(
+    ("strategy", "expected_error"),
+    [
+        ("openevolve", "--generator-command requires --strategy population"),
+        ("population", "--openevolve-command requires --strategy openevolve"),
+    ],
+)
+def test_cli_evolve_rejects_strategy_specific_unused_commands_before_side_effects(
+    tmp_path: Path,
+    capsys,
+    strategy: str,
+    expected_error: str,
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    _write_evolution_contract(contract_path, strategy=strategy, max_rounds=1)
+    generator, generator_marker = _write_call_marker_command(tmp_path, "generator")
+    producer, producer_marker = _write_call_marker_command(tmp_path, "openevolve")
+    evaluator, evaluator_marker = _write_call_marker_command(tmp_path, "evaluator")
+    workspace = tmp_path / "workspace"
+    home = tmp_path / "home"
+
+    assert (
+        main(
+            [
+                "evolve",
+                str(contract_path),
+                "--strategy",
+                strategy,
+                "--generator-command",
+                generator,
+                "--openevolve-command",
+                producer,
+                "--evaluator-command",
+                evaluator,
+                "--workspace",
+                str(workspace),
+                "--json",
+                "--home",
+                str(home),
+            ]
+        )
+        == 2
+    )
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert json.loads(output.err)["error"] == expected_error
+    assert not workspace.exists()
+    assert not generator_marker.exists()
+    assert not producer_marker.exists()
+    assert not evaluator_marker.exists()
+    runs = home / "runs"
+    assert not runs.exists() or not any(runs.iterdir())
 
 
 def test_cli_evolve_runtime_can_fill_one_role_and_rejects_unused_profile(
@@ -1591,7 +1765,9 @@ def test_cli_evolve_rejects_legacy_loop_contracts(tmp_path: Path, capsys) -> Non
     _write_evolution_contract(contract_path, strategy="loop", max_rounds=1)
     assert main(["evolve", str(contract_path), "--json", "--home", str(tmp_path / "home")]) == 2
     error = json.loads(capsys.readouterr().err)
-    assert "loop evolution is retired" in error["error"]
+    assert error["error"] == "loop_strategy_retired"
+    assert "population" in error["message"]
+    assert "openevolve" in error["message"]
 
 
 def test_cli_evolve_detach_returns_handle_then_resume_executes_same_run(

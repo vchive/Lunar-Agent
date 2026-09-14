@@ -86,7 +86,9 @@ reruns the local evaluator, and never reruns the producer.
 
 An omitted benchmark strategy list normalizes to `("population",)`. Explicit lists contain only
 `population` and `openevolve`; duplicates and `loop` are rejected before workspace creation.
-OpenEvolve selection requires its explicit executable and a local evaluator command.
+OpenEvolve selection requires its explicit executable and a local evaluator command. A comparison
+uses one evaluator kind/fingerprint authority, but each strategy receives a fresh evaluator adapter
+so runtime state and factory failure remain isolated to that strategy.
 
 `AgentLoopRuntime`, `--agent-loop`, and `--agent-runtime-loop` are runtime profile fields. Their
 fingerprints remain part of solver/evaluator adapter identity, but they never populate the active

@@ -16,7 +16,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from .algorithm import AlgorithmProblemContract
+from .algorithm import (
+    LOOP_STRATEGY_RETIRED_MESSAGE,
+    AlgorithmProblemContract,
+)
 from .evolution import (
     CandidateEvaluator,
     CandidateGenerator,
@@ -26,8 +29,11 @@ from .evolution import (
     build_strategy,
 )
 
+# Full serialized-result vocabulary retained for historical BenchmarkRun parsing. New selection
+# must use ACTIVE_BENCHMARK_STRATEGIES and is enforced by BenchmarkConfig.
 BENCHMARK_STRATEGIES = ("loop", "population", "openevolve")
-MAX_BENCHMARK_STRATEGIES = 3
+ACTIVE_BENCHMARK_STRATEGIES = ("population", "openevolve")
+MAX_BENCHMARK_STRATEGIES = len(ACTIVE_BENCHMARK_STRATEGIES)
 MAX_REPORT_BYTES = 64 * 1024
 MAX_ERROR_BYTES = 2_000
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -54,7 +60,7 @@ class BenchmarkError(ValueError):
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
-    """Common bounded settings applied to every selected native strategy."""
+    """Common bounded settings applied to every selected active strategy."""
 
     strategies: tuple[str, ...] = ("population",)
     max_rounds: int = 5
@@ -68,6 +74,7 @@ class BenchmarkConfig:
     timeout_seconds: float = 900.0
     generator_fingerprint: str | None = None
     evaluator_fingerprint: str | None = None
+    evaluator_kind: str | None = None
     strategy_commands: dict[str, tuple[str, ...]] = field(default_factory=dict)
     runtime_profile: dict[str, object] | None = None
 
@@ -75,16 +82,14 @@ class BenchmarkConfig:
         if isinstance(self.strategies, (str, bytes)):
             raise BenchmarkError("strategies must be a non-empty sequence")
         normalized = tuple(self.strategies)
-        if not 1 <= len(normalized) <= MAX_BENCHMARK_STRATEGIES:
-            raise BenchmarkError("benchmark requires at least one and at most three strategies")
-        if any(strategy not in BENCHMARK_STRATEGIES for strategy in normalized):
+        if "loop" in normalized:
+            raise BenchmarkError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if any(strategy not in ACTIVE_BENCHMARK_STRATEGIES for strategy in normalized):
             raise BenchmarkError(
                 "benchmark strategy is unsupported; choose population or openevolve"
             )
-        if "loop" in normalized:
-            raise BenchmarkError(
-                "loop benchmark strategy is retired for new runs; choose population or openevolve"
-            )
+        if not 1 <= len(normalized) <= MAX_BENCHMARK_STRATEGIES:
+            raise BenchmarkError("benchmark requires at least one and at most two strategies")
         if len(set(normalized)) != len(normalized):
             raise BenchmarkError("benchmark strategies must be unique")
         object.__setattr__(self, "strategies", normalized)
@@ -115,6 +120,16 @@ class BenchmarkConfig:
                 raise BenchmarkError(f"{name} must be a lowercase SHA-256 hex digest or null")
         if "openevolve" in normalized and self.evaluator_fingerprint is None:
             raise BenchmarkError("openevolve strategy requires a pinned local evaluator fingerprint")
+        evaluator_kind = self.evaluator_kind
+        if evaluator_kind is None:
+            evaluator_kind = "exact_harness" if "openevolve" in normalized else "native"
+        try:
+            EvolutionConfig(evaluator_kind=evaluator_kind)
+        except (TypeError, ValueError) as exc:
+            raise BenchmarkError("benchmark evaluator_kind must be a safe identifier") from exc
+        if "openevolve" in normalized and evaluator_kind != "exact_harness":
+            raise BenchmarkError("openevolve benchmark requires evaluator_kind=exact_harness")
+        object.__setattr__(self, "evaluator_kind", evaluator_kind)
         if self.runtime_profile is not None:
             if not isinstance(self.runtime_profile, dict):
                 raise BenchmarkError("runtime_profile must be an object or null")
@@ -172,6 +187,7 @@ class BenchmarkConfig:
                 command=normalized_commands.get(strategy, ()),
                 generator_fingerprint=self.generator_fingerprint,
                 evaluator_fingerprint=self.evaluator_fingerprint,
+                evaluator_kind=self.evaluator_kind,
             )
 
     def evolution(self, strategy: str) -> EvolutionConfig:
@@ -190,6 +206,7 @@ class BenchmarkConfig:
             timeout_seconds=self.timeout_seconds,
             generator_fingerprint=self.generator_fingerprint,
             evaluator_fingerprint=self.evaluator_fingerprint,
+            evaluator_kind=self.evaluator_kind,
             command=self.strategy_commands.get(strategy, ()),
         )
 
@@ -207,6 +224,7 @@ class BenchmarkConfig:
             "timeout_seconds": self.timeout_seconds,
             "generator_fingerprint": self.generator_fingerprint,
             "evaluator_fingerprint": self.evaluator_fingerprint,
+            "evaluator_kind": self.evaluator_kind,
             "runtime_profile": self.runtime_profile,
             "strategy_commands_sha256": {
                 strategy: hashlib.sha256(
@@ -320,17 +338,24 @@ class BenchmarkRunner:
         contract: AlgorithmProblemContract,
         workspace: str | Path,
         *,
-        generator_factory: GeneratorFactory,
+        generator_factory: GeneratorFactory | None,
         evaluator_factory: EvaluatorFactory,
         config: BenchmarkConfig | None = None,
     ) -> None:
         if not isinstance(contract, AlgorithmProblemContract):
             raise TypeError("contract must be an AlgorithmProblemContract")
-        if not callable(generator_factory) or not callable(evaluator_factory):
-            raise TypeError("benchmark generator/evaluator factories must be callable")
+        if contract.evolution.strategy == "loop":
+            raise BenchmarkError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if config is not None and not isinstance(config, BenchmarkConfig):
+            raise TypeError("benchmark config must be a BenchmarkConfig or None")
+        resolved_config = config or BenchmarkConfig()
+        if "population" in resolved_config.strategies and not callable(generator_factory):
+            raise TypeError("population benchmark generator factory must be callable")
+        if not callable(evaluator_factory):
+            raise TypeError("benchmark evaluator factory must be callable")
         self.contract = contract
         self.workspace = Path(workspace).expanduser().resolve(strict=False)
-        self.config = config or BenchmarkConfig()
+        self.config = resolved_config
         self.generator_factory = generator_factory
         self.evaluator_factory = evaluator_factory
         self._started = False
@@ -385,11 +410,24 @@ class BenchmarkRunner:
         )
         started = time.monotonic()
         default_archive = f"strategies/{strategy}/evolution/archive.jsonl"
+
+        def unused_generator(_request: object) -> object:
+            raise BenchmarkError("openevolve benchmark invoked the native generator")
+
         try:
-            generator = self.generator_factory(strategy)
+            generator = unused_generator
+            if strategy == "population":
+                assert self.generator_factory is not None
+                generator = self.generator_factory(strategy)
+                if not callable(generator):
+                    raise BenchmarkError(
+                        "benchmark generator factory must return a callable generator"
+                    )
             evaluator = self.evaluator_factory(strategy)
-            if not callable(generator) or not callable(evaluator):
-                raise BenchmarkError("benchmark factories must return callable generator/evaluator")
+            if not callable(evaluator):
+                raise BenchmarkError(
+                    "benchmark evaluator factory must return a callable evaluator"
+                )
             context = EvolutionContext(
                 contract=self.contract,
                 workspace=strategy_root,
@@ -453,6 +491,7 @@ class BenchmarkRunner:
 
 
 __all__ = [
+    "ACTIVE_BENCHMARK_STRATEGIES",
     "BENCHMARK_STRATEGIES",
     "BenchmarkConfig",
     "BenchmarkError",

@@ -9,8 +9,9 @@ from pathlib import Path
 import pytest
 
 import famou.evolution as evolution_module
-from famou.algorithm import AlgorithmProblemContract
+from famou.algorithm import LOOP_STRATEGY_RETIRED_MESSAGE, AlgorithmProblemContract
 from famou.evolution import (
+    Candidate,
     CandidateArchive,
     CandidateDraft,
     CandidateExecution,
@@ -22,6 +23,7 @@ from famou.evolution import (
     EvolutionStrategy,
     ExecutionAwareCandidateEvaluator,
     LoopStrategy,
+    OffspringOutcome,
     OpenEvolveStrategy,
     PopulationState,
     PopulationStrategy,
@@ -157,6 +159,103 @@ def _write_controller_contract(
     root.mkdir(parents=True)
     (root / "contract.json").write_bytes(content)
     return content
+
+
+def _workspace_snapshot(workspace: Path) -> dict[str, tuple[str, bytes | str | None]]:
+    snapshot: dict[str, tuple[str, bytes | str | None]] = {}
+    for path in sorted(workspace.rglob("*")):
+        relative = path.relative_to(workspace).as_posix()
+        if path.is_symlink():
+            snapshot[relative] = ("symlink", os.readlink(path))
+        elif path.is_file():
+            snapshot[relative] = ("file", path.read_bytes())
+        else:
+            snapshot[relative] = ("directory", None)
+    return snapshot
+
+
+def _result_payload(strategy: str) -> dict[str, object]:
+    return {
+        "strategy": strategy,
+        "status": "completed",
+        "iterations": 0,
+        "evaluated_candidates": 0,
+        "valid_candidates": 0,
+        "best_candidate_id": None,
+        "best_score": None,
+        "best_candidate_path": None,
+        "archive_path": "evolution/archive.jsonl",
+        "error": None,
+    }
+
+
+def _write_canonical_result(path: Path, strategy: str) -> None:
+    path.write_text(
+        json.dumps(
+            _result_payload(strategy),
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _historical_loop_archive(
+    workspace: Path,
+    *,
+    evidence: frozenset[str] = frozenset({"state", "contract", "archive"}),
+) -> CandidateArchive:
+    root = workspace / "evolution"
+    root.mkdir(parents=True)
+    if "archive" in evidence:
+        candidate_root = root / "candidates" / "candidate-0001"
+        candidate_root.mkdir(parents=True)
+        source = candidate_root / "candidate.py"
+        source.write_text("historical = True\n", encoding="utf-8")
+        candidate = Candidate(
+            candidate_id="candidate-0001",
+            code_path=source.relative_to(workspace).as_posix(),
+            parent_id=None,
+            generation=0,
+            iteration=1,
+            strategy="loop",
+            island_id=None,
+            evaluation=evolution_module._report(_report(1)),
+            created_at=1.0,
+        )
+        (root / "archive.jsonl").write_text(
+            json.dumps(candidate.to_dict(), ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if "contract" in evidence:
+        contract = _contract("loop")
+        (root / "contract.json").write_text(
+            json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+    if "state" in evidence:
+        (root / "state.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1",
+                    "strategy": "loop",
+                    "status": "completed",
+                    "iteration": 1,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    if "result" in evidence:
+        _write_canonical_result(root / "result.json", "loop")
+    return CandidateArchive(workspace)
 
 
 def test_population_archives_every_round_and_returns_best_so_far(tmp_path: Path) -> None:
@@ -1022,20 +1121,21 @@ def test_seeded_population_resume_finalizes_complete_integrity_batch_without_rep
 
 
 @pytest.mark.parametrize(
-    "tamper",
+    ("tamper", "expected_error"),
     [
-        "drop_outcome",
-        "change_failure_code",
-        "swap_candidates",
-        "orphan_candidate",
-        "baseline_candidate",
-        "foreign_candidate",
-        "watermark",
+        ("drop_outcome", "population_outcome_state_mismatch"),
+        ("change_failure_code", "population_outcome_state_mismatch"),
+        ("swap_candidates", "population_outcome_state_mismatch"),
+        ("orphan_candidate", "population_outcome_state_mismatch"),
+        ("baseline_candidate", "population_outcome_state_mismatch"),
+        ("foreign_candidate", "evolution_workspace_strategy_invalid"),
+        ("watermark", "population_outcome_state_mismatch"),
     ],
 )
 def test_population_resume_fails_closed_on_outcome_binding_tamper(
     tmp_path: Path,
     tamper: str,
+    expected_error: str,
 ) -> None:
     config = EvolutionConfig(
         max_rounds=1,
@@ -1106,20 +1206,32 @@ def test_population_resume_fails_closed_on_outcome_binding_tamper(
             evaluation=evolution_module._report(_report(100)),
         )
     elif tamper == "foreign_candidate":
-        archive.persist(
-            CandidateDraft("foreign = True\n"),
-            strategy="openevolve",
+        foreign_source = (
+            archive.candidates_root / "candidate-foreign" / "candidate.py"
+        )
+        foreign_source.parent.mkdir(parents=True)
+        foreign_source.write_text("foreign = True\n", encoding="utf-8")
+        foreign = Candidate(
+            candidate_id="candidate-foreign",
+            code_path=foreign_source.relative_to(tmp_path).as_posix(),
+            parent_id=None,
+            generation=0,
             iteration=1,
-            generation=1,
+            strategy="openevolve",
             island_id=None,
             evaluation=evolution_module._report(_report(100)),
+            created_at=time.time(),
         )
+        with archive.archive_path.open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(foreign.to_dict(), ensure_ascii=False, sort_keys=True) + "\n"
+            )
     else:
         state = archive.read_state()
         state["outcome_watermark"] = 0
         archive.write_state(state)
 
-    with pytest.raises(EvolutionError, match="population_outcome_state_mismatch"):
+    with pytest.raises(EvolutionError, match=f"^{expected_error}$"):
         PopulationStrategy(
             EvolutionContext(
                 _contract(),
@@ -1462,6 +1574,50 @@ def test_population_seed_publish_failure_restores_controller_contract_only_root(
     assert observed == []
 
 
+def _committed_recovery_seed_tree(
+    workspace: Path,
+    *,
+    strategy: str,
+) -> tuple[AlgorithmProblemContract, bytes]:
+    """Create the exact complete tree that an interrupted seed publish can expose."""
+
+    contract = _contract("population")
+    manifest = _seed_manifest(
+        workspace.parent / f"{workspace.name}-{strategy}-incoming",
+        contract,
+        {"candidate.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    contract_content = _write_controller_contract(workspace, contract)
+    seed_id = seeds[0].candidate_id
+    if strategy == "population":
+        state = {
+            "schema_version": "1",
+            "strategy": "population",
+            "config": {"strategy": "population"},
+            "status": "running",
+            "iteration": 0,
+            "active_ids": {"0": [seed_id]},
+        }
+    else:
+        state = {
+            "schema_version": "1",
+            "strategy": "openevolve",
+            "config": {"strategy": "openevolve"},
+            "status": "completed",
+            "iteration": 1,
+            "best_candidate_id": seed_id,
+        }
+    CandidateArchive(workspace).commit_initial_seeds(
+        seeds,
+        state=state,
+        contract_sha256=contract.digest(),
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+        canonical_strategy=strategy,  # type: ignore[arg-type]
+    )
+    return contract, contract_content
+
+
 @pytest.mark.parametrize("retain_stage", [True, False])
 def test_candidate_archive_recovers_interrupted_controller_seed_publish(
     tmp_path: Path, retain_stage: bool
@@ -1509,6 +1665,166 @@ def test_candidate_archive_recovers_interrupted_controller_seed_publish(
     assert (root / "contract.json").read_bytes() == contract_content
     assert not stage.exists()
     assert not backup.exists()
+
+
+@pytest.mark.parametrize(
+    ("recovery_shape", "expected"),
+    [
+        ("backup_loop", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("stage_openevolve", "evolution_workspace_strategy_mismatch"),
+        ("stage_config_mismatch", "evolution_workspace_strategy_invalid"),
+        ("stage_unknown_state", "evolution_workspace_strategy_invalid"),
+        ("stage_malformed_state", "evolution_workspace_strategy_invalid"),
+        ("stage_overflow_state", "evolution_workspace_strategy_invalid"),
+        ("root_loop_stage_loop", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("complete_root_loop_backup", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("missing_root_stage_loop_backup", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("population_root_openevolve_stage", "evolution_workspace_strategy_mismatch"),
+    ],
+)
+def test_strategy_constructor_preflights_seed_recovery_identity_without_mutation(
+    tmp_path: Path,
+    recovery_shape: str,
+    expected: str,
+) -> None:
+    workspace = tmp_path / recovery_shape
+    root = workspace / "evolution"
+    stage = workspace / ".evolution-seed-stage-v1"
+    backup = workspace / ".evolution-seed-backup-v1"
+    loop_content = (
+        json.dumps(
+            _contract("loop").to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    if recovery_shape == "backup_loop":
+        backup.mkdir(parents=True)
+        (backup / "contract.json").write_bytes(loop_content)
+    else:
+        tree_strategy = (
+            "openevolve"
+            if recovery_shape in {"stage_openevolve", "population_root_openevolve_stage"}
+            else "population"
+        )
+        _, population_contract_content = _committed_recovery_seed_tree(
+            workspace,
+            strategy=tree_strategy,
+        )
+        os.replace(root, stage)
+        if recovery_shape == "stage_config_mismatch":
+            state_path = stage / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["config"]["strategy"] = "openevolve"
+            state_path.write_text(
+                json.dumps(state, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        elif recovery_shape == "stage_unknown_state":
+            state_path = stage / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["strategy"] = "future"
+            state_path.write_text(
+                json.dumps(state, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        elif recovery_shape == "stage_malformed_state":
+            (stage / "state.json").write_text('{"strategy":', encoding="utf-8")
+        elif recovery_shape == "stage_overflow_state":
+            state_path = stage / "state.json"
+            content = state_path.read_text(encoding="utf-8").rstrip()
+            state_path.write_text(content[:-1] + ',"probe":1e999}\n', encoding="utf-8")
+        elif recovery_shape == "root_loop_stage_loop":
+            (stage / "contract.json").write_bytes(loop_content)
+            root.mkdir()
+            (root / "contract.json").write_bytes(loop_content)
+        elif recovery_shape == "complete_root_loop_backup":
+            os.replace(stage, root)
+            (root / "contract.json").write_bytes(loop_content)
+            backup.mkdir()
+            (backup / "contract.json").write_bytes(loop_content)
+        elif recovery_shape == "missing_root_stage_loop_backup":
+            (stage / "contract.json").write_bytes(loop_content)
+            backup.mkdir()
+            (backup / "contract.json").write_bytes(loop_content)
+        elif recovery_shape == "population_root_openevolve_stage":
+            root.mkdir()
+            (root / "contract.json").write_bytes(population_contract_content)
+
+    calls = {"generate": 0, "evaluate": 0, "observer_bind": 0}
+
+    class Callback:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __call__(self, *_args):
+            calls[self.name] += 1
+            return CandidateDraft("must_not_run = True\n")
+
+        def set_observer(self, _observer) -> None:
+            calls["observer_bind"] += 1
+
+    before = _workspace_snapshot(workspace)
+    with pytest.raises(EvolutionError) as caught:
+        PopulationStrategy(
+            EvolutionContext(
+                _contract(),
+                workspace,
+                Callback("generate"),
+                Callback("evaluate"),
+                EvolutionConfig(strategy="population"),
+            )
+        )
+
+    assert str(caught.value) == expected
+    assert calls == {"generate": 0, "evaluate": 0, "observer_bind": 0}
+    assert _workspace_snapshot(workspace) == before
+
+
+def test_openevolve_recovers_population_contract_seed_publication_without_callbacks(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "openevolve-recovery"
+    contract, contract_content = _committed_recovery_seed_tree(
+        workspace,
+        strategy="openevolve",
+    )
+    root = workspace / "evolution"
+    stage = workspace / ".evolution-seed-stage-v1"
+    backup = workspace / ".evolution-seed-backup-v1"
+    archive_content = (root / "archive.jsonl").read_bytes()
+    backup.mkdir()
+    (backup / "contract.json").write_bytes(contract_content)
+    calls = {"generate": 0, "evaluate": 0}
+
+    def generate(_request):
+        calls["generate"] += 1
+        return CandidateDraft("must_not_run = True\n")
+
+    def evaluate(_path, _contract):
+        calls["evaluate"] += 1
+        return _report(1)
+
+    OpenEvolveStrategy(
+        EvolutionContext(
+            contract,
+            workspace,
+            generate,
+            evaluate,
+            _openevolve_config((sys.executable, "-c", "pass")),
+        )
+    )
+
+    assert calls == {"generate": 0, "evaluate": 0}
+    assert root.is_dir()
+    assert (root / "archive.jsonl").read_bytes() == archive_content
+    assert (root / "contract.json").read_bytes() == contract_content
+    assert not stage.exists()
+    assert not backup.exists()
+    assert archive_content
 
 
 def test_candidate_archive_finishes_cleanup_after_seed_publish_crash(
@@ -2057,6 +2373,902 @@ def test_retired_loop_strategy_remains_importable_but_cannot_mutate_state(
     assert not (tmp_path / "evolution").exists()
 
 
+@pytest.mark.parametrize("strategy_name", ["population", "openevolve"])
+def test_strategy_constructor_rejects_config_identity_mismatch_before_workspace_or_callbacks(
+    tmp_path: Path,
+    strategy_name: str,
+) -> None:
+    workspace = tmp_path / strategy_name
+    calls = {"generate": 0, "evaluate": 0}
+
+    def generate(_request):
+        calls["generate"] += 1
+        return CandidateDraft("must_not_run = True\n")
+
+    def evaluate(_path, _contract):
+        calls["evaluate"] += 1
+        return _report(1)
+
+    if strategy_name == "population":
+        strategy_type = PopulationStrategy
+        contract = _contract("population")
+        config = _openevolve_config((sys.executable, "-c", "pass"))
+    else:
+        strategy_type = OpenEvolveStrategy
+        contract = _contract("openevolve")
+        config = EvolutionConfig(strategy="population")
+
+    with pytest.raises(
+        EvolutionError,
+        match="^evolution_workspace_strategy_mismatch$",
+    ):
+        strategy_type(EvolutionContext(contract, workspace, generate, evaluate, config))
+
+    assert calls == {"generate": 0, "evaluate": 0}
+    assert not workspace.exists()
+
+
+@pytest.mark.parametrize(
+    ("evidence", "expected"),
+    [
+        ("duplicate_state_strategy", "evolution_workspace_strategy_invalid"),
+        ("loop_result", LOOP_STRATEGY_RETIRED_MESSAGE),
+    ],
+)
+def test_population_constructor_rejects_root_strategy_evidence_before_callbacks(
+    tmp_path: Path,
+    evidence: str,
+    expected: str,
+) -> None:
+    workspace = tmp_path / evidence
+    root = workspace / "evolution"
+    root.mkdir(parents=True)
+    if evidence == "duplicate_state_strategy":
+        (root / "state.json").write_text(
+            '{"schema_version":"1","strategy":"loop","strategy":"population"}\n',
+            encoding="utf-8",
+        )
+    else:
+        _write_canonical_result(root / "result.json", "loop")
+    before = _workspace_snapshot(workspace)
+    calls = {"generate": 0, "evaluate": 0}
+
+    def generate(_request):
+        calls["generate"] += 1
+        return CandidateDraft("must_not_run = True\n")
+
+    def evaluate(_path, _contract):
+        calls["evaluate"] += 1
+        return _report(1)
+
+    with pytest.raises(EvolutionError) as caught:
+        PopulationStrategy(
+            EvolutionContext(
+                _contract(),
+                workspace,
+                generate,
+                evaluate,
+                EvolutionConfig(strategy="population", max_rounds=1),
+            )
+        )
+
+    assert str(caught.value) == expected
+    assert calls == {"generate": 0, "evaluate": 0}
+    assert _workspace_snapshot(workspace) == before
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [float("nan"), float("inf"), float("-inf"), object()],
+    ids=["nan", "infinity", "negative-infinity", "not-serializable"],
+)
+def test_state_writer_rejects_nonfinite_or_unserializable_payload_before_layout(
+    tmp_path: Path,
+    invalid_value: object,
+) -> None:
+    workspace = tmp_path / "workspace"
+    archive = CandidateArchive(workspace)
+
+    with pytest.raises(EvolutionError, match="^evolution state must be finite JSON$"):
+        archive.write_state(
+            {
+                "schema_version": "1",
+                "strategy": "population",
+                "probe": invalid_value,
+            }
+        )
+
+    assert _workspace_snapshot(workspace) == {}
+    assert not archive.root.exists()
+
+
+@pytest.mark.parametrize(
+    "writer",
+    ["state", "outcome", "candidate", "seed_commit"],
+)
+@pytest.mark.parametrize("evidence_source", ["state", "contract", "archive", "result"])
+def test_historical_loop_workspace_rejects_every_public_writer_without_mutation(
+    tmp_path: Path,
+    writer: str,
+    evidence_source: str,
+) -> None:
+    workspace = tmp_path / "historical"
+    archive = _historical_loop_archive(
+        workspace,
+        evidence=frozenset({evidence_source}),
+    )
+    population_contract = _contract()
+    seeds = ()
+    if writer == "seed_commit":
+        manifest = _seed_manifest(
+            tmp_path / "incoming",
+            population_contract,
+            {"candidate.py": "score = 1\n"},
+        )
+        seeds = _admitted_initial_seeds(manifest, population_contract, num_islands=1)
+    before = _workspace_snapshot(workspace)
+
+    with pytest.raises(EvolutionError) as caught:
+        if writer == "state":
+            archive.write_state({"schema_version": "1", "strategy": "population"})
+        elif writer == "outcome":
+            archive.append_offspring_outcome(
+                OffspringOutcome(1, 0, 0, "candidate_failed")
+            )
+        elif writer == "candidate":
+            archive.persist(
+                CandidateDraft("external_score = 999\n"),
+                strategy="openevolve",
+                iteration=1,
+                generation=0,
+                island_id=None,
+                evaluation=evolution_module._report(_report(999)),
+            )
+        else:
+            seed_id = seeds[0].candidate_id
+            archive.commit_initial_seeds(
+                seeds,
+                state={
+                    "schema_version": "1",
+                    "strategy": "population",
+                    "status": "running",
+                    "iteration": 0,
+                    "active_ids": {"0": [seed_id]},
+                },
+                contract_sha256=population_contract.digest(),
+                evaluator_fingerprint=SEED_EVALUATOR_SHA,
+            )
+
+    assert str(caught.value) == LOOP_STRATEGY_RETIRED_MESSAGE
+    assert _workspace_snapshot(workspace) == before
+
+
+@pytest.mark.parametrize(
+    "writer",
+    ["state", "outcome", "candidate", "seed_commit"],
+)
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "missing_state_strategy",
+        "duplicate_state_strategy",
+        "duplicate_config_strategy",
+        "overflow_state_number",
+        "missing_result_strategy",
+        "unknown_result",
+        "noncanonical_result",
+        "oversized_result",
+        "result_directory",
+        "result_symlink",
+        "mixed_state_result",
+        "duplicate_contract_strategy",
+        "duplicate_archive_strategy",
+        "overflow_archive_number",
+        "duplicate_outcome_key",
+    ],
+)
+def test_untrusted_state_or_result_strategy_blocks_every_writer_without_mutation(
+    tmp_path: Path,
+    writer: str,
+    evidence: str,
+) -> None:
+    workspace = tmp_path / evidence
+    root = workspace / "evolution"
+    root.mkdir(parents=True)
+    if evidence == "missing_state_strategy":
+        (root / "state.json").write_text('{"schema_version":"1"}\n', encoding="utf-8")
+    elif evidence == "duplicate_state_strategy":
+        (root / "state.json").write_text(
+            '{"schema_version":"1","strategy":"loop","strategy":"population"}\n',
+            encoding="utf-8",
+        )
+    elif evidence == "duplicate_config_strategy":
+        (root / "state.json").write_text(
+            '{"schema_version":"1","strategy":"population",'
+            '"config":{"strategy":"loop","strategy":"population"}}\n',
+            encoding="utf-8",
+        )
+    elif evidence == "overflow_state_number":
+        (root / "state.json").write_text(
+            '{"schema_version":"1","strategy":"population","probe":1e999}\n',
+            encoding="utf-8",
+        )
+    elif evidence == "missing_result_strategy":
+        payload = _result_payload("population")
+        payload.pop("strategy")
+        (root / "result.json").write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    elif evidence == "unknown_result":
+        _write_canonical_result(root / "result.json", "future")
+    elif evidence == "noncanonical_result":
+        (root / "result.json").write_text(
+            json.dumps(_result_payload("population")) + "\n",
+            encoding="utf-8",
+        )
+    elif evidence == "oversized_result":
+        (root / "result.json").write_bytes(b" " * (evolution_module.MAX_STATE_BYTES + 1))
+    elif evidence == "result_directory":
+        (root / "result.json").mkdir()
+    elif evidence == "result_symlink":
+        outside = workspace / "outside-result.json"
+        _write_canonical_result(outside, "population")
+        (root / "result.json").symlink_to(outside)
+    elif evidence == "duplicate_contract_strategy":
+        payload = json.dumps(
+            _contract().to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).replace(
+            '"strategy":"population"',
+            '"strategy":"loop","strategy":"population"',
+            1,
+        )
+        (root / "contract.json").write_text(payload + "\n", encoding="utf-8")
+    elif evidence in {"duplicate_archive_strategy", "overflow_archive_number"}:
+        candidate = Candidate(
+            candidate_id="candidate-0001",
+            code_path="evolution/candidates/candidate-0001/candidate.py",
+            parent_id=None,
+            generation=0,
+            iteration=0,
+            strategy="population",
+            island_id=0,
+            evaluation=evolution_module._report(_report(1)),
+            created_at=1.0,
+        )
+        payload = json.dumps(
+            candidate.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if evidence == "duplicate_archive_strategy":
+            payload = payload.replace(
+                '"strategy":"population"',
+                '"strategy":"loop","strategy":"population"',
+                1,
+            )
+        else:
+            payload = payload.replace('"created_at":1.0', '"created_at":1e999', 1)
+        (root / "archive.jsonl").write_text(payload + "\n", encoding="utf-8")
+    elif evidence == "duplicate_outcome_key":
+        payload = json.dumps(
+            OffspringOutcome(1, 0, 0, "candidate_failed").to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).replace('"attempt":0', '"attempt":17,"attempt":0', 1)
+        (root / "offspring-outcomes.jsonl").write_text(
+            payload + "\n",
+            encoding="utf-8",
+        )
+    else:
+        (root / "state.json").write_text(
+            '{"schema_version":"1","strategy":"population"}\n',
+            encoding="utf-8",
+        )
+        _write_canonical_result(root / "result.json", "openevolve")
+    archive = CandidateArchive(workspace)
+    population_contract = _contract()
+    seeds = ()
+    if writer == "seed_commit":
+        manifest = _seed_manifest(
+            tmp_path / "incoming",
+            population_contract,
+            {"candidate.py": "score = 1\n"},
+        )
+        seeds = _admitted_initial_seeds(manifest, population_contract, num_islands=1)
+    before = _workspace_snapshot(workspace)
+
+    with pytest.raises(
+        EvolutionError,
+        match="^evolution_workspace_strategy_invalid$",
+    ):
+        if writer == "state":
+            archive.write_state({"schema_version": "1", "strategy": "population"})
+        elif writer == "outcome":
+            archive.append_offspring_outcome(
+                OffspringOutcome(1, 0, 0, "candidate_failed")
+            )
+        elif writer == "candidate":
+            archive.persist(
+                CandidateDraft("external_score = 999\n"),
+                strategy="openevolve",
+                iteration=1,
+                generation=0,
+                island_id=None,
+                evaluation=evolution_module._report(_report(999)),
+            )
+        else:
+            seed_id = seeds[0].candidate_id
+            archive.commit_initial_seeds(
+                seeds,
+                state={
+                    "schema_version": "1",
+                    "strategy": "population",
+                    "status": "running",
+                    "iteration": 0,
+                    "active_ids": {"0": [seed_id]},
+                },
+                contract_sha256=population_contract.digest(),
+                evaluator_fingerprint=SEED_EVALUATOR_SHA,
+            )
+
+    assert _workspace_snapshot(workspace) == before
+
+
+@pytest.mark.parametrize(
+    ("config_payload", "expected"),
+    [
+        ({}, "evolution_workspace_strategy_invalid"),
+        ({"strategy": "future"}, "evolution_workspace_strategy_invalid"),
+        ({"strategy": "loop"}, LOOP_STRATEGY_RETIRED_MESSAGE),
+        ({"strategy": "openevolve"}, "evolution_workspace_strategy_invalid"),
+        ([], "evolution_workspace_strategy_invalid"),
+    ],
+)
+@pytest.mark.parametrize("writer", ["state", "outcome", "candidate", "seed_commit"])
+def test_existing_state_config_strategy_blocks_every_writer_without_mutation(
+    tmp_path: Path,
+    config_payload: object,
+    expected: str,
+    writer: str,
+) -> None:
+    config_key = hashlib.sha256(
+        json.dumps(config_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    workspace = tmp_path / f"{writer}-{config_key}"
+    root = workspace / "evolution"
+    root.mkdir(parents=True)
+    (root / "state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "strategy": "population",
+                "config": config_payload,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    archive = CandidateArchive(workspace)
+    population_contract = _contract()
+    seeds = ()
+    if writer == "seed_commit":
+        manifest = _seed_manifest(
+            tmp_path / f"incoming-{config_key}",
+            population_contract,
+            {"candidate.py": "score = 1\n"},
+        )
+        seeds = _admitted_initial_seeds(manifest, population_contract, num_islands=1)
+    before = _workspace_snapshot(workspace)
+
+    with pytest.raises(EvolutionError) as caught:
+        if writer == "state":
+            archive.write_state(
+                {
+                    "schema_version": "1",
+                    "strategy": "population",
+                    "config": {"strategy": "population"},
+                }
+            )
+        elif writer == "outcome":
+            archive.append_offspring_outcome(
+                OffspringOutcome(1, 0, 0, "candidate_failed")
+            )
+        elif writer == "candidate":
+            archive.persist(
+                CandidateDraft("score = 2\n"),
+                strategy="population",
+                iteration=1,
+                generation=0,
+                island_id=0,
+                evaluation=evolution_module._report(_report(2)),
+            )
+        else:
+            seed_id = seeds[0].candidate_id
+            archive.commit_initial_seeds(
+                seeds,
+                state={
+                    "schema_version": "1",
+                    "strategy": "population",
+                    "status": "running",
+                    "iteration": 0,
+                    "active_ids": {"0": [seed_id]},
+                },
+                contract_sha256=population_contract.digest(),
+                evaluator_fingerprint=SEED_EVALUATOR_SHA,
+            )
+
+    assert str(caught.value) == expected
+    assert _workspace_snapshot(workspace) == before
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            {"strategy": "population", "config": {}},
+            "evolution_workspace_strategy_invalid",
+        ),
+        (
+            {"strategy": "population", "config": {"strategy": "future"}},
+            "evolution_workspace_strategy_invalid",
+        ),
+        (
+            {"strategy": "population", "config": {"strategy": "loop"}},
+            LOOP_STRATEGY_RETIRED_MESSAGE,
+        ),
+        (
+            {"strategy": "population", "config": {"strategy": "openevolve"}},
+            "evolution_workspace_strategy_mismatch",
+        ),
+        (
+            {"config": {"strategy": "openevolve"}},
+            "evolution_workspace_strategy_mismatch",
+        ),
+        (
+            {"strategy": "population", "config": []},
+            "evolution_workspace_strategy_invalid",
+        ),
+    ],
+)
+def test_outgoing_state_config_strategy_is_bound_before_layout(
+    tmp_path: Path,
+    payload: dict[str, object],
+    expected: str,
+) -> None:
+    workspace = tmp_path / hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    archive = CandidateArchive(workspace)
+
+    with pytest.raises(EvolutionError) as caught:
+        archive.write_state({"schema_version": "1", **payload})
+
+    assert str(caught.value) == expected
+    assert _workspace_snapshot(workspace) == {}
+    assert not archive.root.exists()
+
+
+def test_legacy_state_without_config_still_allows_population_writer(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "evolution"
+    root.mkdir()
+    (root / "state.json").write_text(
+        '{"schema_version":"1","strategy":"population"}\n',
+        encoding="utf-8",
+    )
+    archive = CandidateArchive(tmp_path)
+
+    archive.append_offspring_outcome(OffspringOutcome(1, 0, 0, "candidate_failed"))
+
+    assert archive.offspring_outcomes() == (
+        OffspringOutcome(1, 0, 0, "candidate_failed"),
+    )
+
+
+@pytest.mark.parametrize(
+    "writer",
+    ["state", "outcome", "candidate", "seed_commit"],
+)
+def test_active_result_strategy_mismatch_blocks_every_writer_without_mutation(
+    tmp_path: Path,
+    writer: str,
+) -> None:
+    workspace = tmp_path / writer
+    root = workspace / "evolution"
+    root.mkdir(parents=True)
+    result_strategy = "population" if writer == "candidate" else "openevolve"
+    _write_canonical_result(root / "result.json", result_strategy)
+    archive = CandidateArchive(workspace)
+    population_contract = _contract()
+    seeds = ()
+    if writer == "seed_commit":
+        manifest = _seed_manifest(
+            tmp_path / "incoming",
+            population_contract,
+            {"candidate.py": "score = 1\n"},
+        )
+        seeds = _admitted_initial_seeds(manifest, population_contract, num_islands=1)
+    before = _workspace_snapshot(workspace)
+
+    with pytest.raises(
+        EvolutionError,
+        match="^evolution_workspace_strategy_mismatch$",
+    ):
+        if writer == "state":
+            archive.write_state({"schema_version": "1", "strategy": "population"})
+        elif writer == "outcome":
+            archive.append_offspring_outcome(
+                OffspringOutcome(1, 0, 0, "candidate_failed")
+            )
+        elif writer == "candidate":
+            archive.persist(
+                CandidateDraft("external_score = 999\n"),
+                strategy="openevolve",
+                iteration=1,
+                generation=0,
+                island_id=None,
+                evaluation=evolution_module._report(_report(999)),
+            )
+        else:
+            seed_id = seeds[0].candidate_id
+            archive.commit_initial_seeds(
+                seeds,
+                state={
+                    "schema_version": "1",
+                    "strategy": "population",
+                    "status": "running",
+                    "iteration": 0,
+                    "active_ids": {"0": [seed_id]},
+                },
+                contract_sha256=population_contract.digest(),
+                evaluator_fingerprint=SEED_EVALUATOR_SHA,
+            )
+
+    assert _workspace_snapshot(workspace) == before
+
+
+def test_omitted_fresh_state_strategy_materializes_population_compatibly(
+    tmp_path: Path,
+) -> None:
+    archive = CandidateArchive(tmp_path)
+
+    archive.write_state({"schema_version": "1", "status": "running"})
+
+    assert archive.read_state() == {
+        "schema_version": "1",
+        "strategy": "population",
+        "status": "running",
+    }
+
+
+def test_historical_result_evidence_remains_read_only(tmp_path: Path) -> None:
+    archive = _historical_loop_archive(
+        tmp_path,
+        evidence=frozenset({"result"}),
+    )
+    before = _workspace_snapshot(tmp_path)
+
+    result = archive.result("loop", "completed", 0)
+
+    assert result.strategy == "loop"
+    assert result.best_candidate_id is None
+    assert _workspace_snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    ["unknown_state", "unknown_contract", "mixed_archive"],
+)
+def test_existing_unknown_or_mixed_strategy_evidence_blocks_state_writer(
+    tmp_path: Path,
+    evidence: str,
+) -> None:
+    workspace = tmp_path / evidence
+    root = workspace / "evolution"
+    root.mkdir(parents=True)
+    if evidence == "unknown_state":
+        (root / "state.json").write_text(
+            '{"schema_version":"1","strategy":"future"}\n',
+            encoding="utf-8",
+        )
+    elif evidence == "unknown_contract":
+        payload = _contract().to_dict()
+        payload["evolution"]["strategy"] = "future"
+        (root / "contract.json").write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        candidates_root = root / "candidates"
+        candidates_root.mkdir()
+        candidates = []
+        for index, strategy in enumerate(("population", "openevolve"), start=1):
+            candidate_id = f"candidate-{index:04d}"
+            source = candidates_root / candidate_id / "candidate.py"
+            source.parent.mkdir()
+            source.write_text(f"value = {index}\n", encoding="utf-8")
+            candidates.append(
+                Candidate(
+                    candidate_id=candidate_id,
+                    code_path=source.relative_to(workspace).as_posix(),
+                    parent_id=None,
+                    generation=0,
+                    iteration=index,
+                    strategy=strategy,  # type: ignore[arg-type]
+                    island_id=0 if strategy == "population" else None,
+                    evaluation=evolution_module._report(_report(index)),
+                    created_at=float(index),
+                )
+            )
+        (root / "archive.jsonl").write_text(
+            "".join(
+                json.dumps(candidate.to_dict(), ensure_ascii=False, sort_keys=True) + "\n"
+                for candidate in candidates
+            ),
+            encoding="utf-8",
+        )
+    archive = CandidateArchive(workspace)
+    before = _workspace_snapshot(workspace)
+
+    with pytest.raises(
+        EvolutionError,
+        match="^evolution_workspace_strategy_invalid$",
+    ):
+        archive.write_state({"schema_version": "1", "strategy": "population"})
+
+    assert _workspace_snapshot(workspace) == before
+
+
+@pytest.mark.parametrize(
+    ("state_strategy", "expected"),
+    [
+        ("missing", "verified_seed_state_invalid"),
+        ("loop", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("openevolve", "verified_seed_state_invalid"),
+        ("future", "verified_seed_state_invalid"),
+    ],
+)
+def test_seed_commit_and_validation_bind_state_to_canonical_strategy_before_mutation(
+    tmp_path: Path,
+    state_strategy: str,
+    expected: str,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"candidate.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    seed_id = seeds[0].candidate_id
+    valid_state = {
+        "schema_version": "1",
+        "strategy": "population",
+        "status": "running",
+        "iteration": 0,
+        "active_ids": {"0": [seed_id]},
+    }
+    supplied_state = dict(valid_state)
+    if state_strategy == "missing":
+        supplied_state.pop("strategy")
+    else:
+        supplied_state["strategy"] = state_strategy
+
+    rejected_workspace = tmp_path / "rejected"
+    rejected = CandidateArchive(rejected_workspace)
+    rejected_before = _workspace_snapshot(rejected_workspace)
+    with pytest.raises(EvolutionError) as commit_error:
+        rejected.commit_initial_seeds(
+            seeds,
+            state=supplied_state,
+            contract_sha256=contract.digest(),
+            evaluator_fingerprint=SEED_EVALUATOR_SHA,
+        )
+    assert str(commit_error.value) == expected
+    assert _workspace_snapshot(rejected_workspace) == rejected_before
+
+    committed_workspace = tmp_path / "committed"
+    committed = CandidateArchive(committed_workspace)
+    committed.commit_initial_seeds(
+        seeds,
+        state=valid_state,
+        contract_sha256=contract.digest(),
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+    validation_state = committed.read_state()
+    if state_strategy == "missing":
+        validation_state.pop("strategy")
+    else:
+        validation_state["strategy"] = state_strategy
+    committed_before = _workspace_snapshot(committed_workspace)
+
+    with pytest.raises(EvolutionError) as validation_error:
+        committed.validate_initial_seeds(
+            seeds,
+            state=validation_state,
+            contract_sha256=contract.digest(),
+            evaluator_fingerprint=SEED_EVALUATOR_SHA,
+        )
+
+    assert str(validation_error.value) == expected
+    assert _workspace_snapshot(committed_workspace) == committed_before
+
+
+@pytest.mark.parametrize(
+    ("config_payload", "expected"),
+    [
+        ({}, "verified_seed_state_invalid"),
+        ({"strategy": "future"}, "verified_seed_state_invalid"),
+        ({"strategy": "loop"}, LOOP_STRATEGY_RETIRED_MESSAGE),
+        ({"strategy": "openevolve"}, "verified_seed_state_invalid"),
+        ([], "verified_seed_state_invalid"),
+    ],
+)
+def test_seed_commit_and_validation_bind_optional_state_config_strategy(
+    tmp_path: Path,
+    config_payload: object,
+    expected: str,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"candidate.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    seed_id = seeds[0].candidate_id
+    valid_state = {
+        "schema_version": "1",
+        "strategy": "population",
+        "config": {"strategy": "population"},
+        "status": "running",
+        "iteration": 0,
+        "active_ids": {"0": [seed_id]},
+    }
+
+    rejected_workspace = tmp_path / "rejected"
+    rejected = CandidateArchive(rejected_workspace)
+    rejected_before = _workspace_snapshot(rejected_workspace)
+    with pytest.raises(EvolutionError) as commit_error:
+        rejected.commit_initial_seeds(
+            seeds,
+            state={**valid_state, "config": config_payload},
+            contract_sha256=contract.digest(),
+            evaluator_fingerprint=SEED_EVALUATOR_SHA,
+        )
+    assert str(commit_error.value) == expected
+    assert _workspace_snapshot(rejected_workspace) == rejected_before
+
+    committed_workspace = tmp_path / "committed"
+    committed = CandidateArchive(committed_workspace)
+    committed.commit_initial_seeds(
+        seeds,
+        state=valid_state,
+        contract_sha256=contract.digest(),
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+    persisted_state = committed.read_state()
+    assert committed.validate_initial_seeds(
+        seeds,
+        state=persisted_state,
+        contract_sha256=contract.digest(),
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+    committed_before = _workspace_snapshot(committed_workspace)
+
+    with pytest.raises(EvolutionError) as validation_error:
+        committed.validate_initial_seeds(
+            seeds,
+            state={**persisted_state, "config": config_payload},
+            contract_sha256=contract.digest(),
+            evaluator_fingerprint=SEED_EVALUATOR_SHA,
+        )
+
+    assert str(validation_error.value) == expected
+    assert _workspace_snapshot(committed_workspace) == committed_before
+
+
+@pytest.mark.parametrize(
+    ("foreign_strategy", "expected"),
+    [
+        ("loop", LOOP_STRATEGY_RETIRED_MESSAGE),
+        ("openevolve", "evolution_workspace_strategy_invalid"),
+    ],
+)
+def test_seed_validation_rejects_cross_strategy_archive_without_mutation(
+    tmp_path: Path,
+    foreign_strategy: str,
+    expected: str,
+) -> None:
+    contract = _contract()
+    manifest = _seed_manifest(
+        tmp_path / "incoming",
+        contract,
+        {"candidate.py": "score = 1\n"},
+    )
+    seeds = _admitted_initial_seeds(manifest, contract, num_islands=1)
+    seed_id = seeds[0].candidate_id
+    workspace = tmp_path / "committed"
+    archive = CandidateArchive(workspace)
+    archive.commit_initial_seeds(
+        seeds,
+        state={
+            "schema_version": "1",
+            "strategy": "population",
+            "status": "running",
+            "iteration": 0,
+            "active_ids": {"0": [seed_id]},
+        },
+        contract_sha256=contract.digest(),
+        evaluator_fingerprint=SEED_EVALUATOR_SHA,
+    )
+    foreign_source = archive.candidates_root / "candidate-foreign" / "candidate.py"
+    foreign_source.parent.mkdir()
+    foreign_source.write_text("foreign = True\n", encoding="utf-8")
+    foreign = Candidate(
+        candidate_id="candidate-foreign",
+        code_path=foreign_source.relative_to(workspace).as_posix(),
+        parent_id=None,
+        generation=0,
+        iteration=1,
+        strategy=foreign_strategy,  # type: ignore[arg-type]
+        island_id=None,
+        evaluation=evolution_module._report(_report(999)),
+        created_at=2.0,
+    )
+    with archive.archive_path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(foreign.to_dict(), sort_keys=True) + "\n")
+    state = archive.read_state()
+    before = _workspace_snapshot(workspace)
+
+    with pytest.raises(EvolutionError) as caught:
+        archive.validate_initial_seeds(
+            seeds,
+            state=state,
+            contract_sha256=contract.digest(),
+            evaluator_fingerprint=SEED_EVALUATOR_SHA,
+        )
+
+    assert str(caught.value) == expected
+    assert _workspace_snapshot(workspace) == before
+
+
+def test_direct_openevolve_candidate_persist_requires_verified_seed_commit(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "fresh"
+    archive = CandidateArchive(workspace)
+    sentinel = workspace / "sentinel.txt"
+    sentinel.write_text("preserve\n", encoding="utf-8")
+    before = _workspace_snapshot(workspace)
+
+    with pytest.raises(
+        EvolutionError,
+        match="^openevolve_candidate_requires_verified_seed_commit$",
+    ):
+        archive.persist(
+            CandidateDraft("external_score = 999\n"),
+            strategy="openevolve",
+            iteration=1,
+            generation=0,
+            island_id=None,
+            evaluation=evolution_module._report(_report(999)),
+        )
+
+    assert _workspace_snapshot(workspace) == before
+    assert not archive.root.exists()
+
+
 def test_evolution_config_keeps_optional_adapter_fingerprints_credential_safe() -> None:
     legacy_payload = EvolutionConfig().to_dict()
     assert "generator_fingerprint" not in legacy_payload
@@ -2364,6 +3576,131 @@ def test_strategy_selector_accepts_openevolve_only_with_explicit_command_and_eva
 
     with pytest.raises(ValueError, match="pinned local evaluator fingerprint"):
         EvolutionConfig(strategy="openevolve", command=(sys.executable, "-c", "pass"))
+
+
+def test_openevolve_rejects_historical_archive_before_starting_producer(
+    tmp_path: Path,
+) -> None:
+    producer_counter = tmp_path / "producer-count.txt"
+    fake = _write_fake_openevolve(tmp_path, producer_counter=producer_counter)
+    _historical_loop_archive(tmp_path, evidence=frozenset({"archive"}))
+    before = _workspace_snapshot(tmp_path)
+    context = EvolutionContext(
+        _contract("openevolve"),
+        tmp_path,
+        lambda request: pytest.fail("historical workspace invoked the Lunar generator"),
+        lambda path, contract: pytest.fail("historical workspace invoked the evaluator"),
+        _openevolve_config((sys.executable, str(fake))),
+    )
+
+    with pytest.raises(EvolutionError) as caught:
+        OpenEvolveStrategy(context).run()
+
+    assert str(caught.value) == LOOP_STRATEGY_RETIRED_MESSAGE
+    assert not producer_counter.exists()
+    assert _workspace_snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "existing_entry",
+    [
+        "empty_root",
+        "empty_state",
+        "empty_archive",
+        "seed_commit",
+        "candidate_tree",
+        "historical_result",
+    ],
+)
+def test_openevolve_preflights_complete_fresh_commit_shape_before_producer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_entry: str,
+) -> None:
+    root = tmp_path / "evolution"
+    root.mkdir()
+    if existing_entry == "empty_state":
+        (root / "state.json").write_text("{}\n", encoding="utf-8")
+    elif existing_entry == "empty_archive":
+        (root / "archive.jsonl").write_text("", encoding="utf-8")
+    elif existing_entry == "seed_commit":
+        (root / "seed-commit.json").write_text("{}\n", encoding="utf-8")
+    elif existing_entry == "candidate_tree":
+        candidate_root = root / "candidates" / "orphan"
+        candidate_root.mkdir(parents=True)
+        (candidate_root / "record.json").write_text(
+            '{"strategy":"loop"}\n', encoding="utf-8"
+        )
+    elif existing_entry == "historical_result":
+        (root / "result.json").write_text(
+            '{"strategy":"loop","status":"completed"}\n',
+            encoding="utf-8",
+        )
+    before = _workspace_snapshot(tmp_path)
+    producer_calls: list[Path] = []
+
+    def reject_producer(
+        self: OpenEvolveStrategy,
+        external: Path,
+        config_path: Path,
+    ) -> str:
+        del self, config_path
+        producer_calls.append(external)
+        pytest.fail("invalid fresh workspace reached the OpenEvolve producer boundary")
+
+    monkeypatch.setattr(OpenEvolveStrategy, "_run_producer", reject_producer)
+    context = EvolutionContext(
+        _contract("openevolve"),
+        tmp_path,
+        lambda request: pytest.fail("invalid fresh workspace invoked the Lunar generator"),
+        lambda path, contract: pytest.fail("invalid fresh workspace invoked the evaluator"),
+        _openevolve_config((sys.executable, "-c", "pass")),
+    )
+
+    expected = {
+        "empty_state": "evolution_workspace_strategy_invalid",
+        "historical_result": LOOP_STRATEGY_RETIRED_MESSAGE,
+    }.get(existing_entry, "verified_seed_initialization_requires_empty_archive")
+    with pytest.raises(EvolutionError) as caught:
+        OpenEvolveStrategy(context).run()
+
+    assert str(caught.value) == expected
+    assert producer_calls == []
+    assert _workspace_snapshot(tmp_path) == before
+
+
+def test_openevolve_rejects_nonterminal_state_before_producer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = EvolutionContext(
+        _contract("openevolve"),
+        tmp_path,
+        lambda request: pytest.fail("nonterminal state invoked the Lunar generator"),
+        lambda path, contract: pytest.fail("nonterminal state invoked the evaluator"),
+        _openevolve_config((sys.executable, "-c", "pass")),
+    )
+    archive = CandidateArchive(tmp_path)
+    archive.write_state(
+        {
+            "strategy": "openevolve",
+            "status": "running",
+            "iteration": 0,
+            "contract_sha256": context.contract.digest(),
+            "config": context.config.to_dict(),
+        }
+    )
+    before = _workspace_snapshot(tmp_path)
+
+    def reject_producer(self: OpenEvolveStrategy, external: Path, config_path: Path) -> str:
+        del self, external, config_path
+        pytest.fail("nonterminal state reached the OpenEvolve producer boundary")
+
+    monkeypatch.setattr(OpenEvolveStrategy, "_run_producer", reject_producer)
+    with pytest.raises(EvolutionError, match="^openevolve_resume_mismatch$"):
+        OpenEvolveStrategy(context).run()
+
+    assert _workspace_snapshot(tmp_path) == before
 
 
 def test_openevolve_adapter_commits_verified_seed_evidence_without_external_payload(

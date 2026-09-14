@@ -52,10 +52,11 @@ canonical source and sidecar, reruns the local evaluator, and verifies the recei
 configuration identities before returning the prior result.
 
 The benchmark selector accepts active strategies only and defaults to one `population` run.
-Explicit population/OpenEvolve comparisons share the local evaluator while retaining separate
-workspaces and provenance. `AgentLoopRuntime`, `--agent-loop`, and `--agent-runtime-loop` remain
-model/tool runtime controls inside a population generator or evaluator invocation; they do not map
-to an evolution strategy.
+Explicit population/OpenEvolve comparisons share the same local evaluator kind and fingerprint
+while constructing a fresh evaluator adapter in each separate strategy workspace. This preserves
+one scoring authority without sharing mutable runtime state. `AgentLoopRuntime`, `--agent-loop`,
+and `--agent-runtime-loop` remain model/tool runtime controls inside a population generator or
+evaluator invocation; they do not map to an evolution strategy.
 
 ## Files and structure
 

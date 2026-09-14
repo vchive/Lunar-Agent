@@ -29,7 +29,15 @@ from .agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
-from .algorithm import MAX_INPUT_FILE_BYTES, MAX_INPUT_FILES, AlgorithmProblemContract
+from .algorithm import (
+    ACTIVE_EVOLUTION_STRATEGIES,
+    LOOP_STRATEGY_RETIRED,
+    LOOP_STRATEGY_RETIRED_MESSAGE,
+    LOOP_STRATEGY_RETIREMENT_HINT,
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    AlgorithmProblemContract,
+)
 from .artifacts import ArtifactStore
 from .benchmark import BenchmarkConfig, BenchmarkRunner
 from .budget import BudgetSpec
@@ -82,6 +90,13 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="emit one machine-readable JSON value on stdout",
     )
+
+
+def _evolution_strategy_request(value: str) -> str:
+    """Parse active names while retaining ``loop`` solely for fixed-code retirement handling."""
+    if value == "loop" or value in ACTIVE_EVOLUTION_STRATEGIES:
+        return value
+    raise argparse.ArgumentTypeError("strategy must be population or openevolve")
 
 
 def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
@@ -198,8 +213,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     solve_parser.add_argument(
         "--strategy",
-        choices=("population", "openevolve"),
-        help="evolution strategy when --evolve is enabled (default: contract strategy)",
+        type=_evolution_strategy_request,
+        metavar="{population,openevolve}",
+        help=(
+            "evolution strategy when --evolve is enabled "
+            "(default: contract strategy; new contracts default to population)"
+        ),
     )
     solve_parser.add_argument(
         "--openevolve-command",
@@ -287,10 +306,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evolve_parser.add_argument(
         "--strategy",
-        choices=("population", "openevolve"),
-        help="override the contract strategy",
+        type=_evolution_strategy_request,
+        metavar="{population,openevolve}",
+        help="override the contract strategy (new contracts default to population)",
     )
-    evolve_parser.add_argument("--generator-command", help="explicit generator command; receives a request JSON path")
+    evolve_parser.add_argument(
+        "--generator-command",
+        help="explicit population generator command; receives a request JSON path",
+    )
     evolve_parser.add_argument("--agent-command", help="explicit Agent command used as candidate generator")
     evolve_parser.add_argument(
         "--agent-portfolio-command",
@@ -401,12 +424,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy",
         dest="strategies",
         action="append",
-        choices=("population", "openevolve"),
+        type=_evolution_strategy_request,
+        metavar="{population,openevolve}",
         help="strategy to compare; repeat for order (default: population)",
     )
     benchmark_parser.add_argument("--workspace", type=Path, help="new benchmark workspace")
     benchmark_parser.add_argument(
-        "--generator-command", help="explicit generator command for native strategies"
+        "--generator-command", help="explicit generator command for population"
     )
     benchmark_parser.add_argument(
         "--evaluator-command", help="explicit evaluator command"
@@ -789,6 +813,19 @@ def _config(args: argparse.Namespace) -> Config:
     config.ensure()
     Store(config.database).initialize()
     return config
+
+
+def _reject_retired_cli_strategy(args: argparse.Namespace) -> None:
+    """Reject an explicitly named historical strategy before local state is initialized."""
+    requested: tuple[str, ...]
+    if args.command == "benchmark":
+        requested = tuple(args.strategies or ())
+    elif args.command in {"solve", "evolve"}:
+        requested = (args.strategy,) if args.strategy is not None else ()
+    else:
+        return
+    if "loop" in requested:
+        raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
 
 
 _MAX_MODEL_PROFILE_BYTES = 64 * 1024
@@ -1231,9 +1268,19 @@ def _emit(payload: object, json_mode: bool) -> None:
     print(payload)
 
 
+def _loop_retirement_payload() -> dict[str, str]:
+    return {
+        "error": LOOP_STRATEGY_RETIRED,
+        "message": LOOP_STRATEGY_RETIREMENT_HINT,
+    }
+
+
 def _emit_error(message: str, json_mode: bool) -> None:
     if json_mode:
-        print(json.dumps({"error": message}, ensure_ascii=False), file=sys.stderr)
+        payload = {"error": message}
+        if message in {LOOP_STRATEGY_RETIRED, LOOP_STRATEGY_RETIRED_MESSAGE}:
+            payload = _loop_retirement_payload()
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
     else:
         print(f"error: {message}", file=sys.stderr)
 
@@ -1628,6 +1675,11 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         run = controller.store.get_run(args.run_id)
         if run is None:
             raise ValueError(f"unknown run: {args.run_id}")
+        current_plan = controller.store.get_current_plan(run.id)
+        if current_plan is not None and current_plan.algorithm_problem is not None:
+            current_contract = AlgorithmProblemContract.from_dict(current_plan.algorithm_problem)
+            if current_contract.evolution.strategy == "loop":
+                raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
         if args.workspace is not None and args.workspace.expanduser().resolve() != run.workspace:
             raise ValueError("--workspace does not match the existing conversational run")
         manifest = _conversation_manifest(run)
@@ -1892,12 +1944,12 @@ def _solve_evolution(
     if contract_payload is None or contract_payload.algorithm_problem is None:
         raise ValueError("solve --evolve requires a compiled algorithm contract")
     contract = AlgorithmProblemContract.from_dict(contract_payload.algorithm_problem)
+    if contract.evolution.strategy == "loop":
+        raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
     candidate_inputs = _candidate_input_artifacts(controller.store, parent.id)
     strategy_name = args.strategy or contract.evolution.strategy
     if strategy_name == "loop":
-        raise ValueError(
-            "loop evolution is retired for new runs; choose population or explicit openevolve"
-        )
+        raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
     compile_evaluator = bool(getattr(args, "compile_evaluator", False))
 
@@ -2214,6 +2266,17 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
             else None
         ),
     }
+    if (
+        run.status.value == "failed"
+        and run.current_plan_id is None
+        and any(
+            task.plan_task_id is None
+            and task.state.value == "failed"
+            and task.last_error == LOOP_STRATEGY_RETIRED_MESSAGE
+            for task in controller.store.list_tasks(run.id)
+        )
+    ):
+        payload.update(_loop_retirement_payload())
     if evolution_payload is not None:
         payload["evolution"] = evolution_payload
     return payload
@@ -2331,6 +2394,8 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"contract is not valid JSON: {exc.msg}") from exc
     contract = AlgorithmProblemContract.from_dict(payload)
+    if contract.evolution.strategy == "loop":
+        raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
     if args.strategy and args.strategy != contract.evolution.strategy:
         contract = replace(contract, evolution=replace(contract.evolution, strategy=args.strategy))
     controller = LocalController(config, build_runtime("mock", None, None, None, None))
@@ -2355,9 +2420,11 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         contract = canonical
     strategy_name = args.strategy or contract.evolution.strategy
     if strategy_name == "loop":
-        raise ValueError(
-            "loop evolution is retired for new runs; choose population or explicit openevolve"
-        )
+        raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
+    if args.generator_command and strategy_name != "population":
+        raise ValueError("--generator-command requires --strategy population")
+    if args.openevolve_command and strategy_name != "openevolve":
+        raise ValueError("--openevolve-command requires --strategy openevolve")
     seed_identity_options = (
         args.seed_dependency_sha256,
         args.seed_environment_sha256,
@@ -2673,7 +2740,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         elif generator_command:
             generator = CommandCandidateGenerator(generator_command, args.timeout)
         else:
-            raise ValueError("loop and population require --generator-command or --agent-command")
+            raise ValueError("population requires --generator-command or --agent-command")
         if evaluator_agent_command:
             evaluator_adapter = CommandAgentAdapter(
                 evaluator_agent_command,
@@ -2887,8 +2954,10 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if openevolve_command and "openevolve" not in strategies:
         raise ValueError("--openevolve-command requires --strategy openevolve")
     native_selected = any(strategy != "openevolve" for strategy in strategies)
+    if generator_command and not native_selected:
+        raise ValueError("--generator-command requires --strategy population")
     if native_selected and not agent_runtime and not generator_command:
-        raise ValueError("benchmark requires --generator-command for loop/population")
+        raise ValueError("benchmark requires --generator-command for population")
     if not evaluator_command and not agent_runtime:
         raise ValueError("benchmark requires --evaluator-command or --agent-runtime")
     if agent_runtime and generator_command and evaluator_command:
@@ -2931,11 +3000,13 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 loop_memory=args.agent_runtime_memory,
                 loop_session_history=args.agent_runtime_session_history,
             )
+            if native_selected
+            else None
         ),
         evaluator_fingerprint=(
             _adapter_fingerprint(
                 evaluator_command,
-                kind="benchmark-evaluator",
+                kind="objective-harness",
                 name="command-evaluator",
                 role="evaluator",
             )
@@ -2954,6 +3025,7 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 loop_session_history=args.agent_runtime_session_history,
             )
         ),
+        evaluator_kind="exact_harness" if evaluator_command else "native",
         strategy_commands={"openevolve": openevolve_command} if openevolve_command else {},
         runtime_profile=(
             {
@@ -3006,7 +3078,7 @@ def _benchmark(config: Config, args: argparse.Namespace) -> dict[str, object]:
     report = BenchmarkRunner(
         contract,
         workspace,
-        generator_factory=generator_factory,
+        generator_factory=generator_factory if native_selected else None,
         evaluator_factory=evaluator_factory,
         config=benchmark_config,
     ).run()
@@ -3508,6 +3580,11 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     run = store.get_run(args.run_id)
     if run is None:
         raise ValueError(f"unknown run: {args.run_id}")
+    current_plan = store.get_current_plan(run.id)
+    if current_plan is not None and current_plan.algorithm_problem is not None:
+        current_contract = AlgorithmProblemContract.from_dict(current_plan.algorithm_problem)
+        if current_contract.evolution.strategy == "loop":
+            raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
     pending = store.pending_input(run.id)
     if pending is None:
         raise ValueError(f"run is not awaiting input: {args.run_id}")
@@ -3578,7 +3655,7 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
             _solve_evolution(config, evolution_args, controller, resumed)
             resumed = controller.store.get_run(resumed.id) or resumed
     solved_payload = _solve_payload(controller, resumed)
-    return {
+    payload = {
         "run_id": resumed.id,
         "task_id": task_id,
         "status": solved_payload["status"],
@@ -3589,11 +3666,15 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         "algorithm_outputs": solved_payload.get("algorithm_outputs", []),
         "evolution": solved_payload.get("evolution"),
     }
+    if solved_payload.get("error") == LOOP_STRATEGY_RETIRED:
+        payload.update(_loop_retirement_payload())
+    return payload
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        _reject_retired_cli_strategy(args)
         if args.command == "effect-trial":
             payload = _effect_host_scope(args, _effect_trial)
             _emit(payload, args.json)

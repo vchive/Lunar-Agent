@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-11
 
-**Status**: Draft
+**Status**: Complete and independently reviewed (2026-09-14)
 
 **Input**: Local review of famou-v2 `product/dev`, WebAgent 2.5 evolution control, and Lunar's existing population evolution path.
 
@@ -101,3 +101,10 @@ An integration owner can describe a remote evolution experiment, such as a futur
 - The first implementation is local-only for seed admission; no real external evolution framework or famou-v2 service is invoked.
 - Existing `EvaluationReport`, `Candidate`, archive, checkpoint, and exact harness contracts remain authoritative and are extended only through bounded metadata or a versioned adapter contract.
 - This feature does not claim an effective-solution improvement and does not reopen sealed campaign slots. A future real measurement needs a separate frozen registration.
+
+## Closure note
+
+Feature 084 itself remains transport-free and local-only. The later generic producer adapters and
+Feature 086 remote-material bridge reuse this seed admission contract and its local evaluator
+authority; they do not turn a producer or remote score into a Lunar score. The closure evidence is
+recorded in `validation/results.md`.

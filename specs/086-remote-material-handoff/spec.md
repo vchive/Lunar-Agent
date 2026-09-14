@@ -74,8 +74,9 @@ new candidate schema.
   exact evaluator before returning `SeedAdmissionResult`.
 - **FR-086-04**: Preserve the remote DTO's unknown/reconciliation semantics and perform no network,
   subprocess, scheduler, or model operation.
-- **FR-086-05**: Keep Feature 084/085 Draft, ordinary offspring integrity separate as Feature 087,
-  and preserve 074/076/078/082 sealed artifacts byte-for-byte.
+- **FR-086-05**: Do not close Feature 084/085 as part of Feature 086, keep ordinary offspring
+  integrity separate as Feature 087, and preserve 074/076/078/082 sealed artifacts byte-for-byte.
+  Features 084/085 may close only through their own later implementation and review gate.
 
 ## Limits
 

@@ -367,6 +367,8 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
 
     case = report["cases"][0]
     assert report["mode"] == "deep_evolution"
+    assert report["protocol"] == "famou-bench-deep-evolution-v1"
+    assert report["strategy"] == "loop"
     assert report["outer_rounds"] == 5
     assert case["lunar_best"] == 0.60
     assert case["baseline_historical_best"] == 0.50

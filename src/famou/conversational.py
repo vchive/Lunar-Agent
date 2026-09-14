@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-from .algorithm import AlgorithmProblemContract
+from .algorithm import LOOP_STRATEGY_RETIRED_MESSAGE, AlgorithmProblemContract
 from .policy import PlanDocument, PlanTask
 from .runtime import Runtime
 
@@ -209,9 +209,11 @@ def _parse_response(raw: str) -> CompilationResult:
     try:
         _validate_contract_shape(payload["contract"])
         contract = AlgorithmProblemContract.from_dict(payload["contract"])
+        if contract.evolution.strategy == "loop":
+            raise ContractCompilationError(LOOP_STRATEGY_RETIRED_MESSAGE)
         return CompilationResult("compiled", contract=contract, evidence=tuple(evidence))
     except (TypeError, ValueError) as exc:
-            raise ContractCompilationError(f"compiled contract is invalid: {exc}") from exc
+        raise ContractCompilationError(f"compiled contract is invalid: {exc}") from exc
 
 
 def _validate_contract_shape(value: object) -> None:
@@ -503,7 +505,9 @@ class RuntimeContractCompiler:
             "statement, inputs (relative path, format, fields), decision_variables, objective (name,direction), "
         "hard_constraints and soft_constraints (id,description,source,verification,result_fields), "
         "outputs (path under output/, format json|jsonl|csv|text, optional fields, required, description), "
-            "success_criteria, deliverables, assumptions, and optional evolution. Constraint source must explicitly be "
+            "success_criteria, deliverables, assumptions, and optional evolution. New evolution must use "
+            "strategy=population (the default) or explicit strategy=openevolve; never emit the retired strategy=loop. "
+            "Constraint source must explicitly be "
             "user_confirmed, data_observed, or explicit_assumption. Questions have {question, options}. "
             "The top-level envelope is either {status,contract,evidence} or {status,questions,evidence}.\n\n"
             f"User goal:\n{goal}{answer_section}"
@@ -528,4 +532,6 @@ class CallableContractCompiler:
         result = self.function(goal, workspace, answer=answer, timeout=timeout)
         if not isinstance(result, CompilationResult):
             raise ContractCompilationError("compiler callable returned an invalid result")
+        if result.contract is not None and result.contract.evolution.strategy == "loop":
+            raise ContractCompilationError(LOOP_STRATEGY_RETIRED_MESSAGE)
         return result

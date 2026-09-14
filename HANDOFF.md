@@ -6,6 +6,37 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 084/085 结项：verified seed 与 population-first
+
+Feature 084 与 Feature 085 已于 2026-09-14 完成实现、离线验证和独立终审。所有新演化任务
+只接受 `population` 或显式 `openevolve`；默认 contract、`solve --evolve`、standalone
+`evolve` 与 benchmark 均使用 `population`。历史 `loop` contract/archive/result 仍可只读，
+但新建、controller resume、CLI answer 以及 `LoopStrategy.run()`/`resume()` 都会在首次 mutation
+前固定拒绝并给出 `loop_strategy_retired`。显式 OpenEvolve 只提供候选 material，必须经过 Feature 084
+的本地 exact evaluator、verified seed receipt 和 canonical commit，外部分数不进入 Lunar
+score、rank 或最终交付权威。
+
+恢复与 writer 边界已补齐：root/stage/backup 会在任何创建、替换、清理或 callback 前只读
+预检；state/config/archive/result/outcomes 严格拒绝重复 JSON key、非有限数值、历史 loop、
+unknown、mixed 与 cross-strategy operational evidence。materialization 将 state/archive/result、
+artifact ledger、candidate digest、execution artifact/event、parent output、promotion event 与
+terminal marker 绑定；marker 缺失而 `execution.json` 或 `.execution.json.tmp` 存在、异常或不可
+检查时保留现场并拒绝重跑。
+
+最终离线验证：Feature 084 聚焦 507 项（10.91 秒），Feature 085 聚焦 583 项（27.55 秒），
+主仓全量 2673 项（78.26 秒）；Ruff、compileall、两个 Specify prerequisites、
+`git diff --check` 均通过。051/074/076/078/082 共 601 个 tracked 封存文件相对当前 HEAD 无
+diff，独立终审无 P0/P1/P2 blocker。本次没有启动模型、provider、WebAgent、真实
+OpenEvolve/ShinkaEvolve、远端服务、company evaluator 或 campaign，也没有产生新的效果提升、
+有效解率提升或 WebAgent 持平结论。
+
+仍保留两个系统边界。Feature 036 的多 output 发布没有跨文件系统与 SQLite ledger 的整体事务；
+第二个 output artifact 失败时可能残留前面已发布的文件和 ledger row。完整修复需要 Store 批量
+事务、同盘 staging、commit/rollback journal 与 crash recovery。另一个边界是 subprocess
+`Popen` 成功到 `.execution.json.tmp` durable publication 之间的硬崩溃窗口；在没有 durable
+pre-launch protocol 或独立事务的情况下，现有证据不能判定候选是否已经执行，因此不能声称
+严格 exactly-once。
+
 ## 最新续作：Feature 087 ordinary candidate integrity
 
 Feature 087 已为普通 `population` 候选补齐离线、可恢复的完整性边界。每个新候选都以
@@ -162,20 +193,21 @@ prerequisites、`git diff --check` 均通过。074/076/078/082 的 595 个 Git �
 没有启动模型、真实 OpenEvolve/ShinkaEvolve、WebAgent、provider、公司平台、远端 backend
 或 campaign，也没有复写任何历史 measurement。
 
-Feature 084/085 文档仍保持 Draft，未完成任务不要勾选，也不能把离线互操作宣称为有效解率
-提升。当前明确保留的后续项：普通 offspring/candidate 的完整 receipt/fingerprint schema；
-ShinkaEvolve exporter 的更广泛真实 runner/benchmark 验证；SkyDiscover/LLM4AD 先接
-benchmark/task envelope，仓库型或 workflow 型候选另开冻结 Feature。
+Feature 084/085 后续已完成实现、任务核验和独立终审，结项状态与最终验证见本文件顶部。
+此处所述普通 offspring/candidate 完整 receipt/fingerprint schema 后来由 Feature 087 完成，
+remote material bridge 由 Feature 086 完成。仍保留的后续项包括 ShinkaEvolve exporter 的
+更广泛真实 runner/benchmark 验证；SkyDiscover/LLM4AD 先接 benchmark/task envelope，
+仓库型或 workflow 型候选另开冻结 Feature。离线互操作本身不构成有效解率提升证据。
 
-## 0. 当前续作：Feature 084（草案）
+## 0. 历史续作起点：Feature 084
 
 已找到并离线审查本地 `famou-v2` 仓库（`/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-v2`）及 WebAgent 2.5 分支。审查结论是：famou-v2 的深度演化通过远端实验控制面运行；其 `initial_programs` 必须经过本地 evaluator enrichment/可行性门槛，有效 rollout 才推进正式 iteration。WebAgent 的 `evolve_create/status/sync/continue/cancel` 是服务委托，不是 Lunar staged Build 的本地 runtime。
 
-Feature 084 草案已写入 `specs/084-verified-seed-handoff/`，目标是先实现本地 verified seed adapter、身份/lineage/provenance/evaluator receipt 和恢复校验，再定义显式但暂不联网的 famou-v2 backend protocol。远端分数只能作为 provenance，必须经 Lunar 本地 exact harness 重验后才可进入 population。084 不启动模型、WebAgent、provider、公司评测、真实 famou-v2 服务或新 campaign，也不改变 074/076/078/082 封存文件。审查证据见 `docs/famou-v2-engine-review-20260911.md`、`docs/webagent-v25-branch-audit-20260911.md` 和 `docs/webagent-v25-evolve-service-audit-20260911.md`。
+Feature 084 当时以草案写入 `specs/084-verified-seed-handoff/`，目标是先实现本地 verified seed adapter、身份/lineage/provenance/evaluator receipt 和恢复校验，再定义显式但暂不联网的 famou-v2 backend protocol；该 Feature 后续已按此边界完成。远端分数只能作为 provenance，必须经 Lunar 本地 exact harness 重验后才可进入 population。084 不启动模型、WebAgent、provider、公司评测、真实 famou-v2 服务或新 campaign，也不改变 074/076/078/082 封存文件。审查证据见 `docs/famou-v2-engine-review-20260911.md`、`docs/webagent-v25-branch-audit-20260911.md` 和 `docs/webagent-v25-evolve-service-audit-20260911.md`。
 
-## 1. 当前状态
+## 1. 历史状态：Feature 083
 
-083已完成可选主机执行保护，`.specify`指向083。新增公开Python接口
+083已完成可选主机执行保护，`.specify`当时指向083。新增公开Python接口
 `host_execution(report_path)`，普通/深度trial CLI增加`--keep-awake-report PATH`；默认
 路径和原生结果不变。macOS进程持有PreventUserIdleSystemSleep断言，派发前同步查询
 验收并fsync日志及父目录，结束时查询/释放；单次scope覆盖配置/凭据读取及原trial调用。
@@ -1212,7 +1244,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/065-budget-guided-fixed-measurement
+specs/085-population-first-evolution
 ```
 
 后续新功能必须：
