@@ -247,6 +247,20 @@ or guaranteed completion. Surviving candidate processes are not identified or ki
     digest. Goals, commands, candidate/output bytes, logs and raw payloads are excluded. The
     bundle remains observational with `recovery_eligibility: not_assessed` and cannot trigger
     recovery or prove delivery success.
+21. `attest-materialization-execution` accepts one explicitly reviewed schema 1 receipt for an
+    existing launch and retained execution. It freezes canonical receipt bytes before private
+    DB/WAL preflight, then checks nonce uniqueness, ownership, candidate and execution fingerprints,
+    device/inode and absent filesystem/database downstream evidence under the child lifecycle
+    lock. The optional receipt in the 24 KiB execution journal binds one fixed-pair attestation
+    event; that event and the 091 prepared event commit together in a FULL transaction with
+    reciprocal digests. Execution batch commit and completion reuse 091. Identical receipts can
+    explicitly retry a complete attested journal before DB preparation; automatic resume still
+    cannot prepare raw evidence. After preparation, normal 091/092 recovery validates the retained
+    attestation without the original receipt file and never reruns a candidate. Conflicting nonce,
+    partial/unattested journals and downstream evidence are refused. Diagnostics and bundles
+    observe the new event and digest associations without revealing receipt bodies or nonce.
+    This operator statement supplies local authorization, not external identity or execution proof.
+
 Intent files/events are retained without GC; coordinated removal of all of them is not externally
 authenticated. The advisory locks coordinate these publishers, not unrelated same-user file writers.
 

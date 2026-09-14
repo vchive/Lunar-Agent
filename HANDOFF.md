@@ -1,14 +1,40 @@
 # Lunar-Agent 交接记录
 
-## Feature 095 设计中：显式执行证据 attestation
+## Feature 095 结项：显式执行证据登记
 
-下一阶段拟处理 090 launch intent 后、091 execution preparation 前的未知窗口。设计要求
-操作者显式提供一次性、有界且 canonical 的 attestation，绑定 parent/child/task、launch
-intent、candidate/attempt、execution 字节指纹与 inode，并在现有生命周期锁下重新核验后
-才允许调用 091 登记。raw 或 temporary execution 不会自动升级；下游 output/terminal
-证据、指纹漂移、重复 nonce 和并发变化均 fail-closed。该 attestation 只是本机人工授权
-和审计记录，不提供外部身份认证、exactly-once 或成功交付保证。当前仅完成规格设计，
-尚未修改执行行为；详见 `specs/095-manual-execution-attestation/`。
+新增 `attest-materialization-execution PARENT CHILD --receipt FILE`。它用于 090 launch intent
+已存在、候选留下原始 `execution.json`、但尚未开始 091 登记的现场。操作者主动提供
+canonical schema 1 确认文件，绑定 parent/child/唯一 task、完整 launch digest、candidate/
+attempt、execution SHA-256/size/device/inode 和 Store 内唯一 nonce。系统不会从原始执行
+文件、诊断或证据包自动生成授权。用白话说：人工确认“只登记这个任务的这一份执行结果”，
+不授予重跑候选权限，也不证明执行结果是真实或成功的。
+
+CLI 先解析并冻结同一份最多 16 KiB 的 receipt，再复制 093 有界 DB/WAL 到私有临时目录
+预检。校验失败不会初始化源 home/数据库或改写运行证据。校验通过后，在现有 090
+生命周期锁内复核 workspace/budget、launch owner、候选和 execution 原始文件，拒绝
+临时 execution、指纹漂移、已用/冲突 nonce、以及仅存在于数据库的下游证据。
+
+091 journal 可选嵌入完整 receipt，上限扩为 24 KiB；普通执行 journal 内容保持原状。
+`materialization_execution_attested` 与 `materialization_execution_prepared` 在同一个 FULL
+SQLite transaction 中登记，通过 receipt/journal SHA-256 和 prepared.attestation_sha256
+相互绑定。原执行 artifact 和 commit batch 仍复用 091，不另建表或事后补审计。nonce
+在同一 Store 的所有 run 中唯一；相同 receipt 精确重试幂等，另一 nonce 不能替换已有 child 授权。
+
+完整 attested journal 已写、DB 尚未 prepared 时，可以显式重交同一 receipt；普通 resume
+仍不能创建 preparation。prepared 后，中断恢复直接校验 journal 中保留的 receipt，不依赖
+原确认文件，可继续 091 并通过 092 验证输出、发布和完成终态，全程不重跑候选。
+成功/失败的本地候选 fixture 均验证了这条交付链。partial/unattested journal、缺失 bytes
+及任何下游 088/089/092 记录仍拒绝，保留现场。093/094 已支持新事件和摘要关联检查，报告
+和 bundle 不输出 receipt 正文或 nonce，仍不提供恢复权限。
+
+最终主仓全量 **3788 passed in 224.61s**，新增三文件共 189 项（集成 75、Store 98、
+诊断 16），已包含于全量。Ruff、compileall、Specify 与 diff check 通过，601 个封存文件
+相对 `027a235` 保持不变；Store、恢复/CLI、诊断和文档独立审查无剩余 blocker。详见
+`specs/095-manual-execution-attestation/validation.md`。实现已完成并纳入本轮本地提交。
+本轮仅使用离线 fixture/本地测试，没有启动真实
+模型、provider、WebAgent、OpenEvolve/ShinkaEvolve、远端服务或 campaign，没有新增算法
+效果或 WebAgent 持平结论；不 push。其余边界：人工 statement 不认证外部身份，不证明
+进程实际运行，不识别/终止未知存活进程，不保证 exactly-once 或成功交付，协议记录暂无 GC。
 
 更新时间：2026-09-14
 当前仓库：`/Users/liminghan/Documents/lunar_agent`  

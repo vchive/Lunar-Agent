@@ -2136,12 +2136,15 @@ class Store:
     @staticmethod
     def _materialization_execution_events(
         parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
-        execution: dict[str, Any], identity: dict[str, Any],
+        execution: dict[str, Any], identity: dict[str, Any], *, attestation_sha256: str | None = None,
     ) -> dict[str, tuple[str, dict[str, Any]]]:
         suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
         executed_suffix = hashlib.sha256(f"{parent_id}\0{child_id}\0{intent['candidate_sha256']}".encode()).hexdigest()
         return {
-            "event-materialization-execution-prepared-" + suffix: ("materialization_execution_prepared", identity),
+            "event-materialization-execution-prepared-" + suffix: (
+                "materialization_execution_prepared",
+                identity if attestation_sha256 is None else {**identity, "attestation_sha256": attestation_sha256},
+            ),
             "event-materialization-execution-artifact-recorded-" + suffix: (
                 "artifact_recorded", {key: identity[key] for key in ("artifact_id", "path", "sha256", "size")},
             ),
@@ -2216,7 +2219,13 @@ class Store:
         error = "materialization_execution_ledger_mismatch"
         if not self._inspect_materialization_launch(connection, parent_id, child_id, task_id, launch_event_id, launch_payload):
             raise ValueError(error)
-        expected = self._materialization_execution_events(parent_id, child_id, task_id, intent, execution, identity)
+        attested = self._inspect_materialization_execution_attestation(
+            connection, parent_id, child_id, task_id, intent, execution, identity,
+        )
+        expected = self._materialization_execution_events(
+            parent_id, child_id, task_id, intent, execution, identity,
+            attestation_sha256=None if attested is None else attested[1]["receipt_sha256"],
+        )
         rows = connection.execute(
             "SELECT id, run_id, task_id, type, payload FROM events WHERE id IN (?, ?, ?, ?) "
             "OR (run_id = ? AND type IN ('materialization_execution_prepared', "
@@ -2245,7 +2254,7 @@ class Store:
         ).fetchall()
         prepared = next(iter(expected))
         if prepared not in matching:
-            if matching or artifacts:
+            if matching or artifacts or attested is not None:
                 raise ValueError(error)
             self._reject_materialization_execution_downstream(connection, parent_id, child_id)
             return "absent"
@@ -2442,7 +2451,7 @@ class Store:
             artifact_id = "artifact-materialization-execution-" + suffix
             ids = tuple(prefix + suffix for prefix in (
                 "event-materialization-execution-prepared-", "event-materialization-execution-artifact-recorded-",
-                "event-materialization-execution-committed-",
+                "event-materialization-execution-committed-", "event-materialization-execution-attested-",
             ))
             with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
                 connection.row_factory = sqlite3.Row
@@ -2450,12 +2459,16 @@ class Store:
                 if connection.execute("SELECT 1 FROM artifacts WHERE id = ?", (artifact_id,)).fetchone():
                     return True
                 rows = connection.execute(
-                    "SELECT id, type, payload FROM events WHERE id IN (?, ?, ?) OR (run_id = ? "
-                    "AND type IN ('materialization_execution_prepared', 'materialization_execution_committed', 'artifact_recorded'))",
+                    "SELECT id, type, payload FROM events WHERE id IN (?, ?, ?, ?) OR (run_id = ? "
+                    "AND type IN ('materialization_execution_prepared', 'materialization_execution_committed', "
+                    "'materialization_execution_attested', 'artifact_recorded'))",
                     (*ids, child_id),
                 ).fetchall()
                 for row in rows:
-                    if row["id"] in ids or row["type"] in {"materialization_execution_prepared", "materialization_execution_committed"}:
+                    if row["id"] in ids or row["type"] in {
+                        "materialization_execution_prepared", "materialization_execution_committed",
+                        "materialization_execution_attested",
+                    }:
                         return True
                     if self._materialization_publication_json(row["payload"]).get("artifact_id") == artifact_id:
                         return True
@@ -2464,7 +2477,8 @@ class Store:
             raise ValueError("materialization_execution_ledger_mismatch") from None
 
     def materialization_execution_status(
-        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *, journal_sha256: str,
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *,
+        journal_sha256: str, attestation: dict[str, Any] | None = None,
     ) -> str:
         """Read exact launch, preparation and batch identity in one SQLite snapshot."""
         try:
@@ -2474,27 +2488,48 @@ class Store:
             with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
                 connection.row_factory = sqlite3.Row
                 connection.execute("BEGIN")
-                return self._inspect_materialization_execution(
+                status = self._inspect_materialization_execution(
                     connection, parent_id, child_id, task_id, intent, result, identity, launch_id, launch,
                 )
+                found = self._inspect_materialization_execution_attestation(
+                    connection, parent_id, child_id, task_id, intent, result, identity,
+                    attestation=attestation, require_supplied=True,
+                )
+                if status != "absent" and attestation is not None and found is None:
+                    raise ValueError("materialization_execution_ledger_mismatch")
+                return status
         except Exception:  # noqa: BLE001 - exact read failures expose only a safe integrity code.
             raise ValueError("materialization_execution_ledger_mismatch") from None
 
     def _write_materialization_execution(
         self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *,
-        journal_sha256: str, max_artifact_bytes: int, commit: bool,
+        journal_sha256: str, max_artifact_bytes: int, commit: bool, attestation: dict[str, Any] | None = None,
     ) -> None:
         try:
+            if isinstance(attestation, dict):
+                attestation = dict(attestation)
             launch_id, launch, result, identity = self._materialization_execution_manifest(
                 parent_id, child_id, task_id, intent, execution, journal_sha256,
             )
-            expected = self._materialization_execution_events(parent_id, child_id, task_id, intent, result, identity)
+            receipt = None if attestation is None else self._materialization_execution_attestation_manifest(
+                parent_id, child_id, task_id, intent, result, identity, attestation,
+            )
+            expected = self._materialization_execution_events(
+                parent_id, child_id, task_id, intent, result, identity,
+                attestation_sha256=None if receipt is None else receipt[1]["receipt_sha256"],
+            )
             with closing(self._connect()) as connection, connection:
                 connection.execute("PRAGMA synchronous = FULL")
                 connection.execute("BEGIN IMMEDIATE")
                 status = self._inspect_materialization_execution(
                     connection, parent_id, child_id, task_id, intent, result, identity, launch_id, launch,
                 )
+                found = self._inspect_materialization_execution_attestation(
+                    connection, parent_id, child_id, task_id, intent, result, identity,
+                    attestation=attestation, require_supplied=True,
+                )
+                if status != "absent" and attestation is not None and found is None:
+                    raise ValueError("materialization_execution_ledger_mismatch")
                 if status == "committed":
                     return
                 if commit and status != "prepared":
@@ -2512,6 +2547,10 @@ class Store:
                     event_id = next(iter(expected))
                     kind, payload = expected[event_id]
                     if not self._append_event(connection, child_id, task_id, kind, payload, event_id):
+                        raise ValueError("materialization_execution_ledger_mismatch")
+                    if receipt is not None and not self._append_event(
+                        connection, child_id, task_id, "materialization_execution_attested", receipt[1], receipt[0],
+                    ):
                         raise ValueError("materialization_execution_ledger_mismatch")
                     return
                 connection.execute(
@@ -2535,23 +2574,160 @@ class Store:
 
     def prepare_materialization_execution(
         self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *,
-        journal_sha256: str, max_artifact_bytes: int,
+        journal_sha256: str, max_artifact_bytes: int, attestation: dict[str, Any] | None = None,
     ) -> None:
         """Durably prepare a wholly absent execution batch after exact launch authorization."""
         self._write_materialization_execution(
             parent_id, child_id, task_id, intent, execution, journal_sha256=journal_sha256,
-            max_artifact_bytes=max_artifact_bytes, commit=False,
+            max_artifact_bytes=max_artifact_bytes, commit=False, attestation=attestation,
         )
 
     def commit_materialization_execution(
         self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any], execution: dict[str, Any], *,
-        journal_sha256: str, max_artifact_bytes: int,
+        journal_sha256: str, max_artifact_bytes: int, attestation: dict[str, Any] | None = None,
     ) -> None:
         """Atomically register the prepared execution artifact and its complete event batch."""
         self._write_materialization_execution(
             parent_id, child_id, task_id, intent, execution, journal_sha256=journal_sha256,
-            max_artifact_bytes=max_artifact_bytes, commit=True,
+            max_artifact_bytes=max_artifact_bytes, commit=True, attestation=attestation,
         )
+
+    def _materialization_execution_attestation_manifest(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+        execution: dict[str, Any], identity: dict[str, Any], attestation: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        """Bind one operator receipt to the canonical execution and exact journal."""
+        error = "materialization_execution_ledger_mismatch"
+        keys = {
+            "schema_version", "parent_run_id", "evolution_run_id", "task_id", "launch_intent_sha256",
+            "candidate_id", "candidate_sha256", "attempt_path", "execution_path",
+            "execution_sha256", "execution_size", "device", "inode", "nonce",
+        }
+        if not isinstance(attestation, dict) or set(attestation) != keys:
+            raise ValueError(error)
+        expected = {
+            "schema_version": "1", "parent_run_id": parent_id, "evolution_run_id": child_id,
+            "task_id": task_id, "launch_intent_sha256": identity["launch_intent_sha256"],
+            "candidate_id": intent["candidate_id"], "candidate_sha256": intent["candidate_sha256"],
+            "attempt_path": intent["attempt_path"], "execution_path": identity["path"],
+            "execution_sha256": identity["sha256"], "execution_size": identity["size"],
+        }
+        if (
+            any(type(attestation[key]) is not type(value) or attestation[key] != value for key, value in expected.items())
+            or any(type(attestation[key]) is not int or not 0 <= attestation[key] < 2**64 for key in ("device", "inode"))
+            or not isinstance(attestation["nonce"], str)
+            or re.fullmatch(r"[A-Za-z0-9._~-]{32,128}", attestation["nonce"]) is None
+        ):
+            raise ValueError(error)
+        content = (json.dumps(attestation, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+        if len(content) > 16 * 1024:
+            raise ValueError(error)
+        suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+        payload = {
+            **attestation, "receipt_sha256": hashlib.sha256(content).hexdigest(),
+            "journal_sha256": identity["journal_sha256"],
+        }
+        return "event-materialization-execution-attested-" + suffix, payload
+
+    def _inspect_materialization_execution_attestation(
+        self, connection: sqlite3.Connection, parent_id: str, child_id: str, task_id: str,
+        intent: dict[str, Any], execution: dict[str, Any], identity: dict[str, Any],
+        *, attestation: dict[str, Any] | None = None, require_supplied: bool = False,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Inspect the current pair and global nonce owners in the caller's snapshot."""
+        error = "materialization_execution_ledger_mismatch"
+        prefix = "event-materialization-execution-attested-"
+        pair_id = prefix + hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+        wanted = None if attestation is None else self._materialization_execution_attestation_manifest(
+            parent_id, child_id, task_id, intent, execution, identity, attestation,
+        )
+        rows = connection.execute(
+            "SELECT id, run_id, task_id, type, payload FROM events WHERE id LIKE ? "
+            "OR type = 'materialization_execution_attested'", (prefix + "%",),
+        ).fetchall()
+        parsed = []
+        unknown_nonce = False
+        for row in rows:
+            try:
+                value = self._materialization_publication_json(row["payload"])
+                parsed.append((row, value))
+                nonce = value.get("nonce")
+                if not isinstance(nonce, str) or re.fullmatch(r"[A-Za-z0-9._~-]{32,128}", nonce) is None:
+                    unknown_nonce = True
+            except (TypeError, ValueError, RecursionError):
+                if row["id"] == pair_id or row["run_id"] == child_id:
+                    raise ValueError(error) from None
+                unknown_nonce = True
+        relevant = [(row, value) for row, value in parsed if row["id"] == pair_id
+                    or row["run_id"] == child_id or value.get("evolution_run_id") == child_id]
+        if len(relevant) > 1:
+            raise ValueError(error)
+        found = None
+        if relevant:
+            row, value = relevant[0]
+            receipt = {key: item for key, item in value.items() if key not in {"receipt_sha256", "journal_sha256"}}
+            found = self._materialization_execution_attestation_manifest(
+                parent_id, child_id, task_id, intent, execution, identity, receipt,
+            )
+            if (
+                row["id"] != found[0] or row["run_id"] != child_id or row["task_id"] != task_id
+                or row["type"] != "materialization_execution_attested"
+                or json.dumps(value, sort_keys=True, allow_nan=False) != json.dumps(found[1], sort_keys=True, allow_nan=False)
+                or (require_supplied and wanted != found)
+            ):
+                raise ValueError(error)
+        nonce = wanted[1]["nonce"] if wanted is not None else found[1]["nonce"] if found is not None else None
+        if nonce is not None and (
+            unknown_nonce or any(row["id"] != pair_id and value.get("nonce") == nonce for row, value in parsed)
+        ):
+            raise ValueError(error)
+        return found
+
+    def materialization_execution_attestation_recorded(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+        execution: dict[str, Any], attestation: dict[str, Any], *, journal_sha256: str,
+        require_no_downstream: bool = False,
+    ) -> bool:
+        """Read exact receipt and launch/execution authority without opening a writer."""
+        try:
+            launch_id, launch, result, identity = self._materialization_execution_manifest(
+                parent_id, child_id, task_id, intent, execution, journal_sha256,
+            )
+            self._materialization_execution_attestation_manifest(
+                parent_id, child_id, task_id, intent, result, identity, attestation,
+            )
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                if require_no_downstream:
+                    self._reject_materialization_execution_downstream(connection, parent_id, child_id)
+                status = self._inspect_materialization_execution(
+                    connection, parent_id, child_id, task_id, intent, result, identity, launch_id, launch,
+                )
+                found = self._inspect_materialization_execution_attestation(
+                    connection, parent_id, child_id, task_id, intent, result, identity,
+                    attestation=attestation, require_supplied=True,
+                )
+                if status != "absent" and found is None:
+                    raise ValueError("materialization_execution_ledger_mismatch")
+                return found is not None
+        except Exception:  # noqa: BLE001 - probe failures expose no receipt or ledger contents.
+            raise ValueError("materialization_execution_ledger_mismatch") from None
+
+    def has_materialization_execution_attestation(self, parent_id: str, child_id: str) -> bool:
+        """Recognize current-pair attestation evidence, including damaged reserved IDs."""
+        try:
+            self._materialization_launch_id(parent_id, child_id)
+            suffix = hashlib.sha256(f"{parent_id}\0{child_id}".encode()).hexdigest()
+            event_id = "event-materialization-execution-attested-" + suffix
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.execute("BEGIN")
+                return connection.execute(
+                    "SELECT 1 FROM events WHERE id = ? "
+                    "OR (run_id = ? AND type = 'materialization_execution_attested') LIMIT 1", (event_id, child_id),
+                ).fetchone() is not None
+        except Exception:  # noqa: BLE001 - unavailable state cannot authorize an evidence downgrade.
+            raise ValueError("materialization_execution_ledger_mismatch") from None
 
     def discard_attempt_outputs(self, run_id: str, task_id: str, attempt_id: str) -> list[str]:
         """Remove late result/runtime metadata while retaining the prompt and audit event."""

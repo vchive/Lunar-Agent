@@ -200,6 +200,17 @@ Feature [094](specs/094-materialization-evidence-bundle/) adds
 same private database/WAL snapshot before normal storage initialization; it never writes the run
 workspace or database and never authorizes recovery.
 
+Feature [095](specs/095-manual-execution-attestation/) adds the explicit operator command
+`attest-materialization-execution PARENT CHILD --receipt FILE`. A reviewed canonical receipt binds
+one exact launch, candidate, task and retained execution file, including its digest and inode.
+Lunar preflights a private database copy, then revalidates under the lifecycle lock and records the
+attestation together with execution preparation. The command only registers execution; normal
+resume can then continue delivery without rerunning the candidate. Exact receipt retries are
+idempotent, while changed bytes, reused nonce and downstream records are refused. This is local
+operator authorization and audit evidence, not proof that a process ran or outputs succeeded.
+See the [operator guide](specs/095-manual-execution-attestation/quickstart.md) for receipt format and
+recovery limits. No attestation is generated automatically from raw evidence or diagnostics.
+
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.
 Contracts without `outputs` keep the existing source-only result. `evolve CONTRACT` remains

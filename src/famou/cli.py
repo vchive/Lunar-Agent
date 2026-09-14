@@ -790,6 +790,14 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--output", required=True)
     _add_home(export_parser)
     _add_json(export_parser)
+    attest_parser = subparsers.add_parser(
+        "attest-materialization-execution", help="register an explicitly attested retained execution",
+    )
+    attest_parser.add_argument("parent_run_id")
+    attest_parser.add_argument("evolution_run_id")
+    attest_parser.add_argument("--receipt", required=True, type=Path)
+    _add_home(attest_parser)
+    _add_json(attest_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3736,6 +3744,15 @@ def main(argv: list[str] | None = None) -> int:
             export_home = Path(args.home or os.environ.get("FAMOU_HOME", ".famou")).expanduser()
             payload = export_materialization_evidence(
                 export_home / "state.db", args.parent_run_id, args.evolution_run_id, Path(args.output),
+            )
+            _emit(payload, args.json)
+            return 0
+        if args.command == "attest-materialization-execution":
+            from .materialization_attestation import attest_from_database
+
+            attest_home = Path(args.home or os.environ.get("FAMOU_HOME", ".famou")).expanduser()
+            payload = attest_from_database(
+                attest_home / "state.db", args.parent_run_id, args.evolution_run_id, args.receipt,
             )
             _emit(payload, args.json)
             return 0

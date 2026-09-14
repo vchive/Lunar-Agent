@@ -17,6 +17,7 @@ from .materialization_execution import (
     DIRECTORY as EXECUTION_DIRECTORY,
 )
 from .materialization_execution import (
+    MAX_JOURNAL_BYTES,
     _digest,
     _encode,
     _path,
@@ -52,7 +53,7 @@ def delivery_authority(store: Store, parent: Run, child: Run, identity: dict) ->
     execution = inspect_materialization_execution(store, parent, child, identity)
     if intent is None or execution is None or identity["parent_run_id"] != parent.id:
         raise MaterializationDeliveryUncertain(_INVALID)
-    journal = _read(_path(_root(child), EXECUTION_DIRECTORY + "/journal.json"), 4096)
+    journal = _read(_path(_root(child), EXECUTION_DIRECTORY + "/journal.json"), MAX_JOURNAL_BYTES)
     return intent, execution, {
         "schema_version": "1", "parent_run_id": parent.id, "evolution_run_id": child.id,
         "task_id": identity["task_id"], "launch_intent_sha256": _digest(_encode(intent)),

@@ -1,7 +1,8 @@
 """Reconcile explicitly prepared execution registration without invoking a candidate.
 
 Callers hold the Feature 090 materialization lifecycle lock throughout these operations.
-Only a returned runner result may initiate preparation; recovery never creates preparation.
+A returned runner result or explicit local operator receipt may initiate preparation.
+Automatic recovery never creates preparation from raw execution evidence.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from .models import Run
 from .store import Store
 
 DIRECTORY = "evolution/materialization/.execution-publication"
-MAX_JOURNAL_BYTES = 4096
+MAX_JOURNAL_BYTES = 24 * 1024
 _INVALID = "materialization_execution_evidence_invalid"
 
 
@@ -140,18 +141,22 @@ def _execution(root: Path, identity: dict[str, Any]) -> tuple[CandidateExecution
     if _present(_path(root, identity["attempt_path"] + "/.execution.json.tmp")):
         raise MaterializationExecutionUncertain(_INVALID)
     path = _path(root, relative)
+    before = os.lstat(path)
     content = _read(path, MAX_STATE_BYTES)
+    after = os.lstat(_path(root, relative))
+    def fingerprint(info):
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
     execution = CandidateExecution.from_dict(_strict_json_loads(content))
-    if _encode(execution.to_dict()) != content:
+    if fingerprint(before) != fingerprint(after) or _encode(execution.to_dict()) != content:
         raise MaterializationExecutionUncertain(_INVALID)
-    return execution, content, os.lstat(path)
+    return execution, content, after
 
 
 def _journal(
     parent: Run, child: Run, identity: dict[str, Any], intent: dict[str, Any],
-    content: bytes, info: os.stat_result,
+    content: bytes, info: os.stat_result, *, attestation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "schema_version": "1", "parent_run_id": parent.id, "evolution_run_id": child.id,
         "task_id": identity["task_id"], "launch_intent_sha256": _digest(_encode(intent)),
         "execution_path": identity["attempt_path"] + "/execution.json",
@@ -159,6 +164,22 @@ def _journal(
         "artifact_id": "artifact-materialization-execution-" + _digest(f"{parent.id}\0{child.id}".encode()),
         "device": info.st_dev, "inode": info.st_ino,
     }
+    if attestation is not None:
+        from .materialization_attestation import validate_receipt
+
+        receipt = validate_receipt(attestation)
+        expected = {
+            **{key: result[key] for key in (
+                "schema_version", "parent_run_id", "evolution_run_id", "task_id",
+                "launch_intent_sha256", "execution_path", "execution_sha256", "execution_size", "device", "inode",
+            )},
+            **{key: identity[key] for key in ("candidate_id", "candidate_sha256", "attempt_path")},
+            "nonce": receipt["nonce"],
+        }
+        if receipt != expected:
+            raise MaterializationExecutionUncertain(_INVALID)
+        result["attestation"] = receipt
+    return result
 
 
 def _load(store: Store, parent: Run, child: Run, identity: dict[str, Any]) -> tuple[dict, dict, CandidateExecution, str]:
@@ -170,7 +191,9 @@ def _load(store: Store, parent: Run, child: Run, identity: dict[str, Any]) -> tu
     content = _read(_path(directory, "journal.json"), MAX_JOURNAL_BYTES)
     journal = _strict_json_loads(content)
     execution, execution_content, info = _execution(root, identity)
-    expected = _journal(parent, child, identity, intent, execution_content, info)
+    expected = _journal(
+        parent, child, identity, intent, execution_content, info, attestation=journal.get("attestation"),
+    )
     if content != _encode(expected) or journal != expected:
         raise MaterializationExecutionUncertain(_INVALID)
     temporary = _path(directory, ".journal.json.tmp")
@@ -195,10 +218,11 @@ def _no_downstream(parent: Run, child: Run) -> None:
 
 
 def _status(store: Store, parent: Run, child: Run, identity: dict, loaded: tuple) -> str:
-    _, intent, execution, digest = loaded
+    journal, intent, execution, digest = loaded
     try:
         return store.materialization_execution_status(
             parent.id, child.id, identity["task_id"], intent, execution.to_dict(), journal_sha256=digest,
+            **({"attestation": journal["attestation"]} if "attestation" in journal else {}),
         )
     except Exception as exc:
         raise MaterializationExecutionUncertain("materialization_execution_commit_unknown") from exc
@@ -226,6 +250,7 @@ def _finish(store: Store, parent: Run, child: Run, identity: dict, *, repair: bo
             store.commit_materialization_execution(
                 parent.id, child.id, identity["task_id"], intent, execution.to_dict(),
                 journal_sha256=digest, max_artifact_bytes=(child.budget or BudgetSpec()).max_artifact_bytes,
+                **({"attestation": journal["attestation"]} if "attestation" in journal else {}),
             )
         except Exception as exc:
             if _status(store, parent, child, identity, loaded) != "committed":
@@ -281,8 +306,9 @@ def inspect_materialization_execution(
 
 def publish_materialization_execution(
     store: Store, parent: Run, child: Run, identity: dict[str, Any], execution: CandidateExecution,
+    *, attestation: dict[str, Any] | None = None,
 ) -> CandidateExecution:
-    """Prepare only the current returned execution and commit its exact ledger batch."""
+    """Prepare a returned result or exact explicit attestation and commit its ledger batch."""
     try:
         if not isinstance(execution, CandidateExecution):
             raise MaterializationExecutionUncertain(_INVALID)
@@ -294,30 +320,42 @@ def publish_materialization_execution(
         if _encode(execution.to_dict()) != content:
             raise MaterializationExecutionUncertain(_INVALID)
         directory = _path(root, DIRECTORY)
-        if _present(directory) or store.has_materialization_execution(parent.id, child.id):
-            raise MaterializationExecutionUncertain(_INVALID)
         _no_downstream(parent, child)
-        journal = _journal(parent, child, identity, intent, content, info)
+        journal = _journal(parent, child, identity, intent, content, info, attestation=attestation)
         journal_content = _encode(journal)
         if len(journal_content) > MAX_JOURNAL_BYTES:
             raise MaterializationExecutionUncertain(_INVALID)
         digest = _digest(journal_content)
         loaded = (journal, intent, recorded, digest)
-        if _status(store, parent, child, identity, loaded) != "absent":
+        status = _status(store, parent, child, identity, loaded)
+        existing = _present(directory)
+        if existing:
+            if attestation is None or _load(store, parent, child, identity) != loaded:
+                raise MaterializationExecutionUncertain(_INVALID)
+            if status != "absent":
+                return _finish(store, parent, child, identity, repair=True)
+            if _completion(directory, digest) is not None or _present(_path(directory, ".journal.json.tmp")):
+                raise MaterializationExecutionUncertain(_INVALID)
+        elif status != "absent" or store.has_materialization_execution(parent.id, child.id):
             raise MaterializationExecutionUncertain(_INVALID)
         execution_path = _path(root, journal["execution_path"])
         _sync_file(execution_path)
         _fsync_directory_chain(execution_path.parent, root, error="materialization_execution_sync_failed")
-        directory.mkdir(mode=0o700)
-        _sync(directory.parent)
-        _write_record(directory, "journal.json", journal_content)
+        if not existing:
+            directory.mkdir(mode=0o700)
+            _sync(directory.parent)
+            _write_record(directory, "journal.json", journal_content)
+        else:
+            _sync_file(directory / "journal.json")
         _fsync_directory_chain(directory, root, error="materialization_execution_sync_failed")
         if _load(store, parent, child, identity) != loaded:
             raise MaterializationExecutionUncertain(_INVALID)
+        _no_downstream(parent, child)
         try:
             store.prepare_materialization_execution(
                 parent.id, child.id, identity["task_id"], intent, execution.to_dict(),
                 journal_sha256=digest, max_artifact_bytes=(child.budget or BudgetSpec()).max_artifact_bytes,
+                **({"attestation": attestation} if attestation is not None else {}),
             )
         except Exception as exc:
             if _status(store, parent, child, identity, loaded) != "prepared":

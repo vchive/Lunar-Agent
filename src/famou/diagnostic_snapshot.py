@@ -31,6 +31,7 @@ _EVENT_TYPES = (
     "artifact_recorded", "evolution_linked", "evolution_parent_linked",
     "materialization_launch_intended", "materialization_execution_prepared",
     "materialization_execution_committed", "evolved_candidate_executed",
+    "materialization_execution_attested",
     "materialization_delivery_prepared", "evolved_outputs_promoted",
     "output_publication_committed", "materialization_publication_prepared",
     "materialization_publication_committed", "evolved_candidate_materialized",
@@ -38,6 +39,7 @@ _EVENT_TYPES = (
 _EVENT_PREFIXES = (
     "event-materialization-launch-intended-", "event-materialization-execution-prepared-",
     "event-materialization-execution-artifact-recorded-", "event-materialization-execution-committed-",
+    "event-materialization-execution-attested-",
     "event-materialization-delivery-prepared-", "event-evolved-outputs-promoted-",
     "event-output-publication-committed-", "event-materialization-publication-prepared-",
     "event-materialization-artifact-recorded-", "event-materialization-publication-committed-",

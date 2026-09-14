@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 import re
 import stat
@@ -28,6 +29,7 @@ _EVENTS = {
     "execution": {
         "materialization_execution_prepared": "event-materialization-execution-prepared-",
         "materialization_execution_committed": "event-materialization-execution-committed-",
+        "materialization_execution_attested": "event-materialization-execution-attested-",
         "evolved_candidate_executed": None,
     },
     "delivery": {"materialization_delivery_prepared": "event-materialization-delivery-prepared-"},
@@ -45,6 +47,11 @@ _RESULT_KEYS = {
     "schema_version", "status", "parent_run_id", "evolution_run_id", "contract_sha256",
     "candidate_id", "candidate_path", "candidate_sha256", "attempt_path", "execution",
     "validation", "outputs", "error",
+}
+_ATTESTATION_KEYS = {
+    "schema_version", "parent_run_id", "evolution_run_id", "task_id", "launch_intent_sha256",
+    "candidate_id", "candidate_sha256", "attempt_path", "execution_path", "execution_sha256",
+    "execution_size", "device", "inode", "nonce",
 }
 _SHAPES = {
     ("launch", "intent"): {
@@ -224,6 +231,8 @@ def _read_files(reader, stages, roots, suffix):
             limit = 4096
         if stage == "launch":
             limit = 8192
+        if stage == "execution" and key in {"journal", "temporary_journal"}:
+            limit = 24 * 1024
         observation, value = reader.node(path, limit=limit)
         stages[stage]["files"][key] = observation
         values[stage, key] = value
@@ -311,6 +320,8 @@ def _assess(stages, values, matched, parent, child, task_id):
             continue
         base_key = key.removeprefix("temporary_")
         shape = _SHAPES.get((stage, base_key))
+        if stage == "execution" and base_key == "journal" and "attestation" in value:
+            shape = {*shape, "attestation"}
         if shape is not None and (set(value) != shape or value.get("schema_version") != "1"):
             _issue(stages[stage], "record_shape_mismatch")
         if any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None
@@ -332,6 +343,8 @@ def _assess(stages, values, matched, parent, child, task_id):
                     _issue(stages[stage], "temporary_record_mismatch")
             else:
                 _issue(stages[stage], "temporary_record_only")
+
+    _assess_attestation(stages, values, matched, parent, child, task_id)
 
     bindings = (
         ("launch", "intent", "materialization_launch_intended", "intent_sha256"),
@@ -443,6 +456,59 @@ def _assess(stages, values, matched, parent, child, task_id):
             stage["state"] = "incomplete"
         else:
             stage["state"] = "present" if any_records else "absent"
+
+
+def _assess_attestation(stages, values, matched, parent, child, task_id):
+    """Observe manual-registration bindings without treating a receipt as authorization."""
+    stage = stages["execution"]
+    journal = values.get(("execution", "journal"))
+    rows = matched["materialization_execution_attested"]
+    prepared = matched["materialization_execution_prepared"]
+    receipt = journal.get("attestation") if isinstance(journal, dict) else None
+    if receipt is None:
+        if rows or any("attestation_sha256" in row["payload"] for row in prepared):
+            _issue(stage, "attestation_without_record")
+        if isinstance(journal, dict) and "attestation" in journal:
+            _issue(stage, "attestation_shape_mismatch")
+        return
+    if not rows:
+        _issue(stage, "attestation_receipt_missing")
+    if not isinstance(receipt, dict) or set(receipt) != _ATTESTATION_KEYS:
+        _issue(stage, "attestation_shape_mismatch")
+        return
+    if (receipt.get("schema_version") != "1"
+        or any(not isinstance(receipt[key], str) or re.fullmatch(r"[0-9a-f]{64}", receipt[key]) is None
+               for key in ("launch_intent_sha256", "candidate_sha256", "execution_sha256"))
+        or not isinstance(receipt["nonce"], str) or re.fullmatch(r"[A-Za-z0-9._~-]{32,128}", receipt["nonce"]) is None
+        or any(type(receipt[key]) is not int or receipt[key] < 0 for key in ("execution_size", "device", "inode"))):
+        _issue(stage, "attestation_shape_mismatch")
+    intent = values.get(("launch", "intent"))
+    if any(receipt[field] != expected for field, expected in (
+        ("parent_run_id", parent), ("evolution_run_id", child), ("task_id", task_id),
+    )) or (isinstance(intent, dict) and any(receipt[field] != intent.get(field) for field in (
+        "candidate_id", "candidate_sha256", "attempt_path",
+    ))) or any(receipt[field] != journal.get(field) for field in ("execution_path", "device", "inode")):
+        _issue(stage, "attestation_identity_mismatch")
+    execution = stage["files"]["attempt_execution"]
+    if (receipt["execution_sha256"] != execution.get("sha256") or receipt["execution_size"] != execution.get("size")
+        or receipt["launch_intent_sha256"] != stages["launch"]["files"]["intent"].get("sha256")):
+        _issue(stage, "attestation_digest_mismatch")
+    content = (json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    digest = hashlib.sha256(content).hexdigest()
+    if any(row["payload"].get("attestation_sha256") != digest for row in prepared):
+        _issue(stage, "attestation_digest_mismatch")
+    for row in rows:
+        payload = row["payload"]
+        if row["task_id"] != task_id or any(
+            json.dumps(payload.get(key), sort_keys=True) != json.dumps(value, sort_keys=True)
+            for key, value in receipt.items()
+        ):
+            _issue(stage, "attestation_identity_mismatch")
+        if (payload.get("receipt_sha256") != digest
+            or payload.get("journal_sha256") != stage["files"]["journal"].get("sha256")):
+            _issue(stage, "attestation_digest_mismatch")
+        if set(payload) != {*_ATTESTATION_KEYS, "receipt_sha256", "journal_sha256"}:
+            _issue(stage, "attestation_shape_mismatch")
 
 
 def diagnose_materialization(database: Path, parent_id: str, child_id: str, *, _snapshot_data: dict | None = None) -> dict:
