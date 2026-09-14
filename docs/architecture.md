@@ -305,6 +305,12 @@ starts a producer, model, evaluator, scheduler or remote service. The comparison
 framework names and run IDs so equivalent workloads can be compared without importing their result
 semantics. External scores and generation numbers remain outside Lunar score, rank and iteration state.
 
+Feature 098 adds `BenchmarkComparisonPlan` for fixed-condition multi-arm comparisons. Its derived
+comparison ID is based on the shared task workload and common contract/model/evaluator/candidate/
+budget fields, while framework labels and run IDs stay outside the identity. Admission reuses the
+097 read-only checks independently for every arm and keeps each arm's physical attempt budget
+isolated. It is a plan validator, not a framework runner or result comparator.
+
 ## Invocation and evolution seams
 
 The invocation seam and the search-strategy seam are deliberately independent:

@@ -395,7 +395,10 @@ def _verify_input(root: Path, item: TaskInput) -> None:
         descriptor = resolved.stat()
         if not stat.S_ISREG(descriptor.st_mode):
             _fail("benchmark_task_input_unsafe")
-        content = resolved.read_bytes()
+        if descriptor.st_size > 16 * 1024 * 1024:
+            _fail("benchmark_task_input_changed")
+        with resolved.open("rb") as stream:
+            content = stream.read(item.size + 1)
     except OSError:
         _fail("benchmark_task_input_missing")
     if len(content) != item.size:

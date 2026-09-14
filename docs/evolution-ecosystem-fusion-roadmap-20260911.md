@@ -31,6 +31,13 @@ and physical budget for future SkyDiscover/LLM4AD comparisons. Admission is read
 scores or generation IDs never become Lunar scores or iterations. No external framework or model is
 launched; comparisons still require fixed conditions and a new pre-registered measurement.
 
+## 2026-09-15：fixed-condition comparison plan
+
+Feature 098 adds `BenchmarkComparisonPlan` above the task envelope. It freezes common workload,
+contract, model, evaluator, candidate and physical budget across two or more arms, then performs
+read-only input/pin admission. This is preparation for later SkyDiscover/LLM4AD comparisons; no
+framework execution or effectiveness claim is included.
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)

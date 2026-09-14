@@ -1098,6 +1098,12 @@ Validation rechecks confined input bytes and caller pins, emitting only bounded 
 comparison digests. It does not initialize Lunar storage or run an external framework, model or
 evaluator; framework scores and generation IDs remain outside Lunar score and iteration authority.
 
+Feature [098](specs/098-benchmark-comparison-plan/) freezes a multi-arm comparison plan on top of
+these envelopes. Every arm must share the same task comparison digest, contract, model, exact
+evaluator, candidate kind and physical budget. `BenchmarkComparisonPlan` and
+`admit_benchmark_comparison_plan(...)` only validate those identities and local input bytes; they
+do not run SkyDiscover, LLM4AD, Lunar or any evaluator, and they produce no effectiveness claim.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

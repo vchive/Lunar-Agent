@@ -1,8 +1,16 @@
 # Lunar-Agent 交接记录
 
+## Feature 098：固定条件 benchmark comparison plan（已完成）
+
+已开始在 097 task envelope 之上冻结多 arm comparison plan：所有 arm 必须共享 task comparison
+digest、contract、model、exact evaluator 与物理预算；framework 名称、score、generation/run ID
+不进入比较身份。计划只做严格解析和只读 admission，不运行 SkyDiscover、LLM4AD、Lunar、模型、
+evaluator、scheduler 或 Store。098 模块与 097 admission 已完成，聚焦回归 **82 passed**；本轮
+没有运行真实 benchmark 或产生效果结论。详见 `specs/098-benchmark-comparison-plan/validation.md`。
+
 ## Feature 097：benchmark/task envelope（已完成）
 
-已开始实现面向 SkyDiscover/LLM4AD 的离线 `lunar-benchmark-task-v1` task envelope：严格规范化
+已完成面向 SkyDiscover/LLM4AD 的离线 `lunar-benchmark-task-v1` task envelope：严格规范化
 JSON、benchmark/task/contract/input/model/evaluator/budget 身份、稳定 envelope/comparison digest，
 以及只读输入字节和 caller pin admission。新增静态 `benchmark-task validate` CLI，在普通配置
 初始化前分派，不启动框架、模型、evaluator、scheduler 或远端服务。聚焦测试 **79 passed**，
