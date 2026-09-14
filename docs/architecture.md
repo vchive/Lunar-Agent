@@ -178,15 +178,31 @@ inspectable.
     A filesystem completion receipt is durable before a normal return. Resume may complete a
     prepared result or a missing completion receipt after validating all prior execution/output
     evidence. A completed result with missing or conflicting marker/database evidence is rejected.
+16. Final candidate launch has a separate durable intent under the child's
+    `evolution/materialization/launch-intent.json`. After preparing inputs and the runner, the
+    controller syncs the source copy, canonical intent and directories, then records an exact
+    digest-bound `materialization_launch_intended` event in a FULL-synchronous SQLite transaction.
+    Only that first preparation may enter the runner. A nonblocking
+    `evolution/.materialization.lock` covers the entire materialization lifecycle, including all
+    recovery and staging cleanup. Parent/child/contract/candidate identity is checked before and
+    after lock acquisition. Existing or partial launch evidence prevents cleanup and relaunch.
+    Before output or terminal recovery can write, an existing intent requires complete real
+    execution evidence and its independently recorded artifact/event. An ambiguous runner
+    exception preserves the attempt without inventing a pre-execution failure result.
 
 The output publication transaction defines logical delivery in SQLite; filesystem readers may see
 a prefix of final files before commit or until recovery runs after a crash. Reconciliation occurs
 before terminal materialization replay and does not execute a candidate. Feature 089 can publish a
 missing marker only from an exact durable terminal preparation; it never infers one from output or
 execution evidence alone. A crash before either publication's preparation is complete requires
-diagnosis of retained staging. This includes the candidate-launch-to-execution-evidence window and
-the interval after output commit but before terminal preparation. The advisory locks coordinate
-these publishers, not unrelated same-user file writers.
+diagnosis of retained staging. Feature 090 prevents automatic relaunch during the
+candidate-launch-to-execution-evidence window but cannot reconstruct missing execution
+artifact/events or a terminal preparation after output commit. A durable intent does not prove
+that Popen happened: interruption before runner entry can leave zero executions and still refuse
+retry. This is at most one authorized runner entry under the protocol, not exactly-once execution
+or guaranteed completion. Surviving candidate processes are not identified or killed on resume.
+Intent files/events are retained without GC; coordinated removal of all of them is not externally
+authenticated. The advisory locks coordinate these publishers, not unrelated same-user file writers.
 
 ## Deliberate boundary versus WebAgent
 

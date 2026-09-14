@@ -76,6 +76,12 @@ from .evolution import (
     _read_bounded_regular_file,
     build_strategy,
 )
+from .materialization_launch import (
+    MaterializationLaunchUncertain,
+    inspect_launch_intent,
+    materialization_lock,
+    prepare_launch_intent,
+)
 from .materialization_publication import (
     publish_materialization_result,
     recover_materialization_result,
@@ -1453,8 +1459,8 @@ class LocalController:
         Evolution scores select source; they do not authorize delivery.  This phase therefore
         copies the selected source and hashed inputs into a deterministic child-run attempt,
         executes it with a minimal environment, applies the immutable parent ``OutputSpec``
-        contract, and promotes only matching bytes.  A terminal marker makes both success and
-        failure idempotent across ``solve --resume``.
+        contract, and promotes only matching bytes.  Durable launch intent prevents automatic
+        relaunch; complete terminal evidence reuses success or failure across ``solve --resume``.
         """
         if not isinstance(contract, AlgorithmProblemContract):
             raise TypeError("contract must be an AlgorithmProblemContract")
@@ -1478,6 +1484,28 @@ class LocalController:
         ):
             raise ValueError("materialization timeout must be between 0 and 86400 seconds")
 
+        _parent, child, _candidate = self._validate_materialization_request(
+            parent_run_id, evolution_run_id, contract, result,
+        )
+        with materialization_lock(child):
+            # State may have changed between the read-only entry validation and lock acquisition.
+            parent, current_child, candidate_bytes = self._validate_materialization_request(
+                parent_run_id, evolution_run_id, contract, result,
+            )
+            if current_child.workspace != child.workspace:
+                raise EvolutionError("materialization workspace changed before lock acquisition")
+            return self._materialize_evolved_outputs_locked(
+                parent, current_child, contract, result, candidate_bytes,
+                timeout_seconds=float(timeout_seconds),
+            )
+
+    def _validate_materialization_request(
+        self,
+        parent_run_id: str,
+        evolution_run_id: str,
+        contract: AlgorithmProblemContract,
+        result: StrategyResult,
+    ) -> tuple[Run, Run, bytes]:
         parent = self.store.get_run(parent_run_id)
         child = self.store.get_run(evolution_run_id)
         if parent is None or child is None:
@@ -1513,11 +1541,18 @@ class LocalController:
         candidate_bytes = self._validate_materialization_result_identity(
             child, contract, result
         )
+        return parent, child, candidate_bytes
 
-        # Publication recovery reconciles only the output batch. The existing terminal-marker
-        # and execution gates below still decide whether this materialization may be returned.
-        recover_outputs(self.store, parent, child.id, contract.outputs)
-
+    def _materialize_evolved_outputs_locked(
+        self,
+        parent: Run,
+        child: Run,
+        contract: AlgorithmProblemContract,
+        result: StrategyResult,
+        candidate_bytes: bytes,
+        *,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
         child_root = Path(child.workspace).expanduser().resolve(strict=False)
         candidate_digest = hashlib.sha256(candidate_bytes).hexdigest()
         attempt_relative = (
@@ -1533,8 +1568,57 @@ class LocalController:
         temporary_marker = materialization_root / ".result.json.tmp"
         if marker.is_symlink():
             raise EvolutionError("materialization result must not be a symlink")
+        child_tasks = self.store.list_tasks(child.id)
+        if len(child_tasks) != 1:
+            raise EvolutionError("materialization evolution task identity is invalid")
+        child_task = child_tasks[0]
+        launch_identity = {
+            "schema_version": "1", "parent_run_id": parent.id, "evolution_run_id": child.id,
+            "task_id": child_task.id, "contract_sha256": contract.digest(),
+            "strategy": result.strategy, "candidate_id": result.best_candidate_id,
+            "candidate_path": result.best_candidate_path, "candidate_sha256": candidate_digest,
+            "attempt_path": attempt_relative,
+        }
+        launch = inspect_launch_intent(self.store, child, launch_identity)
+        if launch is not None:
+            # No publication may conceal an unknown process launch. Require its independently
+            # recorded execution before allowing existing output/terminal recovery to mutate.
+            try:
+                evidence_relative = f"{attempt_relative}/execution.json"
+                evidence_path = self._confined_regular_file(child_root, evidence_relative)
+                if evidence_path is None:
+                    raise EvolutionError("materialization execution evidence is missing or unsafe")
+                execution_data = json.loads(_read_bounded_regular_file(
+                    evidence_path, MAX_STATE_BYTES,
+                    error="materialization execution evidence is missing or unsafe",
+                ))
+                previous_execution = CandidateExecution.from_dict(execution_data)
+                self._validate_materialization_execution_evidence(
+                    {
+                        "candidate_id": result.best_candidate_id,
+                        "candidate_sha256": candidate_digest,
+                        "execution": {
+                            "status": previous_execution.status,
+                            "exit_code": previous_execution.exit_code,
+                            "duration_ms": previous_execution.duration_ms,
+                            "evidence_path": evidence_relative,
+                        },
+                    },
+                    parent, child, attempt_relative, candidate_digest,
+                )
+            except (EvolutionError, OSError, TypeError, ValueError) as exc:
+                raise MaterializationLaunchUncertain(
+                    "materialization marker is missing from a recorded attempt"
+                    if not marker.exists() else "materialization_launch_outcome_unknown"
+                ) from exc
+
+        # Retain Feature 088 recovery for attempts with independently recorded execution.
+        recover_outputs(self.store, parent, child.id, contract.outputs)
 
         def validate_terminal(payload: dict[str, Any]) -> None:
+            current_launch = inspect_launch_intent(self.store, child, launch_identity)
+            if current_launch is not None and not payload.get("execution", {}).get("evidence_path"):
+                raise MaterializationLaunchUncertain("materialization_launch_outcome_unknown")
             self._validate_materialization_replay(
                 payload, parent, child, contract, result, candidate_digest, attempt_relative,
             )
@@ -1568,6 +1652,8 @@ class LocalController:
         self._validate_absent_materialization_marker(
             parent, child, result.best_candidate_id, candidate_digest, attempt_relative
         )
+        if launch is not None:
+            raise MaterializationLaunchUncertain("materialization_launch_outcome_unknown")
         if temporary_marker.exists() or temporary_marker.is_symlink():
             raise EvolutionError("materialization temporary result already exists")
         try:
@@ -1590,8 +1676,8 @@ class LocalController:
         temporary_candidate.write_bytes(candidate_bytes)
         temporary_candidate.replace(candidate_copy)
 
-        child_task = self.store.list_tasks(child.id)[0]
         execution: CandidateExecution | None = None
+        launch_entered = False
         validation = Evaluation(False, (), "candidate execution did not start", {"kind": "output"})
         outputs: tuple[dict[str, Any], ...] = ()
         error: str | None = None
@@ -1609,7 +1695,14 @@ class LocalController:
                     "PYTHONIOENCODING": "utf-8",
                 },
             )
-            execution = runner.run(candidate_copy, attempt, timeout=float(timeout_seconds))
+            prepare_launch_intent(self.store, child, launch_identity, runner)
+            launch_entered = True
+            try:
+                execution = runner.run(candidate_copy, attempt, timeout=float(timeout_seconds))
+            except Exception as exc:
+                raise MaterializationLaunchUncertain(
+                    "materialization_launch_outcome_unknown"
+                ) from exc
             execution_path = attempt / "execution.json"
             ArtifactStore(child_root, self.store, child.id).record(
                 execution_path, child_task.id, kind="evolved_candidate_execution"
@@ -1645,11 +1738,13 @@ class LocalController:
                     outputs = self._promote_evolved_outputs(
                         parent, child.id, attempt, contract.outputs
                     )
-        except OutputPublicationUncertain:
-            # An unknown database commit or unsafe rollback cannot become a terminal failure
-            # claiming no promoted outputs. Preserve the attempt and its publication journal.
+        except (OutputPublicationUncertain, MaterializationLaunchUncertain):
+            # Unknown launch/commit state or unsafe rollback cannot become a terminal failure
+            # claiming no execution or outputs. Preserve the attempt and its durable evidence.
             raise
         except (ArtifactError, EvolutionError, OSError, TypeError, ValueError) as exc:
+            if launch_entered and execution is None:
+                raise MaterializationLaunchUncertain("materialization_launch_outcome_unknown") from exc
             error = self._sanitize_error(exc)
 
         execution_path = attempt / "execution.json"

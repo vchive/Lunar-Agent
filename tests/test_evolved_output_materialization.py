@@ -1316,7 +1316,7 @@ def test_execution_evidence_replace_failure_blocks_marker_and_replay(
         context.setattr(os, "replace", fail_execution_replace)
         with pytest.raises(
             EvolutionError,
-            match="^failed materialization has unexpected execution evidence$",
+            match="^materialization_launch_outcome_unknown$",
         ):
             controller.materialize_evolved_outputs(
                 parent.id, child.id, _contract(), result, timeout_seconds=1

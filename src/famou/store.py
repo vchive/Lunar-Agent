@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sqlite3
 import uuid
@@ -1959,6 +1960,145 @@ class Store:
             parent_id, child_id, task_id, payload, journal_sha256=journal_sha256,
             max_artifact_bytes=max_artifact_bytes, commit=True,
         )
+
+    @staticmethod
+    def _materialization_launch_id(parent_id: str, child_id: str) -> str:
+        if parent_id == child_id or any(
+            not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value) is None
+            for value in (parent_id, child_id)
+        ):
+            raise ValueError("materialization_launch_ledger_mismatch")
+        return "event-materialization-launch-intended-" + hashlib.sha256(
+            f"{parent_id}\0{child_id}".encode()
+        ).hexdigest()
+
+    def _materialization_launch_manifest(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        error = "materialization_launch_ledger_mismatch"
+        event_id = self._materialization_launch_id(parent_id, child_id)
+        keys = {
+            "schema_version", "parent_run_id", "evolution_run_id", "task_id",
+            "contract_sha256", "strategy", "candidate_id", "candidate_path",
+            "candidate_sha256", "attempt_path", "runner_sha256", "timeout_seconds",
+        }
+        if (
+            not isinstance(task_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", task_id) is None
+            or not isinstance(intent, dict) or set(intent) != keys
+            or intent["schema_version"] != "1" or intent["parent_run_id"] != parent_id
+            or intent["evolution_run_id"] != child_id or intent["task_id"] != task_id
+            or intent["strategy"] not in ("population", "openevolve")
+            or not isinstance(intent["candidate_id"], str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", intent["candidate_id"]) is None
+            or any(not isinstance(intent[key], str) or re.fullmatch(r"[0-9a-f]{64}", intent[key]) is None
+                   for key in ("contract_sha256", "candidate_sha256", "runner_sha256"))
+        ):
+            raise ValueError(error)
+        timeout = intent["timeout_seconds"]
+        if type(timeout) not in (int, float) or not 0 < timeout <= 86_400 or not math.isfinite(timeout):
+            raise ValueError(error)
+        for key in ("candidate_path", "attempt_path"):
+            value = intent[key]
+            if (
+                not isinstance(value, str) or not value or "\0" in value or "\\" in value
+                or Path(value).is_absolute() or Path(value).as_posix() != value
+                or any(part in {"", ".", ".."} for part in value.split("/"))
+            ):
+                raise ValueError(error)
+        if intent["attempt_path"] != (
+            f"evolution/materialization/{intent['candidate_id']}-{intent['candidate_sha256'][:12]}"
+        ):
+            raise ValueError(error)
+        content = (json.dumps(
+            intent, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False,
+        ) + "\n").encode("utf-8")
+        if len(content) > 8192:
+            raise ValueError(error)
+        return event_id, {
+            "parent_run_id": parent_id, "evolution_run_id": child_id,
+            "intent_path": "evolution/materialization/launch-intent.json",
+            "intent_sha256": hashlib.sha256(content).hexdigest(), "intent_size": len(content),
+        }
+
+    def _inspect_materialization_launch(
+        self, connection: sqlite3.Connection, parent_id: str, child_id: str, task_id: str,
+        event_id: str, payload: dict[str, Any],
+    ) -> bool:
+        error = "materialization_launch_ledger_mismatch"
+        runs = connection.execute("SELECT id FROM runs WHERE id IN (?, ?)", (parent_id, child_id)).fetchall()
+        tasks = connection.execute("SELECT id FROM tasks WHERE run_id = ?", (child_id,)).fetchall()
+        if len(runs) != 2 or len(tasks) != 1 or tasks[0]["id"] != task_id:
+            raise ValueError(error)
+        rows = connection.execute(
+            "SELECT id, run_id, task_id, type, payload FROM events WHERE id = ? "
+            "OR (run_id = ? AND type = 'materialization_launch_intended')",
+            (event_id, child_id),
+        ).fetchall()
+        if not rows:
+            return False
+        if len(rows) != 1:
+            raise ValueError(error)
+        row = rows[0]
+        stored = self._materialization_publication_json(row["payload"])
+        if (
+            row["id"] != event_id or row["run_id"] != child_id or row["task_id"] != task_id
+            or row["type"] != "materialization_launch_intended"
+            or json.dumps(stored, sort_keys=True, allow_nan=False) != json.dumps(payload, sort_keys=True, allow_nan=False)
+        ):
+            raise ValueError(error)
+        return True
+
+    def has_materialization_launch_intent(self, parent_id: str, child_id: str) -> bool:
+        """Observe any modern launch evidence, including damaged event ownership or type."""
+        try:
+            event_id = self._materialization_launch_id(parent_id, child_id)
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.execute("BEGIN")
+                return connection.execute(
+                    "SELECT 1 FROM events WHERE id = ? "
+                    "OR (run_id = ? AND type = 'materialization_launch_intended') LIMIT 1",
+                    (event_id, child_id),
+                ).fetchone() is not None
+        except Exception:  # noqa: BLE001 - an unreadable ledger cannot prove launch never happened.
+            raise ValueError("materialization_launch_ledger_mismatch") from None
+
+    def materialization_launch_intent_recorded(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+    ) -> bool:
+        """Check exact launch evidence in a single read-only database snapshot."""
+        try:
+            event_id, payload = self._materialization_launch_manifest(parent_id, child_id, task_id, intent)
+            with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True, timeout=30)) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                return self._inspect_materialization_launch(
+                    connection, parent_id, child_id, task_id, event_id, payload,
+                )
+        except Exception:  # noqa: BLE001 - keep replay failure diagnostics bounded and safe.
+            raise ValueError("materialization_launch_ledger_mismatch") from None
+
+    def record_materialization_launch_intent(
+        self, parent_id: str, child_id: str, task_id: str, intent: dict[str, Any],
+    ) -> None:
+        """Durably register one exact launch intent; replay does not authorize execution."""
+        try:
+            event_id, payload = self._materialization_launch_manifest(parent_id, child_id, task_id, intent)
+            with closing(self._connect()) as connection, connection:
+                connection.execute("PRAGMA synchronous = FULL")
+                connection.execute("BEGIN IMMEDIATE")
+                if self._inspect_materialization_launch(connection, parent_id, child_id, task_id, event_id, payload):
+                    return
+                if not self._append_event(
+                    connection, child_id, task_id, "materialization_launch_intended", payload, event_id,
+                ):
+                    raise ValueError("materialization_launch_ledger_mismatch")
+        except Exception as exc:  # noqa: BLE001 - failed writes roll back with no sensitive diagnostics.
+            code = (
+                "materialization_launch_ledger_mismatch"
+                if isinstance(exc, (ValueError, TypeError, RecursionError))
+                else "materialization_launch_commit_failed"
+            )
+            raise ValueError(code) from None
 
     def discard_attempt_outputs(self, run_id: str, task_id: str, attempt_id: str) -> list[str]:
         """Remove late result/runtime metadata while retaining the prompt and audit event."""

@@ -6,6 +6,47 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 090 结项：候选启动意图持久化
+
+Feature 090 为最终候选交付补齐启动前的 durable intent，防止 controller 在 `Popen` 后、
+execution evidence 落盘前中断时，resume 把已可能执行的 attempt 当作空 staging 清理并重跑。
+新的 `materialization_launch.py` 在 child 的 `evolution/.materialization.lock` 使用非阻塞
+flock，覆盖恢复、检查、清理、运行和 088/089 发布的完整 lifecycle。请求的 parent/child、
+contract 和 candidate 身份在拿锁前后各验证一次；并发调用立即返回
+`materialization_already_running`，之后可复用已完成结果。
+
+通过输入准备、Python eligibility 和 runner 构造后，先同步候选副本及目录链，再以临时
+文件 fsync → no-clobber link → 目录链 fsync 写出
+`evolution/materialization/launch-intent.json`，最后以 FULL-synchronous SQLite transaction
+登记确定 ID 的 child `materialization_launch_intended` 事件。最多 8 KiB 的 canonical intent
+绑定 parent/child/task、contract、strategy、candidate ID/path/digest、attempt、runner
+fingerprint 和实际 timeout；事件绑定固定路径及 exact digest/size，不新增 artifact row
+或迁移。只有本次首次准备且确认完整的调用才能进入 runner 一次，Store 幂等登记或读取
+既有 intent 都不授予重跑权限。
+
+intent 临时/最终文件、SQLite 残片或内容漂移均保留现场并阻止 cleanup/relaunch。有 intent
+时，在任何 088/089 恢复写入前必须验证真实 execution 文件及独立 artifact/event。完整证据
+仍允许 088 验证和安全 rollback，以及 089 prepared terminal 续发；不能补造 execution
+记录或从输出推断终态。runner 进入后抛普通异常、没有返回执行结果时固定报状态不确定，
+不会伪装成执行前失败。真正的输入/语言检查失败、无 intent 的安全 staging、source-only
+contract 和历史完整缓存保持原有语义；缓存请求改变 timeout 也不要求重跑。
+
+最终离线验证：090 quickstart 七文件 252 项（34.47 秒），新增持久化故障文件 10 项
+（1.84 秒，与 quickstart 有重叠），主仓全量 3016 项（102.26 秒）；Ruff、compileall、
+Specify prerequisites 和 `git diff --check` 通过。051/074/076/078/082 共 601 个 tracked
+封存文件相对 `a28411a` 无 diff，Store 与 FS/controller 两路独立终审无剩余 blocker。
+详情见 `specs/090-durable-materialization-launch/validation.md`。新增测试全部使用离线 fixture，
+没有启动真实模型、provider、WebAgent、真实 OpenEvolve/ShinkaEvolve、远端服务或 campaign，
+没有新的算法效果或 WebAgent 持平结论。
+
+剩余边界：intent 只证明授权，不证明 `Popen` 发生。intent 后、runner 前中断可能零执行，
+同样禁止自动重试；保证是协议内至多一次 runner 授权进入，不是 exactly-once 或自动完成。
+controller 崩溃后候选进程可能仍存活，resume 不猜测 PID 或终止未知进程。执行文件与
+execution artifact/event 的恢复登记，以及 output commit 到 terminal preparation 之间
+的恢复仍未实现；后续应优先制定 execution evidence reconciliation 协议。通用
+`CommandCandidateRunner` 和普通演化候选路径未修改。intent 和旧 publication 记录暂不 GC，
+协调删除全部 FS/DB intent 没有外部真实性保护，仍可能与从未授权的旧记录无法区分。
+
 ## Feature 089 结项：可恢复的最终结果登记
 
 Feature 089 处理了“最终 result marker 已写出，但 artifact/event 尚未完整登记”的恢复缺口。

@@ -159,6 +159,16 @@ completed results from being silently repaired. Old results remain subject to st
 validation. Interruptions before durable terminal preparation, including the process-launch to
 execution-evidence window, still require diagnosis.
 
+Feature [090](specs/090-durable-materialization-launch/) records and syncs a launch intent in the
+child workspace and SQLite before entering the final runner. A nonblocking child lock covers the
+whole materialization lifecycle; another active caller gets `materialization_already_running`.
+If the controller exits after authorization, resume preserves the attempt and refuses to launch it
+again, even when no execution result exists. Intact completed results and prepared terminal
+publications remain reusable after validating launch and execution evidence. Intent records
+authorization, so interruption before the runner actually starts can also require diagnosis.
+This prevents automatic duplicate launch under the protocol; it does not guarantee completion or
+exactly-once execution, reconcile missing execution artifact/events, or identify surviving processes.
+
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.
 Contracts without `outputs` keep the existing source-only result. `evolve CONTRACT` remains
