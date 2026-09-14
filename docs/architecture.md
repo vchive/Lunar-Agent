@@ -275,6 +275,26 @@ process model. Lunar-Agent adopts the portable behaviors and excludes those depl
 A parent agent can invoke the JSON CLI as a child process, while a local user can run the same
 binary without a Hermes installation or a machine-wide configuration directory.
 
+## Producer exports as population input
+
+Feature 096 adds `export-shinka-result` as a thin CLI over the existing offline exporter. It parses
+a bounded contract and dispatches before normal configuration/storage initialization. Program IDs
+and top-k selection remain mutually exclusive, and the response describes an exported material
+bundle rather than an admitted candidate.
+
+`evolve --producer-result` uses the shared `prepare_producer_seed_manifest` function to verify the
+completed envelope, caller-pinned producer identity and material bytes, then constructs an
+unadmitted in-memory SeedManifest. The generic producer's source-bundle dependency digest and
+declared-protocol environment digest are preserved. The controller's existing seed admission is
+the only evaluation/receipt/commit path; no parallel scoring or admission schema is introduced.
+The evaluator command uses the same objective-harness fingerprint as other seeded population runs.
+
+Producer imports are population-only and cannot be mixed with an explicit seed manifest or seed
+identity overrides. Existing resume checks bind config, manifest and canonical seed evidence;
+revalidation uses the exact evaluator again. Detached startup forwards the original producer root
+and pins so the child reconstructs the same manifest. These flags never install, discover or run
+an external framework; ordinary generator/evaluator commands remain the caller's explicit choices.
+
 ## Invocation and evolution seams
 
 The invocation seam and the search-strategy seam are deliberately independent:

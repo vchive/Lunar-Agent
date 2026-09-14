@@ -1,5 +1,6 @@
 """Portable materialization evidence exports are bounded, sanitized and no-clobber."""
 
+import gc
 import hashlib
 import json
 import os
@@ -10,7 +11,8 @@ import uuid
 from pathlib import Path
 
 import pytest
-from test_materialization_diagnostics import _fixture, _materialize
+from test_materialization_diagnostics import _fixture
+from test_materialization_diagnostics import _materialize as _materialize_fixture
 
 from famou import cli
 from famou.config import Config
@@ -23,6 +25,13 @@ from famou.materialization_evidence_bundle import (
 from famou.store import Store
 
 SENSITIVE = "bundle-secret-goal-command-payload-DO-NOT-LEAK"
+
+
+def _materialize(controller, parent, child, result):
+    materialized = _materialize_fixture(controller, parent, child, result)
+    # SQLite context managers do not close connections; settle fixture cleanup before sampling.
+    gc.collect()
+    return materialized
 
 
 def _bundle(controller, parent, child, destination: Path) -> dict:

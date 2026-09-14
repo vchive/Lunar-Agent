@@ -34,6 +34,7 @@ from .algorithm import (
     LOOP_STRATEGY_RETIRED,
     LOOP_STRATEGY_RETIRED_MESSAGE,
     LOOP_STRATEGY_RETIREMENT_HINT,
+    MAX_CONTRACT_BYTES,
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
     AlgorithmProblemContract,
@@ -64,13 +65,17 @@ from .evolution import (
     EvolutionConfig,
     EvolutionError,
     ExecutionAwareCandidateEvaluator,
+    _read_bounded_regular_file,
+    _strict_json_loads,
     contract_candidate_runner_fingerprint,
 )
 from .memory import MemoryStore
 from .models import Run
 from .policy import MasterPolicy, PlanDocument, PlanPatch
+from .producer_handoff import ProducerHandoffError
 from .profiles import ModelProfile
 from .runtime import OpenAICompatibleRuntime, build_runtime
+from .seed_handoff import SeedAdmissionError
 from .staged_workflow import StagedWorkflowConfig
 from .store import Store
 from .tools import LocalToolRegistry
@@ -291,11 +296,20 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument("--resume", action="store_true", help="resume an existing strategy run")
     evolve_parser.add_argument("--run-id", help="existing evolution run ID (required with --resume)")
     evolve_parser.add_argument("--detach", action="store_true", help="return an evolution run ID and execute in the background")
-    evolve_parser.add_argument(
+    seed_source = evolve_parser.add_mutually_exclusive_group()
+    seed_source.add_argument(
         "--seed-manifest",
         type=Path,
         help="optional verified-seed manifest for population initialization",
     )
+    seed_source.add_argument(
+        "--producer-result", type=Path,
+        help="completed local producer export directory for population initialization",
+    )
+    evolve_parser.add_argument(
+        "--producer-fingerprint", help="pinned producer version/config digest required with --producer-result",
+    )
+    evolve_parser.add_argument("--producer-id", help="optional expected producer name with --producer-result")
     evolve_parser.add_argument(
         "--seed-dependency-sha256",
         help="current dependency identity required with --seed-manifest",
@@ -798,6 +812,18 @@ def build_parser() -> argparse.ArgumentParser:
     attest_parser.add_argument("--receipt", required=True, type=Path)
     _add_home(attest_parser)
     _add_json(attest_parser)
+    shinka_parser = subparsers.add_parser(
+        "export-shinka-result", help="export completed Shinka material for local population warm start",
+    )
+    shinka_parser.add_argument("results_root", type=Path)
+    shinka_parser.add_argument("--output", type=Path, required=True, help="new export directory")
+    shinka_parser.add_argument("--contract", type=Path, required=True, help="algorithm contract JSON")
+    shinka_parser.add_argument("--producer-fingerprint", required=True, help="pinned Shinka version/config SHA-256")
+    shinka_parser.add_argument("--producer-run-id", help="optional producer run label")
+    selection = shinka_parser.add_mutually_exclusive_group()
+    selection.add_argument("--program-id", action="append", dest="program_ids", help="select ordered IDs; repeat for more")
+    selection.add_argument("--top-k", type=int, help="select top correct rows by producer score (default: 1)")
+    _add_json(shinka_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -2444,6 +2470,19 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     strategy_name = args.strategy or contract.evolution.strategy
     if strategy_name == "loop":
         raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
+    producer_result = args.producer_result
+    if producer_result is None and (args.producer_fingerprint is not None or args.producer_id is not None):
+        raise ValueError("--producer-fingerprint and --producer-id require --producer-result")
+    if producer_result is not None:
+        if strategy_name != "population":
+            raise ValueError("--producer-result is supported only by the population strategy")
+        if not args.producer_fingerprint:
+            raise ValueError("--producer-result requires --producer-fingerprint")
+        if args.seed_dependency_sha256 is not None or args.seed_environment_sha256 is not None:
+            raise ValueError("--producer-result cannot be combined with seed dependency/environment overrides")
+        if not args.evaluator_command:
+            raise ValueError("--producer-result requires --evaluator-command as the local exact harness")
+    seeded = args.seed_manifest is not None or producer_result is not None
     if args.generator_command and strategy_name != "population":
         raise ValueError("--generator-command requires --strategy population")
     if args.openevolve_command and strategy_name != "openevolve":
@@ -2685,7 +2724,7 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         elif evaluator_command:
             evaluator_fingerprint = _adapter_fingerprint(
                 evaluator_command,
-                kind="objective-harness" if args.seed_manifest is not None else "evaluator",
+                kind="objective-harness" if seeded else "evaluator",
                 name="command-evaluator",
                 role="evaluator",
             )
@@ -2862,6 +2901,18 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 and state_payload.get("config") != evolution_config.to_dict()
             ):
                 raise ValueError("evolution resume configuration does not match the existing run")
+    seed_manifest = args.seed_manifest
+    seed_dependency = args.seed_dependency_sha256
+    seed_environment = args.seed_environment_sha256
+    if producer_result is not None:
+        from .producer_handoff import prepare_producer_seed_manifest
+
+        seed_manifest = prepare_producer_seed_manifest(
+            producer_result, contract, evaluator_fingerprint=evaluator_fingerprint,
+            producer_fingerprint=args.producer_fingerprint, producer_id=args.producer_id,
+        )
+        seed_dependency = seed_manifest.dependency_sha256
+        seed_environment = seed_manifest.environment_sha256
     if existing_run is None:
         run = controller.create_evolution_run(contract, workspace=workspace)
     else:
@@ -2875,9 +2926,9 @@ def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         evaluator,
         evolution_config,
         resume=args.resume,
-        seed_manifest=args.seed_manifest,
-        seed_dependency_sha256=args.seed_dependency_sha256,
-        seed_environment_sha256=args.seed_environment_sha256,
+        seed_manifest=seed_manifest,
+        seed_dependency_sha256=seed_dependency,
+        seed_environment_sha256=seed_environment,
     )
     return {
         **result.to_dict(),
@@ -3462,6 +3513,11 @@ def _detach_evolution(
         command.extend(("--strategy", args.strategy))
     if args.seed_manifest is not None:
         command.extend(("--seed-manifest", str(args.seed_manifest.expanduser().absolute())))
+    if args.producer_result is not None:
+        command.extend(("--producer-result", str(args.producer_result.expanduser().absolute())))
+        command.extend(("--producer-fingerprint", args.producer_fingerprint))
+        if args.producer_id is not None:
+            command.extend(("--producer-id", args.producer_id))
     if args.seed_dependency_sha256 is not None:
         command.extend(("--seed-dependency-sha256", args.seed_dependency_sha256))
     if args.seed_environment_sha256 is not None:
@@ -3694,6 +3750,29 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     return payload
 
 
+def _export_shinka(args: argparse.Namespace) -> dict[str, object]:
+    from .shinka_handoff import export_shinka_result
+
+    try:
+        content = _read_bounded_regular_file(
+            args.contract.expanduser(), MAX_CONTRACT_BYTES, error="producer_export_contract_invalid",
+        )
+        contract = AlgorithmProblemContract.from_dict(_strict_json_loads(content))
+    except (EvolutionError, OSError, TypeError, ValueError, RecursionError):
+        raise ValueError("producer_export_contract_invalid") from None
+    envelope = export_shinka_result(
+        args.results_root, args.output, contract_sha256=contract.digest(),
+        producer_fingerprint=args.producer_fingerprint, producer_run_id=args.producer_run_id,
+        program_ids=args.program_ids, top_k=args.top_k,
+    )
+    return {
+        "status": "exported", "export_root": str(args.output.expanduser().absolute()),
+        "producer_id": envelope.producer_id, "producer_run_id": envelope.producer_run_id,
+        "material_count": len(envelope.materials), "contract_sha256": envelope.contract_sha256,
+        "envelope_sha256": envelope.envelope_sha256,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -3755,6 +3834,9 @@ def main(argv: list[str] | None = None) -> int:
                 attest_home / "state.db", args.parent_run_id, args.evolution_run_id, args.receipt,
             )
             _emit(payload, args.json)
+            return 0
+        if args.command == "export-shinka-result":
+            _emit(_export_shinka(args), args.json)
             return 0
         config = _config(args)
         if args.command == "init":
@@ -3953,6 +4035,8 @@ def main(argv: list[str] | None = None) -> int:
         EffectTrialError,
         EffectAdapterError,
         EffectKitError,
+        ProducerHandoffError,
+        SeedAdmissionError,
     ) as exc:
         _emit_error(str(exc), getattr(args, "json", False))
         return 2

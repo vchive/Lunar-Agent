@@ -600,3 +600,163 @@ def test_required_producer_fingerprint_is_pinned_before_reading_envelope(tmp_pat
             producer_fingerprint="short",
         )
     assert caught.value.code == PRODUCER_FINGERPRINT_REQUIRED
+
+
+def test_prepare_manifest_is_public_and_does_not_admit_or_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import famou
+    import famou.producer_handoff as module
+    from famou.seed_handoff import SeedManifest
+
+    contract = _contract()
+    root = tmp_path / "producer"
+    materials = [
+        _material(root, "first.py", "answer = 1\n", lineage=("first",), evidence={"combined_score": 999}),
+        _material(root, "second.py", "answer = 2\n", lineage=("second",)),
+    ]
+    _envelope(root, contract, materials)
+    before = {path.relative_to(tmp_path): (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in tmp_path.rglob("*") if path.is_file()}
+    monkeypatch.setattr(module, "admit_seed_manifest", lambda *args, **kwargs: pytest.fail("preparation admitted seeds"))
+    manifest = module.prepare_producer_seed_manifest(
+        root, contract, evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA, producer_id="shinka",
+    )
+    assert famou.prepare_producer_seed_manifest is module.prepare_producer_seed_manifest
+    assert "prepare_producer_seed_manifest" in famou.__all__ and "prepare_producer_seed_manifest" in module.__all__
+    assert isinstance(manifest, SeedManifest) and manifest.source_root == root.resolve()
+    assert manifest.evaluator_kind == "exact_harness" and manifest.evaluator_fingerprint == EVALUATOR_SHA
+    assert manifest.dependency_sha256 == producer_bundle_dependency_sha256([value["sha256"] for value in materials])
+    assert manifest.environment_sha256 == declared_producer_environment_sha256()
+    assert [record.source_path for record in manifest.seeds] == ["first.py", "second.py"]
+    assert manifest.seeds[0].provenance.external_evidence["score_present"] is True
+    assert "999" not in json.dumps(manifest.to_dict())
+    assert {path.relative_to(tmp_path): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in tmp_path.rglob("*") if path.is_file()} == before
+    assert set(tmp_path.iterdir()) == {root}
+
+
+def test_preparation_and_legacy_admission_share_exact_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import famou.producer_handoff as module
+    from famou.seed_handoff import admit_seed_manifest
+
+    contract = _contract()
+    root = tmp_path / "producer"
+    material = _material(root, "candidate.py", "answer = 1\n", lineage=("parent",))
+    payload = _envelope(root, contract, [material])
+    nested = root / "nested.json"
+    (root / "producer-result.json").rename(nested)
+    prepared = module.prepare_producer_seed_manifest(
+        root, contract, evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA, envelope_path=Path("nested.json"),
+    )
+    captured = []
+    calls = []
+
+    def capture(manifest, *args, **kwargs):
+        captured.append(manifest)
+        return admit_seed_manifest(manifest, *args, **kwargs)
+
+    def evaluator(path, supplied):
+        calls.append(path.read_bytes())
+        return _report(0.25)
+
+    monkeypatch.setattr(module, "admit_seed_manifest", capture)
+    file_result = admit_producer_result(
+        root, contract, evaluator, evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA,
+        envelope_path="nested.json", staging_root=tmp_path / "file-staging",
+    )
+    object_result = admit_producer_envelope(
+        root, ProducerResultEnvelope.from_dict(payload), contract, evaluator,
+        evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA, staging_root=tmp_path / "object-staging",
+    )
+    assert len(captured) == len(calls) == 2
+    assert captured[0].to_dict() == captured[1].to_dict() == prepared.to_dict()
+    assert file_result.admitted[0].candidate_id == object_result.admitted[0].candidate_id
+    assert file_result.admitted[0].receipt.to_dict() == object_result.admitted[0].receipt.to_dict()
+
+
+@pytest.mark.parametrize("mutation,expected", [
+    ("source", PRODUCER_MATERIAL_DIGEST_MISMATCH),
+    ("contract", PRODUCER_CONTRACT_MISMATCH),
+    ("producer", PRODUCER_IDENTITY_MISMATCH),
+    ("producer_id", PRODUCER_IDENTITY_MISMATCH),
+    ("envelope", PRODUCER_ENVELOPE_JSON_INVALID),
+])
+def test_preparation_preserves_envelope_and_material_checks(tmp_path: Path, mutation: str, expected: str) -> None:
+    import famou.producer_handoff as module
+
+    contract = _contract()
+    root = tmp_path / "producer"
+    material = _material(root, "candidate.py", "answer = 1\n")
+    payload = _envelope(root, contract, [material])
+    if mutation == "source":
+        (root / "candidate.py").write_text("answer = 2\n")
+    elif mutation == "envelope":
+        (root / "producer-result.json").write_text('{"schema_version":"1","schema_version":"1"}')
+    else:
+        payload[{"contract": "contract_sha256", "producer": "producer_fingerprint", "producer_id": "producer_id"}[mutation]] = (
+            "other-producer" if mutation == "producer_id" else "f" * 64
+        )
+        (root / "producer-result.json").write_text(json.dumps(payload))
+    with pytest.raises(ProducerHandoffError) as caught:
+        module.prepare_producer_seed_manifest(
+            root, contract, evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA, producer_id="shinka",
+        )
+    assert caught.value.code == expected
+
+
+def test_prepared_source_is_rechecked_before_any_local_evaluation(tmp_path: Path) -> None:
+    import famou.producer_handoff as module
+    from famou.seed_handoff import admit_seed_manifest
+
+    contract = _contract()
+    root = tmp_path / "producer"
+    material = _material(root, "candidate.py", "answer = 1\n")
+    _envelope(root, contract, [material])
+    manifest = module.prepare_producer_seed_manifest(
+        root, contract, evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA,
+    )
+    (root / "candidate.py").write_text("answer = 2\n")
+    with pytest.raises(SeedAdmissionError):
+        admit_seed_manifest(
+            manifest, contract, lambda *args: pytest.fail("changed material reached evaluation"),
+            evaluator_kind=manifest.evaluator_kind, evaluator_fingerprint=manifest.evaluator_fingerprint,
+            dependency_sha256=manifest.dependency_sha256, environment_sha256=manifest.environment_sha256,
+            staging_root=tmp_path / "staging",
+        )
+
+
+@pytest.mark.parametrize("api", ["file", "object", "prepare"])
+def test_shared_preparation_preserves_caller_error_precedence(tmp_path: Path, api: str) -> None:
+    import famou.producer_handoff as module
+
+    function = {
+        "file": lambda contract, evaluator: admit_producer_result(
+            tmp_path / "missing", contract, evaluator, evaluator_fingerprint="bad", producer_fingerprint="bad",
+        ),
+        "object": lambda contract, evaluator: admit_producer_envelope(
+            tmp_path / "missing", None, contract, evaluator, evaluator_fingerprint="bad", producer_fingerprint="bad",
+        ),
+        "prepare": lambda contract, evaluator: module.prepare_producer_seed_manifest(
+            tmp_path / "missing", contract, evaluator_fingerprint="bad", producer_fingerprint="bad",
+        ),
+    }[api]
+    with pytest.raises(ProducerHandoffError) as caught:
+        function(None, None)
+    assert caught.value.code == PRODUCER_CONTRACT_MISMATCH
+    with pytest.raises(ProducerHandoffError) as caught:
+        function(_contract(), None)
+    assert caught.value.code == (
+        "producer_evaluator_fingerprint_required" if api == "prepare" else PRODUCER_ENVELOPE_SCHEMA_INVALID
+    )
+
+
+def test_object_admission_preserves_material_reference_overrides(tmp_path: Path) -> None:
+    contract = _contract()
+    root = tmp_path / "producer"
+    material = _material(root, "candidate.py", "answer = 1\n")
+    payload = _envelope(root, contract, [material])
+    result = admit_producer_envelope(
+        root, ProducerResultEnvelope.from_dict(payload), contract, lambda path, supplied: _report(0.25),
+        evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA,
+        material_ref_overrides={"candidate.py": ("opaque-producer-ref",)}, staging_root=tmp_path / "staging",
+    )
+    assert result.admitted[0].provenance.material_refs == ("opaque-producer-ref",)

@@ -127,6 +127,7 @@ from .producer_handoff import (
     admit_producer_result,
     declared_producer_environment_sha256,
     parse_producer_envelope,
+    prepare_producer_seed_manifest,
     producer_bundle_dependency_sha256,
 )
 from .profiles import EvaluatorProfile, ModelProfile, ProfileRegistry, SolverProfile
@@ -351,6 +352,7 @@ __all__ = [
     "normalize_feedback",
     "parse_producer_envelope",
     "parse_seed_manifest",
+    "prepare_producer_seed_manifest",
     "producer_bundle_dependency_sha256",
     "profile_sha256",
     "reconcile_remote_state",

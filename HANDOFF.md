@@ -1,5 +1,33 @@
 # Lunar-Agent 交接记录
 
+## Feature 096：外部 producer CLI 热启动
+
+已打通用户可直接操作的 Shinka → Lunar population 工作流。新增
+`export-shinka-result RESULTS_ROOT --output NEW_ROOT --contract FILE --producer-fingerprint SHA`，
+复用现有静态 SQLite exporter；可按重复 `--program-id` 有序选择，或用互斥的 `--top-k`
+（默认一条）。命令在普通配置初始化前分派，输出 exported、候选数量和 envelope 摘要，
+不创建 Lunar home/Store，也不启动 producer 或 evaluator。
+
+新增 `evolve --producer-result ROOT --producer-fingerprint SHA [--producer-id NAME]`，
+仅供 population 使用，并要求原有 `--evaluator-command` 本地 exact harness。它与
+`--seed-manifest` 互斥，也不允许 seed dependency/environment 手工覆盖。新公开 API
+`prepare_producer_seed_manifest` 复用原 generic adapter 的 envelope/material/pin 校验，
+只在内存构造未 admission 的 SeedManifest。随后由原 controller seed admission 唯一地
+执行评测、生成 receipt 和提交候选，避免提前或重复评测。dependency 是 source-bundle
+摘要，environment 是原 adapter 的 declared-protocol 协议声明摘要，不认证外部框架的运行环境或依赖。
+
+普通 resume 保留完整 seed/ordinary-candidate 复验；`--detach` 传递原始 producer root、
+fingerprint 和可选 name pin，不把临时 manifest 或推导参数伪装为用户输入。已用真实本地
+Python fixture 验证 Shinka SQLite 导出、good/bad mixed admission、外部高分不覆盖本地
+0.42 分、全 invalid 时不启动搜索、恢复复验与稳定 seed ID，以及 source/pin/evaluator/
+envelope 漂移拒绝。没有运行真实 Shinka/OpenEvolve、模型、provider、远端服务或 campaign，
+没有新增算法效果或 WebAgent 持平结论。
+
+实现、聚焦测试、独立审查、离线构建和最终全量验证已完成：**3831 passed**。操作说明见
+`specs/096-producer-cli-warm-start/quickstart.md`，本轮完成本地提交，不 push。
+下一层待办仍是 SkyDiscover/LLM4AD benchmark/task envelope 与独立真实验证；本功能只
+处理已有的本地单文件候选，未新增 live runner、网络同步、repository/workflow candidate。
+
 ## Feature 095 结项：显式执行证据登记
 
 新增 `attest-materialization-execution PARENT CHILD --receipt FILE`。它用于 090 launch intent
@@ -1527,7 +1555,7 @@ export FAMOU_MODEL=6Astra
 当前 `.specify/feature.json` 指向：
 
 ```text
-specs/085-population-first-evolution
+specs/096-producer-cli-warm-start
 ```
 
 后续新功能必须：
@@ -1548,7 +1576,7 @@ git diff --check
 ```
 
 4. 代码提交使用：`vchive <vchive@users.noreply.github.com>`。
-5. 默认直接在 `main` 开发并推送；不要擅自切换到工作树或新分支。
+5. 按当前范围直接在 `main` 开发并本地提交，不 push；不要擅自切换到工作树或新分支。
 
 ## 9. 接手第一步
 

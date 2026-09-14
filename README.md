@@ -1055,6 +1055,36 @@ after checking exact UTF-8 bytes against the database row. Call `admit_producer_
 to bounded external evidence and never become Lunar iteration, score, or rank authority. The
 exporter does not launch ShinkaEvolve, a model, a scheduler, or a remote backend.
 
+Feature [096](specs/096-producer-cli-warm-start/) exposes that workflow directly through the CLI:
+
+```bash
+lunar-agent export-shinka-result ./shinka-run --output ./shinka-export \
+  --contract contract.json --producer-fingerprint "$SHINKA_FINGERPRINT" \
+  --program-id program-1 --json
+
+lunar-agent evolve contract.json --producer-result ./shinka-export \
+  --producer-fingerprint "$SHINKA_FINGERPRINT" --producer-id shinka \
+  --generator-command "/absolute/path/to/generator" \
+  --evaluator-command "/absolute/path/to/local-exact-evaluator" \
+  --population-size 4 --json --home .lunar
+```
+
+`SHINKA_FINGERPRINT` is your pinned producer version/configuration SHA-256. Export copies material
+without initializing a Lunar run or executing a producer. Use repeated `--program-id` values for
+ordered selection, or `--top-k N` for producer-score selection (default one); export success does
+not mean the candidate passed Lunar evaluation. `evolve --producer-result` prepares an unadmitted
+manifest and sends it through the same local exact evaluator and seed receipt path as
+`--seed-manifest`. It accepts any compatible completed producer export directory. Source-bundle
+dependency and declared-protocol environment digests are derived by the existing adapter; explicit
+seed dependency/environment overrides and `--seed-manifest` cannot be combined with this option.
+The producer pin and local evaluator command are required; `--producer-id` is an optional name pin.
+
+For resume, retain the export directory and pass the same flags with `--resume --run-id ID`; the
+local evaluator runs fresh while seed identities remain stable. `--detach` forwards these options
+to the background child. The public `prepare_producer_seed_manifest(...)` API performs only the
+read/validation step when Python integration is preferred. See the
+[operator guide](specs/096-producer-cli-warm-start/quickstart.md) for the complete workflow and limits.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

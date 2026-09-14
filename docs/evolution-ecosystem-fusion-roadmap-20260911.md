@@ -9,6 +9,20 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-14：CLI 热启动入口
+
+Feature 096 已把现有离线 adapter 接到用户入口：`export-shinka-result` 导出静态 Shinka
+结果；`evolve --producer-result ROOT --producer-fingerprint SHA` 将兼容 envelope 交给
+Lunar population 的同一 exact-harness seed admission。新共享 API
+`prepare_producer_seed_manifest` 只做只读校验与内存 manifest 构造，准备阶段不评测、
+不创建 Candidate 或 receipt。CLI 支持固定 producer pin、可选名称 pin、正常 resume
+fresh revalidation 和 detached 参数传递。使用方法见
+[096 quickstart](../specs/096-producer-cli-warm-start/quickstart.md)。
+
+该入口已用 SQLite + 本地 generator/evaluator fixture 验证，未启动真实 Shinka、模型或
+远端服务；不构成框架效果比较。下一层仍是 SkyDiscover/LLM4AD benchmark/task envelope
+与固定条件下的独立测量，多文件/repository/workflow candidate 另立契约。
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)
@@ -143,5 +157,5 @@ famou-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远�
 完成这些边界只证明互操作和评分权威一致，不证明任何框架提高 Lunar 的有效解率。效果结论
 需要新的预注册真实测量；历史 Feature 051/074/076/078/082 的 protocol、manifest、receipt
 和统计保持原字节。普通 offspring/candidate 的完整 receipt、contract/evaluator/dependency/
-environment fingerprint 仍应在独立 Feature 087 中定义，不能借 Feature 086 混入既有 archive
+environment fingerprint 后来已由独立 Feature 087 完成，未混入 Feature 086 的 archive
 schema。
