@@ -148,9 +148,16 @@ recoverable: a confirmed uncommitted batch removes only its own new links and pr
 outputs. Resume reconciles the journal before reading the materialization result. Unknown commit
 state or changed evidence preserves the attempt and stops delivery. Filesystem readers can still
 observe a prefix during publication or until crash recovery runs; the atomic boundary is the
-SQLite batch. Staging and journal files are retained. Recovery never reruns the candidate or
-constructs a missing terminal result; the process-launch and terminal-result persistence gaps
-remain explicit limits.
+SQLite batch. Staging and journal files are retained. Output recovery never reruns the candidate
+or infers a terminal result from output files alone.
+
+Feature [089](specs/089-recoverable-materialization-result/) also makes terminal result registration
+recoverable. Lunar retains the validated result bytes and a database preparation receipt before
+publishing `result.json`. Resume can finish that exact pending result and register its artifact and
+events atomically, without executing the candidate again. A completion receipt prevents damaged
+completed results from being silently repaired. Old results remain subject to strict read-only
+validation. Interruptions before durable terminal preparation, including the process-launch to
+execution-evidence window, still require diagnosis.
 
 Resuming the intake reuses the same child and terminal materialization, verifies candidate and
 output digests, and rejects changed strategy settings instead of executing or overwriting again.

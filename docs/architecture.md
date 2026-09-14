@@ -170,13 +170,23 @@ inspectable.
     removing uncommitted links proven to belong to this attempt. Unknown state or changed evidence
     stops delivery and retains the attempt. A missing journal cannot silently bypass an existing
     commit acknowledgement. Staging, journals and rollback acknowledgements are retained.
+15. Terminal materialization publication retains exact result bytes and a journal under the
+    child's `evolution/materialization/.terminal-publication/`. A SQLite preparation receipt binds
+    the journal, result digest and parent/child/task identities before the marker is linked into
+    place and synced. One FULL-synchronous transaction then records the result artifact, its
+    artifact event, the existing parent materialization event and a commit acknowledgement.
+    A filesystem completion receipt is durable before a normal return. Resume may complete a
+    prepared result or a missing completion receipt after validating all prior execution/output
+    evidence. A completed result with missing or conflicting marker/database evidence is rejected.
 
 The output publication transaction defines logical delivery in SQLite; filesystem readers may see
 a prefix of final files before commit or until recovery runs after a crash. Reconciliation occurs
-before terminal materialization replay and does not execute a candidate or create a missing result
-marker. A crash before the complete journal is persisted requires diagnosis of retained staging.
-The candidate-launch-to-execution-evidence window and the terminal marker/ledger gap remain outside
-Feature 088. The advisory lock coordinates these publishers, not unrelated same-user file writers.
+before terminal materialization replay and does not execute a candidate. Feature 089 can publish a
+missing marker only from an exact durable terminal preparation; it never infers one from output or
+execution evidence alone. A crash before either publication's preparation is complete requires
+diagnosis of retained staging. This includes the candidate-launch-to-execution-evidence window and
+the interval after output commit but before terminal preparation. The advisory locks coordinate
+these publishers, not unrelated same-user file writers.
 
 ## Deliberate boundary versus WebAgent
 

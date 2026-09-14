@@ -76,6 +76,10 @@ from .evolution import (
     _read_bounded_regular_file,
     build_strategy,
 )
+from .materialization_publication import (
+    publish_materialization_result,
+    recover_materialization_result,
+)
 from .memory import MemoryStore
 from .models import Run, RunStatus
 from .output_publication import OutputPublicationUncertain, publish_outputs, recover_outputs
@@ -1523,10 +1527,23 @@ class LocalController:
         materialization_root = child_root / "evolution" / "materialization"
         if self._raw_path_has_symlink(child_root, materialization_root):
             raise EvolutionError("materialization directory must not contain a symlink")
+        if materialization_root.exists() and not materialization_root.is_dir():
+            raise EvolutionError("materialization directory could not be prepared")
         marker = materialization_root / "result.json"
         temporary_marker = materialization_root / ".result.json.tmp"
         if marker.is_symlink():
             raise EvolutionError("materialization result must not be a symlink")
+
+        def validate_terminal(payload: dict[str, Any]) -> None:
+            self._validate_materialization_replay(
+                payload, parent, child, contract, result, candidate_digest, attempt_relative,
+            )
+
+        recovered = recover_materialization_result(
+            self.store, parent, child, validate=validate_terminal,
+        )
+        if recovered is not None:
+            return recovered
         if marker.exists():
             payload = self._read_materialization_result(marker)
             self._validate_materialization_replay(
@@ -1661,29 +1678,9 @@ class LocalController:
             "outputs": list(outputs),
             "error": error,
         }
-        self._validate_materialization_attempt_evidence(
-            payload,
-            parent,
-            child,
-            contract,
-            attempt_relative,
-            candidate_digest,
+        return publish_materialization_result(
+            self.store, parent, child, payload, validate=validate_terminal,
         )
-        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-        if len(encoded.encode("utf-8")) > self._MAX_MATERIALIZATION_RESULT_BYTES:
-            raise EvolutionError("materialization result exceeds the bounded size")
-        if temporary_marker.exists() or temporary_marker.is_symlink():
-            raise EvolutionError("materialization temporary result already exists")
-        try:
-            with temporary_marker.open("x", encoding="utf-8") as stream:
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-            temporary_marker.replace(marker)
-        except OSError as exc:
-            raise EvolutionError("materialization result could not be persisted") from exc
-        self._record_materialization_result(parent, child, payload, marker)
-        return payload
 
     def _read_materialization_result(self, path: Path) -> dict[str, Any]:
         try:

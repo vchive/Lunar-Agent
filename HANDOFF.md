@@ -6,6 +6,43 @@
 远端：`git@github.com:vchive/Lunar-Agent.git`  
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
+## Feature 089 结项：可恢复的最终结果登记
+
+Feature 089 处理了“最终 result marker 已写出，但 artifact/event 尚未完整登记”的恢复缺口。
+新的 `materialization_publication.py` 在 child 的
+`evolution/materialization/.terminal-publication/` 保存完整 canonical `result.blob`、journal
+及 completion receipt；`result.json` 和父 `evolved_candidate_materialized` 事件仍保持原有
+schema 1 形状。controller 在 Feature 088 输出恢复之后、旧 marker/执行检查之前尝试终态恢复，
+并复用已有 contract、candidate、execution、output validator；不重新运行候选或发布输出。
+
+顺序是 staging/journal fsync → SQLite prepared receipt → no-clobber marker 与目录 fsync
+→ FULL-synchronous SQLite 原子 terminal batch → durable completion receipt。terminal batch
+只新增结果 artifact、对应 artifact_recorded、原有父终态事件和 child committed
+acknowledgement；execution artifact/event 必须早已完整，恢复不能补造。prepared receipt
+绑定 parent/child/task、journal digest、结果 digest/size 和确定 artifact ID。只有存在精确
+prepared 凭据、没有任何 completion 凭据、且 terminal batch 完全不存在时，才允许续完登记。
+
+数据库提交异常须重新查询完整快照，不能把待提交的成功结果改写为失败。partial、unknown、
+身份/内容漂移、现代 journal 丢失都保留现场并拒绝交付。`completed.json` 及其临时文件都表明
+数据库已经提交；它们存在时缺失任何 terminal 证据都不能自动重建。若完整数据库和 marker
+仍在，仅 completion receipt 缺失可以补完；已有 completed 文件也会补 fsync，以覆盖 link
+后、目录同步前的进程中断。旧结果只有在不存在任何 089 协议证据时，才能按原有严格只读
+规则复用。child 级文件锁只串行化终态发布与恢复。
+
+最终离线验证：089 聚焦四文件 251 项（24.97 秒），终态恢复与双进程测试两文件 51 项
+（10.53 秒，和聚焦集有重叠），主仓全量 2903 项（89.67 秒）；Ruff、compileall、Specify
+prerequisites、`git diff --check` 通过。051/074/076/078/082 共 601 个 tracked 封存文件无 diff，
+Store 与 FS/controller 两路独立终审均无剩余 blocker。所有新增测试都是离线 fixture；没有启动真实模型、
+provider、WebAgent、真实 OpenEvolve/ShinkaEvolve、远端服务或 campaign，也没有新的效果或
+WebAgent 持平结论。
+
+剩余边界：本协议从 durable terminal preparation 开始提供恢复能力；此前的中断仍保留现场
+并要求诊断，包括 `Popen` 到执行证据落盘、执行证据到 ledger/event 完整登记、以及 Feature
+088 output commit 到 terminal preparation 之间的窗口。不能声称严格 exactly-once execution
+或恢复所有执行后的崩溃。stage/journal/completion 暂不 GC，没有外部真实性承诺；协调删除
+所有 completion 凭据及 terminal 数据库记录，仍可能与未提交的 prepared 状态无法区分。
+后续应优先为候选启动及执行证据建立 durable intent/reconciliation 协议。
+
 ## Feature 088 结项：可恢复的演化输出批量发布
 
 Feature 088 补齐了上一轮记录的多 output 发布边界。父 workspace 的
@@ -36,7 +73,8 @@ tracked 封存文件无 diff，独立终审无剩余 blocker。离线测试覆�
 恢复前仍可看到部分路径。stage/journal 暂不 GC；完整 journal 发布前的中断保留现场并要求
 诊断，同一 evolution identity 的已回滚 batch 不会重新发布。恢复不会执行候选，也不会补造
 缺失的 terminal marker。`Popen` 到 durable execution evidence 的窗口，以及 terminal
-marker 与 materialization ledger/event 分开持久化的缺口仍未覆盖。flock 只协调本模块的
+marker 与 materialization ledger/event 分开持久化的缺口在 088 结项时仍未覆盖；后者已由
+上面的 Feature 089 在明确 prepared 凭据之后实现恢复。flock 只协调本模块的
 发布者，不对其他同用户进程提供文件真实性保证。后续开发应分别为这两个窗口制定恢复协议，
 不要将本轮离线工程验证解释为新的算法效果测量。
 
