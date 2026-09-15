@@ -24,6 +24,9 @@ from .candidate_workspace_plan import (
 
 EXECUTION_PROTOCOL = "lunar-candidate-execution-admission-v1"
 EXECUTION_SCHEMA_VERSION = "1"
+# Public naming aliases match the other static boundary modules.
+CANDIDATE_EXECUTION_PROTOCOL = EXECUTION_PROTOCOL
+CANDIDATE_EXECUTION_SCHEMA_VERSION = EXECUTION_SCHEMA_VERSION
 MAX_EXECUTION_ADMISSION_BYTES = 128 * 1024
 MAX_EXECUTION_INPUTS = MAX_INPUT_FILES
 MAX_EXECUTION_TARGET_BYTES = 1024
@@ -59,6 +62,13 @@ def _digest(value: object, code: str = "invalid") -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
         _fail(code)
     return value
+
+
+def _commitment(value: object, code: str) -> str:
+    digest = _digest(value, code)
+    if digest == "0" * 64:
+        _fail(code)
+    return digest
 
 
 def _canonical(value: object) -> bytes:
@@ -195,7 +205,7 @@ class CandidateExecutionAdmission:
     def __post_init__(self) -> None:
         if self.schema_version != EXECUTION_SCHEMA_VERSION or self.protocol != EXECUTION_PROTOCOL: _fail("invalid")
         _digest(self.workspace_plan_sha256, "plan_mismatch"); _digest(self.bundle_sha256, "bundle_mismatch"); _digest(self.contract_sha256, "contract_mismatch")
-        _digest(self.dependency_sha256, "dependency_mismatch"); _digest(self.environment_sha256, "environment_mismatch")
+        _commitment(self.dependency_sha256, "dependency_mismatch"); _commitment(self.environment_sha256, "environment_mismatch")
         if not isinstance(self.evaluator, CandidateEvaluatorPin): _fail("evaluator_mismatch")
         if self.output_contract_sha256 is not None: _digest(self.output_contract_sha256, "output_contract_mismatch")
         if not isinstance(self.budget, CandidateExecutionBudget): _fail("budget_invalid")
@@ -241,9 +251,9 @@ def build_candidate_execution_admission(plan: CandidateWorkspacePlan | Mapping[s
     if expected_bundle_sha256 is not None and _digest(expected_bundle_sha256) != bundle_digest: _fail("bundle_mismatch")
     if expected_contract_sha256 is not None and _digest(expected_contract_sha256) != contract_digest: _fail("contract_mismatch")
     evaluator_pin = evaluator if isinstance(evaluator, CandidateEvaluatorPin) else CandidateEvaluatorPin.from_dict(dict(evaluator)); execution_budget = budget if isinstance(budget, CandidateExecutionBudget) else CandidateExecutionBudget.from_dict(dict(budget))
-    dependency_digest = _digest(dependency_sha256, "dependency_mismatch"); environment_digest = _digest(environment_sha256, "environment_mismatch")
-    if expected_dependency_sha256 is not None and _digest(expected_dependency_sha256, "dependency_mismatch") != dependency_digest: _fail("dependency_mismatch")
-    if expected_environment_sha256 is not None and _digest(expected_environment_sha256, "environment_mismatch") != environment_digest: _fail("environment_mismatch")
+    dependency_digest = _commitment(dependency_sha256, "dependency_mismatch"); environment_digest = _commitment(environment_sha256, "environment_mismatch")
+    if expected_dependency_sha256 is not None and _commitment(expected_dependency_sha256, "dependency_mismatch") != dependency_digest: _fail("dependency_mismatch")
+    if expected_environment_sha256 is not None and _commitment(expected_environment_sha256, "environment_mismatch") != environment_digest: _fail("environment_mismatch")
     if expected_evaluator is not None and (expected_evaluator if isinstance(expected_evaluator, CandidateEvaluatorPin) else CandidateEvaluatorPin.from_dict(dict(expected_evaluator))) != evaluator_pin: _fail("evaluator_mismatch")
     if expected_evaluator_sha256 is not None and _digest(expected_evaluator_sha256, "evaluator_mismatch") != evaluator_pin.fingerprint: _fail("evaluator_mismatch")
     if expected_evaluator_kind is not None and expected_evaluator_kind != evaluator_pin.kind: _fail("evaluator_mismatch")
@@ -308,4 +318,4 @@ def parse_candidate_execution_admission(source: str | os.PathLike[str] | Mapping
 
 
 admit_candidate_execution_admission = admit_candidate_execution
-__all__ = ["EXECUTION_PROTOCOL", "EXECUTION_SCHEMA_VERSION", "MAX_EXECUTION_ADMISSION_BYTES", "MAX_EXECUTION_INPUTS", "MAX_EXECUTION_INPUT_BYTES", "MAX_EXECUTION_OUTPUT_BYTES", "MAX_EXECUTION_PROCESSES", "MAX_EXECUTION_SOURCE_LABEL_BYTES", "MAX_EXECUTION_TARGET_BYTES", "MAX_EXECUTION_TIMEOUT_SECONDS", "CandidateEvaluatorPin", "CandidateExecutionAdmission", "CandidateExecutionBudget", "CandidateExecutionError", "CandidateExecutionInput", "VerifiedCandidateExecutionAdmission", "admit_candidate_execution", "admit_candidate_execution_admission", "build_candidate_execution_admission", "parse_candidate_execution_admission", "validate_candidate_execution_admission"]
+__all__ = ["CANDIDATE_EXECUTION_PROTOCOL", "CANDIDATE_EXECUTION_SCHEMA_VERSION", "EXECUTION_PROTOCOL", "EXECUTION_SCHEMA_VERSION", "MAX_EXECUTION_ADMISSION_BYTES", "MAX_EXECUTION_INPUTS", "MAX_EXECUTION_INPUT_BYTES", "MAX_EXECUTION_OUTPUT_BYTES", "MAX_EXECUTION_PROCESSES", "MAX_EXECUTION_SOURCE_LABEL_BYTES", "MAX_EXECUTION_TARGET_BYTES", "MAX_EXECUTION_TIMEOUT_SECONDS", "CandidateEvaluatorPin", "CandidateExecutionAdmission", "CandidateExecutionBudget", "CandidateExecutionError", "CandidateExecutionInput", "VerifiedCandidateExecutionAdmission", "admit_candidate_execution", "admit_candidate_execution_admission", "build_candidate_execution_admission", "parse_candidate_execution_admission", "validate_candidate_execution_admission"]
