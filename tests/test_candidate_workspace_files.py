@@ -238,7 +238,7 @@ def test_parent_case_alias_cannot_place_workspace_inside_source(tmp_path):
         alias = source
     child = alias / "workspaces"
     child.mkdir()
-    if alias == source:
+    if alias == source or alias.stat().st_ino == source.stat().st_ino:
         pytest.skip("case-sensitive filesystem has no distinct case alias")
     with pytest.raises(CandidateWorkspaceError, match=r"^candidate_workspace_workspace_root_unsafe$"):
         _materialize(source, bundle, child)
