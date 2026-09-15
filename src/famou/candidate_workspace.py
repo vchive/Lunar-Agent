@@ -1,15 +1,35 @@
 """Materialize a verified multi-file candidate into an isolated private directory."""
 from __future__ import annotations
-import hashlib, os
+
+import hashlib
+import os
 from collections.abc import Mapping
 from pathlib import Path
+
 from . import _benchmark_files as _files
-from .candidate_bundle import CandidateBundleError, CandidateSourceBundle, CandidateSourceFile, parse_candidate_source_bundle, validate_candidate_source_bundle, verify_candidate_source_bundle
-from .candidate_workspace_plan import CandidateWorkspaceError, CandidateWorkspacePlan, WORKSPACE_PLAN_PROTOCOL, WORKSPACE_PLAN_SCHEMA_VERSION, build_candidate_workspace_plan, candidate_file_table_sha256, parse_candidate_workspace_plan, validate_candidate_workspace_plan
 from ._candidate_workspace_io import DirectoryChain, PrivateTree
+from .candidate_bundle import (
+    CandidateBundleError,
+    CandidateSourceBundle,
+    CandidateSourceFile,
+    parse_candidate_source_bundle,
+    validate_candidate_source_bundle,
+    verify_candidate_source_bundle,
+)
+from .candidate_workspace_plan import (
+    WORKSPACE_PLAN_PROTOCOL,
+    WORKSPACE_PLAN_SCHEMA_VERSION,
+    CandidateWorkspaceError,
+    CandidateWorkspacePlan,
+    build_candidate_workspace_plan,
+    candidate_file_table_sha256,
+    parse_candidate_workspace_plan,
+    validate_candidate_workspace_plan,
+)
+
 
 class VerifiedCandidateWorkspace:
-    __slots__ = ("workspace_path", "bundle_sha256", "contract_sha256", "entrypoint", "file_count", "total_bytes", "file_table_sha256")
+    __slots__ = ("bundle_sha256", "contract_sha256", "entrypoint", "file_count", "file_table_sha256", "total_bytes", "workspace_path")
     def __init__(self, workspace_path: Path, verified) -> None:
         self.workspace_path=workspace_path; self.bundle_sha256=verified.bundle_sha256; self.contract_sha256=verified.bundle.contract_sha256; self.entrypoint=verified.bundle.entrypoint; self.file_count=verified.file_count; self.total_bytes=verified.total_bytes; self.file_table_sha256=candidate_file_table_sha256(verified.bundle)
     def to_dict(self):
@@ -27,9 +47,9 @@ def _read_source(root: Path, item: CandidateSourceFile) -> bytes:
 def materialize_candidate_source_bundle(bundle: CandidateSourceBundle | Mapping[str, object] | str | os.PathLike[str], *, source_root: str | os.PathLike[str], workspace_root: str | os.PathLike[str], contract_sha256: str | None = None, expected_bundle_sha256: str | None = None) -> VerifiedCandidateWorkspace:
     if contract_sha256 is None: raise CandidateWorkspaceError("candidate_workspace_invalid")
     try: source_path=Path(_files.absolute_path(source_root)); source_chain=DirectoryChain(source_path,"candidate_workspace_source_unsafe")
-    except Exception: raise CandidateWorkspaceError("candidate_workspace_source_unsafe") from None
+    except (OSError, TypeError, ValueError): raise CandidateWorkspaceError("candidate_workspace_source_unsafe") from None
     try: parent_path=Path(_files.absolute_path(workspace_root)); parent_chain=DirectoryChain(parent_path,"candidate_workspace_workspace_root_unsafe")
-    except Exception: source_chain.close(); raise CandidateWorkspaceError("candidate_workspace_workspace_root_unsafe") from None
+    except (OSError, TypeError, ValueError): source_chain.close(); raise CandidateWorkspaceError("candidate_workspace_workspace_root_unsafe") from None
     try:
         if source_path == parent_path or source_path.is_relative_to(parent_path) or parent_path.is_relative_to(source_path): raise CandidateWorkspaceError("candidate_workspace_workspace_root_unsafe")
         parsed=validate_candidate_source_bundle(bundle if isinstance(bundle,CandidateSourceBundle) else parse_candidate_source_bundle(bundle))
@@ -48,9 +68,9 @@ def materialize_candidate_source_bundle(bundle: CandidateSourceBundle | Mapping[
             try: tree.cleanup()
             except BaseException: raise CandidateWorkspaceError("candidate_workspace_cleanup_failed") from exc
             raise CandidateWorkspaceError("candidate_workspace_destination_write_failed") from None
-        except BaseException as exc:
+        except Exception as exc:
             try: tree.cleanup()
-            except BaseException: raise CandidateWorkspaceError("candidate_workspace_cleanup_failed") from exc
+            except Exception: raise CandidateWorkspaceError("candidate_workspace_cleanup_failed") from exc
             if isinstance(exc,CandidateWorkspaceError): raise
             raise CandidateWorkspaceError("candidate_workspace_materialization_failed") from None
         finally: tree.close()

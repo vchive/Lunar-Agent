@@ -41,7 +41,7 @@ class DirectoryChain:
                 if identity(before) != identity(os.fstat(child)):
                     fail(code)
             self.check()
-        except BaseException:
+        except Exception:
             self.close()
             raise
 
