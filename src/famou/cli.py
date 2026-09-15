@@ -840,6 +840,23 @@ def build_parser() -> argparse.ArgumentParser:
     validate_task_parser.add_argument("--evaluator-fingerprint", required=True, help="caller-pinned exact evaluator digest")
     _add_home(validate_task_parser)
     _add_json(validate_task_parser)
+    comparison_parser = subparsers.add_parser(
+        "benchmark-comparison", help="validate a frozen benchmark comparison without initialization",
+    )
+    comparison_commands = comparison_parser.add_subparsers(
+        dest="benchmark_comparison_command", required=True,
+    )
+    validate_comparison_parser = comparison_commands.add_parser(
+        "validate-result", help="validate a comparison plan and its result receipt",
+    )
+    validate_comparison_parser.add_argument("plan", type=Path, help="comparison plan JSON")
+    validate_comparison_parser.add_argument("result", type=Path, help="comparison result JSON")
+    validate_comparison_parser.add_argument("--contract", type=Path, required=True, help="algorithm contract JSON")
+    validate_comparison_parser.add_argument("--input-root", type=Path, required=True, help="root containing declared input files")
+    validate_comparison_parser.add_argument("--model-profile-sha256", required=True, help="caller-pinned model profile digest")
+    validate_comparison_parser.add_argument("--evaluator-fingerprint", required=True, help="caller-pinned exact evaluator digest")
+    _add_home(validate_comparison_parser)
+    _add_json(validate_comparison_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3824,6 +3841,47 @@ def _benchmark_task_validate(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _benchmark_comparison_validate_result(args: argparse.Namespace) -> dict[str, object]:
+    from .benchmark_comparison import (
+        BenchmarkComparisonError,
+        admit_benchmark_comparison_plan,
+        parse_benchmark_comparison_plan,
+    )
+    from .benchmark_result import (
+        BenchmarkResultError,
+        admit_benchmark_comparison_result,
+        parse_benchmark_comparison_result,
+    )
+
+    try:
+        content = _read_bounded_regular_file(
+            args.contract.expanduser(), MAX_CONTRACT_BYTES, error="benchmark_comparison_invalid",
+        )
+        contract = AlgorithmProblemContract.from_dict(_strict_json_loads(content))
+        plan = parse_benchmark_comparison_plan(args.plan)
+        admitted_plan = admit_benchmark_comparison_plan(
+            plan,
+            contract_sha256=contract.digest(),
+            input_root=args.input_root,
+            model_profile_sha256=args.model_profile_sha256,
+            evaluator_fingerprint=args.evaluator_fingerprint,
+        )
+        result = parse_benchmark_comparison_result(args.result)
+        admitted_result = admit_benchmark_comparison_result(result, plan)
+    except (BenchmarkComparisonError, BenchmarkResultError):
+        raise
+    except (EvolutionError, OSError, TypeError, ValueError, RecursionError):
+        raise ValueError("benchmark_comparison_invalid") from None
+    return {
+        "status": "validated",
+        "comparison_id": admitted_plan.comparison_id,
+        "result_id": admitted_result.result_id,
+        "arm_count": len(admitted_result.arms),
+        "arm_ids": [arm.arm_id for arm in admitted_result.arms],
+        "per_arm_attempts": admitted_plan.per_arm_attempts,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -3893,6 +3951,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.benchmark_task_command != "validate":
                 raise ValueError("benchmark_task_envelope_invalid")
             _emit(_benchmark_task_validate(args), args.json)
+            return 0
+        if args.command == "benchmark-comparison":
+            if args.benchmark_comparison_command != "validate-result":
+                raise ValueError("benchmark_comparison_invalid")
+            _emit(_benchmark_comparison_validate_result(args), args.json)
             return 0
         config = _config(args)
         if args.command == "init":

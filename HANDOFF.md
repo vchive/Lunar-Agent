@@ -6,7 +6,9 @@
 计数、耗时、有限分数摘要和 evidence SHA-256 绑定到 098 comparison plan。严格 canonical JSON、
 重复键/非有限值/越界字段拒绝，result ID 由 plan comparison ID 与 arm 摘要稳定派生；admission
 要求每个计划 arm 恰好出现一次。该层只保存测量证据，不写入 Lunar candidate、score 或 iteration，
-不运行任何框架、模型、evaluator、provider 或远程服务。聚焦回归 **17 passed**；详见
+新增静态 `benchmark-comparison validate-result` 命令，在普通配置初始化前复用 097 plan/input
+pin admission 并绑定 result arms，只输出 ID 与摘要。该层不运行任何框架、模型、evaluator、
+provider 或远程服务。聚焦回归 **18 passed**；详见
 `specs/099-benchmark-comparison-result/validation.md`。
 
 ## Feature 098：固定条件 benchmark comparison plan（已完成）

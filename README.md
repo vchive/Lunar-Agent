@@ -1109,6 +1109,10 @@ It records per-arm status, counters, timing, finite score summaries and evidence
 checks that every planned arm appears exactly once. It remains measurement evidence and never
 updates Lunar candidate, score or iteration authority.
 
+The static `benchmark-comparison validate-result` command validates a plan and result receipt with
+the same local contract, input, model and evaluator pins. It runs before normal configuration
+initialization and emits only comparison/result IDs and arm summaries.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

@@ -316,6 +316,9 @@ accepts only bounded per-arm summaries and evidence digests, derives a stable re
 rejects missing or extra arms. The receipt is measurement evidence; it does not import scores into
 Lunar state or execute any producer, model or evaluator.
 
+The `benchmark-comparison validate-result` CLI exposes this read-only admission before normal
+configuration initialization, so a receipt can be checked without creating a Lunar home or Store.
+
 ## Invocation and evolution seams
 
 The invocation seam and the search-strategy seam are deliberately independent:
