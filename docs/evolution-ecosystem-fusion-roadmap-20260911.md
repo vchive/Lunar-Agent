@@ -44,6 +44,15 @@ Feature 099 adds a bounded result envelope for future fixed-condition measuremen
 per-arm summary to the 098 plan and preserves only evidence digests and finite summary metrics;
 parsing is read-only and does not run or score any external framework.
 
+## 2026-09-15：comparison evidence binding
+
+Feature 100 optionally adds a relative evidence path and byte size to each 099 arm result. When an
+operator supplies an evidence root, Lunar verifies confined non-symlink regular-file bytes,
+stable device/inode, exact size and SHA-256 before accepting the receipt. Digest-only 099 results
+remain compatible without an evidence root. This binds a receipt to observed local bytes but does
+not certify the producer, evaluator or framework, and does not create a benchmark effectiveness
+claim.
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)

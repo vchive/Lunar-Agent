@@ -1,5 +1,22 @@
 # Lunar-Agent 交接记录
 
+## Feature 100：benchmark comparison evidence binding（已完成）
+
+在 099 comparison result receipt 的 `evidence_sha256` 之上增加可选的
+`evidence_path` + `evidence_size` 描述。调用方通过
+`benchmark-comparison validate-result ... --evidence-root ROOT` 或
+`bind_benchmark_comparison_result_evidence` 时，系统只读检查每个 arm 的相对 POSIX 路径、
+非符号链接 regular file、大小、inode/device 稳定性和 SHA-256；缺失描述、路径穿越、符号
+链接、文件变化和摘要不匹配均拒绝。未提供 evidence root 时，099 的 digest-only receipt
+继续兼容。描述字段进入 result ID，因此路径或大小变化也会产生不同身份。
+
+本功能只绑定操作者提供的本地证据字节，不证明外部框架、模型或 evaluator 的真实性，
+不导入分数到 Lunar candidate、score 或 iteration，也不启动任何框架、模型、provider、
+远程服务或 campaign。聚焦 benchmark result/comparison/CLI 回归 **11 passed**，全量回归
+**3854 passed**，Ruff、compileall 与 diff check 通过；
+当前分支 `main`，不 push。下一层仍是多文件/repository/workflow candidate 契约，以及
+在新预注册协议下进行真实 SkyDiscover/LLM4AD/WebAgent 对照测量。
+
 ## Feature 099：benchmark comparison result envelope（已完成）
 
 新增 `BenchmarkComparisonResult` 与 `ComparisonArmResult`，把未来固定条件测量的每 arm 状态、

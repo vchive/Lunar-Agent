@@ -112,6 +112,8 @@ def test_result_evidence_binding_rejects_symlink_and_traversal(tmp_path: Path):
     )
     with pytest.raises(BenchmarkResultError, match="benchmark_result_evidence_unsafe"):
         bind_benchmark_comparison_result_evidence(result, plan, evidence_root)
+    with pytest.raises(BenchmarkResultError, match="benchmark_result_evidence_invalid"):
+        ComparisonArmResult("sky", "completed", 10, 2, 1, 0.5, digest, "../outside.json", len(payload))
 
 
 def test_cli_validates_plan_and_result_without_initializing_home(tmp_path: Path, monkeypatch, capsys):
