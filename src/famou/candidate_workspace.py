@@ -66,11 +66,13 @@ def materialize_candidate_source_bundle(bundle: CandidateSourceBundle | Mapping[
             tree.sync_and_check(); return VerifiedCandidateWorkspace(parent_path/tree.name,verified)
         except OSError as exc:
             try: tree.cleanup()
-            except BaseException: raise CandidateWorkspaceError("candidate_workspace_cleanup_failed") from exc
+            except BaseException:  # noqa: BLE001 - every cleanup failure has one fixed public code
+                raise CandidateWorkspaceError("candidate_workspace_cleanup_failed") from exc
             raise CandidateWorkspaceError("candidate_workspace_destination_write_failed") from None
         except Exception as exc:
             try: tree.cleanup()
-            except Exception: raise CandidateWorkspaceError("candidate_workspace_cleanup_failed") from exc
+            except Exception:  # noqa: BLE001 - every cleanup failure has one fixed public code
+                raise CandidateWorkspaceError("candidate_workspace_cleanup_failed") from exc
             if isinstance(exc,CandidateWorkspaceError): raise
             raise CandidateWorkspaceError("candidate_workspace_materialization_failed") from None
         finally: tree.close()

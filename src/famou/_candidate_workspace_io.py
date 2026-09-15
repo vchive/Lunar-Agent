@@ -86,7 +86,7 @@ class PrivateTree:
             os.fchmod(self.fd, 0o700)
             self.directories[()] = identity(os.fstat(self.fd))
             self.check_root()
-        except BaseException:
+        except BaseException:  # noqa: BLE001 - interruption must not leave an ambiguous tree
             # If opening the new name was interrupted, do not guess which tree is ours.
             if self.fd >= 0:
                 os.close(self.fd)
