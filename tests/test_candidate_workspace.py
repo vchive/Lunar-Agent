@@ -73,7 +73,7 @@ def test_workspace_plan_is_strict_and_replayed(mutation, tmp_path: Path):
     source = tmp_path / "source"
     source.mkdir()
     bundle = parse_candidate_source_bundle(_bundle(source))
-    plan = build_candidate_workspace_plan(bundle, command=["/usr/bin/python", "main.py"])
+    plan = build_candidate_workspace_plan(bundle, command=["/usr/bin/python", "main.py"], contract_sha256=CONTRACT)
     payload = plan.to_dict()
     mutation(payload)
     with pytest.raises(CandidateWorkspaceError):
@@ -85,8 +85,8 @@ def test_workspace_plan_digest_is_independent_of_environment_order(tmp_path: Pat
     source = tmp_path / "source"
     source.mkdir()
     bundle = parse_candidate_source_bundle(_bundle(source))
-    first = build_candidate_workspace_plan(bundle, command=["/usr/bin/python"], environment={"B": "2", "A": "1"})
-    second = build_candidate_workspace_plan(bundle, command=["/usr/bin/python"], environment={"A": "1", "B": "2"})
+    first = build_candidate_workspace_plan(bundle, command=["/usr/bin/python"], contract_sha256=CONTRACT, environment={"B": "2", "A": "1"})
+    second = build_candidate_workspace_plan(bundle, command=["/usr/bin/python"], contract_sha256=CONTRACT, environment={"A": "1", "B": "2"})
     assert first.digest() == second.digest()
     assert first.entrypoint == "main.py"
 
