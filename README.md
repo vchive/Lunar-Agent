@@ -1113,6 +1113,23 @@ The static `benchmark-comparison validate-result` command validates a plan and r
 the same local contract, input, model and evaluator pins. It runs before normal configuration
 initialization and emits only comparison/result IDs and arm summaries.
 
+Feature [100](specs/100-benchmark-evidence-binding/) also checks the actual per-arm evidence files:
+
+```bash
+lunar-agent benchmark-comparison validate-result plan.json result.json \
+  --contract contract.json --input-root ./public-input \
+  --model-profile-sha256 "$MODEL_PROFILE_SHA256" \
+  --evaluator-fingerprint "$EVALUATOR_SHA256" \
+  --evidence-root ./evidence --json
+```
+
+Each result arm must then include `evidence_path` and `evidence_size` alongside `evidence_sha256`.
+Paths are relative to `--evidence-root`; files and ancestor directories must not be symlinks.
+The command reads bounded bytes and rejects observed replacement, size or digest changes, returning
+`evidence_bound: true` only after all arms pass. Without the flag it checks the receipt with
+`evidence_bound: false`. This verifies local bytes; it does not certify how they were produced or
+turn external scores into Lunar scores.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

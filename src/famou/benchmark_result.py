@@ -8,7 +8,7 @@ import os
 import re
 import stat
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -60,9 +60,13 @@ def _evidence_path(value: object) -> str:
     if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
         _fail("benchmark_result_evidence_invalid")
     path = Path(value)
-    if path.is_absolute() or value != path.as_posix() or any(part in {"", ".", ".."} for part in path.parts):
+    if not path.parts or path.is_absolute() or value != path.as_posix() or any(part in {"", ".", ".."} for part in path.parts):
         _fail("benchmark_result_evidence_invalid")
-    if len(value.encode("utf-8")) > 1024:
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        _fail("benchmark_result_evidence_invalid")
+    if size > 1024:
         _fail("benchmark_result_evidence_invalid")
     return path.as_posix()
 
@@ -87,7 +91,7 @@ class ComparisonArmResult:
     def __post_init__(self) -> None:
         if not isinstance(self.arm_id, str) or _SAFE_ID.fullmatch(self.arm_id) is None:
             _fail("benchmark_result_invalid")
-        if self.status not in _STATUSES:
+        if not isinstance(self.status, str) or self.status not in _STATUSES:
             _fail("benchmark_result_invalid")
         if isinstance(self.elapsed_ms, bool) or not isinstance(self.elapsed_ms, int) or not 0 <= self.elapsed_ms <= 86_400_000:
             _fail("benchmark_result_invalid")
@@ -96,8 +100,15 @@ class ComparisonArmResult:
                 _fail("benchmark_result_invalid")
         if self.valid_candidates > self.evaluated_candidates:
             _fail("benchmark_result_invalid")
-        if self.best_score is not None and (isinstance(self.best_score, bool) or not isinstance(self.best_score, (int, float)) or not math.isfinite(float(self.best_score))):
-            _fail("benchmark_result_invalid")
+        if self.best_score is not None:
+            if isinstance(self.best_score, bool) or not isinstance(self.best_score, (int, float)):
+                _fail("benchmark_result_invalid")
+            try:
+                finite_score = math.isfinite(float(self.best_score))
+            except (ValueError, OverflowError):
+                _fail("benchmark_result_invalid")
+            if not finite_score:
+                _fail("benchmark_result_invalid")
         _digest(self.evidence_sha256)
         if self.evidence_path is None:
             if self.evidence_size is not None:
@@ -121,7 +132,9 @@ class ComparisonArmResult:
         item = _strict(value, {"arm_id", "status", "elapsed_ms", "evaluated_candidates", "valid_candidates", "best_score", "evidence_sha256"}, fields)
         path = item.get("evidence_path")
         size = item.get("evidence_size")
-        if (path is None) != (size is None):
+        if ("evidence_path" in item or "evidence_size" in item) and (
+            path is None or size is None
+        ):
             _fail("benchmark_result_evidence_invalid")
         return cls(item["arm_id"], item["status"], item["elapsed_ms"], item["evaluated_candidates"], item["valid_candidates"], item["best_score"], item["evidence_sha256"], path, size)  # type: ignore[arg-type]
 
@@ -137,9 +150,12 @@ class BenchmarkComparisonResult:
     def __post_init__(self) -> None:
         if self.schema_version != SCHEMA_VERSION or self.protocol != PROTOCOL or not isinstance(self.comparison_id, str) or _SAFE_ID.fullmatch(self.comparison_id) is None or not isinstance(self.result_id, str) or _SHA256.fullmatch(self.result_id) is None:
             _fail("benchmark_result_invalid")
-        if not 2 <= len(self.arms) <= 16 or any(not isinstance(a, ComparisonArmResult) for a in self.arms) or len({a.arm_id for a in self.arms}) != len(self.arms):
+        if not isinstance(self.arms, (tuple, list)) or not 2 <= len(self.arms) <= 16 or any(not isinstance(a, ComparisonArmResult) for a in self.arms):
             _fail("benchmark_result_invalid")
-        object.__setattr__(self, "arms", tuple(sorted(self.arms, key=lambda arm: arm.arm_id)))
+        arms = tuple(replace(arm) for arm in self.arms)
+        if len({arm.arm_id for arm in arms}) != len(arms):
+            _fail("benchmark_result_invalid")
+        object.__setattr__(self, "arms", tuple(sorted(arms, key=lambda arm: arm.arm_id)))
         if self.result_id != _result_id(self.comparison_id, self.arms):
             _fail("benchmark_result_identity_mismatch")
 
@@ -152,7 +168,7 @@ class BenchmarkComparisonResult:
     @classmethod
     def from_dict(cls, value: object) -> BenchmarkComparisonResult:
         item = _strict(value, {"schema_version", "protocol", "comparison_id", "result_id", "arms"}, {"schema_version", "protocol", "comparison_id", "result_id", "arms"})
-        if not isinstance(item["arms"], list):
+        if not isinstance(item["arms"], list) or not 2 <= len(item["arms"]) <= 16:
             _fail("benchmark_result_invalid")
         return cls(item["comparison_id"], item["result_id"], tuple(ComparisonArmResult.from_dict(a) for a in item["arms"]), item["schema_version"], item["protocol"])  # type: ignore[arg-type]
 
@@ -162,13 +178,8 @@ def parse_benchmark_comparison_result(source: str | os.PathLike[str] | Mapping[s
         result = BenchmarkComparisonResult.from_dict(dict(source))
         _canonical(result.to_dict())
         return result
-    path = Path(source).expanduser()
-    if path.is_symlink() or not path.is_file():
-        _fail("benchmark_result_invalid")
-    try:
-        content = path.read_bytes()
-    except OSError:
-        _fail("benchmark_result_invalid")
+    path = _absolute_path(source, "benchmark_result_invalid")
+    content = _read_regular_file(path, MAX_RESULT_BYTES)
     if not content or len(content) > MAX_RESULT_BYTES:
         _fail("benchmark_result_too_large")
     def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
@@ -184,45 +195,101 @@ def parse_benchmark_comparison_result(source: str | os.PathLike[str] | Mapping[s
         payload = json.loads(content.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
     except BenchmarkResultError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         _fail("benchmark_result_invalid")
     return BenchmarkComparisonResult.from_dict(payload)
+
+
+def _absolute_path(value: object, error: str) -> Path:
+    try:
+        path = Path(value).expanduser().absolute()
+        # Do not resolve or normalize away symlinks or parent traversal before opening.
+        if ("\x00" in path.as_posix() or ".." in path.parts
+                or len(path.as_posix().encode("utf-8")) > 4096 or len(path.parts) > 128):
+            _fail(error)
+        return path
+    except (OSError, TypeError, ValueError, RuntimeError):
+        _fail(error)
+
+
+def _file_identity(info: os.stat_result) -> tuple[int, ...]:
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def _read_regular_file(path: Path, maximum: int, *, evidence: bool = False) -> bytes:
+    """Read bounded bytes without following links, then recheck the opened names."""
+    invalid = "benchmark_result_evidence_unsafe" if evidence else "benchmark_result_invalid"
+    missing = "benchmark_result_evidence_missing" if evidence else invalid
+    changed = "benchmark_result_evidence_changed" if evidence else invalid
+    large = changed if evidence else "benchmark_result_too_large"
+    descriptors: list[int] = []
+    directories: list[tuple[int, str, int]] = []
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    reading_started = False
+    try:
+        parent = os.open(path.anchor, flags | os.O_DIRECTORY)
+        descriptors.append(parent)
+        for name in path.parts[1:-1]:
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                _fail(invalid)
+            child = os.open(name, flags | os.O_DIRECTORY, dir_fd=parent)
+            descriptors.append(child)
+            opened = os.fstat(child)
+            if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                _fail(changed)
+            directories.append((parent, name, child))
+            parent = child
+
+        before = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            _fail(invalid)
+        if before.st_size > maximum or (evidence and before.st_size != maximum):
+            _fail(large)
+        descriptor = os.open(path.name, flags, dir_fd=parent)
+        descriptors.append(descriptor)
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _file_identity(before) != _file_identity(opened):
+            _fail(changed)
+
+        reading_started = True
+        chunks: list[bytes] = []
+        remaining = maximum + 1
+        while remaining:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        content = b"".join(chunks)
+        if len(content) > maximum:
+            _fail(large)
+        after = os.fstat(descriptor)
+        named = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if (not stat.S_ISREG(named.st_mode) or _file_identity(before) != _file_identity(after)
+                or _file_identity(after) != _file_identity(named) or after.st_size != len(content)):
+            _fail(changed)
+        for ancestor, name, child in reversed(directories):
+            named = os.stat(name, dir_fd=ancestor, follow_symlinks=False)
+            opened = os.fstat(child)
+            if (not stat.S_ISDIR(named.st_mode)
+                    or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)):
+                _fail(changed)
+        return content
+    except FileNotFoundError:
+        _fail(changed if reading_started else missing)
+    except OSError:
+        _fail(changed if reading_started else invalid)
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
 
 
 def _verify_evidence(root: Path, arm: ComparisonArmResult) -> None:
     if arm.evidence_path is None or arm.evidence_size is None:
         _fail("benchmark_result_evidence_missing")
-    raw = root / arm.evidence_path
-    current = raw
-    while current != root:
-        if current.is_symlink():
-            _fail("benchmark_result_evidence_unsafe")
-        current = current.parent
-    try:
-        resolved = raw.resolve(strict=False)
-        resolved.relative_to(root)
-    except (OSError, ValueError):
-        _fail("benchmark_result_evidence_unsafe")
-    if raw.is_symlink() or not resolved.is_file():
-        _fail("benchmark_result_evidence_missing")
-    try:
-        descriptor = resolved.stat()
-        if not stat.S_ISREG(descriptor.st_mode):
-            _fail("benchmark_result_evidence_unsafe")
-        if descriptor.st_size > MAX_EVIDENCE_BYTES:
-            _fail("benchmark_result_evidence_changed")
-        with resolved.open("rb") as stream:
-            content = stream.read(arm.evidence_size + 1)
-        after = resolved.stat()
-    except OSError:
-        _fail("benchmark_result_evidence_missing")
-    if (
-        descriptor.st_ino != after.st_ino
-        or descriptor.st_dev != after.st_dev
-        or descriptor.st_size != after.st_size
-        or len(content) != arm.evidence_size
-    ):
-        _fail("benchmark_result_evidence_changed")
+    path = _absolute_path(root / arm.evidence_path, "benchmark_result_evidence_unsafe")
+    content = _read_regular_file(path, arm.evidence_size, evidence=True)
     if hashlib.sha256(content).hexdigest() != arm.evidence_sha256:
         _fail("benchmark_result_evidence_changed")
 
@@ -237,23 +304,14 @@ def admit_benchmark_comparison_result(
         _fail("benchmark_result_invalid")
     parsed = result if isinstance(result, BenchmarkComparisonResult) else parse_benchmark_comparison_result(result)
     # Reparse object instances so frozen-object mutation cannot bypass strict DTO checks.
-    parsed = BenchmarkComparisonResult.from_dict(parsed.to_dict())
+    parsed = replace(parsed)
     if parsed.comparison_id != plan.comparison_id or {a.arm_id for a in parsed.arms} != {a.id for a in plan.arms}:
         _fail("benchmark_result_identity_mismatch")
     if evidence_root is not None:
-        raw_root = Path(evidence_root).expanduser()
-        absolute_root = raw_root.absolute()
-        current_root = absolute_root
-        while True:
-            if current_root.is_symlink():
-                _fail("benchmark_result_evidence_unsafe")
-            if current_root == current_root.parent:
-                break
-            current_root = current_root.parent
-        if raw_root.is_symlink() or not raw_root.is_dir():
-            _fail("benchmark_result_evidence_unsafe")
+        root = _absolute_path(evidence_root, "benchmark_result_evidence_unsafe")
         try:
-            root = raw_root.resolve(strict=True)
+            if not stat.S_ISDIR(root.lstat().st_mode):
+                _fail("benchmark_result_evidence_unsafe")
         except OSError:
             _fail("benchmark_result_evidence_unsafe")
         for arm in parsed.arms:
@@ -267,6 +325,8 @@ def bind_benchmark_comparison_result_evidence(
     evidence_root: str | os.PathLike[str],
 ) -> BenchmarkComparisonResult:
     """Admit a result and require every arm's descriptor to match a local file."""
+    if evidence_root is None:
+        _fail("benchmark_result_evidence_unsafe")
     return admit_benchmark_comparison_result(result, plan, evidence_root=evidence_root)
 
 

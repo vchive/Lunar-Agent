@@ -319,6 +319,15 @@ Lunar state or execute any producer, model or evaluator.
 The `benchmark-comparison validate-result` CLI exposes this read-only admission before normal
 configuration initialization, so a receipt can be checked without creating a Lunar home or Store.
 
+Feature 100 adds optional evidence path/size descriptors and an explicit `--evidence-root` binding.
+Result JSON and evidence are opened relative to held directory descriptors with `O_NOFOLLOW`, and
+file opens use `O_NONBLOCK`. Before reading, regular-file type and byte limits are checked; afterwards,
+device/inode/size/mtime/ctime and directory/file name bindings are rechecked. Reads are capped at
+128 KiB plus one byte for result JSON or the declared evidence size plus one (maximum 16 MiB plus
+one). Descriptor keys must both be present and non-null, or both omitted for legacy receipts.
+Malformed inputs produce fixed result error codes. This is an observation of individual files,
+not a multi-arm filesystem snapshot or certification of external measurements.
+
 ## Invocation and evolution seams
 
 The invocation seam and the search-strategy seam are deliberately independent:

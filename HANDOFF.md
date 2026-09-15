@@ -1,5 +1,32 @@
 # Lunar-Agent 交接记录
 
+## Feature 100 补修：有界证据读取与文件替换检测（已完成，2026-09-15）
+
+复核发现原实现检查路径后再打开文件，期间发生文件/目录替换可能仍通过校验；result JSON
+也在完整读取后才限制大小。现改为逐级目录 fd + `O_NOFOLLOW` 打开，文件使用
+`O_NONBLOCK`，读取前验证 regular-file 类型和大小，读取后核对 device/inode/size/mtime/
+ctime、文件名及祖先目录名绑定。result JSON 最多读取 128 KiB + 1 字节，evidence 最多
+读取声明大小 + 1 字节（单文件上限 16 MiB）。同大小改写、文件或目录替换、超限均拒绝。
+
+修复 status 非字符串、超大整数分数、非法 Unicode 路径和超长 JSON 整数的异常泄漏；
+descriptor 字段必须同时非 null 或同时省略，显式 bind API 不再接受 None root 跳过校验。
+合法 099 receipt 的规范化内容、result ID 和 digest 与旧实现比较一致。文件路径范围收紧：
+result JSON/evidence 都拒绝祖先 symlink、`..`、超过 4096 UTF-8 字节或 128 个绝对路径
+组件；macOS 的 `/tmp`、`/var` 别名也在此列，应使用实际路径。检查是逐文件的有界观察，
+不保证多 arm 原子快照，也不证明外部测量真实或评分正确。
+
+新增三文件共 66 项回归；六个 benchmark 文件 **88 passed**。主仓全量 **3919 passed in
+221.00s**，JUnit 确认 0 failure/error/skipped；全 src/tests Ruff、compileall、Specify、
+diff check 通过。独立审查无 blocker，额外 144 次异常字段探测无未捕获异常。实际 CLI
+离线 fixture 已验证成功、文件变化拒绝且不创建 home。051/074/076/078/082 的 601 个
+tracked 封存文件相对 `027a235` 保持原样。上轮记录 3854 是统计错误，修复前实际 pytest
+collection 为 3853；本轮计数直接来自 pytest/JUnit。
+
+本轮只修复 100，不新增 Feature 101。README、架构、quickstart、验证记录和 Specify 当前
+feature 已同步；未运行真实框架、模型、provider、WebAgent、远端服务或 campaign，不产生
+效果结论。只在本地 `main` 提交，不 push；真实对照测量与多文件/repository/workflow
+candidate 仍需独立设计，尚未完成。
+
 ## Feature 100：benchmark comparison evidence binding（已完成）
 
 在 099 comparison result receipt 的 `evidence_sha256` 之上增加可选的

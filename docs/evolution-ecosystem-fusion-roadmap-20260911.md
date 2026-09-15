@@ -53,6 +53,11 @@ remain compatible without an evidence root. This binds a receipt to observed loc
 not certify the producer, evaluator or framework, and does not create a benchmark effectiveness
 claim.
 
+The Feature 100 follow-up replaces separate path checks/opens with bounded descriptor-relative
+reads for result JSON and evidence. It also rejects observed file or directory replacement,
+same-size rewrites, malformed scalar fields and null explicit binding roots. Legacy digest-only
+receipt identities remain compatible; result/evidence paths now share the strict no-symlink boundary.
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)
