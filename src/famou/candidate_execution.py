@@ -285,9 +285,14 @@ def _verify_input(root: Path, item: CandidateExecutionInput) -> None:
     if len(content) != item.size or hashlib.sha256(content).hexdigest() != item.sha256: _fail("input_changed")
 
 
-def admit_candidate_execution(admission: CandidateExecutionAdmission | Mapping[str, object] | str | os.PathLike[str], *, input_root: str | os.PathLike[str] | None = None, expected_admission_sha256: str | None = None) -> VerifiedCandidateExecutionAdmission:
+def admit_candidate_execution(admission: CandidateExecutionAdmission | CandidateWorkspacePlan | Mapping[str, object] | str | os.PathLike[str], *, input_root: str | os.PathLike[str] | None = None, expected_admission_sha256: str | None = None, inputs: tuple[CandidateExecutionInput, ...] | list[CandidateExecutionInput] | None = None, dependency_sha256: str | None = None, environment_sha256: str | None = None, evaluator: CandidateEvaluatorPin | Mapping[str, object] | None = None, output_contract_sha256: str | None = None, budget: CandidateExecutionBudget | Mapping[str, object] | None = None, expected_plan_sha256: str | None = None, expected_bundle_sha256: str | None = None, expected_contract_sha256: str | None = None, expected_dependency_sha256: str | None = None, expected_environment_sha256: str | None = None, expected_evaluator: CandidateEvaluatorPin | Mapping[str, object] | None = None, expected_evaluator_sha256: str | None = None, expected_evaluator_kind: str | None = None, expected_output_contract_sha256: str | None = None) -> VerifiedCandidateExecutionAdmission:
     try:
-        parsed = admission if isinstance(admission, CandidateExecutionAdmission) else CandidateExecutionAdmission.from_dict(dict(admission)) if isinstance(admission, Mapping) else parse_candidate_execution_admission(admission)
+        is_plan = isinstance(admission, CandidateWorkspacePlan) or (isinstance(admission, Mapping) and "bundle" in admission and "command" in admission)
+        if is_plan:
+            if inputs is None or dependency_sha256 is None or environment_sha256 is None or evaluator is None or budget is None: _fail("invalid")
+            parsed = build_candidate_execution_admission(admission, inputs=inputs, dependency_sha256=dependency_sha256, environment_sha256=environment_sha256, evaluator=evaluator, output_contract_sha256=output_contract_sha256, budget=budget, expected_plan_sha256=expected_plan_sha256, expected_bundle_sha256=expected_bundle_sha256, expected_contract_sha256=expected_contract_sha256, expected_dependency_sha256=expected_dependency_sha256, expected_environment_sha256=expected_environment_sha256, expected_evaluator=expected_evaluator, expected_evaluator_sha256=expected_evaluator_sha256, expected_evaluator_kind=expected_evaluator_kind, expected_output_contract_sha256=expected_output_contract_sha256)
+        else:
+            parsed = admission if isinstance(admission, CandidateExecutionAdmission) else CandidateExecutionAdmission.from_dict(dict(admission)) if isinstance(admission, Mapping) else parse_candidate_execution_admission(admission)
         parsed = validate_candidate_execution_admission(parsed)
     except CandidateExecutionError: raise
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RecursionError): _fail("invalid")

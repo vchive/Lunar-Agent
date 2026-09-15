@@ -61,6 +61,21 @@ def test_admission_replays_self_digest_and_optional_byte_check(tmp_path):
     assert parse_candidate_execution_admission(admission.to_dict()) == admission
 
 
+def test_admit_accepts_workspace_plan_and_builds_verified_declaration(tmp_path):
+    content = b"fixture"
+    (tmp_path / "input.txt").write_bytes(content)
+    verified = admit_candidate_execution(
+        _plan(),
+        input_root=tmp_path,
+        inputs=[CandidateExecutionInput("input.txt", "fixture", len(content), hashlib.sha256(content).hexdigest())],
+        dependency_sha256="b" * 64,
+        environment_sha256="c" * 64,
+        evaluator={"kind": "exact-harness", "fingerprint": "d" * 64},
+        budget={"timeout_seconds": 5, "max_output_bytes": 1024, "max_input_bytes": 1024, "max_processes": 1},
+    )
+    assert verified.input_count == 1
+
+
 @pytest.mark.parametrize("target", ["/tmp/x", "../x", "a//x", "a\\x", "a/./x"])
 def test_input_target_is_logical_and_relative(target):
     with pytest.raises(CandidateExecutionError, match="^candidate_execution_input_"):
