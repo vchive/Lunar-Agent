@@ -1,6 +1,6 @@
 # Lunar-Agent 交接记录
 
-## Feature 104：候选 execution admission（核心已完成，CLI 接入中，2026-09-16）
+## Feature 104：候选 execution admission（已完成静态 admission 边界，2026-09-16）
 
 已实现 `src/famou/candidate_execution.py` 的静态、path-free admission API：
 `CandidateExecutionInput`、`CandidateEvaluatorPin`、`CandidateExecutionBudget`、
@@ -18,11 +18,10 @@ contract、dependency、environment、evaluator、output-contract 和 admission 
 依赖、不检查 host environment、不调用 evaluator、不初始化 home/Store，也不写 Candidate、
 receipt、archive、resume 或 materialization ledger；它不是执行回执。
 
-Feature 104 focused 测试当前 **190 passed**；102/103/104 联合 **456 passed, 1 skipped**，
-Ruff、compileall 和当前 diff check 已通过。静态
-`candidate-bundle admit-execution` CLI 仍待接入普通配置/Store 初始化之前，并需补成功、输入
-size/hash、plan/pin mismatch、entrypoint 不执行及 no-home/Store 的 installed-CLI fixture。
-在 CLI 合入并完成全仓回归前，不要把 quickstart 命令描述成已安装能力，也不要声称已有真实
+Feature 104 focused 测试当前 **195 passed**（含 installed CLI fixture）；全仓回归
+**4471 passed, 1 skipped**，Ruff、compileall 和 diff check 已通过。静态
+`candidate-bundle admit-execution` CLI 已在普通配置/Store 初始化之前分派，并覆盖成功、输入
+size/hash、plan/pin mismatch、entrypoint 不执行及 no-home/Store。不要把它描述成真实
 候选执行、模型、evaluator、OpenEvolve/WebAgent 或效果测量。
 
 ## Feature 103：候选 workspace 物化（已完成，2026-09-15）
@@ -38,9 +37,8 @@ size/hash、plan/pin mismatch、entrypoint 不执行及 no-home/Store 的 instal
 或 materialization ledger。聚焦回归 `266 passed, 1 skipped`，Ruff 和 compileall 通过；安装 CLI
 fixture 已确认只复制声明文件、入口不执行且不创建 home。全仓回归与本地提交已完成，未 push。
 
-Feature 104 已完成核心 admission API 和离线边界测试；其 CLI 接入、installed-CLI side-effect
-fixture 与最终全仓回归仍在进行。详见本文件顶部 Feature 104 记录；在这些项目完成前，不应
-把静态声明描述成 runner 授权或执行能力。
+Feature 104 已完成 admission API、静态 CLI、installed-CLI side-effect fixture 与最终全仓回归。
+详见本文件顶部 Feature 104 记录；它仍是静态声明，不是 runner 执行能力。
 
 ## Feature 102：多文件候选源码包（已完成，2026-09-15）
 

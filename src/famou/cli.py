@@ -893,6 +893,33 @@ def build_parser() -> argparse.ArgumentParser:
     materialize_bundle_parser.add_argument("--environment-json", type=Path, help="optional explicit environment object JSON")
     _add_home(materialize_bundle_parser)
     _add_json(materialize_bundle_parser)
+    admit_execution_parser = candidate_bundle_commands.add_parser(
+        "admit-execution", help="admit a static execution declaration without initialization",
+    )
+    admit_execution_parser.add_argument("plan", type=Path, help="candidate workspace plan JSON")
+    admit_execution_parser.add_argument(
+        "--inputs", type=Path, required=True,
+        help="JSON file containing the logical input descriptor array",
+    )
+    admit_execution_parser.add_argument(
+        "--input-root", type=Path,
+        help="optional root containing the declared input bytes",
+    )
+    admit_execution_parser.add_argument("--dependency-sha256", required=True)
+    admit_execution_parser.add_argument("--environment-sha256", required=True)
+    admit_execution_parser.add_argument("--evaluator-kind", required=True)
+    admit_execution_parser.add_argument("--evaluator-sha256", required=True)
+    admit_execution_parser.add_argument("--output-contract-sha256")
+    admit_execution_parser.add_argument("--timeout-seconds", type=float)
+    admit_execution_parser.add_argument("--max-output-bytes", type=int)
+    admit_execution_parser.add_argument("--max-input-bytes", type=int)
+    admit_execution_parser.add_argument("--max-processes", type=int)
+    admit_execution_parser.add_argument("--plan-sha256", dest="expected_plan_sha256")
+    admit_execution_parser.add_argument("--bundle-sha256", dest="expected_bundle_sha256")
+    admit_execution_parser.add_argument("--contract-sha256", dest="expected_contract_sha256")
+    admit_execution_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
+    _add_home(admit_execution_parser)
+    _add_json(admit_execution_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3988,6 +4015,119 @@ def _candidate_bundle_materialize(args: argparse.Namespace) -> dict[str, object]
     return {**result.to_dict(), "plan_sha256": plan.digest(), "workspace_path": str(result.workspace_path)}
 
 
+def _candidate_bundle_admit_execution(args: argparse.Namespace) -> dict[str, object]:
+    from . import _benchmark_files as files
+    from .candidate_execution import (
+        MAX_EXECUTION_ADMISSION_BYTES,
+        MAX_EXECUTION_INPUT_BYTES,
+        SOURCE_ONLY_EVALUATOR_KIND,
+        CandidateEvaluatorPin,
+        CandidateExecutionBudget,
+        CandidateExecutionError,
+        CandidateExecutionInput,
+        admit_candidate_execution,
+    )
+    from .candidate_workspace_plan import (
+        CandidateWorkspaceError,
+        parse_candidate_workspace_plan,
+    )
+
+    def check_digest_pin(value: object, actual: str, code: str) -> None:
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            or value != actual
+        ):
+            raise CandidateExecutionError(code)
+
+    def check_digest(value: object, code: str, *, reject_zero: bool) -> None:
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            or (reject_zero and value == "0" * 64)
+        ):
+            raise CandidateExecutionError(code)
+
+    try:
+        try:
+            plan = parse_candidate_workspace_plan(args.plan)
+        except CandidateWorkspaceError:
+            raise CandidateExecutionError("plan_mismatch") from None
+
+        # Validate all identity fields that can be checked from the plan and CLI arguments before
+        # opening the separate input descriptor file. The admission API repeats these checks.
+        if args.expected_plan_sha256 is not None:
+            check_digest_pin(args.expected_plan_sha256, plan.digest(), "plan_mismatch")
+        if args.expected_bundle_sha256 is not None:
+            check_digest_pin(args.expected_bundle_sha256, plan.bundle_sha256, "bundle_mismatch")
+        if args.expected_contract_sha256 is not None:
+            check_digest_pin(args.expected_contract_sha256, plan.contract_sha256, "contract_mismatch")
+        if args.expected_admission_sha256 is not None:
+            check_digest(args.expected_admission_sha256, "identity_mismatch", reject_zero=False)
+        check_digest(args.dependency_sha256, "dependency_mismatch", reject_zero=True)
+        check_digest(args.environment_sha256, "environment_mismatch", reject_zero=True)
+        evaluator = CandidateEvaluatorPin(args.evaluator_kind, args.evaluator_sha256)
+        budget = CandidateExecutionBudget(
+            plan.timeout_seconds if args.timeout_seconds is None else args.timeout_seconds,
+            plan.max_output_bytes if args.max_output_bytes is None else args.max_output_bytes,
+            MAX_EXECUTION_INPUT_BYTES if args.max_input_bytes is None else args.max_input_bytes,
+            1 if args.max_processes is None else args.max_processes,
+        )
+        if plan.timeout_seconds > budget.timeout_seconds or plan.max_output_bytes > budget.max_output_bytes:
+            raise CandidateExecutionError("budget_invalid")
+        if args.output_contract_sha256 is None:
+            if evaluator.kind != SOURCE_ONLY_EVALUATOR_KIND:
+                raise CandidateExecutionError("output_contract_mismatch")
+        else:
+            check_digest(args.output_contract_sha256, "output_contract_mismatch", reject_zero=False)
+
+        try:
+            input_content = files.read_regular_file(
+                files.absolute_path(args.inputs), MAX_EXECUTION_ADMISSION_BYTES,
+            )
+        except files.BenchmarkFileError as exc:
+            raise CandidateExecutionError(
+                "input_invalid" if exc.reason != "too_large" else "too_large",
+            ) from None
+        value = _strict_json_loads(input_content)
+        if not isinstance(value, list):
+            raise CandidateExecutionError("input_invalid")
+        inputs = tuple(CandidateExecutionInput.from_dict(item) for item in value)
+        admitted = admit_candidate_execution(
+            plan,
+            input_root=args.input_root,
+            inputs=inputs,
+            dependency_sha256=args.dependency_sha256,
+            environment_sha256=args.environment_sha256,
+            evaluator=evaluator,
+            output_contract_sha256=args.output_contract_sha256,
+            budget=budget,
+            expected_plan_sha256=args.expected_plan_sha256,
+            expected_bundle_sha256=args.expected_bundle_sha256,
+            expected_contract_sha256=args.expected_contract_sha256,
+            expected_admission_sha256=args.expected_admission_sha256,
+        )
+    except CandidateExecutionError:
+        raise
+    except (OSError, TypeError, ValueError, RecursionError):
+        raise CandidateExecutionError("invalid") from None
+
+    admission = admitted.admission
+    return {
+        "status": "admitted",
+        "admission_sha256": admitted.admission_sha256,
+        "plan_sha256": admission.workspace_plan_sha256,
+        "bundle_sha256": admission.bundle_sha256,
+        "contract_sha256": admission.contract_sha256,
+        "evaluator_kind": admission.evaluator.kind,
+        "input_count": admitted.input_count,
+        "total_input_bytes": admitted.total_input_bytes,
+        "inputs_verified": admitted.inputs_verified,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -4069,6 +4209,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if args.candidate_bundle_command == "materialize":
                 _emit(_candidate_bundle_materialize(args), args.json)
+                return 0
+            if args.candidate_bundle_command == "admit-execution":
+                _emit(_candidate_bundle_admit_execution(args), args.json)
                 return 0
             raise ValueError("candidate_bundle_invalid")
         config = _config(args)

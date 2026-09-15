@@ -1185,9 +1185,9 @@ the admission rechecks declared sizes and SHA-256 values with bounded descriptor
 reads; all caller pins are checked before any input is opened. The result contains only identities,
 counts, limits, and digests. It never starts the plan command, imports candidate code, installs
 dependencies, calls an evaluator, initializes home/Store, or writes Candidate/receipt/archive
-state. The corresponding `candidate-bundle admit-execution` CLI is being wired before normal
-configuration initialization; the quickstart records its reserved interface and side-effect
-fixture requirements.
+state. The corresponding `candidate-bundle admit-execution` CLI is dispatched before normal
+configuration initialization and has an installed-CLI fixture covering no-home and no-execution
+side effects.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

@@ -429,9 +429,9 @@ performs no filesystem IO.
 This layer is an authorization declaration for a future runner, not an execution receipt. It does
 not launch a command, import candidate code, inspect or install dependencies, inspect host
 environment, invoke an evaluator, initialize home/Store, or write Candidate, receipt, archive,
-resume, or materialization-ledger state. The core API and offline tests are implemented. A static
-`candidate-bundle admit-execution` CLI must still be wired before normal initialization, with an
-installed-CLI fixture proving the same no-execution and no-home side effects.
+resume, or materialization-ledger state. The core API, static
+`candidate-bundle admit-execution` dispatch, and installed-CLI no-execution/no-home fixture are
+implemented before normal initialization.
 
 ### Frozen effect protocols
 
