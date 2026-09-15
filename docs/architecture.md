@@ -392,6 +392,27 @@ imports a validated result into Lunar-Agent's canonical archive. The existing `-
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
 
+### Candidate source bundles
+
+`candidate_bundle.py` defines the independent `lunar-candidate-source-bundle-v1` manifest. Its
+canonical digest binds the algorithm contract, entrypoint and every declared path/size/SHA-256,
+sorting file descriptors by path. `validate_candidate_source_bundle` deeply reconstructs typed
+values without IO; `verify_candidate_source_bundle` checks the required contract pin and optional
+bundle pin before observing sources. The result carries bundle metadata and byte counts only.
+
+Paths are NFC relative POSIX names with no traversal, control/format characters, `.git` components,
+case-folded component aliases or file/directory conflicts. The private descriptor-based reader
+checks bounded regular-file bytes, file identity and ancestor name bindings. UTF-8 without NUL,
+1–64 files, at most 1 MiB each and 16 MiB total, and a 128 KiB manifest bound keep observation local
+and bounded. Empty files are valid. Source verification is per file and does not create an atomic
+snapshot. Unlisted files are ignored, and no syntax, import closure, dependencies or environment
+are verified.
+
+The static `candidate-bundle validate` CLI dispatches before config/Store initialization. It returns
+only status, digests and counts. This separate contract leaves the single-file Candidate,
+SeedManifest and ProducerResultEnvelope unchanged; repository execution, workflow graphs and
+multi-file evaluator admission require subsequent designs.
+
 ### Frozen effect protocols
 
 The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be

@@ -1138,6 +1138,24 @@ to agree. A matching common comparison ID alone cannot satisfy this check. Outpu
 `plan_bound` independently from `evidence_bound`; legacy receipts report `plan_bound: false` and
 cannot satisfy a caller plan pin. The factory declares a binding and does not certify execution.
 
+Feature [102](specs/102-candidate-source-bundle/) adds a standalone manifest for multiple source
+files. Validate the declared files against their sizes, SHA-256 values and algorithm contract:
+
+```bash
+lunar-agent candidate-bundle validate bundle.json --source-root ./source \
+  --contract contract.json --bundle-sha256 "$BUNDLE_SHA256" --json
+```
+
+The optional bundle pin is the canonical `CandidateSourceBundle.digest()`, covering the entrypoint,
+contract and sorted file descriptors. Output contains digests, file count and total bytes. This
+static command does not initialize home/Store, execute source or admit an evolution candidate.
+Files must be UTF-8 without NUL, at most 1 MiB each, with 1–64 declared files and at most 16 MiB
+total. Manifest JSON is limited to 128 KiB. Paths must be canonical relative POSIX paths with no
+links in the file or ancestor directories; use physical local paths instead of symlink aliases.
+Unlisted files are ignored. The result covers declared bytes observed per file, not an atomic
+repository snapshot or dependency/environment verification. See the
+[offline quickstart](specs/102-candidate-source-bundle/quickstart.md) for manifest construction.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

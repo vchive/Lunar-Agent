@@ -66,6 +66,18 @@ explicit caller pin can require that binding; legacy receipts remain readable wi
 false`. Plan/task DTO replay and bounded descriptor reads cover the static admission path. This is
 measurement preparation, not a live experiment or evidence that external frameworks improved results.
 
+## 2026-09-15：多文件候选源码包
+
+Feature 102 新增独立 `CandidateSourceBundle` 和静态 `candidate-bundle validate` 命令，
+为多文件候选建立 contract、entrypoint、每文件路径/大小/摘要以及完整 bundle digest。
+只读验证有界 UTF-8 源码，拒绝路径冲突、symlink 和观察到的文件变化；显式 bundle pin
+可以固定整个声明。此阶段只覆盖声明的源码文件，不等同 repository 快照、依赖/环境
+认证或执行回执，也不转换现有 Candidate、SeedManifest 或 producer envelope。
+
+后续仍需定义独立 workspace 中的多文件执行、输入/依赖/环境契约、exact evaluator、
+receipt/archive/resume 关联，之后才可接 DGM 等 repository producer。ADAS/EvoAgentX
+的 workflow graph 也需要独立候选契约。真实框架对照测量仍未完成，本功能无效果结论。
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)

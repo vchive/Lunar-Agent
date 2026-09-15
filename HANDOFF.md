@@ -1,5 +1,35 @@
 # Lunar-Agent 交接记录
 
+## Feature 102：多文件候选源码包（已完成，2026-09-15）
+
+新增独立 `CandidateSourceBundle`，把问题 contract、entrypoint 以及每个声明源码文件的
+路径/大小/SHA-256 绑定到完整 canonical bundle digest；按路径排序，不受 JSON 格式或
+文件声明顺序影响。公开 parse/validate/verify API 深层重建 DTO；要求 contract pin，
+可选 caller bundle pin，两者在源文件 IO 前检查。返回 bundle 元数据、文件数和总字节。
+
+文件限定 1–64 个、每个 0–1 MiB、总计 ≤16 MiB；manifest ≤128 KiB。路径必须是 NFC
+相对 POSIX，拒绝 traversal、控制/格式字符、`.git` 组件、大小写组件别名和文件/目录
+前缀冲突。空文件合法，源码只接受无 NUL 的 UTF-8。复用共享 descriptor reader，
+有界读取且拒绝 symlink、非 regular file、大小/hash 漂移和观察到的文件/目录替换。
+
+新命令 `candidate-bundle validate MANIFEST --source-root ROOT --contract FILE
+[--bundle-sha256 SHA] --json` 在普通配置初始化之前分派，只输出 status、两个摘要和
+文件数/字节数，不创建 home/Store，不执行、导入、评测或登记候选。contract 文件也使用
+同一有界 no-follow reader；现有单文件 Candidate、SeedManifest、producer schema 不变。
+
+新增三文件 **159 passed**（核心 84、独立文件边界 45、CLI 30）；和全部 benchmark 联合
+**346 passed in 0.73s**。独立终审无 blocker，实际安装 CLI quickstart 双文件/131 bytes
+验证成功，helper 同大小改写被拒绝，home/执行 marker 均未创建。全 src/tests Ruff、
+compileall、Specify 与 601 个历史封存文件对照均通过。全量 **4169 passed in 202.02s**，
+JUnit 确认零失败/错误/跳过；本轮统一在本地 `main` 提交，不 push。详情见
+`specs/102-candidate-source-bundle/validation.md`。
+
+本功能只验证声明的源码字节，不扫描未列文件，不保证多文件原子快照、import closure、
+依赖/环境、producer 身份、语法或算法有效性。未运行真实框架、模型、provider、WebAgent、
+远端服务或 campaign，无新增算法效果结论。下一步需独立设计多文件 workspace 的执行、
+输入/依赖/环境契约与 exact evaluator/receipt/archive/resume 关联，再接 repository
+producer；workflow graph 候选和真实固定条件对照测量仍未完成。
+
 ## Feature 101：comparison receipt 完整计划绑定（已完成，2026-09-15）
 
 099/100 的 comparison ID 只绑定共享条件，原先即使同名 arm 换 benchmark 版本、发布摘要

@@ -864,6 +864,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_home(validate_comparison_parser)
     _add_json(validate_comparison_parser)
+    candidate_bundle_parser = subparsers.add_parser(
+        "candidate-bundle", help="verify declared candidate source files without initialization",
+    )
+    candidate_bundle_commands = candidate_bundle_parser.add_subparsers(
+        dest="candidate_bundle_command", required=True,
+    )
+    validate_bundle_parser = candidate_bundle_commands.add_parser(
+        "validate", help="validate a source manifest and its declared file bytes",
+    )
+    validate_bundle_parser.add_argument("manifest", type=Path, help="candidate source bundle JSON")
+    validate_bundle_parser.add_argument("--source-root", type=Path, required=True, help="root containing declared source files")
+    validate_bundle_parser.add_argument("--contract", type=Path, required=True, help="algorithm contract JSON")
+    validate_bundle_parser.add_argument("--bundle-sha256", help="optional caller-pinned canonical bundle digest")
+    _add_home(validate_bundle_parser)
+    _add_json(validate_bundle_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3895,6 +3910,34 @@ def _benchmark_comparison_validate_result(args: argparse.Namespace) -> dict[str,
     }
 
 
+def _candidate_bundle_validate(args: argparse.Namespace) -> dict[str, object]:
+    from ._benchmark_files import absolute_path, read_regular_file
+    from .candidate_bundle import (
+        parse_candidate_source_bundle,
+        verify_candidate_source_bundle,
+    )
+
+    try:
+        content = read_regular_file(absolute_path(args.contract), MAX_CONTRACT_BYTES)
+        contract = AlgorithmProblemContract.from_dict(_strict_json_loads(content))
+        contract_sha256 = contract.digest()
+    except (EvolutionError, OSError, TypeError, ValueError, RecursionError):
+        raise ValueError("candidate_bundle_contract_invalid") from None
+    verified = verify_candidate_source_bundle(
+        parse_candidate_source_bundle(args.manifest),
+        source_root=args.source_root,
+        contract_sha256=contract_sha256,
+        expected_bundle_sha256=args.bundle_sha256,
+    )
+    return {
+        "status": "validated",
+        "bundle_sha256": verified.bundle_sha256,
+        "contract_sha256": verified.bundle.contract_sha256,
+        "file_count": verified.file_count,
+        "total_bytes": verified.total_bytes,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -3969,6 +4012,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.benchmark_comparison_command != "validate-result":
                 raise ValueError("benchmark_comparison_invalid")
             _emit(_benchmark_comparison_validate_result(args), args.json)
+            return 0
+        if args.command == "candidate-bundle":
+            if args.candidate_bundle_command != "validate":
+                raise ValueError("candidate_bundle_invalid")
+            _emit(_candidate_bundle_validate(args), args.json)
             return 0
         config = _config(args)
         if args.command == "init":
