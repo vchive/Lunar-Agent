@@ -415,6 +415,24 @@ multi-file evaluator admission require subsequent designs. Feature 103 adds an i
 `candidate-bundle materialize` boundary that copies verified bytes into a fresh private workspace
 and validates a path-free runner plan, without execution, import, evaluation, or registration.
 
+Feature 104 adds the next read-only boundary in `candidate_execution.py`. An immutable
+`CandidateExecutionAdmission` binds the complete Feature 103 plan digest, bundle and contract
+identities, sorted logical input descriptors, dependency/environment commitments, evaluator pin,
+output-contract digest, and physical budget. Its canonical digest is path-free and excludes the
+self-referential returned digest. `build_candidate_execution_admission` and
+`parse_candidate_execution_admission` deeply reconstruct nested DTOs, while
+`admit_candidate_execution` requires an explicit plan on replay and checks every caller pin before
+optional input IO. A supplied input root is read through the existing bounded descriptor-based
+no-follow path and each declared size/SHA-256 is rechecked; structural admission without a root
+performs no filesystem IO.
+
+This layer is an authorization declaration for a future runner, not an execution receipt. It does
+not launch a command, import candidate code, inspect or install dependencies, inspect host
+environment, invoke an evaluator, initialize home/Store, or write Candidate, receipt, archive,
+resume, or materialization-ledger state. The core API and offline tests are implemented. A static
+`candidate-bundle admit-execution` CLI must still be wired before normal initialization, with an
+installed-CLI fixture proving the same no-execution and no-home side effects.
+
 ### Frozen effect protocols
 
 The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be

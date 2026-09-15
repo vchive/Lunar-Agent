@@ -86,18 +86,24 @@ bundle/contract、entrypoint、文件表摘要、显式 runner、超时、输出
 执行 entrypoint、不初始化 Store/home，也不产生 Candidate、receipt 或 archive。多文件执行、
 exact evaluator、依赖/环境真实性和恢复关联仍需后续 Feature。
 
-## 下一阶段：Feature 104 candidate execution admission（草案，未实现）
+## 2026-09-16：Feature 104 candidate execution admission（核心已实现，CLI 接入进行中）
 
 已冻结草案位于 [specs/104-candidate-execution-admission](../specs/104-candidate-execution-admission/)。
-它承接 Feature 103 的 path-free workspace plan，准备在未来 runner 启动前绑定逻辑输入文件的
-目标/大小/SHA-256、dependency/environment identity、exact evaluator pin、output-contract pin
-和有界 process budget，并可在 caller 提供物理 input root 时做 no-follow 有界字节复核。该层只
-产生静态、可重放的 admission digest，不启动命令、不 import 候选、不安装依赖、不调用 evaluator、
-不初始化 Store/home，也不写 Candidate、receipt、archive、resume 或 materialization ledger。
+它承接 Feature 103 的 path-free workspace plan，现已实现 immutable DTO、canonical admission
+digest、完整 plan/bundle/contract 与 caller pin 校验，以及可选的 bounded no-follow 输入字节
+复核。声明绑定逻辑输入文件的目标/大小/SHA-256、dependency/environment identity、exact
+evaluator pin、output-contract pin 和有界 process budget；输入 root 不提供时仍可执行纯内存
+结构 admission。所有 pin 在输入文件 IO 前校验，输出只含身份、计数、限制和摘要。
 
-当前只完成设计草案和边界审阅，未实现代码、CLI 或测试；因此不宣称已有 execution admission
-能力。后续实现必须继续保持离线、无模型/远程服务/真实框架依赖，并在独立 Feature 中处理输入
-staging、真实 runner、exact evaluator、execution evidence 与恢复协议。
+该层只产生静态、可重放的 admission digest，不启动命令、不 import 候选、不安装依赖、不
+调用 evaluator、不初始化 Store/home，也不写 Candidate、receipt、archive、resume 或
+materialization ledger。Feature 104 核心 focused suite 当前为 **190 passed**，与 Feature
+102/103 合计为 **456 passed, 1 skipped**；这些是离线协议验证，不构成任何框架效果结论。
+
+剩余工作是把同一 API 接入静态 `candidate-bundle admit-execution` CLI，在普通配置/Store
+初始化之前分派，并补 installed-CLI 的 no-home/no-execution fixture、pin mismatch 和输入
+字节校验覆盖。后续仍需独立 Feature 处理 input staging、真实 runner、exact evaluator、
+execution evidence 与恢复协议。
 
 ## AlphaEvolve 与 OpenEvolve 的关系
 

@@ -1,5 +1,30 @@
 # Lunar-Agent 交接记录
 
+## Feature 104：候选 execution admission（核心已完成，CLI 接入中，2026-09-16）
+
+已实现 `src/famou/candidate_execution.py` 的静态、path-free admission API：
+`CandidateExecutionInput`、`CandidateEvaluatorPin`、`CandidateExecutionBudget`、
+`CandidateExecutionAdmission`、`VerifiedCandidateExecutionAdmission`，以及
+`build_candidate_execution_admission`、`parse_candidate_execution_admission`、
+`validate_candidate_execution_admission` 和 `admit_candidate_execution`。声明绑定完整
+Feature 103 workspace plan digest、bundle/contract、排序后的逻辑输入描述、非零
+dependency/environment commitments、exact evaluator pin、可选 output-contract digest 与
+有界 timeout/output/input/process budget；canonical digest 不含本地路径和自身 digest。
+
+结构 parse/validate 完全内存内进行。可选 `input_root` 使用已有 descriptor-based no-follow
+reader，对每个声明文件做有界 size/SHA-256 复核，并在任何输入 IO 前校验 plan、bundle、
+contract、dependency、environment、evaluator、output-contract 和 admission caller pins。
+省略 `input_root` 时 `observed_inputs` 为 `None`。该层不启动 runner、不 import 候选、不安装
+依赖、不检查 host environment、不调用 evaluator、不初始化 home/Store，也不写 Candidate、
+receipt、archive、resume 或 materialization ledger；它不是执行回执。
+
+Feature 104 focused 测试当前 **190 passed**；102/103/104 联合 **456 passed, 1 skipped**，
+Ruff、compileall 和当前 diff check 已通过。静态
+`candidate-bundle admit-execution` CLI 仍待接入普通配置/Store 初始化之前，并需补成功、输入
+size/hash、plan/pin mismatch、entrypoint 不执行及 no-home/Store 的 installed-CLI fixture。
+在 CLI 合入并完成全仓回归前，不要把 quickstart 命令描述成已安装能力，也不要声称已有真实
+候选执行、模型、evaluator、OpenEvolve/WebAgent 或效果测量。
+
 ## Feature 103：候选 workspace 物化（已完成，2026-09-15）
 
 已冻结并开始实现独立的 `candidate_workspace.py`：将 Feature 102 已验证的多文件 bundle
@@ -13,9 +38,9 @@
 或 materialization ledger。聚焦回归 `266 passed, 1 skipped`，Ruff 和 compileall 通过；安装 CLI
 fixture 已确认只复制声明文件、入口不执行且不创建 home。全仓回归与本地提交已完成，未 push。
 
-下一阶段草案：`specs/104-candidate-execution-admission/` 定义静态 execution admission，准备绑定
-Feature 103 plan、逻辑输入字节、依赖/环境/evaluator/output contract pin 与有界预算。按当前决策
-只完成路线图和草案，未实现 104 代码、CLI 或测试；不应把草案描述成已有 runner 授权或执行能力。
+Feature 104 已完成核心 admission API 和离线边界测试；其 CLI 接入、installed-CLI side-effect
+fixture 与最终全仓回归仍在进行。详见本文件顶部 Feature 104 记录；在这些项目完成前，不应
+把静态声明描述成 runner 授权或执行能力。
 
 ## Feature 102：多文件候选源码包（已完成，2026-09-15）
 

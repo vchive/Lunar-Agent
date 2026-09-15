@@ -2,8 +2,10 @@
 
 ## Status
 
-Draft. This feature is a static admission boundary only; implementation and integration are
-intentionally deferred.
+Core API implemented (2026-09-16). The immutable DTOs, canonical path-free digest, structural
+pin checks, and optional bounded no-follow input verification are available offline. Static CLI
+dispatch and the installed-CLI side-effect fixture are the remaining integration work; this
+feature still grants no permission to start a process.
 
 ## Problem and scope
 

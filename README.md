@@ -1170,6 +1170,25 @@ bytes, and returns bundle/file-table metadata plus a path-free plan digest. It n
 command, imports the entrypoint, initializes home/Store, or creates a Candidate, receipt, or
 archive. Runner, evaluator, dependency, environment, and recovery integration remain later work.
 
+Feature [104](specs/104-candidate-execution-admission/) adds the static execution admission that
+consumes this plan before a future runner is allowed to start. The implemented core API binds the
+complete workspace-plan digest, bundle and contract identities, sorted logical input descriptors,
+dependency/environment commitments, evaluator fingerprint, output-contract identity, and bounded
+process budget into one path-free admission digest:
+
+```python
+from famou import admit_candidate_execution, build_candidate_execution_admission
+```
+
+Structural parsing and validation perform no filesystem IO. When a caller supplies an input root,
+the admission rechecks declared sizes and SHA-256 values with bounded descriptor-based no-follow
+reads; all caller pins are checked before any input is opened. The result contains only identities,
+counts, limits, and digests. It never starts the plan command, imports candidate code, installs
+dependencies, calls an evaluator, initializes home/Store, or writes Candidate/receipt/archive
+state. The corresponding `candidate-bundle admit-execution` CLI is being wired before normal
+configuration initialization; the quickstart records its reserved interface and side-effect
+fixture requirements.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

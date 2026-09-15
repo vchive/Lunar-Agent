@@ -1,6 +1,8 @@
-# Quickstart (draft)
+# Quickstart
 
-Feature 104 is not implemented yet. The intended static command is:
+The Feature 104 core API is implemented as an offline, read-only admission boundary. The static
+CLI is being wired to the same API and will be dispatched before normal config, home, or Store
+initialization. Its intended interface is:
 
 ```bash
 lunar-agent candidate-bundle admit-execution PLAN \
@@ -13,7 +15,10 @@ lunar-agent candidate-bundle admit-execution PLAN \
   --json
 ```
 
-The command will verify only the declared input bytes and structural pins. It will print the
-canonical admission digest and bounded metadata, and will not start the plan command, import the
-entrypoint, initialize Lunar home/Store, install dependencies, invoke an evaluator, or create a
-Candidate/receipt/archive.
+The command verifies only the declared input bytes and structural pins. It prints the canonical
+admission digest and bounded metadata, and does not start the plan command, import the entrypoint,
+initialize Lunar home/Store, install dependencies, invoke an evaluator, or create a
+Candidate/receipt/archive. Until the CLI wiring lands, callers can use
+`build_candidate_execution_admission` and `admit_candidate_execution` from `famou`; omit
+`input_root` for structural-only admission, or provide a caller-owned root for bounded no-follow
+byte checks.
