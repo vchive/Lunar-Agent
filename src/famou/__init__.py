@@ -40,6 +40,7 @@ from .benchmark_result import (
     BenchmarkResultError,
     ComparisonArmResult,
     admit_benchmark_comparison_result,
+    bind_benchmark_comparison_result_evidence,
     parse_benchmark_comparison_result,
 )
 from .benchmark_task import (
@@ -379,6 +380,7 @@ __all__ = [
     "admit_remote_materials",
     "admit_remote_state",
     "admit_seed_manifest",
+    "bind_benchmark_comparison_result_evidence",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_candidate_manifest",

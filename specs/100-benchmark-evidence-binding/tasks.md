@@ -1,0 +1,4 @@
+- [x] T100-01 Define the optional evidence descriptor and identity binding.
+- [x] T100-02 Implement bounded local evidence admission.
+- [x] T100-03 Add CLI flag and public API.
+- [x] T100-04 Add focused regression tests and validation notes.

@@ -855,6 +855,10 @@ def build_parser() -> argparse.ArgumentParser:
     validate_comparison_parser.add_argument("--input-root", type=Path, required=True, help="root containing declared input files")
     validate_comparison_parser.add_argument("--model-profile-sha256", required=True, help="caller-pinned model profile digest")
     validate_comparison_parser.add_argument("--evaluator-fingerprint", required=True, help="caller-pinned exact evaluator digest")
+    validate_comparison_parser.add_argument(
+        "--evidence-root", type=Path,
+        help="optional root containing the declared per-arm evidence files",
+    )
     _add_home(validate_comparison_parser)
     _add_json(validate_comparison_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
@@ -3867,7 +3871,9 @@ def _benchmark_comparison_validate_result(args: argparse.Namespace) -> dict[str,
             evaluator_fingerprint=args.evaluator_fingerprint,
         )
         result = parse_benchmark_comparison_result(args.result)
-        admitted_result = admit_benchmark_comparison_result(result, plan)
+        admitted_result = admit_benchmark_comparison_result(
+            result, plan, evidence_root=args.evidence_root,
+        )
     except (BenchmarkComparisonError, BenchmarkResultError):
         raise
     except (EvolutionError, OSError, TypeError, ValueError, RecursionError):
@@ -3879,6 +3885,7 @@ def _benchmark_comparison_validate_result(args: argparse.Namespace) -> dict[str,
         "arm_count": len(admitted_result.arms),
         "arm_ids": [arm.arm_id for arm in admitted_result.arms],
         "per_arm_attempts": admitted_plan.per_arm_attempts,
+        "evidence_bound": args.evidence_root is not None,
     }
 
 
