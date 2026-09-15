@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import _benchmark_files as _files
+
 BENCHMARK_TASK_PROTOCOL = "lunar-benchmark-task-v1"
 BENCHMARK_TASK_SCHEMA_VERSION = "1"
 MAX_TASK_ENVELOPE_BYTES = 128 * 1024
@@ -75,7 +77,7 @@ def _relative_path(value: object) -> str:
     if "\\" in raw:
         _fail("benchmark_task_envelope_invalid")
     path = Path(raw)
-    if path.is_absolute() or raw != path.as_posix() or any(part in {"", ".", ".."} for part in path.parts):
+    if not path.parts or path.is_absolute() or raw != path.as_posix() or any(part in {"", ".", ".."} for part in path.parts):
         _fail("benchmark_task_envelope_invalid")
     return path.as_posix()
 
@@ -244,7 +246,7 @@ class PhysicalAttemptBudget:
     def __post_init__(self) -> None:
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int) or not 1 <= self.attempts <= MAX_ATTEMPTS:
             _fail("benchmark_task_envelope_invalid")
-        if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)) or not math.isfinite(float(self.timeout_seconds)) or not 0 < self.timeout_seconds <= MAX_TIMEOUT_SECONDS:
+        if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)) or not 0 < self.timeout_seconds <= MAX_TIMEOUT_SECONDS or not math.isfinite(float(self.timeout_seconds)):
             _fail("benchmark_task_envelope_invalid")
         for value, maximum in ((self.max_total_tokens, MAX_TOTAL_TOKENS), (self.max_cost_micros, MAX_COST_MICROS)):
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= maximum):
@@ -282,9 +284,13 @@ class BenchmarkTaskEnvelope:
         _text(benchmark["name"], safe_id=True)
         _text(benchmark["release_version"], safe_id=True)
         _digest(benchmark["publication_digest"], prefixed=True)
-        if not 1 <= len(self.inputs) <= MAX_TASK_INPUTS:
+        if not isinstance(self.inputs, (tuple, list)) or not 1 <= len(self.inputs) <= MAX_TASK_INPUTS:
             _fail("benchmark_task_envelope_invalid")
         if any(not isinstance(item, TaskInput) for item in self.inputs) or len({item.path for item in self.inputs}) != len(self.inputs):
+            _fail("benchmark_task_envelope_invalid")
+        if (not isinstance(self.task, TaskIdentity) or not isinstance(self.model, ModelIdentity)
+                or not isinstance(self.evaluator, EvaluatorIdentity)
+                or not isinstance(self.budget, PhysicalAttemptBudget)):
             _fail("benchmark_task_envelope_invalid")
         _digest(self.contract_sha256)
         candidate = dict(self.candidate) if isinstance(self.candidate, Mapping) else None
@@ -296,6 +302,7 @@ class BenchmarkTaskEnvelope:
         _public_candidate_path(candidate["filename"])
         object.__setattr__(self, "benchmark", benchmark)
         object.__setattr__(self, "candidate", candidate)
+        object.__setattr__(self, "inputs", tuple(self.inputs))
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -365,44 +372,23 @@ def parse_benchmark_task_envelope(source: str | os.PathLike[str] | Mapping[str, 
         envelope = BenchmarkTaskEnvelope.from_dict(dict(source))
         _canonical_bytes(envelope.to_dict())
         return envelope
-    path = Path(source).expanduser()
-    if path.is_symlink() or not path.is_file():
-        _fail("benchmark_task_envelope_invalid")
     try:
-        content = path.read_bytes()
-    except OSError:
-        _fail("benchmark_task_envelope_invalid")
+        content = _files.read_regular_file(_files.absolute_path(source), MAX_TASK_ENVELOPE_BYTES)
+    except _files.BenchmarkFileError as exc:
+        _fail("benchmark_task_envelope_too_large" if exc.reason == "too_large" else "benchmark_task_envelope_invalid")
     if not content or len(content) > MAX_TASK_ENVELOPE_BYTES:
         _fail("benchmark_task_envelope_too_large")
     return BenchmarkTaskEnvelope.from_dict(_strict_loads(content))
 
 
 def _verify_input(root: Path, item: TaskInput) -> None:
-    raw = root / item.path
-    current = raw
-    while current != root:
-        if current.is_symlink():
-            _fail("benchmark_task_input_unsafe")
-        current = current.parent
     try:
-        resolved = raw.resolve(strict=False)
-        resolved.relative_to(root)
-    except (OSError, ValueError):
-        _fail("benchmark_task_input_unsafe")
-    if raw.is_symlink() or not resolved.is_file():
-        _fail("benchmark_task_input_missing")
-    try:
-        descriptor = resolved.stat()
-        if not stat.S_ISREG(descriptor.st_mode):
-            _fail("benchmark_task_input_unsafe")
-        if descriptor.st_size > 16 * 1024 * 1024:
-            _fail("benchmark_task_input_changed")
-        with resolved.open("rb") as stream:
-            content = stream.read(item.size + 1)
-    except OSError:
-        _fail("benchmark_task_input_missing")
-    if len(content) != item.size:
-        _fail("benchmark_task_input_changed")
+        content = _files.read_regular_file(
+            _files.absolute_path(root / item.path), item.size, exact_size=True,
+        )
+    except _files.BenchmarkFileError as exc:
+        suffix = {"unsafe": "unsafe", "missing": "missing"}.get(exc.reason, "changed")
+        _fail("benchmark_task_input_" + suffix)
     if hashlib.sha256(content).hexdigest() != item.sha256:
         _fail("benchmark_task_input_changed")
 
@@ -418,7 +404,14 @@ def admit_benchmark_task_envelope(
     budget: PhysicalAttemptBudget | Mapping[str, object] | None = None,
 ) -> AdmittedBenchmarkTask:
     """Verify pinned identities and input bytes; never run a producer/model/evaluator."""
-    parsed = envelope if isinstance(envelope, BenchmarkTaskEnvelope) else parse_benchmark_task_envelope(envelope)
+    try:
+        parsed = parse_benchmark_task_envelope(
+            envelope.to_dict() if isinstance(envelope, BenchmarkTaskEnvelope) else envelope,
+        )
+    except BenchmarkTaskError:
+        raise
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RecursionError):
+        _fail("benchmark_task_envelope_invalid")
     expected_contract = _digest(contract_sha256)
     if parsed.contract_sha256 != expected_contract:
         _fail("benchmark_task_contract_mismatch")
@@ -431,13 +424,17 @@ def admit_benchmark_task_envelope(
     if expected_evaluator is None or _digest(expected_evaluator) != parsed.evaluator.evaluator_sha256:
         _fail("benchmark_task_evaluator_mismatch")
     if budget is not None:
-        expected_budget = budget if isinstance(budget, PhysicalAttemptBudget) else PhysicalAttemptBudget.from_dict(dict(budget))
+        expected_budget = PhysicalAttemptBudget.from_dict(
+            budget.to_dict() if isinstance(budget, PhysicalAttemptBudget) else dict(budget),
+        )
         if expected_budget != parsed.budget:
             _fail("benchmark_task_budget_mismatch")
-    raw_root = Path(input_root).expanduser()
-    if raw_root.is_symlink() or not raw_root.is_dir():
+    try:
+        root = _files.absolute_path(input_root)
+        if not stat.S_ISDIR(root.lstat().st_mode):
+            _fail("benchmark_task_input_unsafe")
+    except (OSError, _files.BenchmarkFileError):
         _fail("benchmark_task_input_unsafe")
-    root = raw_root.resolve(strict=False)
     for item in parsed.inputs:
         _verify_input(root, item)
     return AdmittedBenchmarkTask(parsed.digest(), parsed.comparison_digest(), parsed.contract_sha256, parsed.inputs)

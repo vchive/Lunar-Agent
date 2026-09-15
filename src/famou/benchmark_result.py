@@ -12,7 +12,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .benchmark_comparison import BenchmarkComparisonPlan
+from . import _benchmark_files as _files
+from .benchmark_comparison import (
+    BenchmarkComparisonError,
+    BenchmarkComparisonPlan,
+    validate_benchmark_comparison_plan,
+)
 
 PROTOCOL = "lunar-benchmark-comparison-result-v1"
 SCHEMA_VERSION = "1"
@@ -71,9 +76,31 @@ def _evidence_path(value: object) -> str:
     return path.as_posix()
 
 
-def _result_id(comparison_id: str, arms: tuple[ComparisonArmResult, ...]) -> str:
+def _result_id(
+    comparison_id: str,
+    arms: tuple[ComparisonArmResult, ...],
+    plan_sha256: str | None = None,
+) -> str:
     payload = {"protocol": PROTOCOL, "comparison_id": comparison_id, "arms": [a.to_dict() for a in sorted(arms, key=lambda a: a.arm_id)]}
+    if plan_sha256 is not None:
+        payload["plan_sha256"] = _digest(plan_sha256)
     return hashlib.sha256(_canonical(payload)).hexdigest()
+
+
+def _validated_plan(plan: BenchmarkComparisonPlan) -> BenchmarkComparisonPlan:
+    try:
+        return validate_benchmark_comparison_plan(plan)
+    except BenchmarkComparisonError:
+        _fail("benchmark_result_invalid")
+
+
+def _validated_arms(value: object) -> tuple[ComparisonArmResult, ...]:
+    if not isinstance(value, (tuple, list)) or not 2 <= len(value) <= 16 or any(not isinstance(arm, ComparisonArmResult) for arm in value):
+        _fail("benchmark_result_invalid")
+    arms = tuple(replace(arm) for arm in value)
+    if len({arm.arm_id for arm in arms}) != len(arms):
+        _fail("benchmark_result_invalid")
+    return tuple(sorted(arms, key=lambda arm: arm.arm_id))
 
 
 @dataclass(frozen=True)
@@ -146,31 +173,53 @@ class BenchmarkComparisonResult:
     arms: tuple[ComparisonArmResult, ...]
     schema_version: str = SCHEMA_VERSION
     protocol: str = PROTOCOL
+    plan_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != SCHEMA_VERSION or self.protocol != PROTOCOL or not isinstance(self.comparison_id, str) or _SAFE_ID.fullmatch(self.comparison_id) is None or not isinstance(self.result_id, str) or _SHA256.fullmatch(self.result_id) is None:
             _fail("benchmark_result_invalid")
-        if not isinstance(self.arms, (tuple, list)) or not 2 <= len(self.arms) <= 16 or any(not isinstance(a, ComparisonArmResult) for a in self.arms):
-            _fail("benchmark_result_invalid")
-        arms = tuple(replace(arm) for arm in self.arms)
-        if len({arm.arm_id for arm in arms}) != len(arms):
-            _fail("benchmark_result_invalid")
-        object.__setattr__(self, "arms", tuple(sorted(arms, key=lambda arm: arm.arm_id)))
-        if self.result_id != _result_id(self.comparison_id, self.arms):
+        object.__setattr__(self, "arms", _validated_arms(self.arms))
+        if self.plan_sha256 is not None:
+            _digest(self.plan_sha256)
+        if self.result_id != _result_id(self.comparison_id, self.arms, self.plan_sha256):
             _fail("benchmark_result_identity_mismatch")
 
     def to_dict(self) -> dict[str, object]:
-        return {"schema_version": self.schema_version, "protocol": self.protocol, "comparison_id": self.comparison_id, "result_id": self.result_id, "arms": [a.to_dict() for a in sorted(self.arms, key=lambda a: a.arm_id)]}
+        result: dict[str, object] = {"schema_version": self.schema_version, "protocol": self.protocol, "comparison_id": self.comparison_id, "result_id": self.result_id, "arms": [a.to_dict() for a in sorted(self.arms, key=lambda a: a.arm_id)]}
+        if self.plan_sha256 is not None:
+            result["plan_sha256"] = self.plan_sha256
+        return result
 
     def digest(self) -> str:
         return hashlib.sha256(_canonical(self.to_dict())).hexdigest()
 
     @classmethod
     def from_dict(cls, value: object) -> BenchmarkComparisonResult:
-        item = _strict(value, {"schema_version", "protocol", "comparison_id", "result_id", "arms"}, {"schema_version", "protocol", "comparison_id", "result_id", "arms"})
+        item = _strict(value, {"schema_version", "protocol", "comparison_id", "result_id", "arms"}, {"schema_version", "protocol", "comparison_id", "result_id", "arms", "plan_sha256"})
         if not isinstance(item["arms"], list) or not 2 <= len(item["arms"]) <= 16:
             _fail("benchmark_result_invalid")
-        return cls(item["comparison_id"], item["result_id"], tuple(ComparisonArmResult.from_dict(a) for a in item["arms"]), item["schema_version"], item["protocol"])  # type: ignore[arg-type]
+        if "plan_sha256" in item:
+            _digest(item["plan_sha256"])
+        return cls(item["comparison_id"], item["result_id"], tuple(ComparisonArmResult.from_dict(a) for a in item["arms"]), item["schema_version"], item["protocol"], item.get("plan_sha256"))  # type: ignore[arg-type]
+
+    @classmethod
+    def from_plan(
+        cls,
+        plan: BenchmarkComparisonPlan,
+        arms: tuple[ComparisonArmResult, ...],
+    ) -> BenchmarkComparisonResult:
+        """Construct a pinned receipt; this does not admit inputs or evidence files."""
+        parsed_plan = _validated_plan(plan)
+        parsed_arms = _validated_arms(arms)
+        if {arm.arm_id for arm in parsed_arms} != {arm.id for arm in parsed_plan.arms}:
+            _fail("benchmark_result_identity_mismatch")
+        plan_sha256 = parsed_plan.digest()
+        return cls(
+            parsed_plan.comparison_id,
+            _result_id(parsed_plan.comparison_id, parsed_arms, plan_sha256),
+            parsed_arms,
+            plan_sha256=plan_sha256,
+        )
 
 
 def parse_benchmark_comparison_result(source: str | os.PathLike[str] | Mapping[str, object]) -> BenchmarkComparisonResult:
@@ -202,87 +251,19 @@ def parse_benchmark_comparison_result(source: str | os.PathLike[str] | Mapping[s
 
 def _absolute_path(value: object, error: str) -> Path:
     try:
-        path = Path(value).expanduser().absolute()
-        # Do not resolve or normalize away symlinks or parent traversal before opening.
-        if ("\x00" in path.as_posix() or ".." in path.parts
-                or len(path.as_posix().encode("utf-8")) > 4096 or len(path.parts) > 128):
-            _fail(error)
-        return path
-    except (OSError, TypeError, ValueError, RuntimeError):
+        return _files.absolute_path(value)
+    except _files.BenchmarkFileError:
         _fail(error)
 
 
-def _file_identity(info: os.stat_result) -> tuple[int, ...]:
-    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
-
-
 def _read_regular_file(path: Path, maximum: int, *, evidence: bool = False) -> bytes:
-    """Read bounded bytes without following links, then recheck the opened names."""
-    invalid = "benchmark_result_evidence_unsafe" if evidence else "benchmark_result_invalid"
-    missing = "benchmark_result_evidence_missing" if evidence else invalid
-    changed = "benchmark_result_evidence_changed" if evidence else invalid
-    large = changed if evidence else "benchmark_result_too_large"
-    descriptors: list[int] = []
-    directories: list[tuple[int, str, int]] = []
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
-    reading_started = False
     try:
-        parent = os.open(path.anchor, flags | os.O_DIRECTORY)
-        descriptors.append(parent)
-        for name in path.parts[1:-1]:
-            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            if not stat.S_ISDIR(before.st_mode):
-                _fail(invalid)
-            child = os.open(name, flags | os.O_DIRECTORY, dir_fd=parent)
-            descriptors.append(child)
-            opened = os.fstat(child)
-            if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-                _fail(changed)
-            directories.append((parent, name, child))
-            parent = child
-
-        before = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-        if not stat.S_ISREG(before.st_mode):
-            _fail(invalid)
-        if before.st_size > maximum or (evidence and before.st_size != maximum):
-            _fail(large)
-        descriptor = os.open(path.name, flags, dir_fd=parent)
-        descriptors.append(descriptor)
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or _file_identity(before) != _file_identity(opened):
-            _fail(changed)
-
-        reading_started = True
-        chunks: list[bytes] = []
-        remaining = maximum + 1
-        while remaining:
-            chunk = os.read(descriptor, min(64 * 1024, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        content = b"".join(chunks)
-        if len(content) > maximum:
-            _fail(large)
-        after = os.fstat(descriptor)
-        named = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-        if (not stat.S_ISREG(named.st_mode) or _file_identity(before) != _file_identity(after)
-                or _file_identity(after) != _file_identity(named) or after.st_size != len(content)):
-            _fail(changed)
-        for ancestor, name, child in reversed(directories):
-            named = os.stat(name, dir_fd=ancestor, follow_symlinks=False)
-            opened = os.fstat(child)
-            if (not stat.S_ISDIR(named.st_mode)
-                    or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)):
-                _fail(changed)
-        return content
-    except FileNotFoundError:
-        _fail(changed if reading_started else missing)
-    except OSError:
-        _fail(changed if reading_started else invalid)
-    finally:
-        for descriptor in reversed(descriptors):
-            os.close(descriptor)
+        return _files.read_regular_file(path, maximum, exact_size=evidence)
+    except _files.BenchmarkFileError as exc:
+        if evidence:
+            suffix = {"unsafe": "unsafe", "missing": "missing"}.get(exc.reason, "changed")
+            _fail("benchmark_result_evidence_" + suffix)
+        _fail("benchmark_result_too_large" if exc.reason == "too_large" else "benchmark_result_invalid")
 
 
 def _verify_evidence(root: Path, arm: ComparisonArmResult) -> None:
@@ -299,13 +280,21 @@ def admit_benchmark_comparison_result(
     plan: BenchmarkComparisonPlan,
     *,
     evidence_root: str | os.PathLike[str] | None = None,
+    expected_plan_sha256: str | None = None,
 ) -> BenchmarkComparisonResult:
-    if not isinstance(plan, BenchmarkComparisonPlan):
-        _fail("benchmark_result_invalid")
+    parsed_plan = _validated_plan(plan)
+    if expected_plan_sha256 is not None:
+        _digest(expected_plan_sha256)
     parsed = result if isinstance(result, BenchmarkComparisonResult) else parse_benchmark_comparison_result(result)
     # Reparse object instances so frozen-object mutation cannot bypass strict DTO checks.
     parsed = replace(parsed)
-    if parsed.comparison_id != plan.comparison_id or {a.arm_id for a in parsed.arms} != {a.id for a in plan.arms}:
+    if parsed.comparison_id != parsed_plan.comparison_id or {a.arm_id for a in parsed.arms} != {a.id for a in parsed_plan.arms}:
+        _fail("benchmark_result_identity_mismatch")
+    if expected_plan_sha256 is not None and parsed.plan_sha256 is None:
+        _fail("benchmark_result_plan_pin_required")
+    if parsed.plan_sha256 is not None and parsed.plan_sha256 != parsed_plan.digest():
+        _fail("benchmark_result_identity_mismatch")
+    if expected_plan_sha256 is not None and parsed.plan_sha256 != expected_plan_sha256:
         _fail("benchmark_result_identity_mismatch")
     if evidence_root is not None:
         root = _absolute_path(evidence_root, "benchmark_result_evidence_unsafe")
@@ -323,11 +312,15 @@ def bind_benchmark_comparison_result_evidence(
     result: BenchmarkComparisonResult | Mapping[str, object] | str | os.PathLike[str],
     plan: BenchmarkComparisonPlan,
     evidence_root: str | os.PathLike[str],
+    *,
+    expected_plan_sha256: str | None = None,
 ) -> BenchmarkComparisonResult:
     """Admit a result and require every arm's descriptor to match a local file."""
     if evidence_root is None:
         _fail("benchmark_result_evidence_unsafe")
-    return admit_benchmark_comparison_result(result, plan, evidence_root=evidence_root)
+    return admit_benchmark_comparison_result(
+        result, plan, evidence_root=evidence_root, expected_plan_sha256=expected_plan_sha256
+    )
 
 
 __all__ = [

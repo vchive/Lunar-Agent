@@ -1,5 +1,36 @@
 # Lunar-Agent 交接记录
 
+## Feature 101：comparison receipt 完整计划绑定（已完成，2026-09-15）
+
+099/100 的 comparison ID 只绑定共享条件，原先即使同名 arm 换 benchmark 版本、发布摘要
+或互换 envelope，旧 receipt 仍可能通过。现新增可选 `plan_sha256`，绑定完整规范化 plan
+（含 arm ID 与 benchmark name/release/publication 的关联），并参与 result ID。合法无 pin
+的 099/100 JSON、result ID、digest 已用 `d81145f` golden values 验证保持兼容。
+
+新工厂 `BenchmarkComparisonResult.from_plan(plan, arms)` 在无 IO 的结构复验后显式创建
+带 pin 的 receipt；不替旧 receipt 自动补 pin，也不代表此前已运行过该计划。API 的
+`expected_plan_sha256` 与 CLI `benchmark-comparison validate-result --plan-sha256 SHA`
+要求 caller pin、receipt pin 和完整 plan digest 全部匹配；legacy receipt 无法满足该请求。
+输出分别给 `plan_bound`、`evidence_bound` 和 canonical `plan_sha256`，避免混淆计划关联
+与实际证据字节校验。pin 是 canonical plan digest，不是格式化 JSON 文件的原始字节摘要。
+
+新增 `validate_benchmark_comparison_plan`，深拷贝重验 plan 结构及所有 arm 的共同身份。
+task admission 同样重建 DTO，拒绝内存对象被改为 root 外路径、超限大小或非法 schema。
+100 的 fd reader 已抽到私有 `_benchmark_files`，task/plan/result/evidence 和公开输入共用
+no-follow、有界读取及读后文件/目录名复核，保留各 API 固定错误码。task/plan/input 也采用
+无祖先 symlink、无 `..`、4096 UTF-8 字节/128 绝对组件边界；单输入仍限 16 MiB。
+
+新增四文件共 91 项；所有 benchmark 测试 **187 passed**。全量 **4010 passed in
+229.10s**，JUnit 确认零失败/错误/跳过；全 src/tests Ruff、compileall、Specify、diff
+check 通过。独立终审无剩余 blocker，实际安装 CLI fixture 已验证双绑定成功、版本变化
+拒绝且不创建 home。051/074/076/078/082 的 601 个封存文件相对 `027a235` 未变。
+
+README、architecture、roadmap、101 specs 和 Specify 当前 feature 已同步。仅本地 `main`
+提交，不 push；未运行真实框架、模型、provider、WebAgent、远端服务或 campaign，不新增
+算法效果结论。该 pin 只覆盖当前 DTO 已表达的字段，不认证 producer、未表达的命令/配置
+或真实测量；文件检查不是多文件原子快照。真实对照测量与多文件/repository/workflow
+candidate 契约仍未完成，后续另行设计。
+
 ## Feature 100 补修：有界证据读取与文件替换检测（已完成，2026-09-15）
 
 复核发现原实现检查路径后再打开文件，期间发生文件/目录替换可能仍通过校验；result JSON

@@ -1130,6 +1130,14 @@ The command reads bounded bytes and rejects observed replacement, size or digest
 `evidence_bound: false`. This verifies local bytes; it does not certify how they were produced or
 turn external scores into Lunar scores.
 
+Feature [101](specs/101-exact-comparison-plan-binding/) binds a result to the complete plan, including
+each arm's benchmark name, release and publication digest. Create a new pinned receipt with
+`BenchmarkComparisonResult.from_plan(plan, arms)`. Add `--plan-sha256 "$PLAN_SHA256"` to the command
+above to require the independently saved canonical `plan.digest()`, the supplied plan and the receipt
+to agree. A matching common comparison ID alone cannot satisfy this check. Output reports
+`plan_bound` independently from `evidence_bound`; legacy receipts report `plan_bound: false` and
+cannot satisfy a caller plan pin. The factory declares a binding and does not certify execution.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

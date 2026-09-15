@@ -328,6 +328,16 @@ one). Descriptor keys must both be present and non-null, or both omitted for leg
 Malformed inputs produce fixed result error codes. This is an observation of individual files,
 not a multi-arm filesystem snapshot or certification of external measurements.
 
+Feature 101 adds an optional `plan_sha256` to result receipts and their derived IDs. It hashes the
+complete canonical plan, fixing the association of arm IDs with benchmark releases/publications in
+addition to common conditions. Structural plan replay precedes both result creation and admission;
+each task DTO is also rebuilt before input reads. `from_plan` creates a new pinned declaration without
+IO, while `expected_plan_sha256`/CLI `--plan-sha256` require the caller pin, receipt pin and plan digest
+to match. CLI output exposes `plan_bound` separately from byte evidence binding. Existing unpinned
+receipt data and IDs remain unchanged. Task, plan, result and evidence reads now share the private
+`_benchmark_files` descriptor reader; public errors retain their task/plan/result code namespaces.
+Pins cover represented DTO fields, not unrepresented framework configuration or actual execution.
+
 ## Invocation and evolution seams
 
 The invocation seam and the search-strategy seam are deliberately independent:

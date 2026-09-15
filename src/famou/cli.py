@@ -856,6 +856,9 @@ def build_parser() -> argparse.ArgumentParser:
     validate_comparison_parser.add_argument("--model-profile-sha256", required=True, help="caller-pinned model profile digest")
     validate_comparison_parser.add_argument("--evaluator-fingerprint", required=True, help="caller-pinned exact evaluator digest")
     validate_comparison_parser.add_argument(
+        "--plan-sha256", help="caller-pinned canonical plan digest; requires a pinned result receipt",
+    )
+    validate_comparison_parser.add_argument(
         "--evidence-root", type=Path,
         help="optional root containing the declared per-arm evidence files",
     )
@@ -3873,6 +3876,7 @@ def _benchmark_comparison_validate_result(args: argparse.Namespace) -> dict[str,
         result = parse_benchmark_comparison_result(args.result)
         admitted_result = admit_benchmark_comparison_result(
             result, plan, evidence_root=args.evidence_root,
+            expected_plan_sha256=args.plan_sha256,
         )
     except (BenchmarkComparisonError, BenchmarkResultError):
         raise
@@ -3886,6 +3890,8 @@ def _benchmark_comparison_validate_result(args: argparse.Namespace) -> dict[str,
         "arm_ids": [arm.arm_id for arm in admitted_result.arms],
         "per_arm_attempts": admitted_plan.per_arm_attempts,
         "evidence_bound": args.evidence_root is not None,
+        "plan_bound": admitted_result.plan_sha256 is not None,
+        "plan_sha256": plan.digest(),
     }
 
 

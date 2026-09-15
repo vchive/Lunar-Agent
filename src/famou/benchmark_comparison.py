@@ -7,9 +7,9 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
+from . import _benchmark_files as _files
 from .benchmark_task import (
     BenchmarkTaskEnvelope,
     PhysicalAttemptBudget,
@@ -101,11 +101,12 @@ class BenchmarkComparisonPlan:
         _digest(common["contract_sha256"]); _digest(common["task_comparison_sha256"])
         if not isinstance(common["model"], dict) or not isinstance(common["evaluator"], dict) or not isinstance(common["candidate"], dict) or not isinstance(common["budget"], dict):
             _fail("benchmark_comparison_invalid")
-        if len(self.arms) < 2 or len(self.arms) > 16 or any(not isinstance(a, ComparisonArm) for a in self.arms):
+        if not isinstance(self.arms, (tuple, list)) or len(self.arms) < 2 or len(self.arms) > 16 or any(not isinstance(a, ComparisonArm) for a in self.arms):
             _fail("benchmark_comparison_invalid")
         if len({a.id for a in self.arms}) != len(self.arms):
             _fail("benchmark_comparison_invalid")
         object.__setattr__(self, "common", dict(common))
+        object.__setattr__(self, "arms", tuple(self.arms))
         if self.comparison_id != _derived_id(common, self.protocol):
             _fail("benchmark_comparison_identity_mismatch")
 
@@ -119,7 +120,8 @@ class BenchmarkComparisonPlan:
     def from_dict(cls, value: object) -> BenchmarkComparisonPlan:
         item = _strict(value, {"schema_version", "protocol", "comparison_id", "common", "arms"}, {"schema_version", "protocol", "comparison_id", "common", "arms"})
         raw = item["arms"]
-        if not isinstance(raw, list): _fail("benchmark_comparison_invalid")
+        if not isinstance(raw, list) or not 2 <= len(raw) <= 16:
+            _fail("benchmark_comparison_invalid")
         arms: list[ComparisonArm] = []
         for entry in raw:
             part = _strict(entry, {"id", "envelope"}, {"id", "envelope"})
@@ -128,7 +130,7 @@ class BenchmarkComparisonPlan:
 
     @classmethod
     def from_envelopes(cls, envelopes: Mapping[str, BenchmarkTaskEnvelope]) -> BenchmarkComparisonPlan:
-        if len(envelopes) < 2:
+        if not isinstance(envelopes, Mapping) or not 2 <= len(envelopes) <= 16:
             _fail("benchmark_comparison_invalid")
         arms = tuple(ComparisonArm(key, value) for key, value in envelopes.items())
         first = arms[0].envelope
@@ -147,10 +149,10 @@ class BenchmarkComparisonPlan:
 def parse_benchmark_comparison_plan(source: str | os.PathLike[str] | Mapping[str, object]) -> BenchmarkComparisonPlan:
     if isinstance(source, Mapping):
         return BenchmarkComparisonPlan.from_dict(dict(source))
-    path = Path(source).expanduser()
-    if path.is_symlink() or not path.is_file(): _fail("benchmark_comparison_invalid")
-    try: content = path.read_bytes()
-    except OSError: _fail("benchmark_comparison_invalid")
+    try:
+        content = _files.read_regular_file(_files.absolute_path(source), 256 * 1024)
+    except _files.BenchmarkFileError as exc:
+        _fail("benchmark_comparison_too_large" if exc.reason == "too_large" else "benchmark_comparison_invalid")
     if not content or len(content) > 256 * 1024: _fail("benchmark_comparison_too_large")
     def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
         result: dict[str, object] = {}
@@ -163,8 +165,37 @@ def parse_benchmark_comparison_plan(source: str | os.PathLike[str] | Mapping[str
         payload = json.loads(content.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
     except BenchmarkComparisonError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError): _fail("benchmark_comparison_invalid")
+    except (UnicodeDecodeError, ValueError, RecursionError): _fail("benchmark_comparison_invalid")
     return BenchmarkComparisonPlan.from_dict(payload)
+
+
+def validate_benchmark_comparison_plan(plan: BenchmarkComparisonPlan) -> BenchmarkComparisonPlan:
+    """Return an independent, strictly revalidated plan without reading any files.
+
+    A frozen DTO can still contain mutable mappings or be modified through object-level
+    operations. Rebuild its full JSON structure, then require every arm to match the frozen
+    common task, model, evaluator, candidate and budget identities before it is admitted or
+    used to bind a result. Construction alone keeps allowing plans to be drafted for validation.
+    """
+    if not isinstance(plan, BenchmarkComparisonPlan):
+        _fail("benchmark_comparison_invalid")
+    try:
+        # The JSON round trip also detaches nested common mappings from the caller's object.
+        parsed = BenchmarkComparisonPlan.from_dict(json.loads(_canonical(plan.to_dict())))
+        for arm in parsed.arms:
+            env = arm.envelope
+            if (env.contract_sha256 != parsed.common["contract_sha256"]
+                    or env.comparison_digest() != parsed.common["task_comparison_sha256"]
+                    or env.model.to_dict() != parsed.common["model"]
+                    or env.evaluator.to_dict() != parsed.common["evaluator"]
+                    or dict(env.candidate) != parsed.common["candidate"]
+                    or env.budget.to_dict() != parsed.common["budget"]):
+                _fail("benchmark_comparison_identity_mismatch")
+        return parsed
+    except BenchmarkComparisonError:
+        raise
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RecursionError):
+        _fail("benchmark_comparison_invalid")
 
 
 def admit_benchmark_comparison_plan(
@@ -172,27 +203,16 @@ def admit_benchmark_comparison_plan(
     contract_sha256: str, input_root: str | os.PathLike[str], model_profile_sha256: str,
     evaluator_fingerprint: str, budget: PhysicalAttemptBudget | Mapping[str, object] | None = None,
 ) -> AdmittedBenchmarkComparison:
-    parsed = plan if isinstance(plan, BenchmarkComparisonPlan) else parse_benchmark_comparison_plan(plan)
+    parsed = validate_benchmark_comparison_plan(
+        plan if isinstance(plan, BenchmarkComparisonPlan) else parse_benchmark_comparison_plan(plan)
+    )
     expected_budget = budget if isinstance(budget, PhysicalAttemptBudget) else (PhysicalAttemptBudget.from_dict(dict(budget)) if budget is not None else None)
     admitted: list[AdmittedComparisonArm] = []
-    baseline: str | None = None
     for arm in parsed.arms:
         env = arm.envelope
-        if env.contract_sha256 != parsed.common["contract_sha256"] or env.comparison_digest() != parsed.common["task_comparison_sha256"]:
-            _fail("benchmark_comparison_identity_mismatch")
-        if env.model.to_dict() != parsed.common["model"] or env.evaluator.to_dict() != parsed.common["evaluator"] or dict(env.candidate) != parsed.common["candidate"] or env.budget.to_dict() != parsed.common["budget"]:
-            _fail("benchmark_comparison_identity_mismatch")
-        # Reparse the canonical DTO before admission so object-level mutations cannot bypass
-        # strict field validation or alter the comparison identity.
-        canonical_env = BenchmarkTaskEnvelope.from_dict(env.to_dict())
-        result = admit_benchmark_task_envelope(canonical_env, contract_sha256=contract_sha256, input_root=input_root, model_profile_sha256=model_profile_sha256, evaluator_fingerprint=evaluator_fingerprint, budget=expected_budget)
-        baseline = baseline or env.comparison_digest()
-        if baseline != env.comparison_digest(): _fail("benchmark_comparison_identity_mismatch")
+        result = admit_benchmark_task_envelope(env, contract_sha256=contract_sha256, input_root=input_root, model_profile_sha256=model_profile_sha256, evaluator_fingerprint=evaluator_fingerprint, budget=expected_budget)
         admitted.append(AdmittedComparisonArm(arm.id, result.envelope_sha256, result.comparison_sha256))
-    derived = _derived_id(parsed.common, parsed.protocol)
-    if parsed.comparison_id != derived:
-        _fail("benchmark_comparison_identity_mismatch")
     return AdmittedBenchmarkComparison(parsed.comparison_id, tuple(admitted), parsed.arms[0].envelope.budget.attempts)
 
 
-__all__ = ["AdmittedBenchmarkComparison", "BenchmarkComparisonError", "BenchmarkComparisonPlan", "ComparisonArm", "admit_benchmark_comparison_plan", "parse_benchmark_comparison_plan"]
+__all__ = ["AdmittedBenchmarkComparison", "BenchmarkComparisonError", "BenchmarkComparisonPlan", "ComparisonArm", "admit_benchmark_comparison_plan", "parse_benchmark_comparison_plan", "validate_benchmark_comparison_plan"]

@@ -58,6 +58,14 @@ reads for result JSON and evidence. It also rejects observed file or directory r
 same-size rewrites, malformed scalar fields and null explicit binding roots. Legacy digest-only
 receipt identities remain compatible; result/evidence paths now share the strict no-symlink boundary.
 
+## 2026-09-15：exact comparison plan binding
+
+Feature 101 adds a complete canonical plan pin to new result receipts. It rejects reuse after a
+same-named arm changes benchmark release/publication or swaps its envelope with another arm. The
+explicit caller pin can require that binding; legacy receipts remain readable with `plan_bound:
+false`. Plan/task DTO replay and bounded descriptor reads cover the static admission path. This is
+measurement preparation, not a live experiment or evidence that external frameworks improved results.
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)

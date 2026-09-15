@@ -34,6 +34,7 @@ from .benchmark_comparison import (
     ComparisonArm,
     admit_benchmark_comparison_plan,
     parse_benchmark_comparison_plan,
+    validate_benchmark_comparison_plan,
 )
 from .benchmark_result import (
     BenchmarkComparisonResult,
@@ -424,4 +425,5 @@ __all__ = [
     "run_subject_adapter",
     "source_only_dependency_sha256",
     "stage_candidate_inputs",
+    "validate_benchmark_comparison_plan",
 ]
