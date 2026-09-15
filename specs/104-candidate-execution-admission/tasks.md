@@ -1,0 +1,6 @@
+- [x] T104-01 Freeze execution-admission schema, limits, and error codes.
+- [ ] T104-02 Implement immutable DTOs and canonical path-free admission digest.
+- [ ] T104-03 Add bounded optional input-byte verification using shared no-follow reader.
+- [ ] T104-04 Add static CLI/API before normal Store/home initialization.
+- [ ] T104-05 Add offline structural/filesystem/side-effect tests and installed CLI fixture.
+- [ ] T104-06 Run full regression and update public documentation and handoff.

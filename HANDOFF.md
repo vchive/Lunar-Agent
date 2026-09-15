@@ -13,6 +13,10 @@
 或 materialization ledger。聚焦回归 `266 passed, 1 skipped`，Ruff 和 compileall 通过；安装 CLI
 fixture 已确认只复制声明文件、入口不执行且不创建 home。全仓回归与本地提交已完成，未 push。
 
+下一阶段草案：`specs/104-candidate-execution-admission/` 定义静态 execution admission，准备绑定
+Feature 103 plan、逻辑输入字节、依赖/环境/evaluator/output contract pin 与有界预算。按当前决策
+只完成路线图和草案，未实现 104 代码、CLI 或测试；不应把草案描述成已有 runner 授权或执行能力。
+
 ## Feature 102：多文件候选源码包（已完成，2026-09-15）
 
 新增独立 `CandidateSourceBundle`，把问题 contract、entrypoint 以及每个声明源码文件的

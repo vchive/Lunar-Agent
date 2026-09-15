@@ -86,6 +86,19 @@ bundle/contract、entrypoint、文件表摘要、显式 runner、超时、输出
 执行 entrypoint、不初始化 Store/home，也不产生 Candidate、receipt 或 archive。多文件执行、
 exact evaluator、依赖/环境真实性和恢复关联仍需后续 Feature。
 
+## 下一阶段：Feature 104 candidate execution admission（草案，未实现）
+
+已冻结草案位于 [specs/104-candidate-execution-admission](../specs/104-candidate-execution-admission/)。
+它承接 Feature 103 的 path-free workspace plan，准备在未来 runner 启动前绑定逻辑输入文件的
+目标/大小/SHA-256、dependency/environment identity、exact evaluator pin、output-contract pin
+和有界 process budget，并可在 caller 提供物理 input root 时做 no-follow 有界字节复核。该层只
+产生静态、可重放的 admission digest，不启动命令、不 import 候选、不安装依赖、不调用 evaluator、
+不初始化 Store/home，也不写 Candidate、receipt、archive、resume 或 materialization ledger。
+
+当前只完成设计草案和边界审阅，未实现代码、CLI 或测试；因此不宣称已有 execution admission
+能力。后续实现必须继续保持离线、无模型/远程服务/真实框架依赖，并在独立 Feature 中处理输入
+staging、真实 runner、exact evaluator、execution evidence 与恢复协议。
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)
