@@ -78,6 +78,14 @@ Feature 102 新增独立 `CandidateSourceBundle` 和静态 `candidate-bundle val
 receipt/archive/resume 关联，之后才可接 DGM 等 repository producer。ADAS/EvoAgentX
 的 workflow graph 也需要独立候选契约。真实框架对照测量仍未完成，本功能无效果结论。
 
+## 2026-09-15：候选源码 workspace 物化
+
+Feature 103 新增 `candidate-bundle materialize` 和独立 workspace plan。它把 Feature 102
+已验证的声明文件复制到新建私有目录，逐文件重新校验并在失败时清理半成品；plan 绑定
+bundle/contract、entrypoint、文件表摘要、显式 runner、超时、输出上限和环境摘要。命令不
+执行 entrypoint、不初始化 Store/home，也不产生 Candidate、receipt 或 archive。多文件执行、
+exact evaluator、依赖/环境真实性和恢复关联仍需后续 Feature。
+
 ## AlphaEvolve 与 OpenEvolve 的关系
 
 [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/)

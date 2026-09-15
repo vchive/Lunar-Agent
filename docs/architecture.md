@@ -411,7 +411,9 @@ are verified.
 The static `candidate-bundle validate` CLI dispatches before config/Store initialization. It returns
 only status, digests and counts. This separate contract leaves the single-file Candidate,
 SeedManifest and ProducerResultEnvelope unchanged; repository execution, workflow graphs and
-multi-file evaluator admission require subsequent designs.
+multi-file evaluator admission require subsequent designs. Feature 103 adds an isolated
+`candidate-bundle materialize` boundary that copies verified bytes into a fresh private workspace
+and validates a path-free runner plan, without execution, import, evaluation, or registration.
 
 ### Frozen effect protocols
 

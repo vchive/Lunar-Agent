@@ -1156,6 +1156,20 @@ Unlisted files are ignored. The result covers declared bytes observed per file, 
 repository snapshot or dependency/environment verification. See the
 [offline quickstart](specs/102-candidate-source-bundle/quickstart.md) for manifest construction.
 
+Feature [103](specs/103-candidate-workspace-materialization/) adds a separate materialization
+boundary:
+
+```bash
+lunar-agent candidate-bundle materialize bundle.json --source-root ./source \
+  --contract contract.json --workspace-root ./workspaces \
+  --command /usr/bin/python main.py --json
+```
+
+It copies only the already verified files into a fresh private directory, rechecks destination
+bytes, and returns bundle/file-table metadata plus a path-free plan digest. It never starts the
+command, imports the entrypoint, initializes home/Store, or creates a Candidate, receipt, or
+archive. Runner, evaluator, dependency, environment, and recovery integration remain later work.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

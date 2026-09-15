@@ -1,5 +1,17 @@
 # Lunar-Agent 交接记录
 
+## Feature 103：候选 workspace 物化（进行中，2026-09-15）
+
+已冻结并开始实现独立的 `candidate_workspace.py`：将 Feature 102 已验证的多文件 bundle
+复制到新建私有目录，逐文件 no-follow 有界读取、独占写入、fsync 和目标重读校验，失败清理
+全部临时目录。`CandidateWorkspacePlan` 绑定 contract/bundle、entrypoint、排序文件表摘要、
+显式绝对 runner、空默认环境、超时和输出上限；不含本地 workspace 路径。
+
+静态命令为 `candidate-bundle materialize MANIFEST --source-root ROOT --contract CONTRACT
+--workspace-root ROOT --command /usr/bin/python ... --json`。它不启动进程、不 import/evaluate、
+不初始化 Store/home、不写 Candidate/receipt/archive，也不改变现有 Candidate、SeedManifest
+或 materialization ledger。当前聚焦测试已通过，仍需完成 CLI fixture、全仓回归和本地提交。
+
 ## Feature 102：多文件候选源码包（已完成，2026-09-15）
 
 新增独立 `CandidateSourceBundle`，把问题 contract、entrypoint 以及每个声明源码文件的

@@ -1,0 +1,5 @@
+- [ ] T103-01 Freeze workspace and plan contracts.
+- [ ] T103-02 Implement static plan DTO and canonical file-table digest.
+- [ ] T103-03 Implement bounded materialization and failure cleanup.
+- [ ] T103-04 Add API, CLI, and focused filesystem tests.
+- [ ] T103-05 Run quickstart, lint, full regression, and update project documentation.

@@ -879,6 +879,20 @@ def build_parser() -> argparse.ArgumentParser:
     validate_bundle_parser.add_argument("--bundle-sha256", help="optional caller-pinned canonical bundle digest")
     _add_home(validate_bundle_parser)
     _add_json(validate_bundle_parser)
+    materialize_bundle_parser = candidate_bundle_commands.add_parser(
+        "materialize", help="copy declared source files into a private workspace without execution",
+    )
+    materialize_bundle_parser.add_argument("manifest", type=Path, help="candidate source bundle JSON")
+    materialize_bundle_parser.add_argument("--source-root", type=Path, required=True, help="root containing declared source files")
+    materialize_bundle_parser.add_argument("--contract", type=Path, required=True, help="algorithm contract JSON")
+    materialize_bundle_parser.add_argument("--workspace-root", type=Path, required=True, help="existing directory for private workspaces")
+    materialize_bundle_parser.add_argument("--bundle-sha256", help="optional caller-pinned canonical bundle digest")
+    materialize_bundle_parser.add_argument("--command", dest="planned_command", nargs="+", required=True, help="planned absolute runner command; never started")
+    materialize_bundle_parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    materialize_bundle_parser.add_argument("--max-output-bytes", type=int, default=1024 * 1024)
+    materialize_bundle_parser.add_argument("--environment-json", type=Path, help="optional explicit environment object JSON")
+    _add_home(materialize_bundle_parser)
+    _add_json(materialize_bundle_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -3938,6 +3952,42 @@ def _candidate_bundle_validate(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _candidate_bundle_materialize(args: argparse.Namespace) -> dict[str, object]:
+    from ._benchmark_files import absolute_path, read_regular_file
+    from .candidate_bundle import MAX_CANDIDATE_BUNDLE_BYTES, parse_candidate_source_bundle
+    from .candidate_workspace import (
+        build_candidate_workspace_plan,
+        materialize_candidate_source_bundle,
+    )
+
+    try:
+        content = read_regular_file(absolute_path(args.contract), MAX_CONTRACT_BYTES)
+        contract = AlgorithmProblemContract.from_dict(_strict_json_loads(content))
+        bundle = parse_candidate_source_bundle(args.manifest)
+        environment: dict[str, str] = {}
+        if args.environment_json is not None:
+            raw = read_regular_file(absolute_path(args.environment_json), MAX_CANDIDATE_BUNDLE_BYTES)
+            value = _strict_json_loads(raw)
+            if not isinstance(value, dict):
+                raise ValueError
+            environment = value
+        plan = build_candidate_workspace_plan(
+            bundle, command=args.planned_command, timeout_seconds=args.timeout_seconds,
+            max_output_bytes=args.max_output_bytes, environment=environment,
+            contract_sha256=contract.digest(), expected_bundle_sha256=args.bundle_sha256,
+        )
+        result = materialize_candidate_source_bundle(
+            bundle, source_root=args.source_root, workspace_root=args.workspace_root,
+            contract_sha256=contract.digest(), expected_bundle_sha256=args.bundle_sha256,
+        )
+    except Exception as exc:
+        from .candidate_workspace import CandidateWorkspaceError
+        if isinstance(exc, CandidateWorkspaceError):
+            raise
+        raise ValueError("candidate_workspace_invalid") from None
+    return {**result.to_dict(), "plan_sha256": plan.digest(), "workspace_path": str(result.workspace_path)}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -4014,10 +4064,13 @@ def main(argv: list[str] | None = None) -> int:
             _emit(_benchmark_comparison_validate_result(args), args.json)
             return 0
         if args.command == "candidate-bundle":
-            if args.candidate_bundle_command != "validate":
-                raise ValueError("candidate_bundle_invalid")
-            _emit(_candidate_bundle_validate(args), args.json)
-            return 0
+            if args.candidate_bundle_command == "validate":
+                _emit(_candidate_bundle_validate(args), args.json)
+                return 0
+            if args.candidate_bundle_command == "materialize":
+                _emit(_candidate_bundle_materialize(args), args.json)
+                return 0
+            raise ValueError("candidate_bundle_invalid")
         config = _config(args)
         if args.command == "init":
             _emit({"home": str(config.home), "status": "initialized"}, args.json)
