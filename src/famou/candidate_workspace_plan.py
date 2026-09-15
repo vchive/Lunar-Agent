@@ -277,7 +277,7 @@ def build_candidate_workspace_plan(
         parsed = bundle if isinstance(bundle, CandidateSourceBundle) else parse_candidate_source_bundle(bundle)
         parsed = validate_candidate_source_bundle(parsed)
         if contract_sha256 is None:
-            contract_sha256 = parsed.contract_sha256
+            _fail("invalid")
         contract = _digest(contract_sha256)
         if contract != parsed.contract_sha256:
             _fail("contract_mismatch")

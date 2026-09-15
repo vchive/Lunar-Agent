@@ -25,7 +25,7 @@ def _read_source(root: Path, item: CandidateSourceFile) -> bytes:
     return data
 
 def materialize_candidate_source_bundle(bundle: CandidateSourceBundle | Mapping[str, object] | str | os.PathLike[str], *, source_root: str | os.PathLike[str], workspace_root: str | os.PathLike[str], contract_sha256: str | None = None, expected_bundle_sha256: str | None = None) -> VerifiedCandidateWorkspace:
-    if contract_sha256 is None: raise CandidateWorkspaceError("candidate_workspace_contract_required")
+    if contract_sha256 is None: raise CandidateWorkspaceError("candidate_workspace_invalid")
     try: source_path=Path(_files.absolute_path(source_root)); source_chain=DirectoryChain(source_path,"candidate_workspace_source_unsafe")
     except Exception: raise CandidateWorkspaceError("candidate_workspace_source_unsafe") from None
     try: parent_path=Path(_files.absolute_path(workspace_root)); parent_chain=DirectoryChain(parent_path,"candidate_workspace_workspace_root_unsafe")
