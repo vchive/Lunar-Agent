@@ -16,6 +16,13 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-16：修复后独立验收
+
+Feature 115 固定 `5e2568f`，沿用 113 全部任务/模型/预算条件独立登记，两例完成仍为
+**0/2**。预算选择通过合同编译后 evaluator 请求超时；工作分配合同请求超时。仅已知
+8625 tokens，超时消费未知。见 [115 报告](../specs/115-isolated-intake-acceptance/postrun/report.md)。
+下一步先修复 dependency waiting 误报用户等待和准备失败缺持久诊断的问题，不补旧槽。
+
 ## 2026-09-16：合同编译入口修复
 
 Feature 114 将合同编译接到已有 stateless runtime 协议入口，消除普通 Agent 的最终总结

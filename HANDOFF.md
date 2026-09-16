@@ -6,21 +6,26 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
-## Feature 115：修复后的独立验收登记（2026-09-16）
+## Feature 115：修复后真实验收 0/2，一例通过合同编译（2026-09-16）
 
-以 `5e2568f` 为固定产品版本，独立登记原两道 GLM-5.2 自动多文件任务，任务/输入、
-顺序、网关、模型、所有预算、population 2+1/seed 113、oracle 和 holdout 与 113 完全
-一致。113 保持原来的 0/2，不补槽、不合并分母。新脚本仅复用已绑定字节的旧 task、guard、
-analyze helper，并使用独立 115 根目录和新登记；不调用旧 campaign 的执行入口。
+`acfb815` 先推送登记再运行，产品固定 `5e2568f`；原两道 GLM-5.2 任务、输入、预算、
+网关、population 2+1/seed 113 与 oracle/holdout 均与 113 一致。预算选择通过合同编译，
+随后 evaluator compiler 请求触及 180 秒 HTTP 超时；工作分配在合同编译请求超时。
+最终仍 **0/2**，没有冻结 evaluator、候选或交付，24 个 holdout 未运行，质量均 null。
 
-增加被动私有响应诊断：密钥遮盖后最多 64 KiB UTF-8 文本前缀、原文大小/摘要、截断和
-工具调用数；不改变 native 请求、返回对象、用量、评分或错误，不反馈给模型，诊断 IO
-失败只标记不可用。它不是原始 HTTP 响应，也不保存隐藏推理。后续可据此诊断格式失败。
+总计三次请求，一次已接受 glm-5.2 响应、两次 timeout。已知用量小计 8625 tokens
+（input 1109/output 7516），两次超时消费未知，不能当作零；费用未知。任务耗时
+300.944、180.943 秒，guard 停止后续请求，无补槽、澄清、回退或自动重试，无已观察残留
+进程。私有响应诊断保留一份完整 5768-byte 合同文本，不反馈模型；超时没有响应可留存。
 
-登记摘要 `a4be47bfc2d6d02446fac1834f34ce8176a92017694cb6d71f8508e364f8a6c9`。
-168 项离线相关测试通过，Ruff/compileall/Specify/diff 检查通过。先提交并 push 登记，
-再各运行一次并保留全部失败；本准备段落不代表已启动或取得成绩。实际结果见后续
-`specs/115-isolated-intake-acceptance/postrun/`，冻结测量不改写。
+168 项相关离线测试和预启动审计通过，登记/产品/旧历史均未改。详见
+`specs/115-isolated-intake-acceptance/postrun/report.md`。113 与 115 保持各自 /2 分母，
+不能声称修复已提升整体完成率，也没有 WebAgent/普通模式对照。
+
+新确认问题：evaluator 准备失败仅写 stderr/空 CLI JSON，无持久失败事件；父任务保留
+合同但误为 awaiting_input。Store 将 DAG dependency waiting 误认作用户问题，pending_input
+返回 question=null，answer 可能误接收答复。下一步区分真实输入等待并记录可恢复准备失败，
+不永久废弃已有合同，也不重开冻结 115 槽位。
 
 ## Feature 114：合同编译协议隔离（2026-09-16）
 

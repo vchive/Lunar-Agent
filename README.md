@@ -1376,6 +1376,10 @@ retains its tools. Describe the required input schema and objective in the goal 
 clarifications; the isolated compiler does not inspect staged files. Invalid responses still fail
 without an automatic repair request. The repair has offline coverage; a new preregistered run is
 required to measure its real-model effect. See [114 verification](specs/114-isolated-contract-intake/quickstart.md).
+The separately registered [115 follow-up](specs/115-isolated-intake-acceptance/postrun/report.md)
+also completed 0/2: one accepted contract reached evaluator preparation, then timed out; the other
+contract request timed out. Known usage is only a subtotal. Generated evaluator quality and
+successful real multi-file delivery remain unverified.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
