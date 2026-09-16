@@ -1419,6 +1419,11 @@ without rerunning the program. This proves the declared file count, not helper i
 Unsupported source, soft source and execution requirements still stop before evaluator generation.
 See [119 source verification](specs/119-source-file-verification/quickstart.md).
 
+The separately registered [120 real acceptance](specs/120-supported-scope-acceptance/postrun/report.md)
+completed **0/2** on the supported file-count scope. Both contracts compiled; both evaluator-generation
+requests timed out at 600 seconds before any candidate or delivery. Known usage was 16,161 tokens;
+timeout consumption and cost are unknown. This does not establish real multi-file reliability.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

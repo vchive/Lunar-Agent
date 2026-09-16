@@ -23,4 +23,15 @@ Logs: `/private/tmp/lunar120-focused.log`, `/private/tmp/lunar120-focused.xml`,
 `/private/tmp/lunar120-new.log`, `/private/tmp/lunar120-new.xml`,
 `/private/tmp/lunar120-quickstart.log`. These local paths are not portable product evidence.
 
-Real outcomes will be recorded in a new postrun report without modifying the frozen registration.
+## After launch
+
+Registration was pushed as `f3b575c5bf86019b27529339c88f6f936a779654` before either slot.
+Both slots ran once: primary/envelope 0/2, contract compilation succeeded, evaluator requests
+returned transport timeouts at 600.004/600.003 seconds. No evaluator, candidate, delivery or
+holdout execution; quality/gap null. Four requests have a known 16,161-token subtotal and two
+unknown-consumption timeouts. Workers exited 1; supervisor completed successfully; cleanup passed.
+
+Read-only evidence audit matched all 46 retained files (size/SHA), 77 product pins, 19 measurement
+pins and 46 historical pins. Two complete private response bodies are 3,817/6,626 bytes and match
+retained SHA256 metadata. No response text was published. Measured results, diagnostics and
+file inventory are retained in [postrun report](postrun/report.md); original registration unchanged.
