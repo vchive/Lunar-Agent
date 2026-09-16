@@ -19,8 +19,7 @@ strict accepted contract. The compiled contracts contained the registered hard
 requirement was added. Neither evaluator compiler request returned a response within the fixed
 600-second limit. Both ended as `transport_timeout` during `open_response` at about 600.003
 seconds. No evaluator bundle, candidate, output delivery, source evidence, holdout audit or
-quality score was produced. The campaign process exited with code1 after bounded cleanup and
-reported no remaining observed processes.
+quality score was produced. Each worker exited with code1 after bounded cleanup; the campaign supervisor completed both slots and reported no remaining observed processes.
 
 There were four provider requests: two completed contract responses and two timeouts. Known
 usage is 2,881 input + 13,280 output = **16,161 tokens**. Usage for timeout requests and total
