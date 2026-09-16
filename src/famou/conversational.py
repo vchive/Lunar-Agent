@@ -476,7 +476,9 @@ class RuntimeContractCompiler:
             )
         prompt = self._prompt(goal, answer)
         try:
-            result = self.runtime.run(prompt, workspace, timeout)
+            isolated = getattr(self.runtime, "run_isolated", None)
+            invoke = isolated if callable(isolated) else self.runtime.run
+            result = invoke(prompt, workspace, timeout)
         except Exception as exc:
             raise ContractCompilationError(
                 f"compiler runtime failed: {type(exc).__name__}: {_safe_error(exc)}"
@@ -497,19 +499,47 @@ class RuntimeContractCompiler:
             else ""
         )
         return (
-            "You are Lunar-Agent's algorithm contract compiler. Return exactly one JSON object and no markdown. "
-            "Use status=needs_input with one to four concise question objects when a material input, objective, "
-            "hard constraint, or deliverable is unknown. Never invent user-confirmed constraints or data fields. "
-            "Use status=compiled only when the nested contract is complete and conforms to this schema: "
-            "schema_version, problem_id, problem_type (scheduling|routing|packing|assignment|forecasting|network_flow|continuous), "
-            "statement, inputs (relative path, format, fields), decision_variables, objective (name,direction), "
-        "hard_constraints and soft_constraints (id,description,source,verification,result_fields), "
-        "outputs (path under output/, format json|jsonl|csv|text, optional fields, required, description), "
-            "success_criteria, deliverables, assumptions, and optional evolution. New evolution must use "
-            "strategy=population (the default) or explicit strategy=openevolve; never emit the retired strategy=loop. "
-            "Constraint source must explicitly be "
-            "user_confirmed, data_observed, or explicit_assumption. Questions have {question, options}. "
-            "The top-level envelope is either {status,contract,evidence} or {status,questions,evidence}.\n\n"
+            "You are Lunar-Agent's algorithm contract compiler. Return exactly one strict JSON object "
+            "and no markdown, code fences, surrounding prose, or tool calls. Use only the goal and "
+            "explicit user answer below; do not inspect files or use memory or prior session history. "
+            "Use status=needs_input when a material input schema, objective, hard constraint, or "
+            "deliverable is unknown. Never invent user-confirmed constraints or data fields.\n\n"
+            "Envelope schema (no additional keys):\n"
+            '- For status="needs_input", include questions: an array of one to four objects with '
+            'question (non-empty string) and optional options (array of at most ten unique non-empty '
+            'strings). Do not include contract.\n'
+            '- For status="compiled", include contract: a complete object with the schema below. '
+            'Do not include questions.\n'
+            "- Either envelope may include evidence: an array of non-empty strings.\n\n"
+            "Contract schema (no additional keys):\n"
+            '- schema_version: string "1". problem_id: a safe identifier string. '
+            'problem_type: one of "scheduling", "routing", "packing", "assignment", '
+            '"forecasting", "network_flow", "continuous". statement: a non-empty string.\n'
+            "- inputs: a non-empty array of objects with path (relative path string), format "
+            "(string), fields (non-empty object mapping field-name strings to description strings, "
+            "not an array), and optional key (a declared field-name string or null).\n"
+            "- decision_variables, success_criteria, deliverables: non-empty arrays of strings. "
+            "assumptions: an optional array of strings.\n"
+            '- objective: an object with name (string), direction ("maximize" or "minimize"), '
+            'and optional metrics (array of objects with name, direction, weight). Each metric name '
+            'is a unique string, direction is "maximize" or "minimize", and weight is a finite '
+            "non-negative JSON number; a non-empty metrics array must have positive total weight.\n"
+            "- hard_constraints and soft_constraints: arrays of objects with id (unique safe "
+            "identifier string), description (string), source "
+            '("user_confirmed", "data_observed", or "explicit_assumption"), verification '
+            '("independent", "partial", or "solver"), and optional result_fields '
+            "(array of field-name strings). Use empty arrays when no constraints are specified.\n"
+            "- outputs: an optional array of objects with path (unique relative path string below "
+            'output/), format ("json", "jsonl", "csv", or "text"), optional fields (array of '
+            "unique field-name strings, not an object; empty for text), optional required (JSON "
+            "boolean, default true), and optional description (string).\n"
+            "- evolution: an optional object with only strategy, max_rounds, stagnation_rounds. "
+            'strategy is "population" (default) or "openevolve"; never emit the retired "loop". '
+            "max_rounds is an integer from 1 to 10000 (default 5). stagnation_rounds is an integer "
+            "from 1 to 1000 (default 3). These integers must not be booleans, strings, or decimals. "
+            "Omit evolution or unspecified settings to retain their defaults. Do not add "
+            "population_size, offspring_per_iteration, islands, migration, seed, or other engine "
+            "settings to the contract.\n\n"
             f"User goal:\n{goal}{answer_section}"
         )
 

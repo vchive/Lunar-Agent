@@ -1370,6 +1370,13 @@ still needs successful real-model validation; local fixtures do not establish ef
 relative WebAgent performance. Active-process cancellation orchestration and OpenEvolve/Shinka
 multi-file seed imports remain future work.
 
+Feature 114 fixes the confirmed intake integration problem: contract compilation uses a stateless
+protocol call when supported and receives explicit JSON field/type guidance. Ordinary solving
+retains its tools. Describe the required input schema and objective in the goal or answer intake
+clarifications; the isolated compiler does not inspect staged files. Invalid responses still fail
+without an automatic repair request. The repair has offline coverage; a new preregistered run is
+required to measure its real-model effect. See [114 verification](specs/114-isolated-contract-intake/quickstart.md).
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

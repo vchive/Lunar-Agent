@@ -209,7 +209,7 @@ def test_automatic_solve_delivers_scored_bundle_and_resumes_without_compilation(
     assert (copied / "source/solve/helper.py").read_text().endswith("return 9\n")
     assert (copied / "evaluation/evaluator.py").read_bytes() == (parent / "evaluator-bundle/evaluator.py").read_bytes()
     assert (runtime.contract_calls, runtime.bundle_calls, runtime.audit_calls, runtime.generator_calls) == (1, 1, 1, 4)
-    assert runtime.isolated_calls == 2
+    assert runtime.isolated_calls == 3
     store = Store(tmp_path / "home/state.db")
     events = store.list_events(first["run_id"])
     rows = store.list_artifacts(first["run_id"])

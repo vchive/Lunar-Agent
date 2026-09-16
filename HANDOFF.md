@@ -6,6 +6,25 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 114：合同编译协议隔离（2026-09-16）
+
+针对 113 后离线确认的入口接线问题，`RuntimeContractCompiler` 优先使用 callable
+`run_isolated`，不再把协议编译交给普通 Agent 的总结提示、工具、记忆和历史。旧 runtime
+没有该能力时继续 `run`，已有隔离调用失败不回退、不重试。mock 与普通求解保持原路径。
+提示词补齐严格 envelope、字段类型及 evolution 的唯一三字段、范围和默认值；严格 JSON、
+未知字段/退役策略拒绝和 needs_input 均保留，不自动修复模型输出。
+
+新增 28 项测试，相关五文件 91 项通过，覆盖真实 Hermes+离线模型的实际请求、预算、
+无工具/历史/记忆、澄清回答、普通工具循环、subprocess 兼容和同 run 终态零重编译。
+产品冻结后全仓 **5517 passed, 1 skipped in 378.36s**，JUnit 零失败/错误；已有 112
+quickstart、Ruff、compileall、installed CLI、Specify、105 个文档链接与 diff 检查通过。
+完整验证记录见 `specs/114-isolated-contract-intake/validation.md`。
+
+该修复不等于已证明真实有效率提升。113 仍是 `c977eb4` 的冻结 0/2，不改写、不补槽；
+下一步以修复后的提交独立登记新验收。当前编译只使用 goal/answer，材料不足需澄清，
+尚无向编译器传入已观察 input profile、失败原始响应留存或编译用量持久总账的新实现。
+运行配置 fingerprint 不代表产品字节；保留旧指纹以支持已编译/终态恢复。
+
 ## Feature 113：当前版本真实多文件验收 0/2（2026-09-16）
 
 登记 `10b844b` 先推送后运行，产品固定 `c977eb4`。预算选择与工作分配各一次真实

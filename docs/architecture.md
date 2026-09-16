@@ -53,6 +53,12 @@ flowchart TD
 ```
 
 The ordinary task runtime and the evolution runtime share the repository-owned adapter boundary.
+Contract intake uses the adapter's optional `run_isolated` capability when available: one stateless
+protocol response, without the ordinary assistant system prompt, tools, memory or history.
+Adapters without that capability retain `run`; an isolated error never triggers a fallback call.
+The compiler consumes the bounded goal and clarification answer, validates strict JSON, and asks
+for missing material facts through `needs_input`. It does not inspect input files in this step.
+
 For an evolution run, `--agent-runtime` constructs a fresh runtime-backed Agent adapter for each
 unbound role and sends it through the existing strict candidate-generation/evaluation bridges:
 
