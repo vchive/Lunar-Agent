@@ -6,6 +6,22 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 115：修复后的独立验收登记（2026-09-16）
+
+以 `5e2568f` 为固定产品版本，独立登记原两道 GLM-5.2 自动多文件任务，任务/输入、
+顺序、网关、模型、所有预算、population 2+1/seed 113、oracle 和 holdout 与 113 完全
+一致。113 保持原来的 0/2，不补槽、不合并分母。新脚本仅复用已绑定字节的旧 task、guard、
+analyze helper，并使用独立 115 根目录和新登记；不调用旧 campaign 的执行入口。
+
+增加被动私有响应诊断：密钥遮盖后最多 64 KiB UTF-8 文本前缀、原文大小/摘要、截断和
+工具调用数；不改变 native 请求、返回对象、用量、评分或错误，不反馈给模型，诊断 IO
+失败只标记不可用。它不是原始 HTTP 响应，也不保存隐藏推理。后续可据此诊断格式失败。
+
+登记摘要 `a4be47bfc2d6d02446fac1834f34ce8176a92017694cb6d71f8508e364f8a6c9`。
+168 项离线相关测试通过，Ruff/compileall/Specify/diff 检查通过。先提交并 push 登记，
+再各运行一次并保留全部失败；本准备段落不代表已启动或取得成绩。实际结果见后续
+`specs/115-isolated-intake-acceptance/postrun/`，冻结测量不改写。
+
 ## Feature 114：合同编译协议隔离（2026-09-16）
 
 针对 113 后离线确认的入口接线问题，`RuntimeContractCompiler` 优先使用 callable
