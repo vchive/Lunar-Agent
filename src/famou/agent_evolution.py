@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from statistics import median
+from typing import TYPE_CHECKING
 
 from .agents import AgentAdapter, AgentError, AgentRegistry, AgentRequest, AgentResult
 from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract, EvaluationReport
@@ -21,6 +22,9 @@ from .evolution import (
     GenerationRequest,
     stage_candidate_inputs,
 )
+
+if TYPE_CHECKING:
+    from .bundle_evolution import MultiFileCandidatePipeline
 
 MAX_GENERATION_PROMPT_BYTES = 60 * 1024
 MAX_CONTEXT_ITEMS = 8
@@ -219,6 +223,7 @@ class AgentCandidateGenerator:
         timeout: float | None = None,
         inputs: Sequence[CandidateInputArtifact] = (),
         scoring: SolverScoringContract | None = None,
+        bundle_pipeline: MultiFileCandidatePipeline | None = None,
     ) -> None:
         self.adapter = AgentRegistry([adapter]).select(role, tuple(required_capabilities))
         self.contract = contract
@@ -231,6 +236,17 @@ class AgentCandidateGenerator:
         self.scoring = scoring
         if any(not isinstance(item, CandidateInputArtifact) for item in self.inputs):
             raise TypeError("inputs must contain CandidateInputArtifact records")
+        self.bundle_pipeline = bundle_pipeline
+        self._bundle_identity = None
+        if bundle_pipeline is not None:
+            from .agent_bundle_generation import bundle_generator_identity
+            from .bundle_evolution import MultiFileCandidatePipeline
+
+            if not isinstance(bundle_pipeline, MultiFileCandidatePipeline) or not isinstance(contract, AlgorithmProblemContract):
+                raise TypeError("bundle generation requires a pipeline and algorithm contract")
+            if scoring is not None or self.inputs:
+                raise ValueError("bundle generation cannot use single-file inputs or scoring source")
+            self._bundle_identity = bundle_generator_identity(bundle_pipeline, contract)
         self._calls = 0
         self._observer: AgentEvidenceObserver | None = None
 
@@ -245,6 +261,10 @@ class AgentCandidateGenerator:
 
     def __call__(self, request: GenerationRequest) -> CandidateDraft:
         self._calls += 1
+        if self.bundle_pipeline is not None:
+            from .agent_bundle_generation import generate_bundle_candidate
+
+            return generate_bundle_candidate(self, request)
         generation_workspace = (
             request.workspace
             / "evolution"
@@ -453,6 +473,10 @@ class AgentCandidateGenerator:
         return prompt
 
     def _draft(self, text: str) -> CandidateDraft:
+        if self.bundle_pipeline is not None:
+            from .agent_bundle_generation import parse_bundle_agent_draft
+
+            return parse_bundle_agent_draft(text, adapter_name=self.adapter.name)
         stripped = text.strip()
         if not stripped:
             raise EvolutionError("agent returned empty candidate source")

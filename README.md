@@ -1296,10 +1296,33 @@ original inode-bound execution/evaluation evidence stays at its retained locatio
 not rerun the candidate. Follow the standalone [109 quickstart](specs/109-bundle-population-integration/quickstart.md)
 to run the complete path locally without a model or external framework.
 
-This is an explicit local bundle mode. Normal solving remains the default. Automatic Agent-based
-multi-file generation, default task routing and parent-run delivery are still separate work;
-OpenEvolve/Shinka seed imports still accept single-file candidates. These local fixtures do not
-establish current-model effectiveness or relative WebAgent performance.
+Feature 110 lets the existing Agent worker generate the complete bundle. Select an Agent command
+instead of a request-file generator, or use the native runtime directly:
+
+```bash
+lunar-agent evolve-bundle contract.json --profile bundle-profile.json --workspace ./bundle-run \
+  --agent-runtime openai-compatible --agent-runtime-endpoint YOUR_ENDPOINT \
+  --agent-runtime-model YOUR_MODEL --agent-runtime-loop \
+  --destination-root ./deliveries --json
+```
+
+The Agent receives the contract, verified input copies, complete parent source and independent
+score feedback in a fresh workspace. Its bounded prompt points to full context files when source
+does not fit inline. The evaluator implementation is not staged for the Agent. Bundle responses
+must include every source file and the entrypoint; the shared Agent response limit is 1 MiB.
+The fixed local pipeline still executes and scores each candidate independently.
+
+`--agent-command` uses the existing JSON AgentRequest stdin interface; `--agent-runtime subprocess`
+uses a native worker receiving the prompt on stdin. These are mutually exclusive with the original
+`--generator-command`. Python callers select the same path with
+`AgentCandidateGenerator(adapter, contract=contract, bundle_pipeline=pipeline)`. The standalone
+[110 quickstart](specs/110-agent-bundle-generation/quickstart.md) validates native runtime generation,
+helper-only improvement, complete delivery and terminal resume using local processes only.
+
+This is an explicit bundle mode. Normal solving remains the default; default task routing,
+parent-run delivery and evaluator preparation still need integration. OpenEvolve/Shinka seed
+imports remain single-file. Local fixtures do not establish current-model effectiveness or
+relative WebAgent performance.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

@@ -1,5 +1,45 @@
 # Lunar-Agent 交接记录
 
+## 当前协作约定更新（2026-09-16）
+
+用户已明确允许“该 push 就 push，不用存太多”。后续完成且通过验证的工作应正常 commit
+并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
+不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
+
+## Feature 110：Agent 自动生成多文件候选（2026-09-16）
+
+`AgentCandidateGenerator(..., bundle_pipeline=pipeline)` 已接通固定 profile 的多文件生成。
+新增 `agent_bundle_generation.py`，每次创建私有 `.bundle-generation-*` 目录，保存完整
+contract、已验证输入、完整父代源码 map/独立文件和已验证的局部分数反馈。提示词仍限
+60 KiB，大上下文通过 `context/context.json` 引用读取；父代完整 map 位于
+`context/parent/files.json`，输入副本位于 `context/inputs/<target>`。候选真实执行仍从
+`LUNAR_CANDIDATE_INPUT_ROOT` 读独立 staged input。评测器实现不复制到 solver context。
+
+Agent 只返回一个完整 `{entrypoint, files, metadata?, experiment?}` JSON；重复键、混合
+单/多文件字段、路径/大小错误均拒绝，保留旧 experiment/playbook/search directive。
+AgentResult 原有 1 MiB 文本上限仍有效，不等于底层 bundle 的 16 MiB 全容量。调用前后
+复验原始证据与 staged context；生成失败不会变成 score。旧单文件行为保持兼容。
+`CommandAgentAdapter` 直接返回 bundle 时保留原始 JSON，避免丢失 helper 或提前吞掉重复键。
+
+`evolve-bundle` 现在在 `--generator-command`、`--agent-command`、`--agent-runtime` 三种
+方式中明确选一。原生 runtime 支持 subprocess/openai-compatible 及已有有界工具循环；
+参数和未使用的选项先于 home/Store 校验，相对 workspace 正常使用。不同生成方式/模型/
+循环设置参与身份绑定，原 command fingerprint 不变；跨方式不能恢复旧 run。独立评测
+仍由显式 profile 负责，Agent 自报分数无权参与选优。通用 mock 不保证输出有效 bundle，
+本轮 native runtime 验收使用真实本地 subprocess 与离线模型替身。
+
+本地真实 Agent/runtime fixture 已完成四个双文件候选、helper-only 改进、独立分数
+**1、2、0、9**、完整交付及 terminal resume；越界候选自报高分仍未入选。独立可运行
+`specs/110-agent-bundle-generation/quickstart.py` 评分 **1、2、6、7**，交付 7 分候选；
+恢复前后 Agent/candidate 次数均 **4 → 4**。产品冻结后全仓 **5187 passed, 1 skipped in
+284.75s**（含新增 74 项），JUnit 零失败/错误。Ruff、compileall、Specify、installed CLI、
+quickstart 和文档链接检查通过，冻结测量相对 `027a235` 未变。最终验证记录见该目录
+`validation.md`。
+
+本轮先将既有 40 个已验证提交推送到 origin/main（`d863df6`），继续按用户新指示推送
+本功能。没有真实 provider/外部框架/WebAgent 调用或新效果测量。下一步接正常任务路由、
+evaluator 准备和 parent-run 的交付/统一恢复；外部 producer 的多文件 seed 导入尚未接通。
+
 ## Feature 109：多文件原生 population 与完整交付（2026-09-16）
 
 已把 Feature 103–108 接入现有 population/archive/controller，新增 `bundle_evolution.py`

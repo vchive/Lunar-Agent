@@ -2,8 +2,8 @@
 
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
-Feature 108/109 已完成多文件评测、原生 population 选优和显式本地交付；下一步聚焦
-普通任务入口、Agent 多文件生成和恢复编排，外部 producer 的多文件接线仍未完成；
+Feature 108–110 已完成多文件评测、Agent 生成、原生 population 选优和显式本地交付；
+下一步聚焦普通任务入口和恢复编排，外部 producer 的多文件接线仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
@@ -14,6 +14,19 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-16：Agent 自动多文件生成
+
+Feature 110 将 `AgentCandidateGenerator` 接入 bundle pipeline。用户可选择 Agent command
+或 native runtime，Agent 在新工作目录读取完整父代源码、已验证输入和独立评分反馈，
+返回完整源码 map；固定的本地 evaluator 继续独立评分。大源码通过完整 context 文件读取，
+提示词保留有界摘要，评测器实现不进入 solver context。CLI 的 generation 模式与设置参与
+恢复身份，原 command 模式保持兼容，terminal resume 不再调用 Agent 或候选。
+
+本地 command/subprocess runtime fixture 和完整交付已提供可运行
+[110 quickstart](../specs/110-agent-bundle-generation/quickstart.md)。这一轮不运行真实模型或
+外部框架，不能作为真实效果增益。正常任务路由、evaluator 准备和统一恢复继续接线。
+已按用户新指示推送已验证的工作，后续不再长期积累本地提交。
 
 ## 2026-09-16：多文件原生 population 与完整交付
 

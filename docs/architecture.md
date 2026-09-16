@@ -557,6 +557,31 @@ Output snapshots remain evaluation-time observations; the new integration does n
 host interpreter/dependency closure or add an OS sandbox. The runnable fixture and current validation
 are in `specs/109-bundle-population-integration/`.
 
+### Agent-generated source bundles
+
+Feature 110 adds `bundle_pipeline` as an explicit `AgentCandidateGenerator` option. The normal
+single-file worker behavior stays unchanged. Bundle generation uses a fresh private directory and
+stages verified inputs, the complete parent source map and individual source files, contract and
+bounded independent feedback. Full context lives in `context/context.json`; a bounded prompt gives
+inline summaries and references to complete files. Existing experiment metadata, search directives
+and problem-family playbooks remain useful across generations. Evaluator implementation and the
+private evaluation directory are not copied into the solver workspace.
+
+The worker is told to return one complete `{entrypoint, files, metadata?, experiment?}` object and
+to read execution inputs through `LUNAR_CANDIDATE_INPUT_ROOT`. Strict parsing rejects malformed,
+duplicate or mixed single-/multi-file responses; `CandidateDraft.from_files` checks the complete
+map. The existing AgentResult 1 MiB response limit and 60 KiB generation prompt limit still apply.
+Original and staged inputs/parent context are rechecked around generation. Worker failures cannot
+turn into candidate scores, and the Feature 109 pipeline remains the only execution/evaluation path.
+
+`CommandAgentAdapter` preserves direct bundle JSON without discarding helper files or normalizing
+away duplicate keys before strict bundle validation. Explicit AgentResult text envelopes continue to
+work. `RuntimeAgentAdapter` uses the same generator with its existing runtime/text protocol and
+optional tool loop. `evolve-bundle` selects exactly one command, Agent command or native runtime;
+mode-specific fingerprints protect resume while retaining the original command-mode fingerprint.
+The evaluator profile remains explicit. Normal task routing and parent-run recovery/delivery are
+later integrations, and no current-model effectiveness is inferred from local worker fixtures.
+
 ### Frozen effect protocols
 
 The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be

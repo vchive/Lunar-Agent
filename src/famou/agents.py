@@ -527,6 +527,11 @@ class CommandAgentAdapter:
             text = payload["text"]
         elif "result" in payload:
             text = payload["result"]
+        elif "files" in payload:
+            # Bundle generation validates the complete object itself. Preserve its original
+            # JSON so duplicate fields and mixed single-/multi-file shapes cannot be erased
+            # by adapter normalization before the bundle parser sees them.
+            text = output
         elif "source" in payload:
             # Preserve optional candidate filename/metadata for AgentCandidateGenerator while
             # keeping the shared AgentResult text contract unchanged.

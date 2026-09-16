@@ -26,6 +26,7 @@ from .agents import (
     DEFAULT_RUNTIME_CAPABILITIES,
     AgentError,
     AgentRegistry,
+    AgentRequest,
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
@@ -435,7 +436,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bundle_evolve_parser.add_argument("contract", type=Path, help="algorithm contract JSON")
     bundle_evolve_parser.add_argument("--profile", type=Path, required=True, help="bundle pipeline profile JSON")
-    bundle_evolve_parser.add_argument("--generator-command", required=True, help="explicit generator command receiving a request JSON path")
+    bundle_generator = bundle_evolve_parser.add_mutually_exclusive_group(required=True)
+    bundle_generator.add_argument("--generator-command", help="explicit generator command receiving a request JSON path")
+    bundle_generator.add_argument("--agent-command", help="explicit solver Agent command receiving an Agent request on stdin")
+    bundle_generator.add_argument("--agent-runtime", choices=("mock", "subprocess", "openai-compatible"), help="repository runtime used only to generate candidate source")
+    bundle_evolve_parser.add_argument("--agent-name", help="solver Agent name (default: bundle-agent)")
+    bundle_evolve_parser.add_argument("--agent-role", help="solver Agent role (default: solver)")
+    bundle_evolve_parser.add_argument("--agent-capability", dest="agent_capabilities", action="append", default=[])
+    bundle_evolve_parser.add_argument("--agent-runtime-command", help="explicit command for the subprocess runtime")
+    bundle_evolve_parser.add_argument("--agent-runtime-endpoint", help="OpenAI-compatible model endpoint")
+    bundle_evolve_parser.add_argument("--agent-runtime-model", help="OpenAI-compatible model name")
+    bundle_evolve_parser.add_argument("--agent-runtime-api-key", help="optional model API key")
+    bundle_evolve_parser.add_argument("--agent-runtime-loop", action="store_true", help="enable the bounded model tool loop")
+    bundle_evolve_parser.add_argument("--agent-runtime-max-steps", type=int, help="model tool-loop step limit (default: 40, maximum: 200)")
+    bundle_evolve_parser.add_argument("--agent-runtime-allow-exec", action="store_true", help="allow command execution within the model tool loop")
+    bundle_evolve_parser.add_argument("--agent-runtime-memory", action="store_true", help="enable durable memory within the model tool loop")
+    bundle_evolve_parser.add_argument("--agent-runtime-session-history", action="store_true", help="retain a bounded model tool-loop transcript")
     bundle_evolve_parser.add_argument("--workspace", type=Path, required=True, help="evolution workspace")
     bundle_evolve_parser.add_argument("--resume", action="store_true", help="validate and resume the existing run")
     bundle_evolve_parser.add_argument("--run-id", help="existing run ID required with --resume")
@@ -2630,6 +2646,115 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
     }
 
 
+def _prepare_bundle_generator(args: argparse.Namespace, contract, pipeline):
+    """Validate one source producer before initialization; evaluation stays in the profile."""
+    runtime_name = args.agent_runtime
+    runtime_command = _parse_command(args.agent_runtime_command, "--agent-runtime-command")
+    runtime_options = (
+        args.agent_runtime_command, args.agent_runtime_endpoint,
+        args.agent_runtime_model, args.agent_runtime_api_key,
+    )
+    step_option = args.agent_runtime_max_steps
+    if step_option is not None and not 1 <= step_option <= 200:
+        raise ValueError("--agent-runtime-max-steps must be between 1 and 200")
+    loop_options = (
+        args.agent_runtime_allow_exec, args.agent_runtime_memory,
+        args.agent_runtime_session_history, step_option is not None,
+    )
+    if runtime_name is None and (
+        any(value is not None for value in runtime_options)
+        or args.agent_runtime_loop or any(loop_options)
+    ):
+        raise ValueError("bundle runtime options require --agent-runtime")
+    if args.agent_runtime_loop and runtime_name != "openai-compatible":
+        raise ValueError("--agent-runtime-loop requires --agent-runtime openai-compatible")
+    if any(loop_options) and not args.agent_runtime_loop:
+        raise ValueError("bundle runtime loop options require --agent-runtime-loop")
+    args.agent_runtime_max_steps = 40 if step_option is None else step_option
+    if runtime_name != "subprocess" and args.agent_runtime_command is not None:
+        raise ValueError("--agent-runtime-command requires --agent-runtime subprocess")
+    if runtime_name == "subprocess" and not runtime_command:
+        raise ValueError("--agent-runtime subprocess requires --agent-runtime-command")
+    if runtime_name != "openai-compatible" and any(
+        value is not None for value in (
+            args.agent_runtime_endpoint, args.agent_runtime_model, args.agent_runtime_api_key,
+        )
+    ):
+        raise ValueError("endpoint/model/API-key options require --agent-runtime openai-compatible")
+
+    if args.generator_command is not None:
+        if args.agent_name is not None or args.agent_role is not None or args.agent_capabilities:
+            raise ValueError("solver Agent options require --agent-command or --agent-runtime")
+        command = _parse_command(args.generator_command, "--generator-command")
+        generator = CommandCandidateGenerator(command, args.timeout)
+        fingerprint = _adapter_fingerprint(
+            command, kind="bundle-generator", name="command-generator", role="solver",
+        )
+        return generator, fingerprint, None
+
+    name = "bundle-agent" if args.agent_name is None else args.agent_name
+    role = "solver" if args.agent_role is None else args.agent_role
+    if not name:
+        raise ValueError("bundle solver Agent name must not be empty")
+    required = tuple(args.agent_capabilities)
+    declared = tuple(sorted(set(DEFAULT_RUNTIME_CAPABILITIES) | set(required)))
+    # Validate roles, duplicate capabilities and timeout before any state or Agent invocation.
+    AgentRequest("bundle-preflight", "generator", role, "Validate source generation options.",
+                 required_capabilities=required, workspace=args.workspace, timeout=args.timeout)
+
+    def wrap(adapter):
+        return AgentCandidateGenerator(
+            adapter, contract=contract, role=role, required_capabilities=required,
+            timeout=args.timeout, bundle_pipeline=pipeline,
+        )
+
+    if args.agent_command is not None:
+        command = _parse_command(args.agent_command, "--agent-command")
+        adapter = CommandAgentAdapter(command, name=name, roles=(role,), capabilities=declared)
+        return wrap(adapter), _adapter_fingerprint(
+            command, kind="bundle-agent-generator", name=name, role=role,
+            required_capabilities=required,
+        ), None
+
+    if runtime_name == "subprocess":
+        # The generic subprocess runtime accepts PATH lookups; this explicit local entry requires
+        # the same existing absolute executable boundary as its other source producers.
+        CommandAgentAdapter(runtime_command, name=name, roles=(role,), capabilities=declared)
+    endpoint, model, api_key = (
+        args.agent_runtime_endpoint, args.agent_runtime_model, args.agent_runtime_api_key,
+    )
+    if runtime_name == "openai-compatible":
+        if any(value is not None and not value.strip() for value in (endpoint, model)):
+            raise ValueError("bundle runtime endpoint and model must not be empty")
+        endpoint = endpoint or os.environ.get("FAMOU_MODEL_ENDPOINT")
+        model = model or os.environ.get("FAMOU_MODEL") or "local"
+        if api_key is None:
+            api_key = os.environ.get("FAMOU_AGENT_RUNTIME_API_KEY")
+    runtime = build_runtime(runtime_name, runtime_command or None, endpoint, model, api_key)
+    generator = wrap(RuntimeAgentAdapter(runtime, name=name, roles=(role,), capabilities=declared))
+    runtime_fingerprint = _runtime_fingerprint(
+        runtime_name, command=runtime_command, endpoint=endpoint, model=model, name=name,
+        role=role, required_capabilities=required, agent_loop=args.agent_runtime_loop,
+        loop_max_steps=args.agent_runtime_max_steps, loop_allow_exec=args.agent_runtime_allow_exec,
+        loop_memory=args.agent_runtime_memory, loop_session_history=args.agent_runtime_session_history,
+    )
+    fingerprint = hashlib.sha256(json.dumps(
+        {"protocol": "lunar-bundle-agent-generator-v1", "runtime_fingerprint": runtime_fingerprint},
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    if not args.agent_runtime_loop:
+        return generator, fingerprint, None
+
+    def initialize_loop(config):
+        # Memory initialization happens only after all profile, Agent and strategy checks pass.
+        loop = _build_evolution_runtime(
+            config, args, runtime_name, runtime_command, endpoint, model, api_key,
+        )
+        return wrap(RuntimeAgentAdapter(loop, name=name, roles=(role,), capabilities=declared))
+
+    return generator, fingerprint, initialize_loop
+
+
 def _evolve_bundle(args: argparse.Namespace) -> dict[str, object]:
     """Validate an explicit multi-file profile before creating its ledger-backed run."""
     from ._benchmark_files import absolute_path, read_regular_file
@@ -2648,7 +2773,8 @@ def _evolve_bundle(args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("bundle_evolution_requires_population")
     pipeline = load_bundle_pipeline(args.profile)
     candidate_output_contract_sha256(contract.outputs)
-    command = _parse_command(args.generator_command, "--generator-command")
+    args.workspace = absolute_path(args.workspace)
+    generator, generator_fingerprint, initialize_loop = _prepare_bundle_generator(args, contract, pipeline)
     evolution_config = pipeline.configure(EvolutionConfig(
         strategy="population",
         max_rounds=(contract.evolution.max_rounds if args.max_rounds is None else args.max_rounds),
@@ -2661,19 +2787,19 @@ def _evolve_bundle(args: argparse.Namespace) -> dict[str, object]:
         migration_rate=args.migration_rate,
         rng_seed=args.seed,
         timeout_seconds=args.timeout,
-        generator_fingerprint=_adapter_fingerprint(
-            command, kind="bundle-generator", name="command-generator", role="solver",
-        ),
+        generator_fingerprint=generator_fingerprint,
     ))
-    generator = CommandCandidateGenerator(command, args.timeout)
-    workspace = absolute_path(args.workspace)
+    workspace = args.workspace
     if args.destination_root is not None:
         from ._candidate_workspace_io import DirectoryChain
 
         # A misspelled delivery destination must not spend a generation/evaluation budget.
         destination = DirectoryChain(absolute_path(args.destination_root), "destination_changed")
         destination.close()
-    controller = LocalController(_config(args), build_runtime("mock", None, None, None, None))
+    config = _config(args)
+    if initialize_loop is not None:
+        generator = initialize_loop(config)
+    controller = LocalController(config, build_runtime("mock", None, None, None, None))
     if args.resume:
         run = controller.store.get_run(args.run_id)
         if run is None:
