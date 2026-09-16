@@ -92,6 +92,14 @@ def _validated(controller, parent_id, child_id, contract, result=None):
     actual = controller._algorithm_contract(parent)
     if actual is None or actual.digest() != contract.digest():
         _fail("contract_mismatch")
+    parent_events = controller.store.list_events(parent.id)
+    if any(event.get("type") == "bundle_profile_prepared" or (
+        event.get("type") == "evolution_requested" and isinstance(event.get("payload"), dict)
+        and event["payload"].get("bundle_mode") == "compiled"
+    ) for event in parent_events):
+        from .automatic_solve_bundle import validate_automatic_solve_bundle
+
+        validate_automatic_solve_bundle(controller.store, parent.id)
     expected_child = files.absolute_path(parent.workspace) / "evolution-run"
     child_root = files.absolute_path(child.workspace)
     for root in (expected_child, child_root):

@@ -240,6 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="compile, preflight, and freeze a local evaluator before native evolution",
     )
     solve_parser.add_argument("--bundle-profile", type=Path, help="explicit multi-file execution and exact evaluator profile for --evolve")
+    solve_parser.add_argument("--multi-file", action="store_true", help="generate complete source bundles with an automatically compiled and frozen evaluator")
     solve_parser.add_argument("--max-rounds", type=int)
     solve_parser.add_argument("--stagnation-rounds", type=int)
     solve_parser.add_argument("--population-size", type=int)
@@ -289,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     resume_parser = subparsers.add_parser("resume", help="recover and continue a run")
     resume_parser.add_argument("run_id")
     resume_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a conversational multi-file evolution run")
+    resume_parser.add_argument("--multi-file", action="store_true", help="continue an automatically prepared multi-file solve")
     _add_runtime_options(resume_parser)
     _add_home(resume_parser)
     _add_json(resume_parser)
@@ -807,6 +809,7 @@ def build_parser() -> argparse.ArgumentParser:
     answer_parser.add_argument("run_id")
     answer_parser.add_argument("answer", nargs="?", help="answer text, or '-' to read stdin")
     answer_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a pending multi-file evolution handoff")
+    answer_parser.add_argument("--multi-file", action="store_true", help="continue an automatically prepared multi-file solve")
     answer_parser.add_argument(
         "--evaluator-command",
         help="explicit local objective harness for a pending native evolution handoff",
@@ -1904,6 +1907,9 @@ def _stage_input_files(
 
 def _prepare_conversational_bundle(args: argparse.Namespace) -> None:
     """Load explicit bundle authority without retaining local profile paths in run events."""
+    if getattr(args, "multi_file", False):
+        _validate_automatic_bundle_options(args)
+        return
     path = getattr(args, "bundle_profile", None)
     if path is None:
         return
@@ -1926,7 +1932,35 @@ def _prepare_conversational_bundle(args: argparse.Namespace) -> None:
     args._bundle_profile_sha256 = bundle_pipeline_sha256(pipeline)
 
 
+def _validate_automatic_bundle_options(args) -> None:
+    if args.command == "solve" and not (args.evolve or args.resume):
+        raise ValueError("--multi-file requires --evolve")
+    if getattr(args, "detach", False):
+        raise ValueError("--multi-file does not support --detach")
+    if (getattr(args, "bundle_profile", None) is not None
+            or getattr(args, "evaluator_command", None)
+            or getattr(args, "openevolve_command", None)
+            or getattr(args, "strategy", None) not in {None, "population"}):
+        raise ValueError("--multi-file requires native population and its automatically compiled evaluator")
+
+
 def _validate_conversational_bundle_request(args, request) -> None:
+    mode = request.get("bundle_mode") if request is not None else None
+    if request is not None and "bundle_mode" in request:
+        if (mode != "compiled" or request.get("compile_evaluator") is not True
+                or "bundle_profile_sha256" in request
+                or request.get("evaluator_command_configured") is not False
+                or request.get("openevolve_command_configured") is not False
+                or request.get("strategy") not in {None, "population"}):
+            raise EvolutionError("solve_bundle_mode_invalid")
+        _validate_automatic_bundle_options(args)
+        args.multi_file = True
+        args.compile_evaluator = True
+        return
+    if getattr(args, "multi_file", False) and (
+        request is not None or args.command in {"answer", "resume"} or getattr(args, "resume", False)
+    ):
+        raise EvolutionError("solve_bundle_mode_mismatch")
     expected = request.get("bundle_profile_sha256") if request is not None else None
     supplied = getattr(args, "_bundle_profile_sha256", None)
     if request is not None and "bundle_profile_sha256" in request and (
@@ -1951,7 +1985,7 @@ def _bind_conversational_bundle_inputs(args, store, parent) -> None:
 
 def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Compile and execute one conversational algorithm mission."""
-    if args.compile_evaluator and not args.evolve:
+    if args.compile_evaluator and not (args.evolve or args.resume):
         raise ValueError("--compile-evaluator requires --evolve")
     if not args.evolve and any(
         getattr(args, name, None) is not None
@@ -1997,6 +2031,8 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         if manifest is not None and manifest.get("runtime_fingerprint") not in {None, fingerprint}:
             raise ValueError("solve resume compiler runtime does not match the existing run")
         evolution_request = _latest_evolution_request(controller.store, run.id)
+        if args.compile_evaluator and not args.evolve and evolution_request is None:
+            raise ValueError("--compile-evaluator requires an existing evolution handoff")
         if args.evolve and evolution_request is None:
             controller.store.append_event(
                 run.id,
@@ -2005,10 +2041,12 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 event_id="event-evolution-request-" + hashlib.sha256(run.id.encode()).hexdigest(),
             )
             evolution_request = _evolution_request_payload(args)
-        if args.evolve and evolution_request is not None:
+        if (args.evolve or args.compile_evaluator) and evolution_request is not None:
             _validate_evolution_override(args, evolution_request)
         _validate_conversational_bundle_request(args, evolution_request)
-        if evolution_request is not None and "bundle_profile_sha256" in evolution_request:
+        if evolution_request is not None and (
+            "bundle_profile_sha256" in evolution_request or "bundle_mode" in evolution_request
+        ):
             _validate_evolution_override(args, evolution_request)
         _validate_conversational_bundle_link(args, controller.store, run)
         _stage_input_files(run, controller.store, args.input_files)
@@ -2075,10 +2113,12 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
         "timeout": args.timeout if args.timeout is not None else 900.0,
         "openevolve_command_configured": bool(args.openevolve_command),
         "evaluator_command_configured": bool(args.evaluator_command),
-        "compile_evaluator": bool(getattr(args, "compile_evaluator", False)),
+        "compile_evaluator": bool(getattr(args, "compile_evaluator", False) or getattr(args, "multi_file", False)),
     }
     if getattr(args, "_bundle_profile_sha256", None) is not None:
         payload["bundle_profile_sha256"] = args._bundle_profile_sha256
+    if getattr(args, "multi_file", False):
+        payload["bundle_mode"] = "compiled"
     return payload
 
 
@@ -2196,6 +2236,7 @@ def _evolution_args(
         if name in request and request[name] is not None:
             values[name] = request[name]
     values["compile_evaluator"] = bool(request.get("compile_evaluator", False))
+    values["multi_file"] = request.get("bundle_mode") == "compiled"
     return argparse.Namespace(**values)
 
 
@@ -2274,8 +2315,12 @@ def _validate_solve_bundle_child(store, parent, child, contract, *, linked_requi
 
 
 def _validate_conversational_bundle_link(args, store, parent):
-    if getattr(args, "_bundle_pipeline", None) is None:
+    if getattr(args, "_bundle_pipeline", None) is None and not getattr(args, "multi_file", False):
         return
+    if getattr(args, "multi_file", False):
+        from .automatic_solve_bundle import validate_automatic_solve_bundle
+
+        validate_automatic_solve_bundle(store, parent.id)
     from ._benchmark_files import absolute_path
     from ._candidate_workspace_io import DirectoryChain
 
@@ -2338,6 +2383,18 @@ def _solve_evolution(
     strategy_name = args.strategy or contract.evolution.strategy
     if strategy_name == "loop":
         raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
+    if getattr(args, "multi_file", False):
+        if strategy_name != "population":
+            raise EvolutionError("solve_bundle_requires_population")
+        if not contract.outputs:
+            raise EvolutionError("solve_bundle_outputs_required")
+        _validate_conversational_bundle_link(args, controller.store, parent)
+        from .automatic_solve_bundle import prepare_automatic_solve_bundle
+
+        args._bundle_pipeline = prepare_automatic_solve_bundle(
+            controller, parent.id, contract,
+            timeout_seconds=args.timeout if args.timeout is not None else 900.0,
+        )
     bundle_pipeline = getattr(args, "_bundle_pipeline", None)
     if bundle_pipeline is not None:
         if strategy_name != "population":
@@ -4877,8 +4934,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
         if args.command == "resume":
             evolution_request = _latest_evolution_request(Store(config.database), args.run_id)
-            if getattr(args, "bundle_profile", None) is not None or (
-                evolution_request is not None and "bundle_profile_sha256" in evolution_request
+            if getattr(args, "bundle_profile", None) is not None or getattr(args, "multi_file", False) or (
+                evolution_request is not None and (
+                    "bundle_profile_sha256" in evolution_request or "bundle_mode" in evolution_request
+                )
             ):
                 values = vars(build_parser().parse_args([
                     "solve", "--resume", "--run-id", args.run_id,

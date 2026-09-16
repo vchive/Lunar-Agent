@@ -43,6 +43,8 @@ MAX_EVALUATOR_OUTPUT_BYTES = 64 * 1024
 MAX_IDENTIFIER_BYTES = 128
 MAX_SOLVER_EVALUATOR_EXCERPT_BYTES = 12 * 1024
 BUNDLE_PROTOCOL = "frozen-evaluator-bundle-v2"
+SNAPSHOT_BUNDLE_PROTOCOL = "frozen-evaluator-snapshot-v1"
+COMPILED_BUNDLE_EVALUATOR_ID = "compiled-bundle"
 BUNDLE_FILES = frozenset(
     {
         "audit.json",
@@ -189,10 +191,13 @@ class FrozenEvaluatorBundle:
     contract_sha256: str
     input_profile_sha256: str
     timeout_seconds: float = 900.0
+    invocation: str = "candidate"
 
     def __call__(
         self, candidate_path: Path, contract: AlgorithmProblemContract
     ) -> EvaluationReport:
+        if self.invocation != "candidate":
+            raise EvaluatorBundleError("snapshot evaluator requires independent candidate evaluation")
         if contract.digest() != self.contract_sha256:
             raise EvaluatorBundleError("frozen evaluator contract digest does not match")
         verified = load_evaluator_bundle(self.root, contract, timeout=self.timeout_seconds)
@@ -375,11 +380,18 @@ def compile_evaluator_bundle(
     *,
     inputs: tuple[CandidateInputArtifact, ...] = (),
     timeout: float = 900.0,
+    invocation: str = "candidate",
 ) -> FrozenEvaluatorBundle:
     """Compile and preflight a bundle, or verify and reuse an existing frozen bundle."""
     if not isinstance(contract, AlgorithmProblemContract):
         raise TypeError("contract must be an AlgorithmProblemContract")
     timeout = _timeout(timeout)
+    _bundle_protocol(invocation)
+    if invocation == "snapshot":
+        from .candidate_evaluation_spec import candidate_output_contract_sha256
+
+        candidate_output_contract_sha256(contract.outputs)
+        _snapshot_spec(b"# evaluator\n", timeout)
     raw_root = Path(workspace).expanduser()
     if raw_root.is_symlink():
         raise EvaluatorBundleError("evaluator bundle workspace must not be a symlink")
@@ -393,6 +405,7 @@ def compile_evaluator_bundle(
             contract,
             input_profile=profile,
             timeout=timeout,
+            invocation=invocation,
         )
 
     compiler_workspace = root / ".evaluator-compiler"
@@ -400,7 +413,7 @@ def compile_evaluator_bundle(
         raise EvaluatorBundleError("evaluator compiler workspace must not be a symlink")
     compiler_workspace.mkdir(parents=True, exist_ok=True)
     profile = _build_input_profile(root, contract, inputs)
-    prompt = _compiler_prompt(contract, profile)
+    prompt = _compiler_prompt(contract, profile, invocation=invocation)
     try:
         result = _run_isolated(runtime, prompt, compiler_workspace, timeout)
     except Exception as exc:
@@ -430,6 +443,7 @@ def compile_evaluator_bundle(
             staging,
             timeout,
             label="compiler",
+            invocation=invocation,
         )
         current = tuple(staging.iterdir())
         if {path.name for path in current} != set(frozen_inputs) or any(
@@ -447,6 +461,7 @@ def compile_evaluator_bundle(
             envelope.evaluator_source,
             root,
             timeout,
+            invocation=invocation,
         )
         audit_path.write_text(_canonical_probe_suite(audit_suite), encoding="utf-8")
         frozen_inputs[audit_path.name] = _sha256(audit_path)
@@ -457,6 +472,7 @@ def compile_evaluator_bundle(
             staging,
             timeout,
             label="audit",
+            invocation=invocation,
         )
         current = tuple(staging.iterdir())
         if {path.name for path in current} != set(frozen_inputs) or any(
@@ -473,6 +489,7 @@ def compile_evaluator_bundle(
             probes_path,
             audit_path,
             profile_path,
+            invocation=invocation,
         )
         manifest_path = staging / "manifest.json"
         manifest_path.write_text(
@@ -489,19 +506,19 @@ def compile_evaluator_bundle(
         ):
             path.chmod(0o444)
         staging.chmod(0o555)
-        load_evaluator_bundle(staging, contract, input_profile=profile, timeout=timeout)
+        load_evaluator_bundle(staging, contract, input_profile=profile, timeout=timeout, invocation=invocation)
         try:
             staging.replace(destination)
         except FileExistsError:
             _remove_tree(staging)
             return load_evaluator_bundle(
-                destination, contract, input_profile=profile, timeout=timeout
+                destination, contract, input_profile=profile, timeout=timeout, invocation=invocation,
             )
     except Exception:
         _remove_tree(staging)
         raise
     return load_evaluator_bundle(
-        destination, contract, input_profile=profile, timeout=timeout
+        destination, contract, input_profile=profile, timeout=timeout, invocation=invocation,
     )
 
 
@@ -511,9 +528,11 @@ def load_evaluator_bundle(
     *,
     input_profile: dict[str, object] | None = None,
     timeout: float = 900.0,
+    invocation: str = "candidate",
 ) -> FrozenEvaluatorBundle:
     """Load a frozen bundle after exact file, mode, schema, and digest verification."""
     timeout = _timeout(timeout)
+    protocol = _bundle_protocol(invocation)
     raw_root = Path(root).expanduser()
     if raw_root.is_symlink():
         raise EvaluatorBundleError("frozen evaluator bundle must not be a symlink")
@@ -553,7 +572,7 @@ def load_evaluator_bundle(
     }
     if not isinstance(manifest, dict) or set(manifest) != expected_keys:
         raise EvaluatorBundleError("frozen evaluator manifest has an invalid shape")
-    if manifest.get("schema_version") != "1" or manifest.get("protocol") != BUNDLE_PROTOCOL:
+    if manifest.get("schema_version") != "1" or manifest.get("protocol") != protocol:
         raise EvaluatorBundleError("frozen evaluator manifest protocol is unsupported")
     if manifest.get("contract_sha256") != contract.digest():
         raise EvaluatorBundleError("frozen evaluator contract digest does not match")
@@ -595,12 +614,15 @@ def load_evaluator_bundle(
     except (OSError, UnicodeDecodeError) as exc:
         raise EvaluatorBundleError("frozen evaluator source is unreadable") from exc
     _validate_source(source)
+    if invocation == "snapshot":
+        _snapshot_spec(source.encode("utf-8"), timeout)
     return FrozenEvaluatorBundle(
         root=root,
         fingerprint=manifest["bundle_sha256"],
         contract_sha256=manifest["contract_sha256"],
         input_profile_sha256=manifest["input_profile_sha256"],
         timeout_seconds=timeout,
+        invocation=invocation,
     )
 
 
@@ -840,6 +862,126 @@ def _validate_source(source: str) -> None:
         raise EvaluatorBundleError("evaluator source requires a normal script entry point")
 
 
+def _bundle_protocol(invocation: str) -> str:
+    if invocation not in ("candidate", "snapshot"):
+        raise ValueError("evaluator invocation must be candidate or snapshot")
+    return SNAPSHOT_BUNDLE_PROTOCOL if invocation == "snapshot" else BUNDLE_PROTOCOL
+
+
+def _snapshot_spec(source: bytes, timeout: float):
+    from .candidate_evaluation_spec import CandidateEvaluationSpec
+
+    return CandidateEvaluationSpec(
+        harness_sha256=hashlib.sha256(source).hexdigest(), harness_size=len(source),
+        command=(str(Path(sys.executable).resolve()), "-I"),
+        evaluator_id=COMPILED_BUNDLE_EVALUATOR_ID, timeout_seconds=timeout,
+        environment=(("LANG", "C.UTF-8"), ("LC_ALL", "C.UTF-8"),
+                     ("PYTHONHASHSEED", "0"), ("PYTHONIOENCODING", "utf-8")),
+    )
+
+
+def _snapshot_invocation_prompt() -> str:
+    return (
+        "The Python evaluator receives request.json as sys.argv[1], using protocol "
+        "lunar-candidate-evaluation-request-v1 and observation='evaluation-time'. Its cwd contains "
+        "only evaluator.py, request.json, declared inputs/<target>, and present output/<path> files. "
+        "The request includes contract, evaluator, inputs, outputs (path/present/size/sha256), and "
+        "binding digests. The evaluator must read inputs at inputs/<target> and outputs at their "
+        "declared paths; it must not read candidate source, data/raw, execution.json, or original "
+        "locations. It must leave every file unchanged and create no files. It must print only one JSON report containing exactly "
+        "schema_version='1', evaluator_id='compiled-bundle', validity (integer 0 or 1), quality, "
+        "combined_score, detailed_scores, and error_info, at most 32 KiB. Invalid reports must have "
+        "combined_score=0 and an explanatory error_info. Probe file declarations still use data/raw/ "
+        "and output/; preflight maps declared data/raw/<target> to inputs/<target>. Include no "
+        "undeclared probe files. Synthetic probes are not candidate execution evidence."
+    )
+
+
+def _snapshot_probe(evaluator, probe, contract, workspace, timeout):
+    """Run the actual 108 harness interface on synthetic data, without an execution record."""
+    from .algorithm import MAX_REPORT_BYTES
+    from .candidate_evaluation import (
+        _chain,
+        _format_valid,
+        _Observation,
+        _request_values,
+        _Resources,
+        _tree_names,
+    )
+    from .candidate_evaluation_spec import (
+        candidate_output_contract_sha256,
+        canonical_json,
+        parse_candidate_evaluation_report,
+    )
+    from .candidate_execution import CandidateExecutionInput, _inputs
+    from .candidate_execution_runner import _bounded_process_bytes, _Executable
+
+    try:
+        source = evaluator.read_bytes()
+        spec = _snapshot_spec(source, timeout)
+        supplied = {item.path: item.content.encode("utf-8") for item in probe.files}
+        declared = {"data/raw/" + item.path for item in contract.inputs} | {item.path for item in contract.outputs}
+        if set(supplied) - declared:
+            raise EvaluatorBundleError("snapshot probe contains undeclared files")
+        descriptors = _inputs(tuple(
+            CandidateExecutionInput(item.path, "synthetic_probe", len(supplied["data/raw/" + item.path]),
+                                    hashlib.sha256(supplied["data/raw/" + item.path]).hexdigest())
+            for item in contract.inputs
+        ))
+        outputs = []
+        for item in sorted(contract.outputs, key=lambda output: output.path):
+            content = supplied.get(item.path)
+            if not _format_valid(item, content):
+                raise EvaluatorBundleError("snapshot probe violates the declared output schema")
+            outputs.append({"path": item.path, "present": content is not None,
+                            "size": len(content) if content is not None else None,
+                            "sha256": hashlib.sha256(content).hexdigest() if content is not None else None})
+        input_table = [item.to_dict() for item in descriptors]
+        # These opaque synthetic identities are used only to exercise the request shape. No
+        # admission, launch/completion record, evaluation receipt, Store row or score is created.
+        binding = {key: hashlib.sha256(("synthetic-evaluator-probe:" + key).encode()).hexdigest()
+                   for key in ("workspace_plan_sha256", "admission_sha256", "bundle_sha256",
+                               "source_file_table_sha256", "launch_intent_sha256", "completion_sha256")}
+        binding.update(contract_sha256=contract.digest(), evaluator_fingerprint=spec.digest(),
+                       input_file_table_sha256=hashlib.sha256(canonical_json(input_table)).hexdigest(),
+                       output_contract_sha256=candidate_output_contract_sha256(contract.outputs))
+        request = {"protocol": "lunar-candidate-evaluation-request-v1", "schema_version": "1",
+                   "observation": "evaluation-time", "binding": binding, "contract": contract.to_dict(),
+                   "evaluator": spec.to_dict(), "inputs": input_table, "outputs": outputs}
+        _request_values(request)
+        copies = {("inputs/" + name.removeprefix("data/raw/")) if name.startswith("data/raw/") else name: content
+                  for name, content in supplied.items()}
+        copies.update({"request.json": canonical_json(request), "evaluator.py": source})
+        for name, content in copies.items():
+            target = workspace / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        with _Resources() as stack:
+            chain = _chain(workspace, stack)
+            observed = {name: _Observation(workspace / name, len(content), stack, code="snapshot_changed")
+                        for name, content in copies.items()}
+            if any(item.content != copies[name] for name, item in observed.items()):
+                raise EvaluatorBundleError("snapshot evaluator probe files changed")
+            _tree_names(chain, copies)
+            executable = _Executable(Path(spec.command[0]))
+            stack.callback(executable.close)
+            stdout, _, status, _, _ = _bounded_process_bytes(
+                [*spec.command, "evaluator.py", "request.json"], cwd=str(workspace),
+                environment=dict(spec.environment), timeout=spec.timeout_seconds,
+                output_limit=MAX_REPORT_BYTES, capture_limit=MAX_REPORT_BYTES,
+            )
+            if status != "succeeded":
+                raise EvaluatorBundleError("snapshot evaluator process failed or exceeded its limits")
+            report = parse_candidate_evaluation_report(stdout, evaluator_id=COMPILED_BUNDLE_EVALUATOR_ID)
+            for item in observed.values():
+                item.check()
+            executable.check()
+            _tree_names(chain, copies)
+        return report
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise EvaluatorBundleError("snapshot evaluator preflight failed") from exc
+
+
 def _preflight(
     evaluator: Path,
     suite: ProbeSuite,
@@ -848,12 +990,23 @@ def _preflight(
     timeout: float,
     *,
     label: str,
+    invocation: str = "candidate",
 ) -> None:
     reports: dict[str, EvaluationReport] = {}
     probe_root = staging / f".{label}-preflight"
     for probe in suite.probes:
         workspace = probe_root / probe.name
         workspace.mkdir(parents=True)
+        if invocation == "snapshot":
+            report = _snapshot_probe(evaluator, probe, contract, workspace, timeout)
+            reports[probe.name] = report
+            if report.validity != probe.expected_validity:
+                raise EvaluatorBundleError(f"{label} constraint probe {probe.name} returned wrong validity")
+            if probe.constraint_id is not None and not any(
+                item.get("code") == probe.constraint_id for item in report.error_info
+            ):
+                raise EvaluatorBundleError(f"{label} constraint probe {probe.name} did not report {probe.constraint_id}")
+            continue
         candidate = workspace / "candidate.py"
         candidate.write_text("# synthetic evaluator probe\n", encoding="utf-8")
         for item in probe.files:
@@ -991,10 +1144,12 @@ def _manifest(
     probes: Path,
     audit: Path,
     input_profile: Path,
+    *,
+    invocation: str = "candidate",
 ) -> dict[str, str]:
     identity = {
         "schema_version": "1",
-        "protocol": BUNDLE_PROTOCOL,
+        "protocol": _bundle_protocol(invocation),
         "contract_sha256": contract.digest(),
         "objective_sha256": _sha256(objective),
         "evaluator_sha256": _sha256(evaluator),
@@ -1017,12 +1172,12 @@ def _build_input_profile(
 
 
 def _compiler_prompt(
-    contract: AlgorithmProblemContract, input_profile: dict[str, object]
+    contract: AlgorithmProblemContract, input_profile: dict[str, object], *, invocation: str = "candidate",
 ) -> str:
     context = json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
     profile = json.dumps(input_profile, ensure_ascii=False, sort_keys=True, indent=2)
     profile_digest = profile_sha256(input_profile)
-    return (
+    prompt = (
         "You are compiling one frozen local evaluator bundle for a bounded algorithm evolution. "
         "Return exactly one JSON object with schema_version='1', objective, evaluator_source, "
         "constraint_coverage, probes, and score_order. The Python evaluator receives a candidate "
@@ -1040,6 +1195,13 @@ def _compiler_prompt(
         f"Private input profile SHA-256: {profile_digest}\n"
         f"Private input profile:\n{profile}"
     )
+    if invocation == "snapshot":
+        prompt = prompt.replace(
+            "The Python evaluator receives a candidate path whose sibling workspace already contains verified data/raw, output, and execution.json.",
+            _snapshot_invocation_prompt(),
+            1,
+        )
+    return prompt
 
 
 def _compile_audit_suite(
@@ -1050,6 +1212,8 @@ def _compile_audit_suite(
     evaluator_source: str,
     root: Path,
     timeout: float,
+    *,
+    invocation: str = "candidate",
 ) -> ProbeSuite:
     workspace = root / ".evaluator-auditor"
     if workspace.is_symlink():
@@ -1058,7 +1222,7 @@ def _compile_audit_suite(
     try:
         result = _run_isolated(
             runtime,
-            _auditor_prompt(contract, input_profile, objective, evaluator_source),
+            _auditor_prompt(contract, input_profile, objective, evaluator_source, invocation=invocation),
             workspace,
             timeout,
         )
@@ -1086,10 +1250,12 @@ def _auditor_prompt(
     input_profile: dict[str, object],
     objective: str,
     evaluator_source: str,
+    *,
+    invocation: str = "candidate",
 ) -> str:
     context = json.dumps(contract.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
     profile = json.dumps(input_profile, ensure_ascii=False, sort_keys=True, indent=2)
-    return (
+    prompt = (
         "You are an independent adversarial evaluator auditor. Attack the supplied frozen evaluator "
         "before any solver candidate exists. Return exactly one JSON object with schema_version='1', "
         "constraint_coverage, probes, and score_order. Provide exactly one expected_validity=0 probe "
@@ -1105,6 +1271,9 @@ def _auditor_prompt(
         f"Frozen objective:\n{objective}\n\n"
         f"Frozen evaluator source:\n{evaluator_source}"
     )
+    if invocation == "snapshot":
+        prompt = _snapshot_invocation_prompt() + "\n\n" + prompt
+    return prompt
 
 
 def _canonical_probe_suite(suite: ProbeSuite) -> str:

@@ -1343,9 +1343,29 @@ evaluator commands. Parent outputs
 retain the existing 256 KiB per-file cap; the complete package and outputs share the parent artifact
 budget. See the standalone [111 quickstart](specs/111-conversational-bundle-delivery/quickstart.md).
 
-Normal solving remains the default. Automatic evaluator preparation, active-process cancellation
-orchestration and OpenEvolve/Shinka multi-file seed imports remain future work. Local fixtures do
-not establish current-model effectiveness or relative WebAgent performance.
+Feature 112 prepares the evaluator and profile automatically:
+
+```bash
+lunar-agent solve 'Optimize the supplied data' --evolve --multi-file \
+  --input ./data.csv=data.csv --runtime openai-compatible --endpoint YOUR_ENDPOINT \
+  --model YOUR_MODEL --agent-loop --workspace ./mission --json
+```
+
+The runtime compiles a snapshot evaluator, then a separate auditor supplies additional constraint
+and score-order probes. Both probe suites must pass before the evaluator is frozen and candidates
+are generated. `mission/evaluator-bundle/` and `mission/bundle-profile.json` retain the preparation;
+answer/resume infer this mode and reuse those files without another evaluator compiler/auditor call.
+Ordinary `deliver` also verifies the preparation evidence. The solver receives inputs and independent
+feedback; evaluator source and probes are not staged in its context.
+
+Automatic preparation retains the existing compiler's input-format and probe capacity limits.
+It requires all contract inputs to match registered `csv`, `json`, `jsonl` or `text` files and uses
+local Python without installing dependencies. Probe success covers the tested cases and does not
+prove full business correctness. See the local [112 quickstart](specs/112-automatic-bundle-evaluator/quickstart.md).
+
+Normal solving remains the default. Active-process cancellation orchestration, OpenEvolve/Shinka
+multi-file seed imports and current-version real-model validation remain future work. Local fixtures
+do not establish current-model effectiveness or relative WebAgent performance.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

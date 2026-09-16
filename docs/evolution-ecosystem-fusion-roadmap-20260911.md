@@ -2,8 +2,8 @@
 
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
-Feature 108–111 已完成多文件评测、Agent 生成、原生 population、普通 solve 显式入口和
-父任务交付/终态恢复；下一步聚焦 evaluator 准备和真实验收，外部 producer 的多文件
+Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
+evaluator/profile 准备和父任务交付/终态恢复；下一步聚焦当前版本真实验收，外部 producer 的多文件
 接线与运行中取消编排仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
@@ -15,6 +15,20 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-16：多文件 evaluator/profile 自动准备
+
+Feature 112 新增 `solve --evolve --multi-file`，复用现有 evaluator compiler、独立 auditor、
+约束反例和分数顺序探针，生成直接消费 108 输出快照的评测器。保持旧单文件调用模式，
+不伪造旧 candidate/execution 文件。准备完成后保存普通 pipeline profile 和六份冻结材料，
+绑定当前输入、contract、字节摘要与 artifact rows；恢复/answer 自动识别模式，已有冻结
+评测器不再调用 compiler/auditor。普通 `deliver` 同样复验准备材料。
+
+可运行 [112 quickstart](../specs/112-automatic-bundle-evaluator/quickstart.md) 不需要显式 profile，
+使用本机 subprocess 完成完整链路。自动准备仍受原编译器输入格式和探针容量限制；探针
+通过不等于完整业务正确性或真实模型效果。接下来应先独立登记小规模当前版本验收，观察
+有效率、质量、耗时和用量，再根据结果处理缺陷或外部多文件 seed 接线，不以新增协议
+替代真实验证。历史 WebAgent/失败测量不重跑、不改写。
 
 ## 2026-09-16：普通任务入口与多文件父任务交付
 

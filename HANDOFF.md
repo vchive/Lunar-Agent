@@ -6,6 +6,47 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 112：多文件 evaluator/profile 自动准备（2026-09-16）
+
+`solve --evolve --multi-file --input SOURCE[=TARGET]` 已接通自动准备，无需手写 profile。
+`answer`、`solve --resume` 与通用 `resume` 自动恢复请求中的 `bundle_mode=compiled`；
+`compile_evaluator=true` 沿用原字段。explicit profile、额外 evaluator command、OpenEvolve
+及 detach 不与该模式混用。正常单文件和 111 显式 profile 入口保持兼容。
+
+`evaluator_bundle.py` 的 compile/load 新增 `invocation="snapshot"`，默认 `candidate` 行为
+不变。snapshot 复用六文件 envelope/probe/audit/freeze，绑定独立 invocation protocol；
+直接消费 108 request/inputs/output，固定 report ID `compiled-bundle`，不构造旧 candidate
+或 execution.json。编译器自测、独立 auditor 的约束反例/有效分数排序都通过后才冻结。
+snapshot 预检使用严格报告、既有有界 process helper 与快照复验；重复 load 不跑探针或模型。
+
+新 `automatic_solve_bundle.py` 从完整父任务 input_data ledger 构造普通 pipeline profile，
+保存于 `parent/bundle-profile.json`，harness 在 `parent/evaluator-bundle/evaluator.py`，输入
+固定为 parent/data/raw。prepared event 绑定 semantic/raw profile、contract、冻结 bundle
+摘要和全部 artifact rows；六文件与 profile 计入父任务当前 artifact 预算，编译回调后重新
+读 budget。已有冻结材料的准备中断可恢复，不重调 compiler/auditor；已登记或 prepared 的
+文件缺失/冲突、或有 child 却无 prepared 均拒绝静默重建。普通 deliver 同样复验自动准备。
+
+Agent bundle generator 保持 scoring=None；旧单文件 scoring excerpt 不进入该路径。
+compiler/auditor 使用既有 isolated runtime turn，solver context 不主动复制评测器源码或
+探针答案。本地进程能力不是 OS 沙箱，环境/依赖摘要只标识声明，不认证安装环境。
+
+独立 `specs/112-automatic-bundle-evaluator/quickstart.py` 已通过。没有显式profile参数，
+独立分数 **1、2、6、7**，最终普通父任务交付 7 分源码/输出/report。终态恢复省略演化与
+profile flags，contract compiler/evaluator compiler/auditor/Agent/candidate 次数保持
+**1 / 1 / 1 / 4 / 4**，交付副本仍为 **1**。产品冻结后全仓 **5371 passed, 1 skipped in
+357.87s**（新增94项），JUnit零失败/错误。Ruff、compileall、Specify、installed CLI、
+100个文档链接和diff检查通过；冻结测量相对`027a235`未变。详见该目录 `validation.md`。
+
+自动编译保留既有 csv/json/jsonl/text 输入格式、每probe最多32文件/64KiB每文件及每套
+probe合计512KiB容量限制，合同输入必须匹配全部登记数据；显式profile模式保留独立能力。自动
+pipeline 使用本地Python、不安装依赖，输出256KiB/file，candidate stdout/stderr限64KiB；
+timeout是逐调用/逐进程上限，不是整轮全链路总时长。探针通过不等于完整业务正确性。
+
+下一步优先独立登记小规模当前版本真实验收，覆盖自动生成评测器与多文件任务有效率、
+质量、耗时和用量，再依据结果处理缺陷或外部 bundle seed 接线。运行中取消/总预算编排、
+detached bundle solve 和真实外部producer接线仍后置。没有真实模型、框架或WebAgent调用，
+冻结测量不改写。通过验收的工作继续按用户要求及时提交并push。
+
 ## Feature 111：普通任务多文件演化与父任务交付（2026-09-16）
 
 `solve --evolve --bundle-profile PROFILE --input SOURCE[=TARGET]` 已接通正常 contract intake、

@@ -613,10 +613,42 @@ copy and validates the output batch without candidate, evaluator or Agent execut
 path is invoked. Parent outputs retain the 256 KiB file cap and the complete package counts toward
 the existing parent artifact budget.
 
-This is an explicit native population route. Detached bundle solving, automatic evaluator
-preparation, external multi-file seed imports and active-process cancellation orchestration remain
-outside this increment. Runnable intake-to-delivery verification is in
+This is an explicit native population route. Detached bundle solving, external multi-file seed
+imports and active-process cancellation orchestration remain outside this increment. Runnable
+intake-to-delivery verification is in
 `specs/111-conversational-bundle-delivery/`.
+
+### Automatic snapshot evaluator preparation
+
+Feature 112 adds `solve --evolve --multi-file`. It reuses `evaluator_bundle.py` with
+`invocation="snapshot"`; the default `candidate` invocation and its manifest bytes are unchanged.
+Snapshot mode freezes the same six files under a distinct invocation protocol. Compiler and
+independent auditor retain their existing envelopes, structural input profiles, constraint coverage
+and score-order probes. Synthetic probe inputs are mapped to the real 108 snapshot layout, and
+the harness receives `request.json` and emits a strict bounded report. No legacy candidate or
+execution file is fabricated; preflight output remains synthetic test evidence.
+
+`automatic_solve_bundle.py` derives the complete input set from the parent ledger and writes an
+ordinary pipeline profile with relative parent resources, local Python argv, explicit environment
+and bounded execution/evaluation settings. All frozen preparation files and profile bytes are
+indexed under the current parent artifact budget. A `bundle_profile_prepared` event pins the
+semantic/raw profile identities, contract, frozen aggregate digest and exact artifact rows.
+Preparation uses a per-parent lock and no-clobber profile publication. Frozen evaluator recovery
+does not repeat compiler, auditor or probe execution; interrupted profile/row registration can
+complete using the existing frozen bytes. Missing registered or prepared material cannot trigger
+silent regeneration, and a linked child requires prepared authority.
+
+The conversational request adds `bundle_mode="compiled"` and reuses `compile_evaluator=true`.
+Answer and resume infer the saved mode and validate preparation before mutation. Parent bundle
+delivery performs the same read-only validation, then reuses Feature 111's scoring/delivery path.
+Bundle generation keeps `scoring=None`, so the old single-file solver scoring excerpt does not
+expose evaluator source. Compiler/auditor sessions use the existing isolated runtime turns.
+
+Generated judges still require semantic review for real use: probes prove their tested behavior,
+not completeness. The compiler's existing input-format/probe limits remain, and local execution
+does not authenticate dependencies. Timeouts bound individual calls/processes rather than total
+preparation plus search wall time. See `specs/112-automatic-bundle-evaluator/` for the runnable
+example and validation.
 
 ### Frozen effect protocols
 
