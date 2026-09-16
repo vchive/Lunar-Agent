@@ -102,7 +102,24 @@ materialization ledger。Feature 104 focused suite 当前为 **195 passed**（�
 
 静态 `candidate-bundle admit-execution` CLI 已在普通配置/Store 初始化之前分派，并覆盖
 installed-CLI 的 no-home/no-execution、pin mismatch 和输入字节校验。后续仍需独立 Feature
-处理 input staging、真实 runner、exact evaluator、execution evidence 与恢复协议。
+处理真实 runner、exact evaluator、execution evidence 与恢复协议；input staging 由下述
+Feature 105 实现。
+
+## 2026-09-16：Feature 105 candidate input staging
+
+新增 `stage_candidate_execution_inputs` API 和静态 `candidate-bundle stage-inputs` CLI。
+它先重验完整 admission、plan 和 caller pins，再将声明的输入复制到新的 `.candidate-inputs-*`
+私有目录。输入支持二进制、嵌套目标和空文件；源/目标根按实际目录身份检查，目标逐个重读
+size/SHA-256。失败或中断时只清理本次创建且身份仍匹配的内容，清理无法安全完成时返回固定
+错误。输入使用新建目录，不合并到源码文件表，也不复制未声明文件。
+
+返回元数据只含摘要、计数和大小；本地 `input_path` 单独提供给调用方。重复调用生成不同
+目录，没有自动复用、恢复或执行回执。Feature 105 的 **96** 项测试、installed CLI 及可运行
+示例均通过；全仓 **4568 passed, 1 skipped**。详见
+[Feature 105 验证记录](../specs/105-candidate-input-staging/validation.md)。
+
+下一步仍需实现消费源码 workspace、staged inputs 和 admission 的真实 runner，再接 exact
+evaluator、execution evidence 和恢复协议。本功能没有运行真实模型或框架，不产生效果结论。
 
 ## AlphaEvolve 与 OpenEvolve 的关系
 

@@ -433,6 +433,21 @@ resume, or materialization-ledger state. The core API, static
 `candidate-bundle admit-execution` dispatch, and installed-CLI no-execution/no-home fixture are
 implemented before normal initialization.
 
+Feature 105 adds `candidate_input_staging.py` and the static `candidate-bundle stage-inputs` CLI.
+It replays the complete admission and matching plan before source/destination IO, then stages
+declared binary inputs into a new directory without merging them into candidate source files. Held
+directory identities enforce disjoint roots even when different path spellings alias the same
+directory. Source reads are bounded by the admission (at most 16 MiB total); exclusive writes use
+the shared private-tree helper and every destination is re-read to check size and SHA-256.
+Directories are 0700 and files 0600. Failure and interruption cleanup deletes only recorded names
+whose identities still match, with an explicit cleanup error for unknown or replaced content.
+
+`StagedCandidateExecutionInputs` contains a detached admission plus a local `input_path`; its
+metadata excludes the path. The CLI exposes the path separately for caller use and cleanup. There
+is no new serialized receipt, state migration, automatic reuse, or launch right. The directory
+remains mutable after return and a future runner must check the bytes again. Runner invocation,
+exact evaluation, execution evidence and recovery integration remain separate work.
+
 ### Frozen effect protocols
 
 The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be

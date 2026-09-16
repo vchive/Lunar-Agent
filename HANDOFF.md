@@ -1,5 +1,29 @@
 # Lunar-Agent 交接记录
 
+## Feature 105：候选执行输入 staging（已完成，2026-09-16）
+
+新增 `src/famou/candidate_input_staging.py`，公开 `stage_candidate_execution_inputs`、
+`StagedCandidateExecutionInputs` 和 `CandidateInputStagingError`。完整 admission、plan 与
+caller pins 在两根目录 IO 前重验；输入按声明 target 从 caller source root 读取，在新建
+`.candidate-inputs-*` 私有目录中独占写入，再重读目标 size/SHA-256。仅复制声明输入，支持
+二进制、嵌套目标和空文件；目录 0700、文件 0600。目录实际 device/inode 身份阻止同根、
+嵌套和大小写别名绕过。已有 admission 字节观察不跳过新的源检查。
+
+静态 CLI 为 `candidate-bundle stage-inputs ADMISSION --plan PLAN --input-root ROOT
+--staging-root ROOT --json`，在 config/home/Store 初始化前分派。API metadata 不含路径；
+CLI 单独返回 `input_path`，成功目录交由 caller 管理和清理。失败和中断只清理已确认属于本次
+操作的文件，外来替换保留并报固定 cleanup 错误。共享 PrivateTree 同时补已知 inode 的
+初始化失败清理，保留 Feature 103 的固定错误码；DirectoryChain 构造中断释放已打开 fd。
+
+Feature 105 三文件测试 **96 passed**；installed CLI quickstart、Ruff、compileall 和 diff
+check 均通过。最终全仓 **4568 passed, 1 skipped in 235.87s**，包含新增 Feature 103 初始化
+失败兼容性回归。规范、可运行 quickstart 和验收见 `specs/105-candidate-input-staging/`。
+
+该功能不启动 runner、import 候选、安装依赖、调用 evaluator，也不创建 Candidate、receipt、
+archive 或恢复状态。目录返回后可被修改，未来 runner 必须在执行时重新校验。下一步是多文件
+真实 runner、exact evaluator、execution evidence 和恢复集成。未运行真实框架、模型或新效果
+测量，历史冻结测量文件未改；继续只在本地 `main` 提交，不 push。
+
 ## Feature 104：候选 execution admission（已完成静态 admission 边界，2026-09-16）
 
 已实现 `src/famou/candidate_execution.py` 的静态、path-free admission API：

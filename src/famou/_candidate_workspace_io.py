@@ -41,7 +41,7 @@ class DirectoryChain:
                 if identity(before) != identity(os.fstat(child)):
                     fail(code)
             self.check()
-        except Exception:
+        except BaseException:  # Interruptions must also release held descriptors.
             self.close()
             raise
 
@@ -64,13 +64,13 @@ class DirectoryChain:
 class PrivateTree:
     """A new leaf owned through its open directory descriptor, never a caller-selected path."""
 
-    def __init__(self, parent: DirectoryChain) -> None:
+    def __init__(self, parent: DirectoryChain, *, prefix: str = '.candidate-workspace-') -> None:
         self.parent = parent
         self.fd = -1
         self.directories: dict[tuple[str, ...], tuple[int, int]] = {}
         self.files: dict[tuple[str, ...], tuple[int, int]] = {}
         for _ in range(8):
-            self.name = '.candidate-workspace-' + secrets.token_hex(12)
+            self.name = prefix + secrets.token_hex(12)
             try:
                 os.mkdir(self.name, 0o700, dir_fd=parent.fd)
                 break
@@ -81,16 +81,32 @@ class PrivateTree:
         try:
             before = os.stat(self.name, dir_fd=parent.fd, follow_symlinks=False)
             self.fd = os.open(self.name, _FLAGS, dir_fd=parent.fd)
-            if identity(before) != identity(os.fstat(self.fd)):
+            opened = os.fstat(self.fd)
+            if identity(before) != identity(opened):
                 fail('destination_changed')
+            self.directories[()] = identity(opened)
             os.fchmod(self.fd, 0o700)
-            self.directories[()] = identity(os.fstat(self.fd))
             self.check_root()
-        except BaseException:  # noqa: BLE001 - interruption must not leave an ambiguous tree
-            # If opening the new name was interrupted, do not guess which tree is ours.
+        except BaseException as exc:  # Interruption must not leave an ambiguous tree.
+            # Once the opened inode is known, even an interrupted initialization owns an empty
+            # tree that can be removed safely. Never guess ownership before that identity check.
+            cleanup_failed = True
+            if () in self.directories:
+                try:
+                    self.cleanup()
+                    cleanup_failed = False
+                except BaseException:  # noqa: BLE001 - all cleanup failures use one fixed code
+                    cleanup_failed = True
             if self.fd >= 0:
-                os.close(self.fd)
-            fail('cleanup_failed')
+                try:
+                    os.close(self.fd)
+                except BaseException:  # noqa: BLE001 - a failed close also makes ownership uncertain
+                    cleanup_failed = True
+            if cleanup_failed:
+                fail('cleanup_failed')
+            if isinstance(exc, OSError):
+                fail('destination_write_failed')
+            raise
 
     def check_root(self) -> None:
         self.parent.check()

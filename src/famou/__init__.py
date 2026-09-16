@@ -88,6 +88,11 @@ from .candidate_execution import (
     parse_candidate_execution_admission,
     validate_candidate_execution_admission,
 )
+from .candidate_input_staging import (
+    CandidateInputStagingError,
+    StagedCandidateExecutionInputs,
+    stage_candidate_execution_inputs,
+)
 from .candidate_workspace import (
     WORKSPACE_PLAN_PROTOCOL,
     WORKSPACE_PLAN_SCHEMA_VERSION,
@@ -332,6 +337,7 @@ __all__ = [
     "CandidateExecutionError",
     "CandidateExecutionInput",
     "CandidateInputArtifact",
+    "CandidateInputStagingError",
     "CandidateIntegrityAuthority",
     "CandidateReceipt",
     "CandidateRunner",
@@ -414,6 +420,7 @@ __all__ = [
     "SolverProfile",
     "SolverScoringContract",
     "StagePolicy",
+    "StagedCandidateExecutionInputs",
     "StagedRunResult",
     "StagedWorkflowConfig",
     "StagedWorkflowRunner",
@@ -494,6 +501,7 @@ __all__ = [
     "run_harness_adapter",
     "run_subject_adapter",
     "source_only_dependency_sha256",
+    "stage_candidate_execution_inputs",
     "stage_candidate_inputs",
     "validate_benchmark_comparison_plan",
     "validate_candidate_execution_admission",

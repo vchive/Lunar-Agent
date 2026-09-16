@@ -920,6 +920,19 @@ def build_parser() -> argparse.ArgumentParser:
     admit_execution_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
     _add_home(admit_execution_parser)
     _add_json(admit_execution_parser)
+    stage_inputs_parser = candidate_bundle_commands.add_parser(
+        "stage-inputs", help="copy admitted inputs to a private directory without execution",
+    )
+    stage_inputs_parser.add_argument("admission", type=Path, help="execution admission JSON")
+    stage_inputs_parser.add_argument("--plan", type=Path, required=True, help="workspace plan JSON")
+    stage_inputs_parser.add_argument("--input-root", type=Path, required=True)
+    stage_inputs_parser.add_argument("--staging-root", type=Path, required=True)
+    stage_inputs_parser.add_argument("--plan-sha256", dest="expected_plan_sha256")
+    stage_inputs_parser.add_argument("--bundle-sha256", dest="expected_bundle_sha256")
+    stage_inputs_parser.add_argument("--contract-sha256", dest="expected_contract_sha256")
+    stage_inputs_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
+    _add_home(stage_inputs_parser)
+    _add_json(stage_inputs_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -4128,6 +4141,34 @@ def _candidate_bundle_admit_execution(args: argparse.Namespace) -> dict[str, obj
     }
 
 
+def _candidate_bundle_stage_inputs(args: argparse.Namespace) -> dict[str, object]:
+    from . import _benchmark_files as files
+    from .candidate_execution import MAX_EXECUTION_ADMISSION_BYTES, CandidateExecutionError
+    from .candidate_input_staging import stage_candidate_execution_inputs
+    from .candidate_workspace_plan import CandidateWorkspaceError, parse_candidate_workspace_plan
+
+    try:
+        plan = parse_candidate_workspace_plan(args.plan)
+    except CandidateWorkspaceError:
+        raise CandidateExecutionError("plan_mismatch") from None
+    try:
+        content = files.read_regular_file(
+            files.absolute_path(args.admission), MAX_EXECUTION_ADMISSION_BYTES,
+        )
+    except files.BenchmarkFileError as exc:
+        raise CandidateExecutionError("too_large" if exc.reason == "too_large" else "invalid") from None
+    except OSError:
+        raise CandidateExecutionError("invalid") from None
+    result = stage_candidate_execution_inputs(
+        content, plan=plan, input_root=args.input_root, staging_root=args.staging_root,
+        expected_plan_sha256=args.expected_plan_sha256,
+        expected_bundle_sha256=args.expected_bundle_sha256,
+        expected_contract_sha256=args.expected_contract_sha256,
+        expected_admission_sha256=args.expected_admission_sha256,
+    )
+    return {**result.to_dict(), "input_path": str(result.input_path)}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -4212,6 +4253,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if args.candidate_bundle_command == "admit-execution":
                 _emit(_candidate_bundle_admit_execution(args), args.json)
+                return 0
+            if args.candidate_bundle_command == "stage-inputs":
+                _emit(_candidate_bundle_stage_inputs(args), args.json)
                 return 0
             raise ValueError("candidate_bundle_invalid")
         config = _config(args)

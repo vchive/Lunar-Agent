@@ -103,3 +103,23 @@ def test_materialize_never_executes_entrypoint_or_initializes_home(tmp_path: Pat
     result = materialize_candidate_source_bundle(payload, source_root=source, workspace_root=root, contract_sha256=CONTRACT)
     assert not marker.exists()
     assert result.workspace_path.exists()
+
+
+def test_materialize_constructor_os_failure_keeps_fixed_error_and_cleans_tree(tmp_path, monkeypatch):
+    from famou import _candidate_workspace_io as workspace_io
+
+    source = tmp_path / "source"
+    source.mkdir()
+    bundle = parse_candidate_source_bundle(_bundle(source))
+    root = tmp_path / "workspaces"
+    root.mkdir()
+
+    def fail_chmod(*_args, **_kwargs):
+        raise OSError("private OS failure with a local path")
+
+    monkeypatch.setattr(workspace_io.os, "fchmod", fail_chmod)
+    with pytest.raises(CandidateWorkspaceError, match="^candidate_workspace_destination_write_failed$"):
+        materialize_candidate_source_bundle(
+            bundle, source_root=source, workspace_root=root, contract_sha256=CONTRACT,
+        )
+    assert list(root.iterdir()) == []

@@ -1189,6 +1189,24 @@ state. The corresponding `candidate-bundle admit-execution` CLI is dispatched be
 configuration initialization and has an installed-CLI fixture covering no-home and no-execution
 side effects.
 
+Feature 105 prepares a separate private input directory from that declaration:
+
+```bash
+lunar-agent candidate-bundle stage-inputs admission.json --plan plan.json \
+  --input-root ./inputs --staging-root ./staging --json
+```
+
+Both roots must exist and be disjoint physical directories. Staging checks the complete admission
+and plan before accessing either root, copies only declared inputs, then re-reads destination sizes
+and SHA-256 values. It supports binary and empty files; directories use mode 0700 and files 0600.
+The CLI returns `input_path` alongside digest/count metadata. The Python API
+`famou.stage_candidate_execution_inputs(...)` returns the path as a separate property and excludes
+it from `to_dict()`. Each call creates a new directory owned by the caller. Failures clean only
+identity-matched files created by the operation; an unsafe or failed cleanup has an explicit error.
+Staging does not run the plan, merge inputs into candidate source files, or create an execution receipt.
+The [offline quickstart](specs/105-candidate-input-staging/quickstart.md) exercises the installed CLI
+and explains how to serialize an admission. Future runners must recheck the mutable staged bytes.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

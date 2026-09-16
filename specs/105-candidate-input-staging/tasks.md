@@ -1,0 +1,5 @@
+- [x] T105-01 Freeze staging scope, API, errors and acceptance scenarios.
+- [x] T105-02 Implement admission replay and private verified input copy with failure cleanup.
+- [x] T105-03 Export API and add the static staging CLI.
+- [x] T105-04 Verify source/destination boundaries, interruption cleanup and CLI side effects.
+- [x] T105-05 Run quickstart and full regression; update documentation and handoff.
