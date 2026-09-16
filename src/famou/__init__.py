@@ -88,6 +88,12 @@ from .candidate_execution import (
     parse_candidate_execution_admission,
     validate_candidate_execution_admission,
 )
+from .candidate_execution_evidence import (
+    CandidateExecutionEvidenceError,
+    CandidateExecutionRecord,
+    inspect_candidate_execution_record,
+    run_candidate_execution_recorded,
+)
 from .candidate_execution_runner import (
     CANDIDATE_INPUT_ROOT_ENV,
     CandidateExecutionRun,
@@ -343,7 +349,9 @@ __all__ = [
     "CandidateExecutionAdmission",
     "CandidateExecutionBudget",
     "CandidateExecutionError",
+    "CandidateExecutionEvidenceError",
     "CandidateExecutionInput",
+    "CandidateExecutionRecord",
     "CandidateExecutionRun",
     "CandidateExecutionRunner",
     "CandidateExecutionRunnerError",
@@ -486,6 +494,7 @@ __all__ = [
     "export_shinka_envelope",
     "export_shinka_result",
     "famou_case_content_digest",
+    "inspect_candidate_execution_record",
     "load_evaluator_bundle",
     "materialize_candidate_source_bundle",
     "normalize_feedback",
@@ -509,6 +518,7 @@ __all__ = [
     "remote_sync",
     "resolve_candidate_integrity_authority",
     "run_candidate_execution",
+    "run_candidate_execution_recorded",
     "run_effect_preflight",
     "run_harness_adapter",
     "run_subject_adapter",

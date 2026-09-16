@@ -40,6 +40,14 @@ framework execution or effectiveness claim is included.
 
 ## 2026-09-16：多文件候选 bounded runner
 
+Feature 107 已在 runner 之上完成独立执行证据层：`candidate-bundle run-recorded` 先独占
+新 attempt 目录并同步 launch intent，再执行一次 Feature 106，最后绑定 result/completed
+文件的 SHA-256、size 和 inode。`inspect-execution` 只读复验原 plan/admission 与记录；
+缺完成记录或保留临时文件时返回 uncertain，同一 attempt 不自动重跑。真实双进程争用与
+五个 os._exit 崩溃阶段已有本地 fixture 覆盖。该层不复用旧单文件 Store 状态机，不登记
+Candidate、不评分、不提供 attestation 或 resume。下一项优先把完整多文件执行记录与
+exact evaluator 的输出契约关联，再进入 receipt/archive；真实固定条件效果测量仍未完成。
+
 Feature 106 consumes the verified workspace plan, execution admission and staged input directory
 with a single bounded local process invocation. It revalidates immutable declarations and mutable
 bytes immediately before launch, rejects symlinked or overlapping roots, uses explicit argv plus the

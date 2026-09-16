@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from famou import (
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
@@ -56,7 +58,10 @@ def _fixture(tmp_path: Path):
 def test_cli_run_returns_path_free_telemetry_without_home(tmp_path, monkeypatch, capsys):
     args, plan, admission, workspace, inputs = _fixture(tmp_path)
     home = tmp_path / "must-not-exist"
-    args.extend(["--home", str(home), "--plan-sha256", plan.digest(), "--admission-sha256", admission.digest()])
+    args.extend([
+        "--home", str(home), "--plan-sha256", plan.digest(),
+        "--admission-sha256", admission.digest(), "--contract-sha256", plan.contract_sha256,
+    ])
     monkeypatch.setattr(cli, "_config", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("initialized")))
     assert cli.main(args) == 0
     output = capsys.readouterr()
@@ -81,3 +86,24 @@ def test_installed_cli_run_executes_one_fixture_process(tmp_path):
     payload = json.loads(completed.stdout)
     assert payload["status"] == "succeeded"
     assert completed.stderr == ""
+
+
+@pytest.mark.parametrize("pin,code", [
+    ("--plan-sha256", "plan_mismatch"),
+    ("--bundle-sha256", "bundle_mismatch"),
+    ("--contract-sha256", "contract_mismatch"),
+    ("--admission-sha256", "identity_mismatch"),
+])
+def test_cli_pins_fail_before_launch_without_home(tmp_path, monkeypatch, capsys, pin, code):
+    import famou.candidate_execution_runner as runner
+
+    args, _plan, _admission, _workspace, _inputs = _fixture(tmp_path)
+    home = tmp_path / "must-not-exist"
+    args.extend(["--home", str(home), pin, "0" * 64])
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Popen called"))
+    monkeypatch.setattr(cli, "_config", lambda *_a, **_k: pytest.fail("config initialized"))
+    assert cli.main(args) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert json.loads(output.err) == {"error": f"candidate_execution_runner_{code}"}
+    assert not home.exists()

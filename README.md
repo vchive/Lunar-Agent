@@ -1223,6 +1223,24 @@ telemetry, not exact evaluator acceptance or a Lunar Candidate/score/receipt. Fe
 install dependencies, call models or evaluators, write execution evidence, or claim parity with
 OpenEvolve, ShinkaEvolve or WebAgent.
 
+Feature 107 retains launch intent and execution telemetry in a new caller-owned attempt:
+
+```bash
+lunar-agent candidate-bundle run-recorded admission.json --plan plan.json \
+  --workspace ./workspace --input-root ./staged-inputs --attempt ./attempt-001 --json
+lunar-agent candidate-bundle inspect-execution admission.json --plan plan.json \
+  --attempt ./attempt-001 --json
+```
+
+The attempt parent must exist. The wrapper exclusively creates the attempt, syncs a launch intent
+before entering the runner, then binds the returned metadata and file identities in a completion
+record. An existing attempt is never reused. Inspection is read-only: valid incomplete evidence
+returns `uncertain`; complete evidence returns `recorded` with the independent process status in
+`runner_result.status`. Both paths check the intended plan/admission and optional caller pins.
+Recording failure or timeout remains failure or timeout, and cannot authorize a score or Candidate.
+No raw output or local path is stored in these records. Exact evaluator, receipt/archive and resume
+integration remain separate work. See the runnable [107 quickstart](specs/107-candidate-execution-evidence/quickstart.md).
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

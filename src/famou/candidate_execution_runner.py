@@ -9,9 +9,11 @@ from __future__ import annotations
 import os
 import selectors
 import signal
+import stat
 import subprocess
 import time
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -32,10 +34,8 @@ from .candidate_workspace_plan import (
 from .evolution import CandidateExecution
 
 CANDIDATE_INPUT_ROOT_ENV = "LUNAR_CANDIDATE_INPUT_ROOT"
-MAX_COMMAND_ARGS = 32
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_RESULT_OUTPUT_BYTES = 16 * 1024
-MIN_PROCESS_TIMEOUT_SECONDS = 0.05
 PROCESS_CLEANUP_GRACE_SECONDS = 0.25
 PROCESS_READ_CHUNK_BYTES = 64 * 1024
 
@@ -212,6 +212,69 @@ def _bounded_process(
     return stdout, stderr, "failed", exit_code, "process_failed"
 
 
+def _close_chain(chain: DirectoryChain) -> None:
+    try:
+        chain.close()
+    except OSError:
+        pass
+
+
+def _check_chain(chain: DirectoryChain, code: str) -> None:
+    try:
+        chain.check()
+    except (OSError, CandidateWorkspaceError):
+        raise CandidateExecutionRunnerError(code) from None
+
+
+def _file_snapshot(info: os.stat_result) -> tuple[int, ...]:
+    return info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+class _Executable:
+    """Hold and recheck a no-follow executable observation, without claiming atomic exec."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.chain: DirectoryChain | None = None
+        self.fd: int | None = None
+        try:
+            self.chain = DirectoryChain(path.parent, "executable_unsafe")
+            before = os.stat(path.name, dir_fd=self.chain.fd, follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode) or not before.st_mode & 0o111:
+                raise CandidateExecutionRunnerError("executable_unsafe")
+            self.snapshot = _file_snapshot(before)
+            self.fd = os.open(
+                path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                dir_fd=self.chain.fd,
+            )
+            self.check()
+        except BaseException as exc:
+            self.close()
+            if isinstance(exc, (OSError, CandidateWorkspaceError)):
+                raise CandidateExecutionRunnerError("executable_unsafe") from None
+            raise
+
+    def check(self) -> None:
+        assert self.chain is not None and self.fd is not None
+        try:
+            self.chain.check()
+            named = os.stat(self.path.name, dir_fd=self.chain.fd, follow_symlinks=False)
+            if self.snapshot != _file_snapshot(named) or self.snapshot != _file_snapshot(os.fstat(self.fd)):
+                raise CandidateExecutionRunnerError("executable_unsafe")
+        except (OSError, CandidateWorkspaceError):
+            raise CandidateExecutionRunnerError("executable_unsafe") from None
+
+    def close(self) -> None:
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = None
+        if self.chain is not None:
+            _close_chain(self.chain)
+
+
 @dataclass(frozen=True)
 class CandidateExecutionRun:
     """Path-free metadata returned by one admitted process invocation."""
@@ -298,100 +361,82 @@ class CandidateExecutionRunner:
             inputs = absolute_path(input_path)
         except BenchmarkFileError:
             raise CandidateExecutionRunnerError("input_unsafe") from None
-        workspace_chain = input_chain = None
-        def close_chains() -> None:
-            for chain in (input_chain, workspace_chain):
-                if chain is not None:
-                    try: chain.close()
-                    except OSError: pass
-        try:
-            workspace_chain = DirectoryChain(workspace, "workspace_unsafe")
-            input_chain = DirectoryChain(inputs, "input_unsafe")
+        environment = dict(parsed_plan.environment)
+        if CANDIDATE_INPUT_ROOT_ENV in environment:
+            raise CandidateExecutionRunnerError("invalid")
+        environment[CANDIDATE_INPUT_ROOT_ENV] = str(inputs)
+        output_limit = parsed_plan.max_output_bytes if self.max_output_bytes is None else self.max_output_bytes
+        if output_limit > verified.admission.budget.max_output_bytes:
+            raise CandidateExecutionRunnerError("invalid")
+        with ExitStack() as resources:
+            try:
+                workspace_chain = DirectoryChain(workspace, "workspace_unsafe")
+            except (OSError, CandidateWorkspaceError):
+                raise CandidateExecutionRunnerError("workspace_unsafe") from None
+            resources.callback(_close_chain, workspace_chain)
+            try:
+                input_chain = DirectoryChain(inputs, "input_unsafe")
+            except (OSError, CandidateWorkspaceError):
+                raise CandidateExecutionRunnerError("input_unsafe") from None
+            resources.callback(_close_chain, input_chain)
             # Shared ordinary ancestors (for example `/` and the user's home directory) are
             # expected.  Reject only when either selected root is itself an ancestor of the
             # other, which would make the source and input namespaces overlap.
-            workspace_id = identity(os.fstat(workspace_chain.fd))
-            input_id = identity(os.fstat(input_chain.fd))
-            workspace_ancestors = {identity(os.fstat(fd)) for fd in workspace_chain.fds}
-            input_ancestors = {identity(os.fstat(fd)) for fd in input_chain.fds}
+            try:
+                workspace_id = identity(os.fstat(workspace_chain.fd))
+                input_id = identity(os.fstat(input_chain.fd))
+                workspace_ancestors = {identity(os.fstat(fd)) for fd in workspace_chain.fds}
+                input_ancestors = {identity(os.fstat(fd)) for fd in input_chain.fds}
+            except OSError:
+                raise CandidateExecutionRunnerError("workspace_unsafe") from None
             if workspace_id in input_ancestors or input_id in workspace_ancestors:
                 raise CandidateExecutionRunnerError("workspace_unsafe")
-            workspace_chain.check(); input_chain.check()
-            wr = workspace.absolute()
-            ir = inputs.absolute()
-        except CandidateExecutionRunnerError:
-            close_chains()
-            raise
-        except CandidateWorkspaceError as exc:
-            close_chains()
-            code = "input_unsafe" if exc.code.endswith("input_unsafe") else "workspace_unsafe"
-            raise CandidateExecutionRunnerError(code) from None
-        except OSError:
-            close_chains()
-            raise CandidateExecutionRunnerError("workspace_unsafe") from None
-        try:
-            verified = admit_candidate_execution(
-                verified.admission,
-                plan=parsed_plan,
-                input_root=inputs,
-                expected_admission_sha256=expected_admission_sha256,
-                expected_plan_sha256=expected_plan_sha256,
-                expected_bundle_sha256=expected_bundle_sha256,
-                expected_contract_sha256=expected_contract_sha256,
-            )
-        except CandidateExecutionError as exc:
-            suffix = exc.code.removeprefix("candidate_execution_")
-            close_chains()
-            raise CandidateExecutionRunnerError(
-                "input_changed" if suffix in {"input_missing", "input_changed"} else suffix,
-            ) from None
-        try:
-            verify_candidate_source_bundle(
-                parsed_plan.bundle,
-                source_root=wr,
-                contract_sha256=parsed_plan.contract_sha256,
-                expected_bundle_sha256=verified.admission.bundle_sha256,
-            )
-        except CandidateBundleError:
-            close_chains()
-            raise CandidateExecutionRunnerError("bundle_changed") from None
-        command = tuple(parsed_plan.command)
-        if len(command) >= MAX_COMMAND_ARGS:
-            for chain in (input_chain, workspace_chain):
-                if chain is not None: chain.close()
-            raise CandidateExecutionRunnerError("invalid")
-        executable = Path(command[0])
-        try:
-            if executable.is_symlink() or not executable.is_file() or not os.access(executable, os.X_OK):
-                close_chains()
-                raise CandidateExecutionRunnerError("executable_unsafe")
-        except OSError:
-            close_chains()
-            raise CandidateExecutionRunnerError("executable_unsafe") from None
-        environment = {key: value for key, value in parsed_plan.environment}
-        if CANDIDATE_INPUT_ROOT_ENV in environment:
-            close_chains()
-            raise CandidateExecutionRunnerError("invalid")
-        environment[CANDIDATE_INPUT_ROOT_ENV] = str(ir)
-        timeout = max(parsed_plan.timeout_seconds, MIN_PROCESS_TIMEOUT_SECONDS)
-        output_limit = parsed_plan.max_output_bytes if self.max_output_bytes is None else self.max_output_bytes
-        if output_limit > verified.admission.budget.max_output_bytes:
-            close_chains()
-            raise CandidateExecutionRunnerError("invalid")
-        started = time.monotonic()
-        try:
-            workspace_chain.check(); input_chain.check()
-            stdout, stderr, status, exit_code, error = _bounded_process(
-                [*command, parsed_plan.entrypoint], cwd=str(wr), environment=environment,
-                timeout=timeout, output_limit=output_limit,
-            )
-        except OSError:
-            stdout = stderr = ""
-            status = "failed"
-            exit_code = None
-            error = "process_start_failed"
-        finally:
-            close_chains()
+            _check_chain(workspace_chain, "workspace_unsafe")
+            _check_chain(input_chain, "input_unsafe")
+            # Keep an executable observation across byte verification, then recheck it together
+            # with both roots immediately before launch. Popen still executes by pathname.
+            command = tuple(parsed_plan.command)
+            executable = _Executable(Path(command[0]))
+            resources.callback(executable.close)
+            try:
+                verified = admit_candidate_execution(
+                    verified.admission,
+                    plan=parsed_plan,
+                    input_root=inputs,
+                    expected_admission_sha256=expected_admission_sha256,
+                    expected_plan_sha256=expected_plan_sha256,
+                    expected_bundle_sha256=expected_bundle_sha256,
+                    expected_contract_sha256=expected_contract_sha256,
+                )
+            except CandidateExecutionError as exc:
+                suffix = exc.code.removeprefix("candidate_execution_")
+                raise CandidateExecutionRunnerError(
+                    "input_changed" if suffix in {"input_missing", "input_changed"} else suffix,
+                ) from None
+            try:
+                verify_candidate_source_bundle(
+                    parsed_plan.bundle,
+                    source_root=workspace,
+                    contract_sha256=parsed_plan.contract_sha256,
+                    expected_bundle_sha256=verified.admission.bundle_sha256,
+                )
+            except CandidateBundleError:
+                raise CandidateExecutionRunnerError("bundle_changed") from None
+            _check_chain(workspace_chain, "workspace_unsafe")
+            _check_chain(input_chain, "input_unsafe")
+            executable.check()
+            started = time.monotonic()
+            try:
+                # Plan validation allows 32 command items; the entrypoint is one fixed extra.
+                stdout, stderr, status, exit_code, error = _bounded_process(
+                    [*command, parsed_plan.entrypoint], cwd=str(workspace), environment=environment,
+                    timeout=parsed_plan.timeout_seconds, output_limit=output_limit,
+                )
+            except OSError:
+                stdout = stderr = ""
+                status = "failed"
+                exit_code = None
+                error = "process_start_failed"
         duration_ms = min(86_400_000, max(0, round((time.monotonic() - started) * 1000)))
         execution = CandidateExecution(status, exit_code, duration_ms, stdout, stderr, error)
         return CandidateExecutionRun(

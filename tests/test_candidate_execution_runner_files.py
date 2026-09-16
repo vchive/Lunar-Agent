@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,7 @@ from famou import (
 )
 
 
-def _fixture(tmp_path: Path, *, environment=None, max_processes: int = 1):
+def _fixture(tmp_path: Path, *, environment=None, max_processes: int = 1, command=("/bin/sh",)):
     tmp_path.mkdir(parents=True, exist_ok=True)
     workspace = tmp_path / "workspace"
     inputs = tmp_path / "inputs"
@@ -36,7 +37,7 @@ def _fixture(tmp_path: Path, *, environment=None, max_processes: int = 1):
         "a" * 64, "run.sh", (CandidateSourceFile("run.sh", len(script), hashlib.sha256(script).hexdigest()),)
     )
     plan = build_candidate_workspace_plan(
-        bundle, command=("/bin/sh",), contract_sha256="a" * 64,
+        bundle, command=command, contract_sha256="a" * 64,
         timeout_seconds=2, max_output_bytes=1024, environment=environment,
     )
     item = CandidateExecutionInput("value", "fixture", 2, hashlib.sha256(b"ok").hexdigest())
@@ -149,4 +150,109 @@ def test_fifo_input_root_is_rejected(tmp_path: Path):
     _assert_code(
         lambda: run_candidate_execution(admission, plan=plan, workspace_path=workspace, input_path=fifo),
         "input_unsafe",
+    )
+
+
+def test_all_32_planned_command_items_are_executable(tmp_path: Path):
+    command = ("/bin/echo", *(f"value-{index}" for index in range(31)))
+    admission, plan, workspace, inputs = _fixture(tmp_path, command=command)
+    result = run_candidate_execution(admission, plan=plan, workspace_path=workspace, input_path=inputs)
+    assert result.execution.status == "succeeded"
+    assert result.execution.stdout == " ".join((*command[1:], "run.sh")) + "\n"
+
+
+@pytest.mark.parametrize("kind", ["symlink", "ancestor_symlink", "fifo", "directory", "nonexecutable"])
+def test_unsafe_executables_fail_before_launch(tmp_path: Path, monkeypatch, kind: str):
+    import famou.candidate_execution_runner as runner
+
+    executable = tmp_path / "executable"
+    if kind == "symlink":
+        executable.symlink_to("/bin/sh")
+    elif kind == "ancestor_symlink":
+        executable.symlink_to("/bin", target_is_directory=True)
+        executable = executable / "sh"
+    elif kind == "fifo":
+        os.mkfifo(executable)
+    elif kind == "directory":
+        executable.mkdir()
+    else:
+        executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        executable.chmod(0o600)
+    admission, plan, workspace, inputs = _fixture(tmp_path, command=(str(executable),))
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Popen called"))
+    _assert_code(
+        lambda: run_candidate_execution(admission, plan=plan, workspace_path=workspace, input_path=inputs),
+        "executable_unsafe",
+    )
+
+
+@pytest.mark.parametrize("changed", ["file", "ancestor", "same_inode"])
+def test_executable_drift_is_rechecked_and_descriptors_close(tmp_path: Path, monkeypatch, changed: str):
+    import famou.candidate_execution_runner as runner
+
+    executable_root = tmp_path / "runtime"
+    executable_root.mkdir()
+    executable = executable_root / "runner"
+    shutil.copyfile("/bin/sh", executable)
+    executable.chmod(0o700)
+    admission, plan, workspace, inputs = _fixture(tmp_path, command=(str(executable),))
+    original_verify = runner.verify_candidate_source_bundle
+    original_open, original_close = os.open, os.close
+    descriptors: list[int] = []
+
+    def tracked_open(*args, **kwargs):
+        descriptor = original_open(*args, **kwargs)
+        descriptors.append(descriptor)
+        return descriptor
+
+    def tracked_close(descriptor):
+        original_close(descriptor)
+        descriptors.remove(descriptor)
+
+    def drift(*args, **kwargs):
+        result = original_verify(*args, **kwargs)
+        if changed == "file":
+            replacement = executable_root / "replacement"
+            shutil.copyfile(executable, replacement)
+            replacement.chmod(0o700)
+            replacement.replace(executable)
+        elif changed == "ancestor":
+            executable_root.rename(tmp_path / "old-runtime")
+            executable_root.mkdir()
+            shutil.copyfile("/bin/sh", executable)
+            executable.chmod(0o700)
+        else:
+            executable.chmod(0o600)
+        return result
+
+    monkeypatch.setattr(runner.os, "open", tracked_open)
+    monkeypatch.setattr(runner.os, "close", tracked_close)
+    monkeypatch.setattr(runner, "verify_candidate_source_bundle", drift)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Popen called"))
+    _assert_code(
+        lambda: run_candidate_execution(admission, plan=plan, workspace_path=workspace, input_path=inputs),
+        "executable_unsafe",
+    )
+    assert descriptors == []
+
+
+@pytest.mark.parametrize("changed", ["workspace", "input"])
+def test_last_root_recheck_has_fixed_runner_error(tmp_path: Path, monkeypatch, changed: str):
+    import famou.candidate_execution_runner as runner
+
+    admission, plan, workspace, inputs = _fixture(tmp_path)
+    original_verify = runner.verify_candidate_source_bundle
+
+    def drift(*args, **kwargs):
+        result = original_verify(*args, **kwargs)
+        root = workspace if changed == "workspace" else inputs
+        root.rename(root.with_name(root.name + "-old"))
+        root.mkdir()
+        return result
+
+    monkeypatch.setattr(runner, "verify_candidate_source_bundle", drift)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Popen called"))
+    _assert_code(
+        lambda: run_candidate_execution(admission, plan=plan, workspace_path=workspace, input_path=inputs),
+        "workspace_unsafe" if changed == "workspace" else "input_unsafe",
     )

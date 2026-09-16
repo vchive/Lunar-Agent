@@ -942,9 +942,29 @@ def build_parser() -> argparse.ArgumentParser:
     run_bundle_parser.add_argument("--input-root", type=Path, required=True)
     run_bundle_parser.add_argument("--plan-sha256", dest="expected_plan_sha256")
     run_bundle_parser.add_argument("--bundle-sha256", dest="expected_bundle_sha256")
+    run_bundle_parser.add_argument("--contract-sha256", dest="expected_contract_sha256")
     run_bundle_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
     _add_home(run_bundle_parser)
     _add_json(run_bundle_parser)
+    for command, help_text in (
+        ("run-recorded", "retain launch intent and process evidence in a new attempt directory"),
+        ("inspect-execution", "inspect retained execution evidence without launching or repairing"),
+    ):
+        record_parser = candidate_bundle_commands.add_parser(command, help=help_text)
+        record_parser.add_argument("admission", type=Path, help="execution admission JSON")
+        record_parser.add_argument("--plan", type=Path, required=True)
+        record_parser.add_argument("--attempt", type=Path, required=True)
+        if command == "run-recorded":
+            record_parser.add_argument("--workspace", type=Path, required=True)
+            record_parser.add_argument("--input-root", type=Path, required=True)
+        else:
+            record_parser.add_argument("--completion-sha256", dest="expected_completion_sha256")
+        record_parser.add_argument("--plan-sha256", dest="expected_plan_sha256")
+        record_parser.add_argument("--bundle-sha256", dest="expected_bundle_sha256")
+        record_parser.add_argument("--contract-sha256", dest="expected_contract_sha256")
+        record_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
+        _add_home(record_parser)
+        _add_json(record_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -4197,7 +4217,42 @@ def _candidate_bundle_run(args: argparse.Namespace) -> dict[str, object]:
         expected_admission_sha256=args.expected_admission_sha256,
         expected_plan_sha256=args.expected_plan_sha256,
         expected_bundle_sha256=args.expected_bundle_sha256,
+        expected_contract_sha256=args.expected_contract_sha256,
     ).to_dict()
+
+
+def _candidate_bundle_execution_record(args: argparse.Namespace) -> dict[str, object]:
+    from . import _benchmark_files as files
+    from .candidate_execution import MAX_EXECUTION_ADMISSION_BYTES
+    from .candidate_execution_evidence import (
+        CandidateExecutionEvidenceError,
+        inspect_candidate_execution_record,
+        run_candidate_execution_recorded,
+    )
+    from .candidate_workspace_plan import CandidateWorkspaceError, parse_candidate_workspace_plan
+
+    try:
+        plan = parse_candidate_workspace_plan(args.plan)
+        admission = files.read_regular_file(files.absolute_path(args.admission), MAX_EXECUTION_ADMISSION_BYTES)
+    except (CandidateWorkspaceError, files.BenchmarkFileError, OSError):
+        raise CandidateExecutionEvidenceError("invalid") from None
+    pins = {
+        "expected_admission_sha256": args.expected_admission_sha256,
+        "expected_plan_sha256": args.expected_plan_sha256,
+        "expected_bundle_sha256": args.expected_bundle_sha256,
+        "expected_contract_sha256": args.expected_contract_sha256,
+    }
+    if args.candidate_bundle_command == "run-recorded":
+        result = run_candidate_execution_recorded(
+            admission, plan=plan, workspace_path=args.workspace, input_path=args.input_root,
+            attempt_path=args.attempt, **pins,
+        )
+    else:
+        result = inspect_candidate_execution_record(
+            args.attempt, plan=plan, admission=admission,
+            expected_completion_sha256=args.expected_completion_sha256, **pins,
+        )
+    return result.to_dict()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -4276,6 +4331,9 @@ def main(argv: list[str] | None = None) -> int:
             _emit(_benchmark_comparison_validate_result(args), args.json)
             return 0
         if args.command == "candidate-bundle":
+            if args.candidate_bundle_command in {"run-recorded", "inspect-execution"}:
+                _emit(_candidate_bundle_execution_record(args), args.json)
+                return 0
             if args.candidate_bundle_command == "validate":
                 _emit(_candidate_bundle_validate(args), args.json)
                 return 0

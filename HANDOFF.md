@@ -1,5 +1,37 @@
 # Lunar-Agent 交接记录
 
+## Feature 107：多文件候选持久化执行证据（已完成，2026-09-16）
+
+新增 `src/famou/candidate_execution_evidence.py`、`run_candidate_execution_recorded`、
+`inspect_candidate_execution_record` 和 `CandidateExecutionRecord`。CLI 为
+`candidate-bundle run-recorded` / `inspect-execution`，均在 config/home/Store 初始化前分派。
+调用方指定不存在的 attempt 目录；完整 plan/admission/pins 和 source/input 字节复验后
+独占创建 0700 目录，先 fsync canonical launch intent，再进入 Feature 106 runner 一次。
+任意已有目录（包括空目录或中断现场）都不授权重跑；不同新目录代表另一次显式执行。
+
+intent 绑定 plan/admission/bundle/contract、source/input 文件表摘要、workspace/input/attempt
+device/inode 和随机 nonce。runner 返回后，result 绑定既有 path-free metadata 投影及其
+canonical digest；completed 绑定 intent/result 原始字节 SHA-256、size、device/inode。
+文件使用 no-follow、独占临时写入、fsync、no-clobber 发布和重读。关闭异常经过固定错误映射，
+共享 DirectoryChain 在报告失败前释放其余 fd。任何失败保留已分配 attempt，不合成执行结果。
+
+inspect 只读检查原声明和证据，原源码/输入可在执行后变化；它不把后验字节当作运行证明。
+有效但不完整记录返回 uncertain；完整记录返回 recorded，并保留独立的 runner process status。
+相同字节但 inode 被替换、摘要漂移、symlink/FIFO、未声明节点及非法 schema 均拒绝。
+不创建 Store、Candidate、score、receipt、archive、attestation 或 resume 状态。
+
+106 同步补修 32 项命令边界、小于 0.05 秒的 timeout 预算突破、可执行文件 no-follow
+目录/元数据观察、资源释放和 CLI contract pin；106 focused **32 passed**。107 已覆盖真实
+双进程争用、五个 os._exit 崩溃阶段、写入/fsync 中断、路径/身份漂移、无初始化和 installed
+CLI；107 focused **107 passed**，最终全仓 **4707 passed, 1 skipped in 232.92s**，JUnit
+确认零失败/错误。全 src/tests Ruff、compileall、Specify、diff check 和可运行 quickstart
+通过；旧封存测量文件未改。详情见 `specs/107-candidate-execution-evidence/validation.md`。
+本轮仅本地 main 提交，不 push。
+
+下一项优先设计和接入多文件 exact evaluator/output-contract，再连 Candidate receipt/archive；
+新 runner 的 attestation/resume 尚未设计实现。旧 090/091/095 协议仍仅服务原单文件
+materialization 生命周期。未运行外部框架、模型、provider 或 campaign，没有新增效果结论。
+
 ## Feature 106：候选 bounded execution runner（已完成，2026-09-16）
 
 新增 `src/famou/candidate_execution_runner.py`、`CandidateExecutionRunner` 和静态

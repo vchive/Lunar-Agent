@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import secrets
 import stat
+import sys
 import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
@@ -56,9 +57,19 @@ class DirectoryChain:
                 fail(self.code)
 
     def close(self) -> None:
-        for descriptor in reversed(self.fds):
-            os.close(descriptor)
-        self.fds.clear()
+        active = sys.exception()
+        failure = None
+        while self.fds:
+            descriptor = self.fds.pop()
+            try:
+                os.close(descriptor)
+            except BaseException as exc:  # noqa: BLE001 - release other owned descriptors first
+                if failure is None or isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    failure = exc
+        if isinstance(active, (KeyboardInterrupt, SystemExit)):
+            return
+        if failure is not None:
+            raise failure
 
 
 class PrivateTree:

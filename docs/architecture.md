@@ -454,14 +454,37 @@ directory identities, and rejects overlapping workspace/input roots. The command
 vector followed by the bundle entrypoint; it uses a fixed workspace cwd, `shell=False`, `DEVNULL`
 stdin, an explicit environment containing `LUNAR_CANDIDATE_INPUT_ROOT`, and a fresh process group.
 The implementation accepts only `max_processes == 1`; it does not inspect or enforce a candidate's
-internal fork count.
+internal fork count. Executable preflight holds the no-follow directory chain and file descriptors,
+then rechecks file metadata before `Popen`. The child still starts by the declared path; this is
+not an atomic executable binding and supplies no caller-pinned executable fingerprint.
 
 Both output pipes are consumed incrementally with bounded memory. Timeout and output overflow kill the
 process group and use a finite cleanup grace period so descendants holding a pipe cannot block the
-caller indefinitely. The returned `CandidateExecutionRun` is path-free telemetry. It is not an
-execution receipt, evaluator report, score, Candidate admission, archive entry, or recovery token;
+caller indefinitely. The serialized `CandidateExecutionRun` is path-free telemetry; Python callers
+can also inspect bounded child stdout/stderr. It is not an execution receipt, evaluator report,
+score, Candidate admission, archive entry, or recovery token;
 the runner never initializes Store/home or writes execution artifacts. Exact evaluation, durable
-evidence, launch intent, and resume remain separate boundaries.
+evidence, launch intent, and resume are separate from this direct runner API.
+
+Feature 107 adds `candidate_execution_evidence.py`, an independent recorded-execution wrapper.
+It reconstructs plan/admission and caller pins before any root IO, verifies source/input bytes,
+and exclusively creates a caller-selected new attempt directory. The synced launch intent binds
+complete declaration/file-table digests, workspace/input/attempt directory device/inode identities,
+and a nonce. The same caller then invokes Feature 106 once. Intent alone never authorizes replay.
+
+After the runner returns, the wrapper validates its existing path-free projection, writes a
+canonical result, and publishes a completion record binding the exact intent/result size, SHA-256,
+device and inode. Descriptor-relative no-clobber writes, fsync and rereads preserve partial or
+uncertain records on failure. The shared directory helper releases all owned descriptors before
+reporting a close failure; public record errors cannot expose raw OS exception text.
+
+`candidate-bundle run-recorded` and `candidate-bundle inspect-execution` dispatch before normal
+config/home/Store initialization. Inspection requires the original declarations and checks retained
+record consistency; it does not reread the mutable source/input trees after execution. Missing
+completion or retained temporary publication is uncertain, while malformed or inconsistent evidence
+is rejected. A complete record does not imply process success. This layer has no Store, exact
+evaluator, Candidate, score, receipt, archive, attestation or resume authority. The old materialization
+recovery protocols retain their separate Run/Store lifecycle.
 
 ### Frozen effect protocols
 

@@ -108,3 +108,29 @@ def test_timeout_does_not_wait_for_background_descendant_pipe(tmp_path: Path):
     )
     assert time.monotonic() - started < 1
     assert result.execution.status == "timed_out"
+
+
+def test_small_timeout_is_not_increased_above_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import famou.candidate_execution_runner as runner
+
+    admission, plan, workspace, inputs = _setup(tmp_path, b"#!/bin/sh\nsleep 1\n")
+    short_plan = build_candidate_workspace_plan(
+        plan.bundle, command=plan.command, contract_sha256="a" * 64,
+        timeout_seconds=0.005, max_output_bytes=1024,
+    )
+    short_admission = build_candidate_execution_admission(
+        short_plan, inputs=admission.inputs, dependency_sha256="b" * 64,
+        environment_sha256="c" * 64, evaluator=admission.evaluator,
+        budget=CandidateExecutionBudget(0.005, 1024, 1024, 1),
+    )
+    process_runner = runner._bounded_process
+    timeouts: list[float] = []
+
+    def observe(*args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return process_runner(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "_bounded_process", observe)
+    result = run_candidate_execution(short_admission, plan=short_plan, workspace_path=workspace, input_path=inputs)
+    assert timeouts == [short_admission.budget.timeout_seconds]
+    assert result.execution.status == "timed_out"
