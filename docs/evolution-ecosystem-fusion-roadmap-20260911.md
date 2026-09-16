@@ -1,5 +1,9 @@
 # Evolution ecosystem fusion roadmap（2026-09-11）
 
+当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
+后续主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
+下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
+
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、模型、provider、远端服务、候选评测或真实
 campaign。当前 Feature 084/085 建立 verified seed、population-first 和协议边界，Feature

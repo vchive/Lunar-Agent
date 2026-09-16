@@ -1,5 +1,18 @@
 # Lunar-Agent 交接记录
 
+## 当前整体评估与下一阶段验收（2026-09-16）
+
+已完成基于 `af4f8d8` 的代码/历史证据盘点，见
+`docs/system-readiness-20260916.md`。旧单文件 population 已有完整演化和恢复交付闭环；
+新多文件链路止于 Feature 107 execution record。下一阶段按四个里程碑推进：多文件
+exact evaluator/输出绑定 → Candidate/receipt/archive/搜索与交付接线 → 统一入口和恢复
+→ 当前版本真实验收。Feature 108 尚未实现；本次只更新评估和路线说明，无产品改动或新实评。
+
+普通流程 069 历史有效 2/2、082 分阶段最终有效 0/2，应分别保留，不能称为当前版本
+整体 WebAgent parity。OpenEvolve/Shinka 已有 adapter/exporter 和 fixture，真实生态搜索
+收益未测。远端服务、repository/workflow、训练/RL 和更多算法移植后置，不作为本地融合
+版本完成的前提。后续优先闭合用户可用路径与真实效果验证，避免以新增协议数量代替验收。
+
 ## Feature 107：多文件候选持久化执行证据（已完成，2026-09-16）
 
 新增 `src/famou/candidate_execution_evidence.py`、`run_candidate_execution_recorded`、
