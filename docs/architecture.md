@@ -448,6 +448,21 @@ is no new serialized receipt, state migration, automatic reuse, or launch right.
 remains mutable after return and a future runner must check the bytes again. Runner invocation,
 exact evaluation, execution evidence and recovery integration remain separate work.
 
+Feature 106 adds `candidate_execution_runner.py` as the one-shot process boundary. It replays the
+validated plan and admission immediately before launch, verifies source and staged-input bytes and
+directory identities, and rejects overlapping workspace/input roots. The command is an explicit argv
+vector followed by the bundle entrypoint; it uses a fixed workspace cwd, `shell=False`, `DEVNULL`
+stdin, an explicit environment containing `LUNAR_CANDIDATE_INPUT_ROOT`, and a fresh process group.
+The implementation accepts only `max_processes == 1`; it does not inspect or enforce a candidate's
+internal fork count.
+
+Both output pipes are consumed incrementally with bounded memory. Timeout and output overflow kill the
+process group and use a finite cleanup grace period so descendants holding a pipe cannot block the
+caller indefinitely. The returned `CandidateExecutionRun` is path-free telemetry. It is not an
+execution receipt, evaluator report, score, Candidate admission, archive entry, or recovery token;
+the runner never initializes Store/home or writes execution artifacts. Exact evaluation, durable
+evidence, launch intent, and resume remain separate boundaries.
+
 ### Frozen effect protocols
 
 The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be

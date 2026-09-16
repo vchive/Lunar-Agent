@@ -1207,6 +1207,22 @@ Staging does not run the plan, merge inputs into candidate source files, or crea
 The [offline quickstart](specs/105-candidate-input-staging/quickstart.md) exercises the installed CLI
 and explains how to serialize an admission. Future runners must recheck the mutable staged bytes.
 
+Feature 106 runs one already admitted multi-file candidate in that private workspace:
+
+```bash
+lunar-agent candidate-bundle run admission.json --plan plan.json \
+  --workspace ./workspace --input-root ./staged-inputs --json
+```
+
+The runner rechecks plan/admission pins, source and input bytes, no-follow directory identities and
+root disjointness before starting. It passes an explicit argv plus the bundle entrypoint with
+`shell=False`, a fixed cwd, an isolated process group and `LUNAR_CANDIDATE_INPUT_ROOT`; timeout and
+output ceilings are enforced with bounded pipe reads. The static CLI runs before normal config/home/
+Store initialization and returns path-free execution telemetry. A successful exit is only process
+telemetry, not exact evaluator acceptance or a Lunar Candidate/score/receipt. Feature 106 does not
+install dependencies, call models or evaluators, write execution evidence, or claim parity with
+OpenEvolve, ShinkaEvolve or WebAgent.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

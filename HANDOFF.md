@@ -1,5 +1,26 @@
 # Lunar-Agent 交接记录
 
+## Feature 106：候选 bounded execution runner（已完成，2026-09-16）
+
+新增 `src/famou/candidate_execution_runner.py`、`CandidateExecutionRunner` 和静态
+`candidate-bundle run` CLI。runner 在启动前重建并重验 workspace plan、execution admission、
+源码 bundle、staged input、caller pins 以及 workspace/input 的实际目录 inode；共享普通祖先
+目录允许，但同根和互为父子目录拒绝。有效命令是 plan 的显式 argv 加 bundle entrypoint，
+固定 cwd 为 candidate workspace，`shell=False`、`stdin=DEVNULL`、显式环境和独立进程组；只
+允许 admission 的 `max_processes == 1`，不声称监控候选自行 fork 的进程数。
+
+stdout/stderr 用 selector 增量读取并有界保留，输出超限或 timeout 会终止进程组并在有限宽限期
+内回收；启动失败、非零退出、超限、timeout 和清理不确定性使用固定
+`candidate_execution_runner_*` 错误。结果 JSON 不包含本地路径或原始 stdout/stderr，只返回状态、
+字节数和身份摘要；Python result 对象保留受限文本供调用方处理。runner 不初始化 Store/home，
+不调用 evaluator，不写 Candidate、receipt、archive、execution.json 或恢复状态。
+
+新增基础、文件边界和 installed-CLI fixture，覆盖成功、非零退出、timeout、输出溢出、后代
+管道、symlink/FIFO/根重叠、输入和源码漂移、reserved env、caller pin、启动失败及无副作用。
+Feature 106 focused suite 当前 **15 passed**；后续独立 Feature 才处理 execution evidence、
+exact evaluator、launch intent 和 resume。未运行真实 OpenEvolve、ShinkaEvolve、WebAgent、
+模型、provider 或 campaign，不产生算法效果结论。
+
 ## Feature 105：候选执行输入 staging（已完成，2026-09-16）
 
 新增 `src/famou/candidate_input_staging.py`，公开 `stage_candidate_execution_inputs`、

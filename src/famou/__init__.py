@@ -88,6 +88,13 @@ from .candidate_execution import (
     parse_candidate_execution_admission,
     validate_candidate_execution_admission,
 )
+from .candidate_execution_runner import (
+    CANDIDATE_INPUT_ROOT_ENV,
+    CandidateExecutionRun,
+    CandidateExecutionRunner,
+    CandidateExecutionRunnerError,
+    run_candidate_execution,
+)
 from .candidate_input_staging import (
     CandidateInputStagingError,
     StagedCandidateExecutionInputs,
@@ -293,6 +300,7 @@ __all__ = [
     "CANDIDATE_BUNDLE_SCHEMA_VERSION",
     "CANDIDATE_EXECUTION_PROTOCOL",
     "CANDIDATE_EXECUTION_SCHEMA_VERSION",
+    "CANDIDATE_INPUT_ROOT_ENV",
     "EXECUTION_PROTOCOL",
     "EXECUTION_SCHEMA_VERSION",
     "WORKSPACE_PLAN_PROTOCOL",
@@ -336,6 +344,9 @@ __all__ = [
     "CandidateExecutionBudget",
     "CandidateExecutionError",
     "CandidateExecutionInput",
+    "CandidateExecutionRun",
+    "CandidateExecutionRunner",
+    "CandidateExecutionRunnerError",
     "CandidateInputArtifact",
     "CandidateInputStagingError",
     "CandidateIntegrityAuthority",
@@ -497,6 +508,7 @@ __all__ = [
     "remote_submit",
     "remote_sync",
     "resolve_candidate_integrity_authority",
+    "run_candidate_execution",
     "run_effect_preflight",
     "run_harness_adapter",
     "run_subject_adapter",

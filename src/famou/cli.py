@@ -933,6 +933,18 @@ def build_parser() -> argparse.ArgumentParser:
     stage_inputs_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
     _add_home(stage_inputs_parser)
     _add_json(stage_inputs_parser)
+    run_bundle_parser = candidate_bundle_commands.add_parser(
+        "run", help="run an admitted candidate without Store or evaluator initialization",
+    )
+    run_bundle_parser.add_argument("admission", type=Path, help="execution admission JSON")
+    run_bundle_parser.add_argument("--plan", type=Path, required=True)
+    run_bundle_parser.add_argument("--workspace", type=Path, required=True)
+    run_bundle_parser.add_argument("--input-root", type=Path, required=True)
+    run_bundle_parser.add_argument("--plan-sha256", dest="expected_plan_sha256")
+    run_bundle_parser.add_argument("--bundle-sha256", dest="expected_bundle_sha256")
+    run_bundle_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
+    _add_home(run_bundle_parser)
+    _add_json(run_bundle_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -4169,6 +4181,25 @@ def _candidate_bundle_stage_inputs(args: argparse.Namespace) -> dict[str, object
     return {**result.to_dict(), "input_path": str(result.input_path)}
 
 
+def _candidate_bundle_run(args: argparse.Namespace) -> dict[str, object]:
+    from . import _benchmark_files as files
+    from .candidate_execution import MAX_EXECUTION_ADMISSION_BYTES
+    from .candidate_execution_runner import CandidateExecutionRunnerError, run_candidate_execution
+    from .candidate_workspace_plan import CandidateWorkspaceError, parse_candidate_workspace_plan
+
+    try:
+        plan = parse_candidate_workspace_plan(args.plan)
+        content = files.read_regular_file(files.absolute_path(args.admission), MAX_EXECUTION_ADMISSION_BYTES)
+    except (CandidateWorkspaceError, files.BenchmarkFileError, OSError):
+        raise CandidateExecutionRunnerError("invalid") from None
+    return run_candidate_execution(
+        content, plan=plan, workspace_path=args.workspace, input_path=args.input_root,
+        expected_admission_sha256=args.expected_admission_sha256,
+        expected_plan_sha256=args.expected_plan_sha256,
+        expected_bundle_sha256=args.expected_bundle_sha256,
+    ).to_dict()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -4257,6 +4288,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.candidate_bundle_command == "stage-inputs":
                 _emit(_candidate_bundle_stage_inputs(args), args.json)
                 return 0
+            if args.candidate_bundle_command == "run":
+                result = _candidate_bundle_run(args)
+                _emit(result, args.json)
+                return 0 if result["status"] == "succeeded" else 1
             raise ValueError("candidate_bundle_invalid")
         config = _config(args)
         if args.command == "init":

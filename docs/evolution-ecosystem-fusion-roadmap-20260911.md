@@ -38,6 +38,20 @@ contract, model, evaluator, candidate and physical budget across two or more arm
 read-only input/pin admission. This is preparation for later SkyDiscover/LLM4AD comparisons; no
 framework execution or effectiveness claim is included.
 
+## 2026-09-16：多文件候选 bounded runner
+
+Feature 106 consumes the verified workspace plan, execution admission and staged input directory
+with a single bounded local process invocation. It revalidates immutable declarations and mutable
+bytes immediately before launch, rejects symlinked or overlapping roots, uses explicit argv plus the
+bundle entrypoint, and bounds stdout/stderr while terminating the process group on timeout or output
+overflow. The static `candidate-bundle run` command is dispatched before normal Store/home setup.
+
+This is an execution boundary only. It accepts `max_processes == 1` as the current admission subset,
+does not monitor candidate-created forks, and does not produce durable execution evidence, invoke an
+exact evaluator, create Candidates, or resume interrupted work. A zero exit code cannot be used as a
+Lunar score or as evidence of OpenEvolve/WebAgent parity. Those concerns require a later launch-intent,
+evidence and evaluator feature; no external framework, model, provider or campaign was run here.
+
 ## 2026-09-15：comparison result receipt
 
 Feature 099 adds a bounded result envelope for future fixed-condition measurements. It binds each
