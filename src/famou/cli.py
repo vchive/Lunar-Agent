@@ -1303,6 +1303,13 @@ def _print_status(config: Config, run_id: str) -> int:
     print(f"status: {run.status.value}")
     print(f"goal: {run.goal}")
     print(f"workspace: {run.workspace}")
+    preparation = _bundle_preparation_payload(store, run.id)
+    if preparation is not None:
+        print(f"evaluator_preparation: {preparation['status']}")
+        if preparation.get("error_category"):
+            print(f"preparation_error: {preparation['stage']}: {preparation['error_category']}")
+        if preparation.get("resume_hint"):
+            print(preparation["resume_hint"])
     if run.runner_pid:
         print(f"runner: pid={run.runner_pid} pgid={run.runner_pgid}")
     pending_input = store.pending_input(run.id)
@@ -1439,6 +1446,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
     artifacts = store.list_artifacts(run.id)
     algorithm_outputs = [item for item in artifacts if item["kind"] == "output"]
     role_evidence = [item for item in artifacts if item["kind"] == "role_evidence"]
+    preparation = _bundle_preparation_payload(store, run.id)
     return {
         "run": {
             "id": run.id,
@@ -1504,7 +1512,8 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             "iterations": evolution_iterations,
             "candidates": evolution_candidates,
             "linked": linked_evolution,
-        } if evolution_configured or evolution_finished or linked_evolution else None,
+            **({"preparation": preparation} if preparation is not None else {}),
+        } if evolution_configured or evolution_finished or linked_evolution or preparation else None,
         "decisions": store.list_decisions(run.id),
         "agents": [
             {"task_id": task_id, **payload}
@@ -2364,6 +2373,10 @@ def _solve_evolution(
     config: Config, args: argparse.Namespace, controller: LocalController, parent: Run
 ) -> dict[str, object]:
     """Create or resume the evolution child linked to one compiled conversational run."""
+    if parent.status.value == "awaiting_input" and controller.store.pending_input(parent.id) is None:
+        # Correct legacy dependency-only waits on explicit continuation, without rewriting
+        # historical rows merely because a user inspected status.
+        parent = controller.store.settle_run(parent.id) or parent
     events = controller.store.list_events(parent.id)
     linked = next(
         (
@@ -2389,12 +2402,20 @@ def _solve_evolution(
         if not contract.outputs:
             raise EvolutionError("solve_bundle_outputs_required")
         _validate_conversational_bundle_link(args, controller.store, parent)
-        from .automatic_solve_bundle import prepare_automatic_solve_bundle
-
-        args._bundle_pipeline = prepare_automatic_solve_bundle(
-            controller, parent.id, contract,
-            timeout_seconds=args.timeout if args.timeout is not None else 900.0,
+        from .automatic_solve_bundle import (
+            AutomaticBundlePreparationError,
+            prepare_automatic_solve_bundle,
         )
+
+        try:
+            args._bundle_pipeline = prepare_automatic_solve_bundle(
+                controller, parent.id, contract,
+                timeout_seconds=args.timeout if args.timeout is not None else 900.0,
+            )
+        except AutomaticBundlePreparationError:
+            # The preparation ledger retains this failure; callers emit the ordinary parent
+            # payload and a nonzero result without creating a child or discarding the contract.
+            return {"run": controller.store.get_run(parent.id) or parent}
     bundle_pipeline = getattr(args, "_bundle_pipeline", None)
     if bundle_pipeline is not None:
         if strategy_name != "population":
@@ -2667,6 +2688,18 @@ def _solve_evolution(
     return {"run": parent, "child": controller.store.get_run(child.id) or child}
 
 
+def _bundle_preparation_payload(store: Store, run_id: str) -> dict[str, object] | None:
+    from .automatic_solve_bundle import automatic_bundle_preparation_status
+
+    preparation = automatic_bundle_preparation_status(store, run_id)
+    if preparation is not None and preparation.get("recoverable"):
+        preparation = {
+            **preparation,
+            "resume_hint": "Run resume with the same home and runtime settings to retry evaluator preparation.",
+        }
+    return preparation
+
+
 def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
     manifest = _conversation_manifest(run)
     input_data = [
@@ -2714,6 +2747,12 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
             "materialization": materialization,
         }
         break
+    preparation = _bundle_preparation_payload(controller.store, run.id)
+    if preparation is not None:
+        if evolution_payload is None:
+            evolution_payload = {"status": preparation["status"], "preparation": preparation}
+        else:
+            evolution_payload["preparation"] = preparation
     effective_status = run.status.value
     if (
         isinstance(materialization, dict)
@@ -2723,6 +2762,10 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
         and evolution_payload.get("status") == "failed"
     ):
         effective_status = "failed"
+    if preparation is not None and preparation["status"] in {"failed", "unknown"}:
+        effective_status = "failed"
+    if run.status.value == "cancelled":
+        effective_status = "cancelled"
     payload = {
         "run_id": run.id,
         "status": effective_status,
@@ -4345,6 +4388,7 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         "workspace": str(resumed.workspace),
         "answer_path": relative_answer,
         "workers": controller.max_workers,
+        "input_request": solved_payload["input_request"],
         "algorithm_outputs": solved_payload.get("algorithm_outputs", []),
         "evolution": solved_payload.get("evolution"),
     }

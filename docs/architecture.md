@@ -656,6 +656,28 @@ does not authenticate dependencies. Timeouts bound individual calls/processes ra
 preparation plus search wall time. See `specs/112-automatic-bundle-evaluator/` for the runnable
 example and validation.
 
+Feature 116 adds advisory `bundle_preparation_started` / `bundle_preparation_failed` events under
+the same preparation lock. They retain a random attempt ID, parent ID, stage and fixed error
+category, never provider prose or model responses. Only failures at the compiler/auditor runtime
+boundary may be described as recoverable after input/evidence revalidation; this permits an
+explicit attempt and does not guarantee that unchanged provider settings will succeed. Malformed
+responses, cancellation and integrity failures do not carry that indication. An unmatched start is
+unknown, including when the process is still active; it is not proof of a crash or zero consumption.
+The existing `bundle_profile_prepared` event and its validated materials remain the success
+authority. Prepared/terminal resume adds no preparation attempts, and frozen evaluator recovery
+still avoids model calls. A continuation guard checks the parent between model stages and before
+publication, preventing later work after an observed terminal transition. It does not interrupt
+an already active HTTP request or make cancellation and publication atomic. Observation write
+failures are not silently ignored.
+
+Solve/answer/resume project a known preparation failure with parent identity, nonzero exit and
+`evolution.preparation`; `status` exposes the same substatus without mutation or runtime calls.
+The durable parent can remain running while this substatus is failed, retaining its accepted
+contract for explicit continuation. This adds no run enum or schema migration. Store input lookup,
+answer selection, settlement and scheduler release all use the same nonempty-question predicate;
+dependency-only WAITING rows cannot accept user answers. Legacy false awaiting_input parents are
+settled on explicit evolution continuation, not rewritten by read-only inspection.
+
 ### Frozen effect protocols
 
 The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be

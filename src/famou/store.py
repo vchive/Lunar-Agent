@@ -132,6 +132,11 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _has_input_question(value: object) -> bool:
+    """Dependency waits and legacy blank questions are scheduler-owned, not user input."""
+    return isinstance(value, str) and bool(value.strip())
+
+
 class Store:
     def __init__(self, database: str | Path) -> None:
         self.database = Path(database).expanduser().resolve()
@@ -837,7 +842,7 @@ class Store:
             for row in pending:
                 # WAITING is also used for dependency edges. A task with an input question is
                 # paused by the session and must remain untouched until ``answer`` is called.
-                if row["state"] == TaskStatus.WAITING.value and row["input_question"]:
+                if row["state"] == TaskStatus.WAITING.value and _has_input_question(row["input_question"]):
                     continue
                 dependencies = json.loads(row["dependencies"] or "[]")
                 if not dependencies:
@@ -1018,11 +1023,7 @@ class Store:
 
     def pending_input(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT id, input_question, input_options, input_answer_path FROM tasks "
-                "WHERE run_id = ? AND state = ? ORDER BY created_at, id LIMIT 1",
-                (run_id, TaskStatus.WAITING.value),
-            ).fetchone()
+            row = self._pending_input_row(connection, run_id)
         if row is None:
             return None
         return {
@@ -1035,23 +1036,21 @@ class Store:
         }
 
     def answer_input(self, run_id: str, answer_path: str) -> str | None:
-        """Attach an answer artifact and make the waiting task ready again."""
+        """Attach an answer to a real question; dependency waits cannot be answered."""
         path = Path(answer_path)
         if path.is_absolute() or ".." in path.parts:
             raise ValueError("input answer path must be run-relative")
         timestamp = utc_now()
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT id FROM tasks WHERE run_id = ? AND state = ? ORDER BY created_at, id LIMIT 1",
-                (run_id, TaskStatus.WAITING.value),
-            ).fetchone()
+            row = self._pending_input_row(connection, run_id)
             if row is None:
                 return None
             task_id = row["id"]
             updated = connection.execute(
                 "UPDATE tasks SET state = ?, input_answer_path = ?, updated_at = ? "
-                "WHERE id = ? AND state = ?",
-                (TaskStatus.READY.value, answer_path, timestamp, task_id, TaskStatus.WAITING.value),
+                "WHERE id = ? AND state = ? AND input_question = ?",
+                (TaskStatus.READY.value, answer_path, timestamp, task_id,
+                 TaskStatus.WAITING.value, row["input_question"]),
             ).rowcount
             if updated != 1:
                 return None
@@ -1067,6 +1066,15 @@ class Store:
                 {"answer_path": answer_path},
             )
         return task_id
+
+    @staticmethod
+    def _pending_input_row(connection: sqlite3.Connection, run_id: str) -> sqlite3.Row | None:
+        rows = connection.execute(
+            "SELECT id, input_question, input_options, input_answer_path FROM tasks "
+            "WHERE run_id = ? AND state = ? ORDER BY created_at, id",
+            (run_id, TaskStatus.WAITING.value),
+        )
+        return next((row for row in rows if _has_input_question(row["input_question"])), None)
 
     def _input_request_path(self, run_id: str, task_id: str) -> str | None:
         with self._connect() as connection:
@@ -1237,7 +1245,9 @@ class Store:
             current = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
             if current is None:
                 return None
-            rows = connection.execute("SELECT state FROM tasks WHERE run_id = ?", (run_id,)).fetchall()
+            rows = connection.execute(
+                "SELECT state, input_question FROM tasks WHERE run_id = ?", (run_id,),
+            ).fetchall()
             if not rows:
                 return self.get_run(run_id)
             states = {row["state"] for row in rows}
@@ -1245,7 +1255,8 @@ class Store:
                 status = RunStatus.FAILED.value
             elif states and states.issubset({TaskStatus.SUCCEEDED.value, TaskStatus.SUPERSEDED.value}) and TaskStatus.SUCCEEDED.value in states:
                 status = RunStatus.SUCCEEDED.value
-            elif TaskStatus.WAITING.value in states:
+            elif any(row["state"] == TaskStatus.WAITING.value
+                     and _has_input_question(row["input_question"]) for row in rows):
                 status = RunStatus.AWAITING_INPUT.value
             elif TaskStatus.CANCELLED.value in states:
                 status = RunStatus.CANCELLED.value

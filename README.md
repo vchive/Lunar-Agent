@@ -1381,6 +1381,15 @@ also completed 0/2: one accepted contract reached evaluator preparation, then ti
 contract request timed out. Known usage is only a subtotal. Generated evaluator quality and
 successful real multi-file delivery remain unverified.
 
+Feature 116 makes automatic preparation failures visible in solve/answer/resume JSON and
+`status` as `evolution.preparation`. A runtime failure retains the accepted contract and returns
+nonzero; if the preparation is recoverable, use `resume RUN_ID` with the same home and runtime
+settings to try again. There is no automatic retry. Status inspection is read-only. Existing frozen
+evaluators are reused, and conflicting evidence is still rejected. Only an actual nonempty question
+permits `answer`; dependency waits no longer appear as a user question. Interrupted preparation is
+reported as unknown, without a claim about provider completion or usage. See the offline
+[116 recovery checks](specs/116-preparation-recovery-state/quickstart.md).
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

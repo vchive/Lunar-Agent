@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -114,6 +115,17 @@ _SECRET = re.compile(
 
 class EvaluatorBundleError(EvolutionError):
     """A bounded evaluator compilation, preflight, or integrity failure."""
+
+
+class EvaluatorBundleRuntimeError(EvaluatorBundleError):
+    """A runtime invocation failed before its compiler/auditor response was accepted."""
+
+    def __init__(self, stage: str) -> None:
+        if stage not in {"evaluator_compile", "evaluator_audit"}:
+            raise ValueError("invalid evaluator runtime failure stage")
+        self.stage = stage
+        role = "compiler" if stage == "evaluator_compile" else "auditor"
+        super().__init__(f"evaluator {role} failed: runtime_error")
 
 
 class BundleRuntime(Protocol):
@@ -381,6 +393,7 @@ def compile_evaluator_bundle(
     inputs: tuple[CandidateInputArtifact, ...] = (),
     timeout: float = 900.0,
     invocation: str = "candidate",
+    continuation_guard: Callable[[], None] | None = None,
 ) -> FrozenEvaluatorBundle:
     """Compile and preflight a bundle, or verify and reuse an existing frozen bundle."""
     if not isinstance(contract, AlgorithmProblemContract):
@@ -414,10 +427,14 @@ def compile_evaluator_bundle(
     compiler_workspace.mkdir(parents=True, exist_ok=True)
     profile = _build_input_profile(root, contract, inputs)
     prompt = _compiler_prompt(contract, profile, invocation=invocation)
+    if continuation_guard is not None:
+        continuation_guard()
     try:
         result = _run_isolated(runtime, prompt, compiler_workspace, timeout)
     except Exception as exc:
-        raise EvaluatorBundleError(f"evaluator compiler failed: {_error_category(exc)}") from exc
+        raise EvaluatorBundleRuntimeError("evaluator_compile") from exc
+    if continuation_guard is not None:
+        continuation_guard()
     if not isinstance(result, RuntimeResult):
         raise EvaluatorBundleError("evaluator compiler returned an invalid runtime result")
     envelope = _parse_envelope(result.text, contract)
@@ -462,6 +479,7 @@ def compile_evaluator_bundle(
             root,
             timeout,
             invocation=invocation,
+            continuation_guard=continuation_guard,
         )
         audit_path.write_text(_canonical_probe_suite(audit_suite), encoding="utf-8")
         frozen_inputs[audit_path.name] = _sha256(audit_path)
@@ -507,6 +525,8 @@ def compile_evaluator_bundle(
             path.chmod(0o444)
         staging.chmod(0o555)
         load_evaluator_bundle(staging, contract, input_profile=profile, timeout=timeout, invocation=invocation)
+        if continuation_guard is not None:
+            continuation_guard()
         try:
             staging.replace(destination)
         except FileExistsError:
@@ -1214,11 +1234,14 @@ def _compile_audit_suite(
     timeout: float,
     *,
     invocation: str = "candidate",
+    continuation_guard: Callable[[], None] | None = None,
 ) -> ProbeSuite:
     workspace = root / ".evaluator-auditor"
     if workspace.is_symlink():
         raise EvaluatorBundleError("evaluator auditor workspace must not be a symlink")
     workspace.mkdir(parents=True, exist_ok=True)
+    if continuation_guard is not None:
+        continuation_guard()
     try:
         result = _run_isolated(
             runtime,
@@ -1227,7 +1250,9 @@ def _compile_audit_suite(
             timeout,
         )
     except Exception as exc:
-        raise EvaluatorBundleError(f"evaluator auditor failed: {_error_category(exc)}") from exc
+        raise EvaluatorBundleRuntimeError("evaluator_audit") from exc
+    if continuation_guard is not None:
+        continuation_guard()
     if not isinstance(result, RuntimeResult):
         raise EvaluatorBundleError("evaluator auditor returned an invalid runtime result")
     return _parse_probe_suite(result.text, contract)
@@ -1366,11 +1391,6 @@ def _dict_digest(value: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _error_category(error: Exception) -> str:
-    del error
-    return "runtime_error"
-
-
 def _remove_tree(path: Path) -> None:
     """Remove a private staging tree even after it was made read-only for final verification."""
     if not path.exists() and not path.is_symlink():
@@ -1390,6 +1410,7 @@ def _remove_tree(path: Path) -> None:
 
 __all__ = [
     "EvaluatorBundleError",
+    "EvaluatorBundleRuntimeError",
     "FrozenEvaluatorBundle",
     "SolverScoringContract",
     "compile_evaluator_bundle",

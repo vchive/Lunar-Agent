@@ -6,6 +6,35 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 116：真实问题等待与评测器准备失败恢复（2026-09-16）
+
+Store 的 pending_input、answer_input、settle_run 和 scheduler 使用相同的非空问题规则。
+无问题、空串及 Unicode 空白的 WAITING 由依赖调度处理，不再误报用户待答；stray answer
+不能创建回答 artifact 或释放依赖。旧 awaiting_input/null-question 父任务在显式继续时
+重新 settle；status 只读，不回写历史状态。无需 schema migration。
+
+自动 evaluator/profile 准备在现有锁内、昂贵调用前写 bundle_preparation_started，失败写
+同 attempt ID 的 bundle_preparation_failed，保留 parent/stage/固定 error_category，不存
+provider 异常原文。compiler/auditor runtime 异常经输入/证据复验后可显式 resume；合同
+保留，无自动重试。取消、完整性错误及终态不提供重试提示。未完成 start 为 unknown，
+可能仍在运行，不代表已确认崩溃或零消费。原 bundle_profile_prepared 仍是唯一准备权威。
+
+solve/answer/resume 发生已记录准备失败时返回父任务 JSON、非零退出及 evolution.preparation；
+durable run_status 通常仍为 running，effective status 为 failed。JSON/text status 可查询
+阶段与安全类别。原冻结 evaluator 恢复不再调用 compiler/auditor，终态恢复不新增尝试。
+阶段间 continuation guard 复验 parent，避免观察到取消/预算终止后继续 auditor 或发布；
+不等于中断活动 HTTP 或完整的运行中取消编排。
+
+新增 69 项测试和独立审查通过。最终全仓 **5636 passed, 1 skipped in 383.95s**，JUnit
+零失败/错误；本地 112 quickstart 仍为 1、2、6、7 分，终态恢复调用次数维持 1/1/1/4/4，
+交付副本 1。Ruff、compileall、installed CLI、Specify、111 个文档链接和 diff 检查通过。
+实现冻结后无代码/测试修改；按用户授权正常提交并 push。
+
+实现、离线验证和限制见 `specs/116-preparation-recovery-state/validation.md`。没有真实模型
+调用；113/115 的各自 0/2、未知用量和冻结证据均不改写，不运行旧 verifier 来更新 pin。
+下一步考虑独立登记与模型耗时匹配的新预算验收，继续验证自动 evaluator 和多文件有效
+交付；外部 OpenEvolve/Shinka 多文件 seed、全链路预算/取消与 detached 模式仍未完成。
+
 ## Feature 115：修复后真实验收 0/2，一例通过合同编译（2026-09-16）
 
 `acfb815` 先推送登记再运行，产品固定 `5e2568f`；原两道 GLM-5.2 任务、输入、预算、

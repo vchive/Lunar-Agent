@@ -16,6 +16,16 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-16：准备失败状态与显式恢复
+
+Feature 116 修复依赖等待误报用户待答，`answer` 只接收真实问题。自动 evaluator/profile
+准备在模型调用前记录 attempt，失败保留安全阶段/类别；CLI 返回父任务 JSON 和非零退出，
+`status` 可只读查询。已接受合同保留，运行异常可在输入/证据复验后显式 resume；不自动
+重试，完整冻结 evaluator 与终态恢复不增加模型请求。中断开始记录为 unknown，取消与
+完整性错误不承诺可重试。新代码仅离线验证，113/115 和 WebAgent 历史仍冻结；下一步
+考虑独立登记新预算验收，而非重开失败槽。详见
+[116 validation](../specs/116-preparation-recovery-state/validation.md)。
+
 ## 2026-09-16：修复后独立验收
 
 Feature 115 固定 `5e2568f`，沿用 113 全部任务/模型/预算条件独立登记，两例完成仍为

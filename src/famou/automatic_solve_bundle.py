@@ -4,6 +4,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import os
+import re
 import secrets
 import stat
 import sys
@@ -22,6 +23,7 @@ from .evaluator import MAX_ARTIFACT_BYTES
 from .evaluator_bundle import (
     BUNDLE_FILES,
     COMPILED_BUNDLE_EVALUATOR_ID,
+    EvaluatorBundleRuntimeError,
     compile_evaluator_bundle,
     load_evaluator_bundle,
 )
@@ -41,6 +43,80 @@ _ENVIRONMENT = {
 }
 _MAX_PROFILE_BYTES = 128 * 1024
 _MAX_FROZEN_FILE_BYTES = 512 * 1024
+_STARTED = "bundle_preparation_started"
+_FAILED = "bundle_preparation_failed"
+_STAGES = {"preparation", "evaluator_compile", "evaluator_audit", "profile_publish"}
+_CATEGORIES = {"runtime_error", "validation_error", "cancelled", "interrupted"}
+
+
+class AutomaticBundlePreparationError(EvolutionError):
+    """An unsuccessful preparation attempt with a durably recorded safe observation."""
+
+    def __init__(self, preparation: dict[str, object], *, budget_exceeded: bool = False) -> None:
+        self.preparation = dict(preparation)
+        suffix = ": automatic_bundle_budget_exceeded" if budget_exceeded else ""
+        super().__init__("automatic_bundle_preparation_failed" + suffix)
+
+
+def _observation(parent_id, attempt_id, *, status, stage, category=None, recoverable=False):
+    return {
+        "schema_version": "1", "parent_run_id": parent_id, "attempt_id": attempt_id,
+        "status": status, "stage": stage, "error_category": category,
+        "recoverable": recoverable,
+    }
+
+
+def _record_observation(store, parent_id, kind, observation):
+    if store.append_event(parent_id, kind, observation) is not True:
+        raise EvolutionError("automatic_bundle_observation_write_failed")
+
+
+def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, object] | None:
+    """Read advisory state; observations never authorize reuse or reconstruction of files."""
+    events = store.list_events(parent_id)
+    relevant = [item for item in events if item.get("type") in {_STARTED, _FAILED, _EVENT}]
+    if not relevant:
+        return None
+    latest = relevant[-1]
+    raw = latest.get("payload")
+    attempt_id = raw.get("attempt_id") if isinstance(raw, dict) else None
+    if not isinstance(attempt_id, str) or re.fullmatch(r"preparation-[0-9a-f]{32}", attempt_id) is None:
+        attempt_id = None
+    stage = raw.get("stage") if isinstance(raw, dict) else None
+    if not isinstance(stage, str) or stage not in _STAGES:
+        stage = "preparation"
+    result = _observation(
+        parent_id, attempt_id, status="unknown", stage=stage, category="interrupted",
+    )
+    parent = store.get_run(parent_id)
+    if parent is not None and parent.status == RunStatus.CANCELLED:
+        return {**result, "status": "failed", "error_category": "cancelled"}
+    try:
+        validate_automatic_solve_bundle(store, parent_id)
+        _, prepared = _event(store, parent)
+    except (EvolutionError, AttributeError, KeyError, OSError, TypeError, ValueError, RecursionError):
+        return {**result, "status": "failed", "error_category": "validation_error"}
+    if prepared is not None:
+        return _observation(parent_id, None, status="prepared", stage="profile_publish")
+    if latest["type"] == _FAILED and isinstance(raw, dict):
+        category = raw.get("error_category")
+        matched_start = any(
+            item.get("type") == _STARTED and isinstance(item.get("payload"), dict)
+            and item["payload"].get("parent_run_id") == parent_id
+            and item["payload"].get("attempt_id") == attempt_id
+            for item in relevant[:-1]
+        )
+        if (attempt_id is not None and raw.get("parent_run_id") == parent_id
+                and matched_start and isinstance(category, str) and category in _CATEGORIES):
+            return {
+                **result, "status": "failed", "error_category": category,
+                "recoverable": (
+                    category == "runtime_error" and stage in {"evaluator_compile", "evaluator_audit"}
+                    and raw.get("recoverable") is True
+                    and parent.status not in {RunStatus.SUCCEEDED, RunStatus.FAILED}
+                ),
+            }
+    return result
 
 
 def _fail(reason="invalid"):
@@ -325,26 +401,74 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
             _, event = _event(controller.store, parent)
             if event is not None:
                 return _read_preparation(controller.store, parent, contract, expected_timeout=timeout)[0]
+            if parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
+                _fail("terminal")
+
+            def continuation_guard():
+                current, _ = _parent(controller.store, parent.id, contract)
+                if current.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
+                    _fail("terminal")
+                held.check()
+
             descriptors, concrete, input_profile = _descriptors(controller.store, parent, contract)
-            bundle = compile_evaluator_bundle(controller.runtime, contract, root, inputs=descriptors,
-                                              timeout=timeout, invocation="snapshot")
-            current = _descriptors(controller.store, parent, contract)
-            if current != (descriptors, concrete, input_profile):
-                _fail("inputs_changed")
-            raw = canonical_json(_profile_payload(bundle, concrete, contract, timeout))
-            materials = _materials(bundle, raw)
-            _budget(controller.store, parent, materials)
-            _write_profile(held, root, raw)
-            pipeline, bundle, raw, materials = _read_preparation(
-                controller.store, parent, contract, expected_timeout=timeout, require_event=False,
+            attempt_id = "preparation-" + secrets.token_hex(16)
+            _record_observation(
+                controller.store, parent.id, _STARTED,
+                _observation(parent.id, attempt_id, status="started", stage="preparation"),
             )
-            rows = _artifact_rows(controller.store, parent, materials, register=True)
-            held.check()
-            _parent(controller.store, parent_id, contract)
-            _budget(controller.store, parent, materials)
-            payload = _payload(parent, contract, bundle, pipeline, raw, rows)
-            event_id, _ = _event(controller.store, parent)
-            controller.store.append_event(parent.id, _EVENT, payload, event_id=event_id)
-            return _read_preparation(controller.store, parent, contract, expected_timeout=timeout)[0]
+            stage = "preparation"
+            try:
+                bundle = compile_evaluator_bundle(controller.runtime, contract, root, inputs=descriptors,
+                                                  timeout=timeout, invocation="snapshot",
+                                                  continuation_guard=continuation_guard)
+                stage = "profile_publish"
+                current = _descriptors(controller.store, parent, contract)
+                if current != (descriptors, concrete, input_profile):
+                    _fail("inputs_changed")
+                raw = canonical_json(_profile_payload(bundle, concrete, contract, timeout))
+                materials = _materials(bundle, raw)
+                _budget(controller.store, parent, materials)
+                continuation_guard()
+                _write_profile(held, root, raw)
+                pipeline, bundle, raw, materials = _read_preparation(
+                    controller.store, parent, contract, expected_timeout=timeout, require_event=False,
+                )
+                rows = _artifact_rows(controller.store, parent, materials, register=True)
+                held.check()
+                continuation_guard()
+                _budget(controller.store, parent, materials)
+                payload = _payload(parent, contract, bundle, pipeline, raw, rows)
+                event_id, _ = _event(controller.store, parent)
+                continuation_guard()
+                controller.store.append_event(parent.id, _EVENT, payload, event_id=event_id)
+                return _read_preparation(controller.store, parent, contract, expected_timeout=timeout)[0]
+            except Exception as exc:
+                category, recoverable = "validation_error", False
+                if isinstance(exc, EvaluatorBundleRuntimeError):
+                    stage = exc.stage
+                    try:
+                        continuation_guard()
+                        validate_automatic_solve_bundle(controller.store, parent.id)
+                        held.check()
+                    except (EvolutionError, OSError, TypeError, ValueError):
+                        pass
+                    else:
+                        category, recoverable = "runtime_error", True
+                current_parent = controller.store.get_run(parent.id)
+                if current_parent is not None and current_parent.status == RunStatus.CANCELLED:
+                    category, recoverable = "cancelled", False
+                elif current_parent is not None and current_parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
+                    category, recoverable = "validation_error", False
+                observation = _observation(
+                    parent.id, attempt_id, status="failed", stage=stage,
+                    category=category, recoverable=recoverable,
+                )
+                _record_observation(controller.store, parent.id, _FAILED, observation)
+                raise AutomaticBundlePreparationError(
+                    observation,
+                    budget_exceeded=(
+                        type(exc) is EvolutionError and str(exc) == "automatic_bundle_budget_exceeded"
+                    ),
+                ) from exc
     except (AttributeError, KeyError, OSError, TypeError, ValueError, RecursionError):
         _fail()
