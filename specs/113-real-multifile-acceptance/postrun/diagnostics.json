@@ -1,0 +1,60 @@
+{
+  "checked_utc": "2026-09-16T10:35:55.925952+00:00",
+  "registration_commit": "10b844b",
+  "manifest_sha256": "9f30acf0db6e672331c86a3efc46a964fb71d4c1d8a4cd2fe287ee9ec8e6e367",
+  "model_calls_for_this_read_only_diagnostic": 0,
+  "slots": [
+    {
+      "attempt_id": "slot-001-attempt-001",
+      "task_failures": [
+        {
+          "attempt_id": "attempt-4f23f528cecf4338b7a9ed926bc48c8a",
+          "error": "compiler response must be one strict JSON object",
+          "result_path": null
+        }
+      ],
+      "event_counts": {
+        "algorithm_input_staged": 2,
+        "artifact_recorded": 3,
+        "conversation_started": 1,
+        "evolution_requested": 1,
+        "route_selected": 1,
+        "run_created": 1,
+        "run_failed": 1,
+        "task_claimed": 1,
+        "task_created": 1,
+        "task_failed": 1
+      },
+      "raw_compiler_response_retained": false,
+      "evaluator_generated": false,
+      "candidate_generated": false,
+      "delivery_present": false
+    },
+    {
+      "attempt_id": "slot-002-attempt-001",
+      "task_failures": [
+        {
+          "attempt_id": "attempt-fb2fe60b4661441e944b59bcf579543c",
+          "error": "evolution contains unknown fields",
+          "result_path": null
+        }
+      ],
+      "event_counts": {
+        "algorithm_input_staged": 2,
+        "artifact_recorded": 3,
+        "conversation_started": 1,
+        "evolution_requested": 1,
+        "route_selected": 1,
+        "run_created": 1,
+        "run_failed": 1,
+        "task_claimed": 1,
+        "task_created": 1,
+        "task_failed": 1
+      },
+      "raw_compiler_response_retained": false,
+      "evaluator_generated": false,
+      "candidate_generated": false,
+      "delivery_present": false
+    }
+  ]
+}

@@ -1363,9 +1363,12 @@ It requires all contract inputs to match registered `csv`, `json`, `jsonl` or `t
 local Python without installing dependencies. Probe success covers the tested cases and does not
 prove full business correctness. See the local [112 quickstart](specs/112-automatic-bundle-evaluator/quickstart.md).
 
-Normal solving remains the default. Active-process cancellation orchestration, OpenEvolve/Shinka
-multi-file seed imports and current-version real-model validation remain future work. Local fixtures
-do not establish current-model effectiveness or relative WebAgent performance.
+Normal solving remains the default. The first preregistered GLM-5.2 acceptance on `c977eb4`
+completed **0/2** tasks: both failed at contract intake, before evaluator or candidate generation.
+See the [113 report](specs/113-real-multifile-acceptance/postrun/report.md). Current-version reliability
+still needs successful real-model validation; local fixtures do not establish effectiveness or
+relative WebAgent performance. Active-process cancellation orchestration and OpenEvolve/Shinka
+multi-file seed imports remain future work.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

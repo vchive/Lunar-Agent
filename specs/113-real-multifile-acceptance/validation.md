@@ -24,3 +24,16 @@ Registered manifest SHA-256:
 `9f30acf0db6e672331c86a3efc46a964fb71d4c1d8a4cd2fe287ee9ec8e6e367`.
 Registration and verification performed zero provider requests. Real outcomes belong in `postrun/`
 and do not alter preregistered source, tasks, holdouts or conditions.
+
+## After launch
+
+Both registered slots ran once and failed at contract intake; no evaluator/candidate/delivery
+was created. Known reported usage is 15958 tokens across exactly two completed GLM-5.2 responses.
+Read-only analysis gives primary and envelope-qualified completion 0/2, with null quality/gap.
+The manifest is byte-identical to preregistration `10b844b`.
+
+Independent postrun audit verified all 76 product pins and 12 measurement/test pins, the complete
+34-file evidence inventory, six Store artifact rows, both call journals and failure events.
+There were no retries, pending requests or remaining observed processes. Frozen historical files
+and product bytes are unchanged. See [the report](postrun/report.md) for the failure distinctions
+and confirmed next repair; the raw responses are unavailable, so their precise contents are unknown.

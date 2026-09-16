@@ -16,6 +16,14 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-16：首次当前版本真实验收
+
+Feature 113 在提交/推送独立登记后，对 `c977eb4` 运行两例 GLM-5.2 自动多文件任务。
+两例均在合同编译失败，完成 **0/2**，没有 evaluator、候选或交付。保留完整分母和已知
+15958 tokens，不补槽、不重跑 WebAgent。见 [113 报告](../specs/113-real-multifile-acceptance/postrun/report.md)。
+下一步先修复 compiler 误用普通 Agent 总结提示/工具的入口接线与 schema 指引，再以
+新登记继续验收；外部 producer 接线继续后置。
+
 ## 2026-09-16：多文件 evaluator/profile 自动准备
 
 Feature 112 新增 `solve --evolve --multi-file`，复用现有 evaluator compiler、独立 auditor、
