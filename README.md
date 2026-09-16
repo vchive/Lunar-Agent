@@ -97,8 +97,10 @@ lunar-agent solve "根据订单数据设计配送路线" \
   --model your-local-model --json --home .lunar
 ```
 
-The compiler must return a strict JSON envelope. If a material objective, input, constraint, or
-deliverable is unknown it returns `status=awaiting_input`; answer the same run and it will resume
+The compiler must return a strict JSON envelope; one complete lowercase `json` code fence with LF
+delimiters is also accepted as framing. Prose, multiple objects, duplicate keys and non-finite
+numbers are rejected without repair or retry. If a material objective, input, constraint, or
+deliverable is unknown, the run returns `status=awaiting_input`; answer the same run and it will resume
 compilation:
 
 ```bash
@@ -1397,6 +1399,15 @@ timed out, and the other task's contract response was wrapped in a Markdown JSON
 Preparation failure now returns parent JSON and durable diagnostics; no recovery retry was used.
 Known usage is a 11309-token subtotal, with timeout consumption unknown. There is still no real
 multi-file delivery or generated-evaluator quality result from these acceptance campaigns.
+
+Feature 118 adds explicit constraint `verification_scope`: `output`, `source`, or `execution`.
+Generated evaluators currently support output checks. A declared source/execution requirement
+stops preparation before a compiler/auditor request and appears in `evolution.preparation` with
+category `unsupported_verification` and the affected IDs/scopes. The contract is retained; retrying
+generation cannot supply the missing independent checker. No requirement is removed because it is
+partial or has empty result fields. Older unscoped contracts keep their existing digests and probe
+coverage. This does not prove helper imports, standard-library-only execution or actual input use.
+See [118 capability and framing checks](specs/118-contract-protocol-capabilities/quickstart.md).
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

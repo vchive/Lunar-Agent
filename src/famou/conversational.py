@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -178,14 +179,44 @@ def _questions(raw: object) -> tuple[CompilationQuestion, ...]:
 def _parse_response(raw: str) -> CompilationResult:
     if not isinstance(raw, str) or not raw.strip():
         raise ContractCompilationError("compiler returned empty output")
-    encoded = raw.encode("utf-8")
+    try:
+        encoded = raw.encode("utf-8")
+    except UnicodeError as exc:
+        raise ContractCompilationError("compiler response must be valid UTF-8 text") from exc
     if len(encoded) > MAX_RESPONSE_BYTES:
         raise ContractCompilationError("compiler response exceeds the bounded limit")
     if _SECRET_RE.search(raw):
         raise ContractCompilationError("compiler response contains credential-like content")
+    candidate = raw.strip(" \t\r\n")
+    # Remove only one complete, explicitly labelled envelope. Never search for JSON in prose,
+    # choose between competing objects, or repair the JSON carried inside the envelope.
+    fenced = re.fullmatch(r"```json\n(.*)\n```", candidate, flags=re.DOTALL)
+    if fenced is not None:
+        candidate = fenced.group(1)
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object member")
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError("nonfinite JSON number")
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("nonfinite JSON number")
+        return result
+
     try:
-        payload = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        payload = json.loads(
+            candidate, object_pairs_hook=unique_object,
+            parse_constant=reject_constant, parse_float=finite_float,
+        )
+    except (ValueError, RecursionError) as exc:
         raise ContractCompilationError("compiler response must be one strict JSON object") from exc
     if not isinstance(payload, dict) or set(payload) - {"status", "contract", "questions", "evidence"}:
         raise ContractCompilationError("compiler response contains unknown fields")
@@ -262,6 +293,7 @@ def _validate_contract_shape(value: object) -> None:
                     "source",
                     "verification",
                     "result_fields",
+                    "verification_scope",
                 }:
                     raise ContractCompilationError("constraint contains unknown fields")
     evolution = value.get("evolution")
@@ -527,8 +559,17 @@ class RuntimeContractCompiler:
             "- hard_constraints and soft_constraints: arrays of objects with id (unique safe "
             "identifier string), description (string), source "
             '("user_confirmed", "data_observed", or "explicit_assumption"), verification '
-            '("independent", "partial", or "solver"), and optional result_fields '
-            "(array of field-name strings). Use empty arrays when no constraints are specified.\n"
+            '("independent", "partial", or "solver"), optional result_fields '
+            '(array of field-name strings), and verification_scope ("output", "source", or '
+            '"execution"). Declare the scope explicitly: output means decidable from declared '
+            "inputs and result files; source means properties of the delivered source files; "
+            "execution means actual program behavior or runtime dependencies. Scope is separate "
+            "from verification strength: partial and empty result_fields do not remove a requirement. "
+            "For example, file count is source; using only standard-library dependencies or actually "
+            "reading every input is execution. Split requirements with different scopes; never "
+            "relabel source/execution requirements as output or drop them to fit an evaluator. "
+            "If a material scope is ambiguous, request clarification. Use empty arrays when no "
+            "constraints are specified.\n"
             "- outputs: an optional array of objects with path (unique relative path string below "
             'output/), format ("json", "jsonl", "csv", or "text"), optional fields (array of '
             "unique field-name strings, not an object; empty for text), optional required (JSON "

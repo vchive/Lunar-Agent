@@ -6,6 +6,37 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 118：合同格式兼容与评测器能力预检（2026-09-16）
+
+合同入口接受严格 JSON，或完整的单层小写 json 代码块（LF 分隔、仅外层 ASCII JSON
+空白）。先检查原始响应 UTF-8/64KiB/凭据模式，再去除这一对包装；不从说明文字中提取，
+不修复内容，不追加请求。任意层级重复键、NaN/Infinity/溢出数字均拒绝，既有 schema、
+未知字段、澄清和退役策略检查保留。普通 Agent 与 evaluator 的解析协议没有放宽。
+
+ConstraintSpec 新增可选 verification_scope=output/source/execution，与 provenance 和
+verification 强度独立；prompt 要求明确范围，不按 partial 或空 result_fields 排除要求。
+旧合同缺省字段保持缺省，原 canonical bytes/digest 不变；显式 scope 参与摘要，null/非法值
+拒绝。自动生成 evaluator 的两种 invocation 均在调用/准备前拒绝显式 source/execution
+要求（hard/soft 都保留）；当前不具备它们的独立验证器，不能用输入/输出反例冒充验证。
+
+准备失败使用 capability_check/unsupported_verification，保存具体 ID/scope、合同及同
+attempt 事件；JSON/text status 给出原因，无 retry 提示。状态读取将诊断与当前合同复验，
+畸形字段不回显；取消优先，显式 resume 仅再次本地检查，不调用模型或创建候选。
+旧未声明 scope 的合同仍沿用原完整探针覆盖，不能据此声称旧合同语义已重新认证。
+
+134 项新增离线测试通过（合同格式 57、范围/CLI 77），相关合同 160 项及准备/恢复 171 项
+回归通过；本地 112 quickstart 仍交付 7 分，四候选 1/2/6/7，终态调用数 1/1/1/4/4 不变。
+最终全仓 **5818 passed, 1 skipped in 380.77s**，JUnit 零失败/错误；实现冻结后无修改。
+Ruff、compileall、installed CLI、Specify、117 个文档链接及 diff 检查通过；完整记录见
+`specs/118-contract-protocol-capabilities/validation.md`。
+没有真实模型调用，不改写 113/115/117 的各自 0/2、响应或未知用量，也不运行旧 verifier
+来更新产品指纹。已按既有授权正常提交推送。
+
+下一步是把明确可检查的源码交付要求接入独立验证与最终交付，再注册支持范围内的小规模
+真实闭环验收。文件数不证明 helper 调用，输入摘要不证明实际读取，静态 import 不完整
+证明运行时依赖；这些执行语义仍不支持。全链路预算/取消、外部多文件 seed 与 detached
+模式继续后置，不能把这轮格式/提前诊断修复当作真实多文件有效率已提升。
+
 ## Feature 117：延长时限后真实验收仍为 0/2（2026-09-16）
 
 新验收固定产品 `9a26a73`，沿用 115 的两道任务、输入、GLM-5.2/网关、oracle/24 holdout、

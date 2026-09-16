@@ -272,6 +272,7 @@ class ConstraintSpec:
     source: Literal["user_confirmed", "data_observed", "explicit_assumption"]
     verification: Literal["independent", "partial", "solver"]
     result_fields: tuple[str, ...] = ()
+    verification_scope: Literal["output", "source", "execution"] | None = None
 
     def __post_init__(self) -> None:
         _safe_segment(self.id, "constraint id")
@@ -280,24 +281,35 @@ class ConstraintSpec:
             raise ValueError("constraint source is unsupported")
         if self.verification not in VERIFICATION_VALUES:
             raise ValueError("constraint verification is unsupported")
+        if self.verification_scope is not None and (
+            not isinstance(self.verification_scope, str)
+            or self.verification_scope not in {"output", "source", "execution"}
+        ):
+            raise ValueError("constraint verification_scope is unsupported")
         if len(self.result_fields) > MAX_ITEMS:
             raise ValueError("constraint result fields are too many")
         for field_name in self.result_fields:
             _safe_segment(field_name, "constraint result field")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "id": self.id,
             "description": self.description,
             "source": self.source,
             "verification": self.verification,
             "result_fields": list(self.result_fields),
         }
+        # Omission preserves historical contract serialization and frozen digests.
+        if self.verification_scope is not None:
+            result["verification_scope"] = self.verification_scope
+        return result
 
     @classmethod
     def from_dict(cls, value: object) -> ConstraintSpec:
         if not isinstance(value, dict):
             raise TypeError("constraint must be an object")
+        if "verification_scope" in value and value["verification_scope"] is None:
+            raise ValueError("constraint verification_scope must not be null")
         result_fields = value.get("result_fields", [])
         if not isinstance(result_fields, list) or any(not isinstance(item, str) for item in result_fields):
             raise TypeError("constraint result_fields must be a string array")
@@ -307,6 +319,7 @@ class ConstraintSpec:
             source=value.get("source"),  # type: ignore[arg-type]
             verification=value.get("verification"),  # type: ignore[arg-type]
             result_fields=tuple(result_fields),
+            verification_scope=value.get("verification_scope"),  # type: ignore[arg-type]
         )
 
 

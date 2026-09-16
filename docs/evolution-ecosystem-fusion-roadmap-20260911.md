@@ -16,6 +16,15 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-16：合同格式兼容与约束范围预检
+
+Feature 118 接受完整的精确 JSON 代码块，但保留严格内部校验且不重试。约束新增显式
+output/source/execution 范围，未声明的旧合同摘要不变。生成 evaluator 在请求前拒绝
+没有独立检查能力的 source/execution 要求，持久保存 ID/scope 并向 CLI 说明，不再假装
+输出探针能验证源码或运行行为。134 项新增离线测试通过，真实测量未重跑；见
+[118 验证](../specs/118-contract-protocol-capabilities/validation.md)。下一步接入确实能验证的
+源码交付要求，并在固定实现后独立登记真实闭环验收。执行依赖和真实输入读取仍不支持。
+
 ## 2026-09-16：延长时限验收与协议失败诊断
 
 Feature 117 先以 `17a0ad2` 提交推送登记，在产品 `9a26a73` 上把单调用/进程限时增至

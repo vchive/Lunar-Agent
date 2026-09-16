@@ -117,6 +117,35 @@ class EvaluatorBundleError(EvolutionError):
     """A bounded evaluator compilation, preflight, or integrity failure."""
 
 
+class UnsupportedEvaluatorConstraintsError(EvaluatorBundleError):
+    """Declared requirements need evidence unavailable to generated probe evaluators."""
+
+    def __init__(self, constraints: tuple[tuple[str, str], ...]) -> None:
+        self.unsupported_constraints = constraints
+        labels = ", ".join(f"{identifier} ({scope})" for identifier, scope in constraints)
+        super().__init__("unsupported evaluator verification scopes: " + labels)
+
+    def details(self) -> list[dict[str, str]]:
+        return [{"id": identifier, "verification_scope": scope}
+                for identifier, scope in self.unsupported_constraints]
+
+
+def validate_evaluator_capabilities(contract: AlgorithmProblemContract) -> None:
+    """Retain all requirements; never interpret verification strength as evidence scope.
+
+    Unscoped historical contracts preserve their original probe-coverage assumptions. Both
+    generated invocation modes use synthetic input/output probes, not source/execution evidence.
+    """
+    verified = AlgorithmProblemContract.from_dict(contract.to_dict())
+    unsupported = tuple(
+        (item.id, item.verification_scope)
+        for item in (*verified.hard_constraints, *verified.soft_constraints)
+        if item.verification_scope in {"source", "execution"}
+    )
+    if unsupported:
+        raise UnsupportedEvaluatorConstraintsError(unsupported)
+
+
 class EvaluatorBundleRuntimeError(EvaluatorBundleError):
     """A runtime invocation failed before its compiler/auditor response was accepted."""
 
@@ -400,6 +429,7 @@ def compile_evaluator_bundle(
         raise TypeError("contract must be an AlgorithmProblemContract")
     timeout = _timeout(timeout)
     _bundle_protocol(invocation)
+    validate_evaluator_capabilities(contract)
     if invocation == "snapshot":
         from .candidate_evaluation_spec import candidate_output_contract_sha256
 
@@ -553,6 +583,7 @@ def load_evaluator_bundle(
     """Load a frozen bundle after exact file, mode, schema, and digest verification."""
     timeout = _timeout(timeout)
     protocol = _bundle_protocol(invocation)
+    validate_evaluator_capabilities(contract)
     raw_root = Path(root).expanduser()
     if raw_root.is_symlink():
         raise EvaluatorBundleError("frozen evaluator bundle must not be a symlink")

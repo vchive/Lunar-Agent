@@ -1310,6 +1310,10 @@ def _print_status(config: Config, run_id: str) -> int:
             print(f"preparation_error: {preparation['stage']}: {preparation['error_category']}")
         if preparation.get("resume_hint"):
             print(preparation["resume_hint"])
+        if preparation.get("capability_hint"):
+            print(preparation["capability_hint"])
+            for constraint in preparation["unsupported_constraints"]:
+                print(f"unsupported_constraint: {constraint['id']} ({constraint['verification_scope']})")
     if run.runner_pid:
         print(f"runner: pid={run.runner_pid} pgid={run.runner_pgid}")
     pending_input = store.pending_input(run.id)
@@ -2696,6 +2700,14 @@ def _bundle_preparation_payload(store: Store, run_id: str) -> dict[str, object] 
         preparation = {
             **preparation,
             "resume_hint": "Run resume with the same home and runtime settings to retry evaluator preparation.",
+        }
+    if preparation is not None and preparation.get("error_category") == "unsupported_verification":
+        preparation = {
+            **preparation,
+            "capability_hint": (
+                "Generated evaluators verify outputs only. These requirements need independent "
+                "source or execution checkers; retrying evaluator generation cannot verify them."
+            ),
         }
     return preparation
 

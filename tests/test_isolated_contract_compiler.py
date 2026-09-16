@@ -179,7 +179,7 @@ def test_invalid_evolution_is_rejected_once_without_repair(tmp_path: Path, evolu
 
 
 @pytest.mark.parametrize("text", [
-    "```json\n" + _compiled() + "\n```",
+    "Here is the contract:\n```json\n" + _compiled() + "\n```",
     _compiled() + "\nFinished compiling the contract.",
     '{"status":"compiled","contract":',
 ])

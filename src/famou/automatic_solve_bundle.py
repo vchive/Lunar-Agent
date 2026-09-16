@@ -24,8 +24,10 @@ from .evaluator_bundle import (
     BUNDLE_FILES,
     COMPILED_BUNDLE_EVALUATOR_ID,
     EvaluatorBundleRuntimeError,
+    UnsupportedEvaluatorConstraintsError,
     compile_evaluator_bundle,
     load_evaluator_bundle,
+    validate_evaluator_capabilities,
 )
 from .evolution import CandidateInputArtifact, EvolutionError
 from .models import RunStatus
@@ -45,8 +47,8 @@ _MAX_PROFILE_BYTES = 128 * 1024
 _MAX_FROZEN_FILE_BYTES = 512 * 1024
 _STARTED = "bundle_preparation_started"
 _FAILED = "bundle_preparation_failed"
-_STAGES = {"preparation", "evaluator_compile", "evaluator_audit", "profile_publish"}
-_CATEGORIES = {"runtime_error", "validation_error", "cancelled", "interrupted"}
+_STAGES = {"preparation", "capability_check", "evaluator_compile", "evaluator_audit", "profile_publish"}
+_CATEGORIES = {"runtime_error", "validation_error", "cancelled", "interrupted", "unsupported_verification"}
 
 
 class AutomaticBundlePreparationError(EvolutionError):
@@ -58,12 +60,16 @@ class AutomaticBundlePreparationError(EvolutionError):
         super().__init__("automatic_bundle_preparation_failed" + suffix)
 
 
-def _observation(parent_id, attempt_id, *, status, stage, category=None, recoverable=False):
-    return {
+def _observation(parent_id, attempt_id, *, status, stage, category=None, recoverable=False,
+                 unsupported_constraints=None):
+    observation = {
         "schema_version": "1", "parent_run_id": parent_id, "attempt_id": attempt_id,
         "status": status, "stage": stage, "error_category": category,
         "recoverable": recoverable,
     }
+    if unsupported_constraints is not None:
+        observation["unsupported_constraints"] = unsupported_constraints
+    return observation
 
 
 def _record_observation(store, parent_id, kind, observation):
@@ -108,6 +114,23 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
         )
         if (attempt_id is not None and raw.get("parent_run_id") == parent_id
                 and matched_start and isinstance(category, str) and category in _CATEGORIES):
+            if category == "unsupported_verification":
+                details = None
+                try:
+                    _, contract = _parent(store, parent_id)
+                    if contract is not None:
+                        validate_evaluator_capabilities(contract)
+                except UnsupportedEvaluatorConstraintsError as exc:
+                    details = exc.details()
+                except (EvolutionError, AttributeError, KeyError, TypeError, ValueError):
+                    pass
+                if (details is None or raw.get("unsupported_constraints") != details
+                        or stage != "capability_check" or raw.get("recoverable") is not False):
+                    return {**result, "status": "failed", "error_category": "validation_error"}
+                return {
+                    **result, "status": "failed", "error_category": category,
+                    "unsupported_constraints": details,
+                }
             return {
                 **result, "status": "failed", "error_category": category,
                 "recoverable": (
@@ -444,6 +467,16 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                 return _read_preparation(controller.store, parent, contract, expected_timeout=timeout)[0]
             except Exception as exc:
                 category, recoverable = "validation_error", False
+                unsupported_constraints = None
+                if isinstance(exc, UnsupportedEvaluatorConstraintsError):
+                    stage, category = "capability_check", "unsupported_verification"
+                    # Recompute from the retained contract rather than trusting exception prose.
+                    try:
+                        validate_evaluator_capabilities(contract)
+                    except UnsupportedEvaluatorConstraintsError as unsupported:
+                        unsupported_constraints = unsupported.details()
+                    else:
+                        category = "validation_error"
                 if isinstance(exc, EvaluatorBundleRuntimeError):
                     stage = exc.stage
                     try:
@@ -459,9 +492,12 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                     category, recoverable = "cancelled", False
                 elif current_parent is not None and current_parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
                     category, recoverable = "validation_error", False
+                if category != "unsupported_verification":
+                    unsupported_constraints = None
                 observation = _observation(
                     parent.id, attempt_id, status="failed", stage=stage,
                     category=category, recoverable=recoverable,
+                    unsupported_constraints=unsupported_constraints,
                 )
                 _record_observation(controller.store, parent.id, _FAILED, observation)
                 raise AutomaticBundlePreparationError(
