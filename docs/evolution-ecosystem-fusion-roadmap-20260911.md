@@ -1,7 +1,8 @@
 # Evolution ecosystem fusion roadmap（2026-09-11）
 
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
-后续主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
+主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
+Feature 108 已完成第一项的本地实现与样例，下一步把多文件评测接入演化和交付；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
@@ -43,6 +44,13 @@ read-only input/pin admission. This is preparation for later SkyDiscover/LLM4AD 
 framework execution or effectiveness claim is included.
 
 ## 2026-09-16：多文件候选 bounded runner
+
+Feature 108 已补上独立评测入口：成功的 execution record 经身份和字节复验后，把声明
+输入/输出复制到新 evaluation 目录；固定指纹的 harness 仅读取快照，返回严格评测报告。
+输出格式不合格时直接给出无效零分，不启动 harness。保存原始报告和绑定快照的 manifest，
+`inspect-evaluation` 只读复验，不重跑候选。输出观察明确发生于评测时，不冒充执行退出时
+的输出证明。双文件本地样例和边界 fixture 已通过；尚未接入 Candidate/receipt/archive、
+population/controller 与恢复交付，没有新增真实模型或外部框架效果结论。
 
 Feature 107 已在 runner 之上完成独立执行证据层：`candidate-bundle run-recorded` 先独占
 新 attempt 目录并同步 launch intent，再执行一次 Feature 106，最后绑定 result/completed

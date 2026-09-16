@@ -71,6 +71,18 @@ from .candidate_bundle import (
     validate_candidate_source_bundle,
     verify_candidate_source_bundle,
 )
+from .candidate_evaluation import (
+    CandidateEvaluationResult,
+    evaluate_candidate_execution,
+    inspect_candidate_evaluation,
+)
+from .candidate_evaluation_spec import (
+    CandidateEvaluationError,
+    CandidateEvaluationSpec,
+    candidate_output_contract_sha256,
+    parse_candidate_evaluation_report,
+    parse_candidate_evaluation_spec,
+)
 from .candidate_execution import (
     CANDIDATE_EXECUTION_PROTOCOL,
     CANDIDATE_EXECUTION_SCHEMA_VERSION,
@@ -344,6 +356,9 @@ __all__ = [
     "CandidateArchive",
     "CandidateBundleError",
     "CandidateDraft",
+    "CandidateEvaluationError",
+    "CandidateEvaluationResult",
+    "CandidateEvaluationSpec",
     "CandidateEvaluatorPin",
     "CandidateExecution",
     "CandidateExecutionAdmission",
@@ -482,6 +497,7 @@ __all__ = [
     "build_round_feedback",
     "build_strategy",
     "candidate_file_table_sha256",
+    "candidate_output_contract_sha256",
     "canonical_profile_json",
     "compile_evaluator_bundle",
     "compute_handoff_fingerprint",
@@ -491,9 +507,11 @@ __all__ = [
     "convert_fm_eval_baseline",
     "declared_producer_environment_sha256",
     "declared_protocol_environment_sha256",
+    "evaluate_candidate_execution",
     "export_shinka_envelope",
     "export_shinka_result",
     "famou_case_content_digest",
+    "inspect_candidate_evaluation",
     "inspect_candidate_execution_record",
     "load_evaluator_bundle",
     "materialize_candidate_source_bundle",
@@ -501,6 +519,8 @@ __all__ = [
     "parse_benchmark_comparison_plan",
     "parse_benchmark_comparison_result",
     "parse_benchmark_task_envelope",
+    "parse_candidate_evaluation_report",
+    "parse_candidate_evaluation_spec",
     "parse_candidate_execution_admission",
     "parse_candidate_source_bundle",
     "parse_candidate_workspace_plan",

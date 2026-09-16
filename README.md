@@ -1238,8 +1238,34 @@ record. An existing attempt is never reused. Inspection is read-only: valid inco
 returns `uncertain`; complete evidence returns `recorded` with the independent process status in
 `runner_result.status`. Both paths check the intended plan/admission and optional caller pins.
 Recording failure or timeout remains failure or timeout, and cannot authorize a score or Candidate.
-No raw output or local path is stored in these records. Exact evaluator, receipt/archive and resume
-integration remain separate work. See the runnable [107 quickstart](specs/107-candidate-execution-evidence/quickstart.md).
+No raw output or local path is stored in these execution records. Independent evaluation is
+available below; receipt/archive and resume integration remain separate work. See the runnable
+[107 quickstart](specs/107-candidate-execution-evidence/quickstart.md).
+
+Feature 108 independently evaluates a successful recorded multi-file candidate:
+
+```bash
+lunar-agent candidate-bundle evaluate admission.json --plan plan.json --contract contract.json \
+  --evaluator evaluator.json --harness harness.py --workspace ./workspace \
+  --input-root ./staged-inputs --attempt ./attempt-001 --evaluation-root ./evaluations --json
+lunar-agent candidate-bundle inspect-evaluation ./evaluations/.candidate-evaluation-ID --json
+```
+
+The admission must pin `CandidateEvaluationSpec.pin()` and
+`candidate_output_contract_sha256(contract.outputs)`. The evaluator fingerprint covers its
+implementation bytes, command, explicit environment, identity and limits. Evaluation verifies
+the execution record and original root identities, then saves the declared inputs and outputs in
+a new private directory. The harness reads those snapshots without rerunning the candidate.
+Missing or malformed required outputs produce an invalid zero-score report before harness launch.
+Strict reports are captured in full up to 32 KiB; snapshots, raw report and a canonical manifest
+remain available for read-only inspection. `evaluate` exits 1 for an invalid result, while
+`inspect-evaluation` exits 0 for any complete consistent record, including an invalid result.
+
+The output observation is explicitly at **evaluation time**, not proof of output bytes at process
+exit. Inspection checks retained local consistency; a previously saved `--evaluation-sha256`
+also pins the manifest. The host interpreter and dependency closure are not authenticated, and
+this is not a sandbox. Candidate/archive/population/controller integration is the next step.
+See the complete [108 quickstart](specs/108-candidate-independent-evaluation/quickstart.md).
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

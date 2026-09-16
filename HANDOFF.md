@@ -1,12 +1,48 @@
 # Lunar-Agent 交接记录
 
+## Feature 108：多文件独立评测与输出快照（2026-09-16）
+
+新增 `candidate_evaluation_spec.py` / `candidate_evaluation.py`，公开
+`CandidateEvaluationSpec`、`evaluate_candidate_execution`、`inspect_candidate_evaluation`。
+CLI 为 `candidate-bundle evaluate` / `inspect-evaluation`，在 config/home/Store 前分派。
+admission 必须固定 spec.pin() 和 `candidate_output_contract_sha256(contract.outputs)`。
+指纹包含实际 harness 文件字节、argv、显式环境、报告 ID、协议与时长/输出限额。
+
+评测只接受 recorded 且进程成功的执行记录；核对 intent 的 workspace/input inode，并持有
+复验全部三份记录、源码、输入、harness 与声明输出的字节/身份观察。共享祖先目录 fd 降低
+句柄放大。新建私有 evaluation 目录保存输入、输出、harness 和 request，harness 从快照
+读取并独立计算约束/目标，候选不再运行。缺失或格式不合格的必需输出直接产生无效零分，
+不启动 harness；可选输出存在时同样必须通过格式检查。
+
+复用旧 OutputSpec/EvaluationReport 语义，JSON/JSONL 和报告增加严格 UTF-8、重复键、
+非有限数检查。报告要求完整七字段、schema 1 和匹配 evaluator ID。106 process helper
+增加原始字节接口供 evaluator 完整采集 32 KiB 报告，旧 runner 16 KiB 文本行为保持兼容。
+保存 raw report 和 canonical evaluation manifest；检查只读绑定保留快照，失败现场保留，
+缺 manifest 不能修复或视为有效评分。每次重新评测新建目录，永不重跑候选。
+
+输出快照明确发生于**评测时**，不是执行退出时输出证明。inspect 的可选 saved digest
+固定 manifest；本地一致性检查不认证 host interpreter、依赖闭包或真实执行。harness 是
+可信本地代码，要求只读快照并向 stdout 返回报告。调用方可保存返回的 evaluation_path。
+
+双文件本地样例评分 9.0，launch counter 保持一次。108 共 **306 项通过**；产品代码冻结后
+全仓 **4976 passed, 1 skipped in 236.854s**，随后新增的 37 项测试也通过，无后续产品改动。
+最终 collection 为 5014 项，合计 **5013 passed, 1 skipped**。Ruff、compileall、Specify、
+installed CLI 与 quickstart 通过，见 `specs/108-candidate-independent-evaluation/validation.md`。
+未运行模型、provider、外部框架
+或新真实测量，历史冻结材料未改。继续只在本地 main 提交，不 push。
+
+下一步：把完整 bundle 与该评测结果接入 Candidate/receipt/archive，再串联 population/
+producer/controller，验收双文件生成、执行、评分、选优和最终交付。统一入口/恢复和当前
+版本效果验证仍未完成；原单文件闭环保持兼容，不引入新的用户 attestation 流程。
+
 ## 当前整体评估与下一阶段验收（2026-09-16）
 
 已完成基于 `af4f8d8` 的代码/历史证据盘点，见
 `docs/system-readiness-20260916.md`。旧单文件 population 已有完整演化和恢复交付闭环；
 新多文件链路止于 Feature 107 execution record。下一阶段按四个里程碑推进：多文件
 exact evaluator/输出绑定 → Candidate/receipt/archive/搜索与交付接线 → 统一入口和恢复
-→ 当前版本真实验收。Feature 108 尚未实现；本次只更新评估和路线说明，无产品改动或新实评。
+→ 当前版本真实验收。该盘点形成时 Feature 108 尚未实现；最新进展见上方 Feature 108。
+该次盘点只更新评估和路线说明，无产品改动或新实评。
 
 普通流程 069 历史有效 2/2、082 分阶段最终有效 0/2，应分别保留，不能称为当前版本
 整体 WebAgent parity。OpenEvolve/Shinka 已有 adapter/exporter 和 fixture，真实生态搜索

@@ -486,6 +486,32 @@ is rejected. A complete record does not imply process success. This layer has no
 evaluator, Candidate, score, receipt, archive, attestation or resume authority. The old materialization
 recovery protocols retain their separate Run/Store lifecycle.
 
+Feature 108 adds `candidate_evaluation_spec.py` and `candidate_evaluation.py`. A canonical evaluator
+spec binds the actual supplied harness bytes, argv, explicit environment, report identity and
+time/artifact limits. Its pin and the sorted OutputSpec digest must match the execution admission.
+Evaluation accepts only a successfully recorded attempt, checks workspace/input identities against
+launch intent, and holds/rechecks observations of all three execution records, source, input,
+harness and output files. Directory ancestors are shared within an operation to limit descriptor
+amplification; unsafe nodes, links and observed identity/byte changes are rejected.
+
+The new private evaluation tree retains only declared inputs/outputs, the harness and a canonical
+request. The harness runs from that tree with `evaluator.py request.json` appended to its command.
+It must leave the snapshot unchanged and emit one strict EvaluationReport on stdout. A shared
+raw-byte process primitive preserves up to 32 KiB per stream, while the original runner's 16 KiB
+text projection remains compatible. Independent output validation reuses format/field semantics
+and adds strict JSON decoding. It produces a zero-score invalid report without invoking a harness
+when declared output checks fail.
+
+After observation rechecks, `report.json` and canonical `evaluation.json` bind the snapshot file
+descriptors, request, evaluator and report. Allocated directories survive failures; missing completion
+is incomplete and never repaired. `inspect_candidate_evaluation` checks complete retained bytes
+without reopening originals or starting a process. These are local consistency observations with
+an optional caller-pinned manifest digest, not cryptographic proof that a harness ran.
+
+The output observation is at evaluation time; it does not upgrade Feature 107 into a process-exit
+output snapshot. There is no atomic multi-file guarantee or host dependency authentication.
+Candidate/receipt/archive integration and controller recovery remain the next milestones.
+
 ### Frozen effect protocols
 
 The effect boundary is intentionally split into two protocols so normal model/tool turns cannot be

@@ -87,15 +87,17 @@ def _bounded(value: object, limit: int) -> tuple[str, bool]:
     return text, overflow
 
 
-def _bounded_process(
+def _bounded_process_bytes(
     command: list[str], *, cwd: str, environment: dict[str, str], timeout: float, output_limit: int,
-) -> tuple[str, str, Literal["succeeded", "failed", "timed_out"], int | None, str | None]:
+    capture_limit: int,
+) -> tuple[bytes, bytes, Literal["succeeded", "failed", "timed_out"], int | None, str | None]:
     """Run a process while keeping each captured stream bounded in memory.
 
     Pipes are consumed as bytes with a selector rather than through ``communicate``.  This both
     keeps output storage bounded and lets timeout/overflow cleanup stop waiting for a descendant
     that inherited the pipes.  A short post-kill grace period captures ordinary trailing output;
-    pipes are then closed even if a detached descendant still holds them open.
+    pipes are then closed even if a detached descendant still holds them open. Callers validate
+    the limits, including ``0 < capture_limit <= output_limit``; returned bytes are never decoded.
     """
     process: subprocess.Popen[bytes] | None = None
     selector: selectors.BaseSelector | None = None
@@ -108,7 +110,6 @@ def _bounded_process(
     cleanup_deadline: float | None = None
     exit_code: int | None = None
     started = time.monotonic()
-    capture_limit = min(output_limit, MAX_RESULT_OUTPUT_BYTES)
 
     def terminate() -> None:
         nonlocal cleanup_ok, cleanup_deadline
@@ -198,9 +199,8 @@ def _bounded_process(
 
     if process is not None and exit_code is None and reason != "timeout":
         exit_code = process.returncode
-    stdout, stdout_overflow = _bounded(bytes(output["stdout"]), output_limit)
-    stderr, stderr_overflow = _bounded(bytes(output["stderr"]), output_limit)
-    overflow = overflow or stdout_overflow or stderr_overflow
+    stdout = bytes(output["stdout"])
+    stderr = bytes(output["stderr"])
     if reason == "timeout" and cleanup_ok:
         return stdout, stderr, "timed_out", None, "process_timed_out"
     if overflow:
@@ -210,6 +210,21 @@ def _bounded_process(
     if exit_code == 0:
         return stdout, stderr, "succeeded", exit_code, None
     return stdout, stderr, "failed", exit_code, "process_failed"
+
+
+def _bounded_process(
+    command: list[str], *, cwd: str, environment: dict[str, str], timeout: float, output_limit: int,
+) -> tuple[str, str, Literal["succeeded", "failed", "timed_out"], int | None, str | None]:
+    """Keep the candidate runner's historical bounded, replacement-decoded text projection."""
+    raw_stdout, raw_stderr, status, exit_code, error = _bounded_process_bytes(
+        command, cwd=cwd, environment=environment, timeout=timeout, output_limit=output_limit,
+        capture_limit=min(output_limit, MAX_RESULT_OUTPUT_BYTES),
+    )
+    stdout, stdout_overflow = _bounded(raw_stdout, output_limit)
+    stderr, stderr_overflow = _bounded(raw_stderr, output_limit)
+    if status != "timed_out" and (stdout_overflow or stderr_overflow):
+        return stdout, stderr, "failed", exit_code, "output_limit_exceeded"
+    return stdout, stderr, status, exit_code, error
 
 
 def _close_chain(chain: DirectoryChain) -> None:

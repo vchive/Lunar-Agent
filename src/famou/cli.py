@@ -965,6 +965,32 @@ def build_parser() -> argparse.ArgumentParser:
         record_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
         _add_home(record_parser)
         _add_json(record_parser)
+    evaluate_bundle_parser = candidate_bundle_commands.add_parser(
+        "evaluate", help="independently score retained candidate outputs without rerunning the candidate",
+    )
+    evaluate_bundle_parser.add_argument("admission", type=Path, help="execution admission JSON")
+    evaluate_bundle_parser.add_argument("--plan", type=Path, required=True)
+    evaluate_bundle_parser.add_argument("--contract", type=Path, required=True)
+    evaluate_bundle_parser.add_argument("--evaluator", type=Path, required=True, help="pinned evaluator specification JSON")
+    evaluate_bundle_parser.add_argument("--harness", type=Path, required=True, help="evaluator implementation file")
+    evaluate_bundle_parser.add_argument("--workspace", type=Path, required=True)
+    evaluate_bundle_parser.add_argument("--input-root", type=Path, required=True)
+    evaluate_bundle_parser.add_argument("--attempt", type=Path, required=True)
+    evaluate_bundle_parser.add_argument("--evaluation-root", type=Path, required=True, help="existing root for a new private evaluation directory")
+    evaluate_bundle_parser.add_argument("--plan-sha256", dest="expected_plan_sha256")
+    evaluate_bundle_parser.add_argument("--bundle-sha256", dest="expected_bundle_sha256")
+    evaluate_bundle_parser.add_argument("--contract-sha256", dest="expected_contract_sha256")
+    evaluate_bundle_parser.add_argument("--admission-sha256", dest="expected_admission_sha256")
+    evaluate_bundle_parser.add_argument("--completion-sha256", dest="expected_completion_sha256")
+    _add_home(evaluate_bundle_parser)
+    _add_json(evaluate_bundle_parser)
+    inspect_evaluation_parser = candidate_bundle_commands.add_parser(
+        "inspect-evaluation", help="verify retained evaluation evidence without execution or initialization",
+    )
+    inspect_evaluation_parser.add_argument("evaluation", type=Path, help="retained evaluation directory")
+    inspect_evaluation_parser.add_argument("--evaluation-sha256", dest="expected_evaluation_sha256")
+    _add_home(inspect_evaluation_parser)
+    _add_json(inspect_evaluation_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -4255,6 +4281,53 @@ def _candidate_bundle_execution_record(args: argparse.Namespace) -> dict[str, ob
     return result.to_dict()
 
 
+def _candidate_bundle_evaluate(args: argparse.Namespace) -> dict[str, object]:
+    from . import _benchmark_files as files
+    from .candidate_evaluation import evaluate_candidate_execution
+    from .candidate_evaluation_spec import (
+        MAX_CANDIDATE_EVALUATION_SPEC_BYTES,
+        CandidateEvaluationError,
+        parse_candidate_evaluation_spec,
+        strict_json,
+    )
+    from .candidate_execution import MAX_EXECUTION_ADMISSION_BYTES
+    from .candidate_workspace_plan import CandidateWorkspaceError, parse_candidate_workspace_plan
+
+    try:
+        plan = parse_candidate_workspace_plan(args.plan)
+        admission = files.read_regular_file(files.absolute_path(args.admission), MAX_EXECUTION_ADMISSION_BYTES)
+        contract_content = files.read_regular_file(files.absolute_path(args.contract), MAX_CONTRACT_BYTES)
+        contract = AlgorithmProblemContract.from_dict(strict_json(contract_content, MAX_CONTRACT_BYTES))
+        evaluator_content = files.read_regular_file(
+            files.absolute_path(args.evaluator), MAX_CANDIDATE_EVALUATION_SPEC_BYTES,
+        )
+        evaluator = parse_candidate_evaluation_spec(evaluator_content)
+    except CandidateEvaluationError:
+        raise
+    except (CandidateWorkspaceError, files.BenchmarkFileError, EvolutionError, OSError, TypeError, ValueError, RecursionError):
+        raise CandidateEvaluationError("invalid") from None
+    result = evaluate_candidate_execution(
+        admission, plan=plan, contract=contract, evaluator=evaluator, harness_path=args.harness,
+        workspace_path=args.workspace, input_path=args.input_root, attempt_path=args.attempt,
+        evaluation_root=args.evaluation_root,
+        expected_admission_sha256=args.expected_admission_sha256,
+        expected_plan_sha256=args.expected_plan_sha256,
+        expected_bundle_sha256=args.expected_bundle_sha256,
+        expected_contract_sha256=args.expected_contract_sha256,
+        expected_completion_sha256=args.expected_completion_sha256,
+    )
+    return {**result.to_dict(), "evaluation_path": str(result.evaluation_path)}
+
+
+def _candidate_bundle_inspect_evaluation(args: argparse.Namespace) -> dict[str, object]:
+    from .candidate_evaluation import inspect_candidate_evaluation
+
+    result = inspect_candidate_evaluation(
+        args.evaluation, expected_evaluation_sha256=args.expected_evaluation_sha256,
+    )
+    return {**result.to_dict(), "evaluation_path": str(result.evaluation_path)}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -4331,6 +4404,13 @@ def main(argv: list[str] | None = None) -> int:
             _emit(_benchmark_comparison_validate_result(args), args.json)
             return 0
         if args.command == "candidate-bundle":
+            if args.candidate_bundle_command == "evaluate":
+                result = _candidate_bundle_evaluate(args)
+                _emit(result, args.json)
+                return 0 if result["report"]["validity"] == 1 else 1
+            if args.candidate_bundle_command == "inspect-evaluation":
+                _emit(_candidate_bundle_inspect_evaluation(args), args.json)
+                return 0
             if args.candidate_bundle_command in {"run-recorded", "inspect-execution"}:
                 _emit(_candidate_bundle_execution_record(args), args.json)
                 return 0
