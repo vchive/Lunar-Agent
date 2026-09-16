@@ -61,6 +61,21 @@ Markdown `json` 代码块，因此原始响应不是可接受的单个 JSON 对�
 证明更长时限一定无效。下一步应优先处理已确认的合同输出协议可靠性，并离线审查评测器
 输入/约束是否可验证；不继续用补槽或逐次加长时限替代问题定位。
 
+## 后续离线代码审查
+
+独立只读审查确认约束覆盖与可见证据范围不匹配：`evaluator_bundle.py` 的
+`_validate_probe_suite` 要求每项 hard constraint 各有一个无效 probe，而 snapshot evaluator
+不能读取候选源码或执行记录。第一题合同中的 `hc_stdlib_only`、`hc_two_source_files`、
+`hc_exact_input_files` 均为 partial verification，且没有 result fields。相同输入和输出
+无法区分单文件实现、第三方依赖实现或硬编码结果；内存验证也确认，只覆盖六项输出约束
+会被现有完整覆盖规则拒绝。
+
+后续应明确区分输出快照、源码交付和执行行为的验证范围，保留全部要求并分配给能够提供
+相应证据的检查。不能仅因 partial 或空 result fields 就跳过约束；没有验证能力时应在
+模型请求前报告不支持。现有源码文件计数不证明 helper 被调用，输入摘要不证明程序实际
+读取过各输入，静态 import 检查也不能完整证明只使用标准库。这是独立代码问题；本次
+evaluator 请求没有返回正文，不能据此认定超时原因。本审查没有修改产品或追加真实调用。
+
 ## 验证与证据
 
 预启动 216 项相关离线测试通过，含 48 项新测试；本地 112 subprocess quickstart 完成

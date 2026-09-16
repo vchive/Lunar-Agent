@@ -34,6 +34,13 @@ running 并保留合同，开始/失败事件同 attempt，evaluator_compile/run
 已确认的合同输出协议可靠性，离线审查 evaluator 输入/约束的可验证性；超时无响应，
 不能推断服务端长推理、排队或网关等具体原因，不继续以补槽/逐次加长时限替代定位。
 
+最终离线审查另确认 evaluator 的验证范围不匹配：`_validate_probe_suite` 要求每项
+hard constraint 有反例，但 snapshot 不能读取源码/执行记录，无法区分相同输出背后的
+文件数量、依赖或输入读取行为。117 第一题三个 partial 约束无 result fields，只覆盖
+六项输出约束会被当前规则拒绝。下一步明确输出快照、源码交付、执行行为的验证范围，
+保留要求并分配独立检查；不以 partial/空字段静默排除，能力不足须提前说明。文件计数
+不证明 helper 调用，输入摘要不证明实际读取。该代码问题不构成本次超时原因的证据。
+
 ## Feature 116：真实问题等待与评测器准备失败恢复（2026-09-16）
 
 Store 的 pending_input、answer_input、settle_run 和 scheduler 使用相同的非空问题规则。
