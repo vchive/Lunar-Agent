@@ -182,8 +182,8 @@ def inspect_bundle_delivery(delivery_path, *, expected_delivery_sha256=None) -> 
         _fail()
 
 
-def publish_bundle_delivery(destination_root, *, identity: dict, materials: dict[str, bytes]) -> BundleDeliveryResult:
-    """Write one new private delivery directory; never overwrite or repair an earlier copy."""
+def bundle_delivery_manifest(*, identity: dict, materials: dict[str, bytes]) -> bytes:
+    """Validate portable materials and encode their manifest without allocating a copy."""
     identity = _identity(identity)
     if not isinstance(materials, dict):
         _fail()
@@ -192,13 +192,18 @@ def publish_bundle_delivery(destination_root, *, identity: dict, materials: dict
         _fail()
     if sum(map(len, materials.values())) > _MAX_TOTAL_BYTES:
         _fail()
-    raw = canonical_json({
+    return canonical_json({
         "schema_version": "1", "protocol": _PROTOCOL, "observation": "evaluation-time",
         "identity": identity, "files": {
             path: {"size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
             for path, content in sorted(materials.items())
         },
     }, maximum=_MAX_MANIFEST_BYTES)
+
+
+def publish_bundle_delivery(destination_root, *, identity: dict, materials: dict[str, bytes]) -> BundleDeliveryResult:
+    """Write one new private delivery directory; never overwrite or repair an earlier copy."""
+    raw = bundle_delivery_manifest(identity=identity, materials=materials)
     try:
         root = _benchmark_files.absolute_path(destination_root)
         chain = DirectoryChain(root, "bundle_delivery_invalid")

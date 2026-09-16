@@ -239,6 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="compile, preflight, and freeze a local evaluator before native evolution",
     )
+    solve_parser.add_argument("--bundle-profile", type=Path, help="explicit multi-file execution and exact evaluator profile for --evolve")
     solve_parser.add_argument("--max-rounds", type=int)
     solve_parser.add_argument("--stagnation-rounds", type=int)
     solve_parser.add_argument("--population-size", type=int)
@@ -287,6 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     resume_parser = subparsers.add_parser("resume", help="recover and continue a run")
     resume_parser.add_argument("run_id")
+    resume_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a conversational multi-file evolution run")
     _add_runtime_options(resume_parser)
     _add_home(resume_parser)
     _add_json(resume_parser)
@@ -804,6 +806,7 @@ def build_parser() -> argparse.ArgumentParser:
     answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
     answer_parser.add_argument("run_id")
     answer_parser.add_argument("answer", nargs="?", help="answer text, or '-' to read stdin")
+    answer_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a pending multi-file evolution handoff")
     answer_parser.add_argument(
         "--evaluator-command",
         help="explicit local objective harness for a pending native evolution handoff",
@@ -1399,7 +1402,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
         (
             event["payload"]
             for event in reversed(events)
-            if event["type"] == "evolved_candidate_materialized"
+            if event["type"] in {"evolved_candidate_materialized", "bundle_candidate_delivered"}
             and isinstance(event.get("payload"), dict)
         ),
         None,
@@ -1899,6 +1902,53 @@ def _stage_input_files(
     return tuple(staged)
 
 
+def _prepare_conversational_bundle(args: argparse.Namespace) -> None:
+    """Load explicit bundle authority without retaining local profile paths in run events."""
+    path = getattr(args, "bundle_profile", None)
+    if path is None:
+        return
+    if args.command == "solve" and not (args.evolve or args.resume):
+        raise ValueError("--bundle-profile requires --evolve")
+    if getattr(args, "detach", False):
+        raise ValueError("--bundle-profile does not support --detach")
+    if (
+        getattr(args, "compile_evaluator", False)
+        or getattr(args, "evaluator_command", None)
+        or getattr(args, "openevolve_command", None)
+        or getattr(args, "strategy", None) not in {None, "population"}
+    ):
+        raise ValueError("--bundle-profile requires native population and its own exact evaluator")
+    from .bundle_evolution import load_bundle_pipeline
+    from .solve_bundle import bundle_pipeline_sha256
+
+    pipeline = load_bundle_pipeline(path)
+    args._bundle_pipeline = pipeline
+    args._bundle_profile_sha256 = bundle_pipeline_sha256(pipeline)
+
+
+def _validate_conversational_bundle_request(args, request) -> None:
+    expected = request.get("bundle_profile_sha256") if request is not None else None
+    supplied = getattr(args, "_bundle_profile_sha256", None)
+    if request is not None and "bundle_profile_sha256" in request and (
+        not isinstance(expected, str) or len(expected) != 64
+        or any(char not in "0123456789abcdef" for char in expected)
+    ):
+        raise EvolutionError("solve_bundle_profile_marker_invalid")
+    if expected is not None and supplied is None:
+        raise EvolutionError("solve_bundle_profile_required")
+    if expected != supplied:
+        raise EvolutionError("solve_bundle_profile_mismatch")
+
+
+def _bind_conversational_bundle_inputs(args, store, parent) -> None:
+    if getattr(args, "_bundle_pipeline", None) is not None:
+        from .solve_bundle import prepare_solve_bundle_pipeline
+
+        args._bundle_pipeline = prepare_solve_bundle_pipeline(
+            store, parent.id, args._bundle_pipeline,
+        )
+
+
 def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Compile and execute one conversational algorithm mission."""
     if args.compile_evaluator and not args.evolve:
@@ -1957,7 +2007,12 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             evolution_request = _evolution_request_payload(args)
         if args.evolve and evolution_request is not None:
             _validate_evolution_override(args, evolution_request)
+        _validate_conversational_bundle_request(args, evolution_request)
+        if evolution_request is not None and "bundle_profile_sha256" in evolution_request:
+            _validate_evolution_override(args, evolution_request)
+        _validate_conversational_bundle_link(args, controller.store, run)
         _stage_input_files(run, controller.store, args.input_files)
+        _bind_conversational_bundle_inputs(args, controller.store, run)
         settled = controller.resume_conversational(
             run.id,
             RuntimeContractCompiler(runtime),
@@ -1984,6 +2039,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             event_id="event-evolution-request-" + hashlib.sha256(run.id.encode()).hexdigest(),
         )
     _stage_input_files(run, controller.store, args.input_files)
+    _bind_conversational_bundle_inputs(args, controller.store, run)
     if args.detach:
         return _detach_solve(config, args, run)
     settled = controller.resume_conversational(
@@ -2002,7 +2058,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
 
 def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
     """Return only bounded, non-secret settings needed to continue a solve handoff."""
-    return {
+    payload = {
         "strategy": args.strategy,
         "max_rounds": args.max_rounds,
         "stagnation_rounds": args.stagnation_rounds,
@@ -2021,6 +2077,9 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
         "evaluator_command_configured": bool(args.evaluator_command),
         "compile_evaluator": bool(getattr(args, "compile_evaluator", False)),
     }
+    if getattr(args, "_bundle_profile_sha256", None) is not None:
+        payload["bundle_profile_sha256"] = args._bundle_profile_sha256
+    return payload
 
 
 def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
@@ -2188,6 +2247,74 @@ def _index_evaluator_bundle(
     )
 
 
+def _validate_solve_bundle_child(store, parent, child, contract, *, linked_required):
+    from ._benchmark_files import absolute_path, read_regular_file
+    from ._candidate_workspace_io import DirectoryChain
+
+    expected = absolute_path(Path(parent.workspace) / "evolution-run")
+    if absolute_path(child.workspace) != expected:
+        raise EvolutionError("solve_bundle_link_invalid")
+    held = DirectoryChain(expected, "destination_changed")
+    try:
+        canonical = AlgorithmProblemContract.from_dict(_strict_json_loads(read_regular_file(
+            expected / "evolution/contract.json", MAX_CONTRACT_BYTES,
+        )))
+        if canonical.digest() != contract.digest():
+            raise EvolutionError("solve_bundle_link_invalid")
+        held.check()
+    finally:
+        held.close()
+    links = [event.get("payload") for event in store.list_events(child.id)
+             if event["type"] == "evolution_parent_linked"]
+    if (linked_required and not links) or any(
+        not isinstance(link, dict) or link.get("parent_run_id") != parent.id
+        or link.get("contract_sha256") != contract.digest() for link in links
+    ):
+        raise EvolutionError("solve_bundle_link_invalid")
+
+
+def _validate_conversational_bundle_link(args, store, parent):
+    if getattr(args, "_bundle_pipeline", None) is None:
+        return
+    from ._benchmark_files import absolute_path
+    from ._candidate_workspace_io import DirectoryChain
+
+    expected = absolute_path(Path(parent.workspace) / "evolution-run")
+    # Validate the existing path before any resolution, input staging, compiler or child work.
+    existing_path = expected
+    while not existing_path.exists() and not existing_path.is_symlink():
+        existing_path = existing_path.parent
+    held = DirectoryChain(existing_path, "destination_changed")
+    held.close()
+    links = [event.get("payload") for event in store.list_events(parent.id)
+             if event["type"] == "evolution_linked"]
+    plan = store.get_current_plan(parent.id)
+    if not links:
+        child = store.get_run_by_workspace(expected)
+        if child is not None:
+            if plan is None or plan.algorithm_problem is None:
+                raise EvolutionError("solve_bundle_link_invalid")
+            _validate_solve_bundle_child(
+                store, parent, child, AlgorithmProblemContract.from_dict(plan.algorithm_problem),
+                linked_required=False,
+            )
+        return
+    if plan is None or plan.algorithm_problem is None or not isinstance(links[0], dict):
+        raise EvolutionError("solve_bundle_link_invalid")
+    contract = AlgorithmProblemContract.from_dict(plan.algorithm_problem)
+    child_id = links[0].get("evolution_run_id")
+    if not isinstance(child_id, str) or not child_id or any(
+        not isinstance(link, dict) or link.get("evolution_run_id") != child_id
+        or link.get("contract_sha256") != contract.digest() or link.get("strategy") != "population"
+        for link in links
+    ):
+        raise EvolutionError("solve_bundle_link_invalid")
+    child = store.get_run(child_id)
+    if child is None:
+        raise EvolutionError("solve_bundle_link_invalid")
+    _validate_solve_bundle_child(store, parent, child, contract, linked_required=True)
+
+
 def _solve_evolution(
     config: Config, args: argparse.Namespace, controller: LocalController, parent: Run
 ) -> dict[str, object]:
@@ -2211,6 +2338,15 @@ def _solve_evolution(
     strategy_name = args.strategy or contract.evolution.strategy
     if strategy_name == "loop":
         raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
+    bundle_pipeline = getattr(args, "_bundle_pipeline", None)
+    if bundle_pipeline is not None:
+        if strategy_name != "population":
+            raise EvolutionError("solve_bundle_requires_population")
+        if not contract.outputs:
+            raise EvolutionError("solve_bundle_outputs_required")
+        _validate_conversational_bundle_link(args, controller.store, parent)
+        _bind_conversational_bundle_inputs(args, controller.store, parent)
+        bundle_pipeline = args._bundle_pipeline
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
     compile_evaluator = bool(getattr(args, "compile_evaluator", False))
 
@@ -2279,7 +2415,14 @@ def _solve_evolution(
         generator_fingerprint = hashlib.sha256(
             f"{runtime_fingerprint}:solver".encode()
         ).hexdigest()
-        if compile_evaluator:
+        if bundle_pipeline is not None:
+            scoring = None
+            evaluator = bundle_pipeline
+            evaluator_fingerprint = bundle_pipeline.evaluator.digest()
+            generator_fingerprint = hashlib.sha256(
+                f"{runtime_fingerprint}:bundle-solver-v1".encode()
+            ).hexdigest()
+        elif compile_evaluator:
             bundle = compile_evaluator_bundle(
                 runtime,
                 contract,
@@ -2322,12 +2465,13 @@ def _solve_evolution(
             contract=contract,
             role="solver",
             timeout=args.timeout,
-            inputs=candidate_inputs,
+            inputs=() if bundle_pipeline is not None else candidate_inputs,
             scoring=scoring,
+            bundle_pipeline=bundle_pipeline,
         )
     runner_fingerprint = (
         None
-        if strategy_name == "openevolve"
+        if strategy_name == "openevolve" or bundle_pipeline is not None
         else contract_candidate_runner_fingerprint(contract, candidate_inputs)
     )
     evolution_config = EvolutionConfig(
@@ -2346,9 +2490,11 @@ def _solve_evolution(
         evaluator_fingerprint=evaluator_fingerprint,
         runner_fingerprint=runner_fingerprint,
     )
+    if bundle_pipeline is not None:
+        evolution_config = bundle_pipeline.configure(evolution_config)
 
     def execution_grounded_evaluator(child: Run):
-        if strategy_name == "openevolve":
+        if strategy_name == "openevolve" or bundle_pipeline is not None:
             return evaluator
         runner = ContractCandidateRunner(
             child.workspace,
@@ -2370,6 +2516,8 @@ def _solve_evolution(
             raise EvolutionError("linked evolution run no longer exists")
         if linked.get("strategy") != strategy_name:
             raise EvolutionError("solve evolution strategy does not match the existing handoff")
+        if bundle_pipeline is not None:
+            _validate_solve_bundle_child(controller.store, parent, child, contract, linked_required=True)
         state_path = child.workspace / "evolution" / "state.json"
         if state_path.is_file():
             try:
@@ -2390,18 +2538,21 @@ def _solve_evolution(
             execution_grounded_evaluator(child),
             evolution_config,
             resume=child.status.value not in {"succeeded", "failed", "cancelled"},
+            bundle_pipeline=bundle_pipeline,
         )
-        if contract.outputs and child.status.value == "succeeded":
-            controller.materialize_evolved_outputs(
-                parent.id,
-                child.id,
-                contract,
-                result,
-                timeout_seconds=evolution_config.timeout_seconds,
-            )
+        if child.status.value == "succeeded" and (bundle_pipeline is not None or contract.outputs):
+            if bundle_pipeline is not None:
+                controller.deliver_bundle_to_parent(parent.id, child.id, contract, result)
+            else:
+                controller.materialize_evolved_outputs(
+                    parent.id, child.id, contract, result,
+                    timeout_seconds=evolution_config.timeout_seconds,
+                )
         return {"run": parent, "child": child}
 
-    child_workspace = (Path(parent.workspace) / "evolution-run").resolve()
+    child_workspace = Path(parent.workspace) / "evolution-run"
+    if bundle_pipeline is None:
+        child_workspace = child_workspace.resolve()
     existing = controller.store.get_run_by_workspace(child_workspace)
     if existing is not None:
         child = existing
@@ -2416,6 +2567,8 @@ def _solve_evolution(
             raise EvolutionError("existing evolution handoff workspace belongs to another contract")
     else:
         child = controller.create_evolution_run(contract, workspace=child_workspace)
+    if bundle_pipeline is not None:
+        _validate_solve_bundle_child(controller.store, parent, child, contract, linked_required=False)
     # Re-run the copy after a crash between child creation and linking; identical bytes are
     # idempotent and conflicting bytes fail closed before strategy execution.
     controller.copy_staged_inputs(parent.id, child.id)
@@ -2444,15 +2597,16 @@ def _solve_evolution(
         generator,
         execution_grounded_evaluator(child),
         evolution_config,
+        bundle_pipeline=bundle_pipeline,
     )
-    if contract.outputs and child.status.value == "succeeded":
-        controller.materialize_evolved_outputs(
-            parent.id,
-            child.id,
-            contract,
-            result,
-            timeout_seconds=evolution_config.timeout_seconds,
-        )
+    if child.status.value == "succeeded" and (bundle_pipeline is not None or contract.outputs):
+        if bundle_pipeline is not None:
+            controller.deliver_bundle_to_parent(parent.id, child.id, contract, result)
+        else:
+            controller.materialize_evolved_outputs(
+                parent.id, child.id, contract, result,
+                timeout_seconds=evolution_config.timeout_seconds,
+            )
     return {"run": parent, "child": controller.store.get_run(child.id) or child}
 
 
@@ -2469,7 +2623,7 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
         (
             event["payload"]
             for event in reversed(controller.store.list_events(run.id))
-            if event["type"] == "evolved_candidate_materialized"
+            if event["type"] in {"evolved_candidate_materialized", "bundle_candidate_delivered"}
             and isinstance(event.get("payload"), dict)
         ),
         None,
@@ -4047,6 +4201,10 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     run = store.get_run(args.run_id)
     if run is None:
         raise ValueError(f"unknown run: {args.run_id}")
+    evolution_request = _latest_evolution_request(store, run.id)
+    _validate_conversational_bundle_request(args, evolution_request)
+    _validate_conversational_bundle_link(args, store, run)
+    _bind_conversational_bundle_inputs(args, store, run)
     current_plan = store.get_current_plan(run.id)
     if current_plan is not None and current_plan.algorithm_problem is not None:
         current_contract = AlgorithmProblemContract.from_dict(current_plan.algorithm_problem)
@@ -4553,6 +4711,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         _reject_retired_cli_strategy(args)
+        if args.command in {"solve", "answer", "resume"}:
+            _prepare_conversational_bundle(args)
         if args.command == "effect-trial":
             payload = _effect_host_scope(args, _effect_trial)
             _emit(payload, args.json)
@@ -4716,6 +4876,24 @@ def main(argv: list[str] | None = None) -> int:
             _emit(payload, args.json)
             return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
         if args.command == "resume":
+            evolution_request = _latest_evolution_request(Store(config.database), args.run_id)
+            if getattr(args, "bundle_profile", None) is not None or (
+                evolution_request is not None and "bundle_profile_sha256" in evolution_request
+            ):
+                values = vars(build_parser().parse_args([
+                    "solve", "--resume", "--run-id", args.run_id,
+                ]))
+                values.update(vars(args))
+                values.update(command="solve", resume=True)
+                payload = _solve(config, argparse.Namespace(**values))
+                _emit(payload, args.json)
+                success = payload["status"] in {"succeeded", "awaiting_input", "pending", "running"}
+                evolution = payload.get("evolution")
+                if isinstance(evolution, dict):
+                    success = success and evolution.get("status") in {
+                        "succeeded", "awaiting_input", "pending", "running", "stagnated",
+                    }
+                return 0 if success else 1
             controller = _controller(args, config)
             run = controller.resume(args.run_id)
             _emit(

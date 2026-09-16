@@ -1167,12 +1167,22 @@ class LocalController:
     def deliver_bundle_evolution(
         self, run_id: str, destination_root: str | Path,
     ) -> BundleDeliveryResult:
-        """Copy selected multi-file source and scored snapshots after read-only validation.
-
-        This explicit API publishes a portable private directory. It does not invoke a candidate
-        or the historical parent-run materialization and delivery lifecycle.
-        """
+        """Copy selected source and scored snapshots into a new portable private directory."""
         from .bundle_delivery import publish_bundle_delivery
+
+        identity, materials, _ = self._verified_bundle_evolution_delivery(run_id)
+        run = self.store.get_run(run_id)
+        try:
+            destination = Path(destination_root).expanduser().absolute()
+            evidence_root = Path(run.workspace) / "evolution"
+            if any(parent.samefile(evidence_root) for parent in (destination, *destination.parents)):
+                raise EvolutionError("bundle_delivery_destination_conflict")
+            return publish_bundle_delivery(destination, identity=identity, materials=materials)
+        except (OSError, TypeError, ValueError) as exc:
+            raise EvolutionError("bundle_delivery_invalid") from exc
+
+    def _verified_bundle_evolution_delivery(self, run_id: str):
+        """Read the ledger-bound selected bundle without allocating a delivery or running code."""
         from .bundle_evolution import read_bundle_delivery_materials
 
         run = self.store.get_run(run_id)
@@ -1180,12 +1190,6 @@ class LocalController:
             raise EvolutionError("bundle_delivery_requires_successful_run")
         workspace = Path(run.workspace)
         try:
-            destination = Path(destination_root).expanduser().absolute()
-            evidence_root = workspace / "evolution"
-            # Adding a child to a retained evaluation tree invalidates its strict inventory.
-            # Keep delivery copies outside all run evolution evidence, including case aliases.
-            if any(parent.samefile(evidence_root) for parent in (destination, *destination.parents)):
-                raise EvolutionError("bundle_delivery_destination_conflict")
             # Store artifact rows bind the completed selection, preventing a later archive/state
             # rewrite from silently choosing a different candidate for the same finished run.
             snapshots = self._materialization_artifact_snapshots(run, workspace)
@@ -1259,11 +1263,20 @@ class LocalController:
                 "receipt_sha256": selected.receipt_sha256,
                 "evaluation_sha256": selected.bundle_evidence["evaluation_sha256"],
             }
-            return publish_bundle_delivery(destination, identity=identity, materials=materials)
+            return identity, materials, canonical_result
         except EvolutionError:
             raise
         except (OSError, KeyError, TypeError, ValueError) as exc:
             raise EvolutionError("bundle_delivery_invalid") from exc
+
+    def deliver_bundle_to_parent(
+        self, parent_id: str, child_id: str, contract: AlgorithmProblemContract,
+        result: StrategyResult,
+    ) -> dict[str, Any]:
+        """Publish an already scored bundle through the parent run's recoverable output batch."""
+        from .bundle_parent_delivery import finish_bundle_parent_delivery
+
+        return finish_bundle_parent_delivery(self, parent_id, child_id, contract, result)
 
     @staticmethod
     def _decode_materialization_identity_json(
@@ -2918,8 +2931,32 @@ class LocalController:
             ),
             None,
         )
-        evolved_delivery = contract is not None and bool(contract.outputs) and evolution_link is not None
-        if evolved_delivery:
+        bundle_terminal = next((event["payload"] for event in reversed(events)
+                                if event["type"] == "bundle_candidate_delivered"
+                                and isinstance(event.get("payload"), dict)), None)
+        bundle_delivery = contract is not None and evolution_link is not None and bundle_terminal is not None
+        evolved_delivery = contract is not None and evolution_link is not None and (
+            bool(contract.outputs) or bundle_delivery
+        )
+        bundle_artifacts = []
+        if bundle_delivery:
+            from .bundle_parent_delivery import inspect_bundle_parent_delivery
+
+            child_id = evolution_link.get("evolution_run_id")
+            if not isinstance(child_id, str):
+                raise ValueError("run has no successful bundle delivery to deliver")
+            materialization = inspect_bundle_parent_delivery(self, run.id, child_id, contract)
+            if materialization["status"] != "succeeded":
+                raise ValueError("run has no successful bundle delivery to deliver")
+            prefix = materialization["delivery_path"] + "/"
+            preferred = [prefix + "delivery.json", prefix + "source-bundle.json",
+                         materialization["evaluation_report_path"]]
+            bundle_artifacts = [next(item for item in artifacts if item["path"] == path)
+                                for path in preferred]
+            bundle_artifacts.extend(item for item in artifacts if item["path"].startswith(prefix)
+                                    and item["path"] not in preferred)
+            passed = True
+        elif evolved_delivery:
             child_id = evolution_link.get("evolution_run_id")
             child = self.store.get_run(child_id) if isinstance(child_id, str) else None
             if (
@@ -3000,6 +3037,7 @@ class LocalController:
                         f"verified algorithm output no longer matches its digest: {output.path}"
                     )
         usable = [
+            *bundle_artifacts,
             *output_artifacts.values(),
             *role_artifacts,
             *[item for item in artifacts if item["kind"] in {"result", "runtime"}],
@@ -3007,8 +3045,13 @@ class LocalController:
         if not passed or not usable:
             raise ValueError("run has no fully verified artifacts to deliver")
         evidence = tuple(item["path"] for item in usable[:16])
+        reason = (
+            "Selected bundle passed independent evaluation; source, report and published outputs are verified"
+            if bundle_delivery
+            else "All tasks passed evaluation and have hashed result/runtime/output artifacts"
+        )
         return PolicyDecision(
-            "deliver", "All tasks passed evaluation and have hashed result/runtime/output artifacts", 1.0,
+            "deliver", reason, 1.0,
             plan_id=run.current_plan_id, plan_version=run.current_plan_version, evidence=evidence,
         )
 

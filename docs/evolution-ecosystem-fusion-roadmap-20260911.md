@@ -2,8 +2,9 @@
 
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
-Feature 108–110 已完成多文件评测、Agent 生成、原生 population 选优和显式本地交付；
-下一步聚焦普通任务入口和恢复编排，外部 producer 的多文件接线仍未完成；
+Feature 108–111 已完成多文件评测、Agent 生成、原生 population、普通 solve 显式入口和
+父任务交付/终态恢复；下一步聚焦 evaluator 准备和真实验收，外部 producer 的多文件
+接线与运行中取消编排仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
@@ -14,6 +15,19 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-16：普通任务入口与多文件父任务交付
+
+Feature 111 增加 `solve --evolve --bundle-profile PROFILE --input SOURCE[=TARGET]`，复用正常
+contract intake、原生 runtime 和完整 bundle Agent。profile 与父任务已登记输入精确匹配，
+演化读取父任务 staged bytes。选优后直接交付已评分的输出快照，完整源码与评测材料保留在
+父任务 `.bundle-deliveries/`，普通 `deliver` 可验证并返回。终态恢复复用既有 child/copy/output
+journal；`answer`、`resume` 和不带 `--evolve` 的 solve 恢复都要求相同 profile。
+
+可运行 [111 quickstart](../specs/111-conversational-bundle-delivery/quickstart.md) 使用本机
+subprocess 同时完成 intake 和候选生成，不调用真实模型/框架。固定 evaluator 仍需显式
+准备；profile 原始输入/harness 资源须可复验。运行中取消、detached bundle solve、自动
+evaluator 准备和外部 bundle seed 接线继续后置。新真实测量仍需独立登记并保留失败分母。
 
 ## 2026-09-16：Agent 自动多文件生成
 

@@ -534,15 +534,16 @@ survive source staging cleanup and do not produce synthetic scored candidates. S
 islands, migration and offspring outcome journals remain in the existing loop. Bundle source
 context and novelty include helper files. `CommandCandidateGenerator` accepts complete source maps
 and adds verified `parent_source_files` to requests for bundle parents; legacy request shape stays
-unchanged. Agent-generated and imported SeedManifest candidates still use their single-file path.
+unchanged. Imported SeedManifest candidates still use their single-file path; Agent bundle
+generation is described below.
 
 `LocalController.run_evolution(..., bundle_pipeline=...)` indexes ordinary v2 record/receipt
 sidecars using the existing Store. `evolve-bundle` validates profile/declarations before creating
 state and exposes execution, selection, terminal resume and optional delivery in one command.
 Read-only resume verifies committed bundle and evaluation evidence; uncertain pending population
-publication is rejected rather than replayed. Active-process cancellation and generic parent-run
-recovery remain broader orchestration work; per-process bounds and between-attempt cancellation
-checks apply to this local path.
+publication is rejected rather than replayed. Per-process bounds and between-attempt cancellation
+checks apply to this local path. Conversational parent delivery is described below; active-process
+cancellation remains broader orchestration work.
 
 `deliver_bundle_evolution` rechecks Store-bound contract, archive, state, result, record/receipt rows,
 events and canonical best selection. It copies verified immutable bytes through `bundle_delivery.py`
@@ -579,8 +580,43 @@ away duplicate keys before strict bundle validation. Explicit AgentResult text e
 work. `RuntimeAgentAdapter` uses the same generator with its existing runtime/text protocol and
 optional tool loop. `evolve-bundle` selects exactly one command, Agent command or native runtime;
 mode-specific fingerprints protect resume while retaining the original command-mode fingerprint.
-The evaluator profile remains explicit. Normal task routing and parent-run recovery/delivery are
-later integrations, and no current-model effectiveness is inferred from local worker fixtures.
+The evaluator profile remains explicit, and no current-model effectiveness is inferred from local
+worker fixtures.
+
+### Conversational bundle evolution and parent delivery
+
+Feature 111 routes `solve --evolve --bundle-profile PROFILE` through the existing runtime contract
+compiler and Agent bundle generator. `solve_bundle.py` binds a canonical semantic profile digest
+to the conversational request. Storage paths are excluded while executable argv and all evaluation,
+input and execution settings remain bound. Profile inputs must match the complete parent
+`input_data` ledger at `data/raw/<target>`; generation/execution read those staged copies. Empty
+input sets need no data directory during intake. Continuation validates mode/profile even when
+`--evolve` is omitted, and `answer` validates before consuming a pending response.
+
+The child stays at `parent/evolution-run`. Reciprocal links, canonical contract and no-follow
+directory validation precede continuation mutations. The existing runtime/configuration checks
+and population recovery still apply. Profile loading validates original profile resources, so
+profileless recovery is not implied by the path-free request digest.
+
+`bundle_parent_delivery.py` verifies the selected child and parent inputs, checks output conflicts
+and artifact budgets, and prepares a portable copy under the parent's `.bundle-deliveries`.
+`bundle_delivery_prepared` pins its relative path, identity and manifest digest. Every package file
+is indexed using existing artifact rows; declared outputs reuse the original publication journal
+keyed by child ID. `bundle_candidate_delivered` records the validated result. Confirmed rollback
+is a failed delivery; unknown publication preserves its state for existing reconciliation.
+
+A per-parent lock serializes delivery preparation/registration. Terminal replay reuses the pinned
+copy and validates the output batch without candidate, evaluator or Agent execution. Normal
+`deliver` verifies package, source/report and outputs; solve/status expose the result through
+`evolution.materialization` in solve and `evolution.linked.materialization` in status, with
+`mode=bundle`. No historical single-file execution or attestation
+path is invoked. Parent outputs retain the 256 KiB file cap and the complete package counts toward
+the existing parent artifact budget.
+
+This is an explicit native population route. Detached bundle solving, automatic evaluator
+preparation, external multi-file seed imports and active-process cancellation orchestration remain
+outside this increment. Runnable intake-to-delivery verification is in
+`specs/111-conversational-bundle-delivery/`.
 
 ### Frozen effect protocols
 

@@ -6,6 +6,44 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 111：普通任务多文件演化与父任务交付（2026-09-16）
+
+`solve --evolve --bundle-profile PROFILE --input SOURCE[=TARGET]` 已接通正常 contract intake、
+原生 runtime 和 Agent bundle generator。固定 profile 的语义摘要进入原 evolution request，
+不保存 profile/harness/input 存储路径。输入描述必须与父任务完整 `input_data` ledger 的
+`data/raw/<target>` size/SHA 匹配，允许相同重复行，拒绝缺失、额外和冲突行；实际演化读取
+父任务 staged bytes。无输入任务不要求 intake 前已存在 data/raw。原 profile loader 仍复验
+原始输入/harness 资源，恢复仍需显式 profile 与可访问匹配资源，不是 profileless recovery。
+
+父子关系、canonical contract 与固定 `parent/evolution-run` 目录在恢复修改前验证，目录
+不跟随 symlink。`solve --resume` 不带 `--evolve` 也保持 bundle mode；通用 `resume` 和
+`answer` 支持相同 profile，先校验再消费答复或 stage 新输入。native population 保持独立
+评分，bundle 不走旧单文件 materialization/attestation；detached bundle solve 暂不支持。
+
+新 `bundle_parent_delivery.py` 将选中候选已评分的输出直接发布到父任务 `output/`，完整
+源码、输入、contract、harness/spec 与 report 放在 `.bundle-deliveries/`。prepared event
+固定 portable copy，普通 artifact rows 登记完整 package，输出复用已有 publication journal；
+终态 event 为 `bundle_candidate_delivered`。普通 `deliver` 复验后优先返回 manifest/source
+描述/report；solve 使用 `evolution.materialization`，status 使用
+`evolution.linked.materialization`，均标记 `mode=bundle`。恢复复用已固定 copy，不重跑
+Agent、候选或 evaluator；确认回滚保留失败，未知 publication 保留既有恢复语义。
+
+父任务输出沿用 256 KiB 单文件上限，完整 package 和输出计入父任务 artifact budget。
+沿用底层至少一个 declared output 的要求；全为 optional 且 evaluator 接受缺失时，仍可
+交付完整源码和 report。未写入 prepared event 的中断副本保留但不作为交付权威。
+
+独立 `specs/111-conversational-bundle-delivery/quickstart.py` 已通过普通 intake、四个双文件
+候选（独立分数 **1、2、6、7**）、父任务输出/完整源码报告、普通 deliver/status 和不带
+`--evolve` 的终态恢复。恢复前后 compiler/Agent/candidate 次数保持 **1 / 4 / 4**，交付
+副本为 **1**。产品冻结后全仓 **5277 passed, 1 skipped in 316.71s**，含新增 90 项，JUnit
+零失败/错误。Ruff、compileall、Specify、installed CLI、文档链接和 diff 检查通过，冻结
+测量相对 `027a235` 未变。完整验证见该目录 `validation.md`。
+
+下一步优先减少显式 evaluator/profile 准备成本，并在实现冻结后独立登记当前版本真实验收；
+外部 OpenEvolve/Shinka bundle seed 接线与运行中取消编排仍未完成。本轮只运行本地 fixture，
+没有真实模型、外部框架/WebAgent 或新效果测量，不改写冻结历史。已验证工作按用户要求
+正常提交并推送，不再长期积累本地提交。
+
 ## Feature 110：Agent 自动生成多文件候选（2026-09-16）
 
 `AgentCandidateGenerator(..., bundle_pipeline=pipeline)` 已接通固定 profile 的多文件生成。

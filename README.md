@@ -1319,10 +1319,33 @@ uses a native worker receiving the prompt on stdin. These are mutually exclusive
 [110 quickstart](specs/110-agent-bundle-generation/quickstart.md) validates native runtime generation,
 helper-only improvement, complete delivery and terminal resume using local processes only.
 
-This is an explicit bundle mode. Normal solving remains the default; default task routing,
-parent-run delivery and evaluator preparation still need integration. OpenEvolve/Shinka seed
-imports remain single-file. Local fixtures do not establish current-model effectiveness or
-relative WebAgent performance.
+Feature 111 also exposes this pipeline through ordinary conversational intake:
+
+```bash
+lunar-agent solve 'Optimize the supplied data' --evolve --bundle-profile bundle-profile.json \
+  --input ./data.csv=data.csv --runtime openai-compatible --endpoint YOUR_ENDPOINT \
+  --model YOUR_MODEL --agent-loop --workspace ./mission --json
+lunar-agent solve --resume --run-id RUN_ID --bundle-profile bundle-profile.json \
+  --runtime openai-compatible --endpoint YOUR_ENDPOINT --model YOUR_MODEL --agent-loop --json
+lunar-agent deliver RUN_ID --json
+```
+
+The profile's complete input set must match the parent's registered `data/raw/<target>` files by
+size and SHA-256. Generation and execution use those staged copies. The selected scored output
+appears in the parent's `output/`; complete source, inputs and evaluation materials are retained
+under `.bundle-deliveries/`. Ordinary `deliver` verifies the package and published outputs. Resume
+reuses the same child and prepared delivery without running the winner or Agent again. `answer`
+and `resume` also accept `--bundle-profile`; continuation requires matching profile/runtime settings.
+
+The profile loader still needs accessible matching input/harness resources. This mode requires
+native population and a contract with declared outputs; it excludes detached solving and additional
+evaluator commands. Parent outputs
+retain the existing 256 KiB per-file cap; the complete package and outputs share the parent artifact
+budget. See the standalone [111 quickstart](specs/111-conversational-bundle-delivery/quickstart.md).
+
+Normal solving remains the default. Automatic evaluator preparation, active-process cancellation
+orchestration and OpenEvolve/Shinka multi-file seed imports remain future work. Local fixtures do
+not establish current-model effectiveness or relative WebAgent performance.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
