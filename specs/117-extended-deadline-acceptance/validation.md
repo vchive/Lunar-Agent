@@ -34,4 +34,34 @@ This is a new /2 acceptance campaign. Both product state handling and time budge
 115, so any difference cannot be attributed to either alone. Provider defaults/time are also
 uncontrolled. The spending threshold observes returned usage and cannot cap unseen server usage
 or monetary charges. Process cleanup has bounded overhead beyond the two task wall allowances.
-Real evaluator behavior and multi-file delivery remain unverified until the registered run ends.
+The registered run ended without a frozen evaluator or delivery; their real behavior remains
+unverified.
+
+## Postrun
+
+Both registered slots completed once after registration `17a0ad2` was pushed. Primary and
+registered-envelope completion are both **0/2**. No evaluator/candidate/child/delivery exists;
+24 holdouts could not run. Both process exits are 1 and cleanup verified with no residual observed
+processes. The two task wall times total 730.695 seconds.
+
+Three requests yielded two complete glm-5.2 responses and one evaluator `transport_timeout` at
+600.004 seconds in `open_response`. Known token subtotal is 11309 (input 2337/output 8972);
+total usage and cost are unknown. No request journal remains pending, but one terminal request
+has unknown consumption.
+
+Slot 1 retains the accepted contract and accurate preparation start/failure observations; CLI
+returns safe failure JSON with no input request, while durable parent remains running. Slot 2
+failed strict JSON parsing because its original response has Markdown JSON fence delimiters.
+Offline parsing of its interior succeeds but does not change the persisted failure or run any
+model, candidate or evaluator.
+
+All 41 retained evidence files and the full inventory file set match their size/SHA entries;
+the first response strictly reparses to the stored contract. Both response texts are complete
+and match original size/hash. Product, registration and old 113/115 bytes remain unchanged.
+Independent final read-only review also passed without correction: all 41 evidence files,
+10 artifact records and 76/15/31 registration pins match; reported state, failures and usage
+agree with the retained observations. No model, candidate or evaluator was called during review.
+The registered verifier, 119 local documentation links and diff checks passed after reporting.
+No source/test changes were made after the 216-test prelaunch regression; no additional product
+full suite was needed. Results and handoff are committed and pushed under the standing instruction.
+See [postrun report](postrun/report.md) and its linked machine-readable evidence.

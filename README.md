@@ -1390,6 +1390,14 @@ permits `answer`; dependency waits no longer appear as a user question. Interrup
 reported as unknown, without a claim about provider completion or usage. See the offline
 [116 recovery checks](specs/116-preparation-recovery-state/quickstart.md).
 
+The independently registered [117 run](specs/117-extended-deadline-acceptance/postrun/report.md)
+on Feature 116 extended request/process limits to 600 seconds and task limits to 3600 seconds,
+retaining the other task/model/budget conditions. It still completed **0/2**: one evaluator request
+timed out, and the other task's contract response was wrapped in a Markdown JSON fence and rejected.
+Preparation failure now returns parent JSON and durable diagnostics; no recovery retry was used.
+Known usage is a 11309-token subtotal, with timeout consumption unknown. There is still no real
+multi-file delivery or generated-evaluator quality result from these acceptance campaigns.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

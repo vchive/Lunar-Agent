@@ -1,0 +1,214 @@
+{
+  "campaign_finished": true,
+  "campaign_id": "acceptance117-glm-5.2-extended-deadline-20260916",
+  "limitations": [
+    "two_hand_authored_tasks_one_attempt_each",
+    "no_normal_or_webagent_control",
+    "product_and_deadlines_changed_not_a_causal_comparison",
+    "observed_token_threshold_not_server_token_cap",
+    "no_os_sandbox",
+    "holdout_sources_not_supplied_as_context_but_locally_accessible",
+    "evaluator_probe_agreement_not_general_business_correctness"
+  ],
+  "manifest_sha256": "822d46f6cc9bfd0850129bf4455bd32eb4652b7f9a07f3dabe9b4a8066b43ec2",
+  "planned_attempts": 2,
+  "product_commit": "9a26a73e38d52b18f003b262a8746bb22496c156",
+  "registered_valid_completions": 0,
+  "schema_version": "1",
+  "slots": [
+    {
+      "attempt_id": "slot-001-attempt-001",
+      "case_key": "budget_selection",
+      "delivery_completion": false,
+      "delivery_verified": false,
+      "errors": [],
+      "evaluator_audit": null,
+      "evaluator_audit_unavailable": "no_frozen_evaluator",
+      "guard_stop": "provider_error",
+      "index": 1,
+      "limitations": [
+        "One delivered solution per slot; no candidate or model is rerun.",
+        "output_check is provisional; failed slots have null official quality and gap.",
+        "Source requirement counts Python files; it does not prove helper imports.",
+        "Synthetic holdouts audit the generated contract and evaluator, not general task coverage."
+      ],
+      "measurement_envelope_verified": false,
+      "optimum": 37,
+      "output_check": {
+        "errors": [
+          "output/result.json:BenchmarkFileError",
+          "output/summary.json:BenchmarkFileError",
+          "missing_output"
+        ],
+        "quality": null,
+        "validity": false
+      },
+      "parent_run_id": "f0c1ad7e96744aa0885837212c582413",
+      "preparation_verified": null,
+      "primary_valid_completion": false,
+      "process": {
+        "cleanup_verified": true,
+        "elapsed_seconds": 693.4195244580042,
+        "error_type": null,
+        "exit_code": 1,
+        "finished_utc": "2026-09-16T15:12:42.067007+00:00",
+        "process_status": "exited",
+        "remaining_observed_pids": []
+      },
+      "product_status": "failed",
+      "product_success": false,
+      "quality": null,
+      "quality_gap": null,
+      "registered_valid_completion": false,
+      "schema_version": "1",
+      "source_file_requirement": false,
+      "source_python_count": 0,
+      "source_python_files": [],
+      "usage": {
+        "cost_micros": null,
+        "finished_requests": 2,
+        "journal_malformed": false,
+        "known_usage": {
+          "input_tokens": 1109,
+          "output_tokens": 6492,
+          "total_tokens": 7601
+        },
+        "pending_requests": [],
+        "provider_requests": 2,
+        "request_outcomes": [
+          {
+            "elapsed_seconds": 92.29976816708222,
+            "failure_reason": null,
+            "index": 1,
+            "outcome": "succeeded",
+            "response_model": "glm-5.2",
+            "response_status": null
+          },
+          {
+            "elapsed_seconds": 600.0039836670039,
+            "failure_reason": "transport_timeout",
+            "index": 2,
+            "outcome": "provider_error",
+            "response_model": null,
+            "response_status": null
+          }
+        ],
+        "usage_complete": false
+      },
+      "worker": {
+        "exit_code": 1,
+        "guard": {
+          "elapsed_seconds": 692.3760639999527,
+          "finished_requests": 2,
+          "known_usage": {
+            "input_tokens": 1109,
+            "output_tokens": 6492,
+            "total_tokens": 7601
+          },
+          "provider_requests": 2,
+          "response_diagnostics": {
+            "captured": 1,
+            "unavailable": 0
+          },
+          "stopped_reason": "provider_error",
+          "usage_complete": false
+        },
+        "status": "returned"
+      }
+    },
+    {
+      "attempt_id": "slot-002-attempt-001",
+      "case_key": "worker_assignment",
+      "delivery_completion": false,
+      "delivery_verified": false,
+      "errors": [
+        "run_evidence_unavailable:ValueError"
+      ],
+      "evaluator_audit": null,
+      "evaluator_audit_unavailable": "run_evidence_unavailable",
+      "guard_stop": null,
+      "index": 2,
+      "limitations": [
+        "One delivered solution per slot; no candidate or model is rerun.",
+        "output_check is provisional; failed slots have null official quality and gap.",
+        "Source requirement counts Python files; it does not prove helper imports.",
+        "Synthetic holdouts audit the generated contract and evaluator, not general task coverage."
+      ],
+      "measurement_envelope_verified": false,
+      "optimum": 39,
+      "output_check": {
+        "errors": [
+          "output/result.json:BenchmarkFileError",
+          "output/summary.json:BenchmarkFileError",
+          "missing_output"
+        ],
+        "quality": null,
+        "validity": false
+      },
+      "preparation_verified": null,
+      "primary_valid_completion": false,
+      "process": {
+        "cleanup_verified": true,
+        "elapsed_seconds": 37.27556604205165,
+        "error_type": null,
+        "exit_code": 1,
+        "finished_utc": "2026-09-16T15:13:19.343814+00:00",
+        "process_status": "exited",
+        "remaining_observed_pids": []
+      },
+      "product_status": "failed",
+      "product_success": false,
+      "quality": null,
+      "quality_gap": null,
+      "registered_valid_completion": false,
+      "schema_version": "1",
+      "source_file_requirement": false,
+      "source_python_count": 0,
+      "source_python_files": [],
+      "usage": {
+        "cost_micros": null,
+        "finished_requests": 1,
+        "journal_malformed": false,
+        "known_usage": {
+          "input_tokens": 1228,
+          "output_tokens": 2480,
+          "total_tokens": 3708
+        },
+        "pending_requests": [],
+        "provider_requests": 1,
+        "request_outcomes": [
+          {
+            "elapsed_seconds": 36.10817191598471,
+            "failure_reason": null,
+            "index": 1,
+            "outcome": "succeeded",
+            "response_model": "glm-5.2",
+            "response_status": null
+          }
+        ],
+        "usage_complete": true
+      },
+      "worker": {
+        "exit_code": 1,
+        "guard": {
+          "elapsed_seconds": 36.13861549994908,
+          "finished_requests": 1,
+          "known_usage": {
+            "input_tokens": 1228,
+            "output_tokens": 2480,
+            "total_tokens": 3708
+          },
+          "provider_requests": 1,
+          "response_diagnostics": {
+            "captured": 1,
+            "unavailable": 0
+          },
+          "stopped_reason": null,
+          "usage_complete": true
+        },
+        "status": "returned"
+      }
+    }
+  ],
+  "valid_completions": 0
+}

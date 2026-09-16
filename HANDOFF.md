@@ -6,15 +6,33 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
-## Feature 117：延长时限的独立真实验收登记（2026-09-16）
+## Feature 117：延长时限后真实验收仍为 0/2（2026-09-16）
 
 新验收固定产品 `9a26a73`，沿用 115 的两道任务、输入、GLM-5.2/网关、oracle/24 holdout、
 population 2+1/seed 113、16 请求和 160000 observed-token stop threshold；单请求/普通
 Agent invocation/本地进程限时从 180 改为 600 秒，每题总限时从 1200 改为 3600 秒。
 每题仅一次，无答复、恢复重试、补槽或模型回退；两题仍独立 /2，113/115 冻结不动。
-登记目录 `specs/117-extended-deadline-acceptance/`；先验证并 commit/push 再启动。
-产品与时限都变了，不构成单一修复的因果比较。网关身份复核一致，费用仍未知，已知
-token 阈值不能限制服务器未报告消费。结果与启动提交将在完成后补充。
+登记 `17a0ad2` 先 push 后启动，manifest SHA 为
+`822d46f6cc9bfd0850129bf4455bd32eb4652b7f9a07f3dabe9b4a8066b43ec2`。
+预算选择的合同在 92.300 秒通过，评测器请求在 600.004 秒 open_response 超时；工作
+分配在 36.108 秒收到响应，但原始文本包在 Markdown json 代码块中，严格 JSON 拒绝。
+离线诊断确认去掉这对外层标记后的内部 JSON 符合合同 schema；没有写回现场或改变失败。
+
+primary/envelope 均 **0/2**，无冻结 evaluator、子任务、候选、交付；24 个 holdout 未运行。
+共三次请求、两次响应、一次未知消费的超时。已知用量小计 **11309 tokens**（input 2337 /
+output 8972），总消费和费用未知；两题耗时 693.420、37.276 秒，退出码均 1，清理通过。
+两个完整私有响应 5435/8111 bytes 已校验 size/SHA，无截断或脱敏替换，不公开正文。
+
+116 修复在真实失败中生效：第一题 CLI 返回完整失败 JSON、input_request=null，父任务
+running 并保留合同，开始/失败事件同 attempt，evaluator_compile/runtime_error 可显式
+恢复。此次测量不执行 resume。第二题正常记录 intake/task/run failed。216 项相关离线
+测试（含 48 新增）、本地 112 quickstart、预启动和最终独立审查通过；41 个证据文件、
+10 条制品记录及 76/15/31 项登记指纹匹配。
+详见 `specs/117-extended-deadline-acceptance/postrun/report.md`。
+
+产品与时限都变了，不构成单一修复的因果比较。113/115 历史均不改写。下一步先处理
+已确认的合同输出协议可靠性，离线审查 evaluator 输入/约束的可验证性；超时无响应，
+不能推断服务端长推理、排队或网关等具体原因，不继续以补槽/逐次加长时限替代定位。
 
 ## Feature 116：真实问题等待与评测器准备失败恢复（2026-09-16）
 

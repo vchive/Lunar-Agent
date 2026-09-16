@@ -3,7 +3,7 @@
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
-evaluator/profile 准备和父任务交付/终态恢复；下一步聚焦当前版本真实验收，外部 producer 的多文件
+evaluator/profile 准备和父任务交付/终态恢复；后续聚焦已确认的协议问题及真实闭环，外部 producer 的多文件
 接线与运行中取消编排仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
@@ -15,6 +15,17 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-16：延长时限验收与协议失败诊断
+
+Feature 117 先以 `17a0ad2` 提交推送登记，在产品 `9a26a73` 上把单调用/进程限时增至
+600 秒、每题增至 3600 秒，其余固定条件沿用 115。两题仍 **0/2**：预算选择通过合同，
+随后 evaluator 编译在 600 秒超时；工作分配返回 Markdown JSON 代码块，严格入口拒绝。
+内部 JSON 仅在离线诊断中确认 schema 有效，没有修复回填或重试。三次请求已知用量小计
+11309 tokens，超时消费未知；无 evaluator、候选或交付。116 的完整失败 JSON、准备事件
+和非用户等待状态在真实调用中生效。下一步优先合同输出协议可靠性及 evaluator 可验证
+约束范围的离线检查；冻结旧槽，不用逐次加时替代定位。见
+[117 报告](../specs/117-extended-deadline-acceptance/postrun/report.md)。
 
 ## 2026-09-16：准备失败状态与显式恢复
 
