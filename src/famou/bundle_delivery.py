@@ -11,21 +11,34 @@ from pathlib import Path
 
 from . import _benchmark_files
 from ._candidate_workspace_io import DirectoryChain, PrivateTree
-from .algorithm import MAX_OUTPUTS
+from .algorithm import MAX_OUTPUTS, AlgorithmProblemContract
 from .candidate_bundle import (
     MAX_CANDIDATE_BUNDLE_FILES,
     MAX_CANDIDATE_PATH_BYTES,
     CandidateSourceFile,
     _check_path_collisions,
+    parse_candidate_source_bundle,
 )
-from .candidate_evaluation_spec import canonical_json, strict_json
+from .candidate_evaluation_spec import (
+    canonical_json,
+    parse_candidate_evaluation_report,
+    parse_candidate_evaluation_spec,
+    strict_json,
+)
 from .candidate_execution import MAX_EXECUTION_INPUTS
-from .candidate_workspace_plan import CandidateWorkspaceError
+from .candidate_workspace_plan import CandidateWorkspaceError, candidate_file_table_sha256
 from .evolution import EvolutionError
+from .source_constraints import (
+    MAX_SOURCE_CHECK_BYTES,
+    source_constraints,
+    validate_source_capabilities,
+    validate_source_check_evidence,
+)
 
 _PROTOCOL = "lunar-bundle-delivery-v1"
+_SOURCE_PROTOCOL = "lunar-bundle-delivery-source-v1"
 _MANIFEST = "delivery.json"
-_MAX_FILES = MAX_CANDIDATE_BUNDLE_FILES + MAX_EXECUTION_INPUTS + MAX_OUTPUTS + 5
+_MAX_FILES = MAX_CANDIDATE_BUNDLE_FILES + MAX_EXECUTION_INPUTS + MAX_OUTPUTS + 6
 # Paths may need JSON escaping, and source paths gain the seven-byte delivery prefix. The
 # remaining allowance covers descriptors and fixed identity fields even at all three file caps.
 _MAX_MANIFEST_BYTES = 4096 + _MAX_FILES * (2 * (MAX_CANDIDATE_PATH_BYTES + 7) + 128)
@@ -73,7 +86,8 @@ def _paths(paths: list[str]) -> None:
     # The bundle validator also rejects parent/file collisions and case aliases. Its per-source
     # size limit is irrelevant here: zero-byte declarations are used only for path validation.
     try:
-        if not 3 <= len(paths) <= _MAX_FILES:
+        maximum = _MAX_FILES if "evaluation/source-checks.json" in paths else _MAX_FILES - 1
+        if not 3 <= len(paths) <= maximum:
             _fail()
         for path in paths:
             if not isinstance(path, str):
@@ -88,10 +102,77 @@ def _paths(paths: list[str]) -> None:
             _fail()
         if any(path not in {
             "source-bundle.json", "evaluation/report.json", "evaluation/evaluator.py",
-            "evaluation/spec.json", "contract.json",
+            "evaluation/spec.json", "evaluation/source-checks.json", "contract.json",
         } and not path.startswith(("source/", "output/", "inputs/")) for path in paths):
             _fail()
     except (TypeError, ValueError):
+        _fail()
+
+
+def _validate_source_materials(identity, paths, read, *, protocol) -> None:
+    """Bind supported source checks to the exact portable source bytes, without execution.
+
+    Historical packages can omit a contract or contain opaque legacy declarations. The new
+    protocol requires source evidence; old-format packages cannot carry new source requirements.
+    """
+    evidence_path = "evaluation/source-checks.json"
+    try:
+        extended = protocol == _SOURCE_PROTOCOL
+        if extended:
+            if "contract.json" not in paths or evidence_path not in paths:
+                _fail()
+        elif protocol != _PROTOCOL or evidence_path in paths:
+            _fail()
+        if "contract.json" not in paths:
+            return
+        raw_contract = read("contract.json")
+        try:
+            value = strict_json(raw_contract, maximum=_MAX_FILE_BYTES)
+        except (TypeError, ValueError):
+            if extended:
+                _fail()
+            # Legacy delivery only hashed these opaque bytes; retain that exact behavior.
+            return
+        constraints = []
+        if isinstance(value, dict):
+            for name in ("hard_constraints", "soft_constraints"):
+                if isinstance(value.get(name), list):
+                    constraints.extend(value[name])
+        scoped = any(isinstance(item, dict) and (
+            item.get("verification_scope") in {"source", "execution"} or "source_check" in item
+        ) for item in constraints)
+        if not extended:
+            if scoped:
+                _fail()
+            return
+        contract = AlgorithmProblemContract.from_dict(value)
+        validate_source_capabilities(contract)
+        if (not source_constraints(contract) or contract.digest() != identity["contract_sha256"]
+                or evidence_path not in paths or "evaluation/spec.json" not in paths):
+            _fail()
+        bundle = parse_candidate_source_bundle(strict_json(read("source-bundle.json")))
+        if (bundle.contract_sha256 != contract.digest() or bundle.digest() != identity["bundle_sha256"]
+                or {"source/" + item.path for item in bundle.files}
+                != {path for path in paths if path.startswith("source/")}):
+            _fail()
+        for item in bundle.files:
+            content = read("source/" + item.path)
+            if len(content) != item.size or hashlib.sha256(content).hexdigest() != item.sha256:
+                _fail()
+        raw_evidence = read(evidence_path)
+        evidence = validate_source_check_evidence(
+            strict_json(raw_evidence, maximum=MAX_SOURCE_CHECK_BYTES), contract, bundle_sha256=bundle.digest(),
+            source_file_table_sha256=candidate_file_table_sha256(bundle),
+        )
+        if not evidence["validity"] or canonical_json(evidence, maximum=MAX_SOURCE_CHECK_BYTES) != raw_evidence:
+            _fail()
+        evaluator = parse_candidate_evaluation_spec(strict_json(read("evaluation/spec.json")))
+        report = parse_candidate_evaluation_report(
+            read("evaluation/report.json"), evaluator_id=evaluator.evaluator_id,
+        )
+        if report.validity != 1:
+            _fail()
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError, RecursionError):
         _fail()
 
 
@@ -131,7 +212,11 @@ def _inventory(path: Path, chain: DirectoryChain, expected: set[str]) -> None:
 
 
 def inspect_bundle_delivery(delivery_path, *, expected_delivery_sha256=None) -> BundleDeliveryResult:
-    """Read a portable delivery and verify all declared bytes without running any code."""
+    """Verify portable bytes without running code; an expected hash pins their origin.
+
+    Without that external pin, internal checks cannot detect a fully consistent replacement of
+    all materials and identities. The source protocol does prevent partial evidence downgrades.
+    """
     if expected_delivery_sha256 is not None and (
         not isinstance(expected_delivery_sha256, str)
         or _SHA.fullmatch(expected_delivery_sha256) is None
@@ -147,7 +232,7 @@ def inspect_bundle_delivery(delivery_path, *, expected_delivery_sha256=None) -> 
                 "schema_version", "protocol", "observation", "identity", "files",
             }:
                 _fail()
-            if (manifest["schema_version"] != "1" or manifest["protocol"] != _PROTOCOL
+            if (manifest["schema_version"] != "1" or manifest["protocol"] not in {_PROTOCOL, _SOURCE_PROTOCOL}
                     or manifest["observation"] != "evaluation-time"
                     or canonical_json(manifest, maximum=_MAX_MANIFEST_BYTES) != raw):
                 _fail()
@@ -171,6 +256,14 @@ def inspect_bundle_delivery(delivery_path, *, expected_delivery_sha256=None) -> 
                 content = _benchmark_files.read_regular_file(path / relative, size, exact_size=True)
                 if hashlib.sha256(content).hexdigest() != descriptor["sha256"]:
                     _fail()
+            def read_material(relative):
+                descriptor = files[relative]
+                content = _benchmark_files.read_regular_file(path / relative, descriptor["size"], exact_size=True)
+                if hashlib.sha256(content).hexdigest() != descriptor["sha256"]:
+                    _fail()
+                return content
+
+            _validate_source_materials(manifest["identity"], files, read_material, protocol=manifest["protocol"])
             _inventory(path, chain, {*files, _MANIFEST})
             if _benchmark_files.read_regular_file(path / _MANIFEST, _MAX_MANIFEST_BYTES) != raw:
                 _fail()
@@ -192,8 +285,10 @@ def bundle_delivery_manifest(*, identity: dict, materials: dict[str, bytes]) -> 
         _fail()
     if sum(map(len, materials.values())) > _MAX_TOTAL_BYTES:
         _fail()
+    protocol = _SOURCE_PROTOCOL if "evaluation/source-checks.json" in materials else _PROTOCOL
+    _validate_source_materials(identity, materials, materials.__getitem__, protocol=protocol)
     return canonical_json({
-        "schema_version": "1", "protocol": _PROTOCOL, "observation": "evaluation-time",
+        "schema_version": "1", "protocol": protocol, "observation": "evaluation-time",
         "identity": identity, "files": {
             path: {"size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
             for path, content in sorted(materials.items())

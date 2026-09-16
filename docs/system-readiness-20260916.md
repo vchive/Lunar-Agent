@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估日期：2026-09-16，已更新至 Feature 118。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 119。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -13,6 +13,9 @@
 118 已离线修复完整 JSON 代码块的入口兼容，并引入显式约束验证范围。生成 evaluator
 在请求前拒绝尚无独立检查能力的 source/execution 要求，保留合同并给出具体诊断；
 这不是新增源码/执行行为验证器，113/115/117 的真实结果不变。
+119 随后接入精确的最少 Python 源码文件数检查，独立源码证据参与评测、选优与父任务
+交付；不支持的行为要求仍提前说明。自动离线流程已拒绝单文件高分候选并交付合规双文件
+结果，当前版本真实多文件有效交付仍未验收。
 
 ## 当前判断
 
@@ -33,13 +36,15 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 **5636 passed, 1 skipped**，新增 69 项状态/恢复测试及本地完整交付验证通过。
 118 新增 134 项格式/能力/CLI 测试，最终全仓 **5818 passed, 1 skipped**；详见
 [118 validation](../specs/118-contract-protocol-capabilities/validation.md)。
+119 新增 94 项源码检查、便携证据和恢复测试，最终全仓 **5912 passed, 1 skipped**；见
+[119 validation](../specs/119-source-file-verification/validation.md)。
 
 | 能力 | 实际状态 | 验证层次 |
 | --- | --- | --- |
 | 本地 Agent / Controller | 工具循环、任务调度、预算、SQLite、恢复、验收和交付已有实现与接线 | 自动化测试；较早普通流程有真实有效解 |
 | 单文件 population | 生成、独立评估、receipt、archive/选择/迁移、checkpoint/resume 与交付已集成 | 代码和离线 fixture；当前版本收益仍待实测 |
 | 多文件候选 | command/Agent/native runtime 生成 → bundle → 执行/独立评测 → receipt/archive/population → 父任务交付/terminal resume 已完成 | 普通 intake、完整父代上下文、helper-only 改进、有效性选优、迁移、失败保留、完整交付与不重跑 fixture |
-| 自动 evaluator/profile | 多文件 solve 复用 compiler、独立 auditor、约束/顺序探针和冻结恢复；显式 source/execution 要求在请求前报不支持；普通 deliver 复验准备材料 | 本地 fixture；输出探针不能证明源码/执行行为，真实任务仍需验收 |
+| 自动 evaluator/profile | 多文件 solve 复用 compiler、独立 auditor、输出探针和冻结恢复；硬源码文件数另做确定性检查；其余 source/execution 提前报不支持 | 本地 fixture；检查只证明声明文件数，真实任务仍需验收 |
 | OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现 | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证 |
 | ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现 | 本地 fixture；尚无 Shinka launcher/调度实现 |
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |
@@ -69,8 +74,8 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 
 1. 113、115、117 各自两例 GLM-5.2 验收均为 0/2。117 已延长时限，仍发生 evaluator
    超时；另一例原始合同响应含代码块标记，内部 schema 在离线诊断中通过。118 已实现
-   精确包装兼容和显式验证范围预检，接下来需把可检查的源码交付要求接入独立检查、
-   评分和交付，再登记支持范围内的新真实验收。超时没有响应，具体服务端原因仍未知，
+   精确包装兼容和显式验证范围预检，119 已把最低源码文件数接入独立检查、评分和交付，
+   接下来登记支持范围内的新真实验收。超时没有响应，具体服务端原因仍未知，
    不继续补槽或盲目加时。尚没有真实有效率提高或评测器质量的证据。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消

@@ -266,6 +266,29 @@ class ObjectiveSpec:
 
 
 @dataclass(frozen=True)
+class SourceCheckSpec:
+    """A declarative file-count check; it makes no claim about source execution."""
+
+    kind: Literal["python_file_count"]
+    minimum: int
+
+    def __post_init__(self) -> None:
+        if self.kind != "python_file_count":
+            raise ValueError("source_check kind is unsupported")
+        if type(self.minimum) is not int or not 1 <= self.minimum <= 64:
+            raise ValueError("source_check minimum must be an integer from 1 to 64")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "minimum": self.minimum}
+
+    @classmethod
+    def from_dict(cls, value: object) -> SourceCheckSpec:
+        if not isinstance(value, dict) or set(value) != {"kind", "minimum"}:
+            raise ValueError("source_check must contain exactly kind and minimum")
+        return cls(value["kind"], value["minimum"])
+
+
+@dataclass(frozen=True)
 class ConstraintSpec:
     id: str
     description: str
@@ -273,6 +296,7 @@ class ConstraintSpec:
     verification: Literal["independent", "partial", "solver"]
     result_fields: tuple[str, ...] = ()
     verification_scope: Literal["output", "source", "execution"] | None = None
+    source_check: SourceCheckSpec | None = None
 
     def __post_init__(self) -> None:
         _safe_segment(self.id, "constraint id")
@@ -286,6 +310,10 @@ class ConstraintSpec:
             or self.verification_scope not in {"output", "source", "execution"}
         ):
             raise ValueError("constraint verification_scope is unsupported")
+        if self.source_check is not None:
+            if self.verification_scope != "source" or not isinstance(self.source_check, SourceCheckSpec):
+                raise ValueError("source_check requires source verification_scope")
+            object.__setattr__(self, "source_check", SourceCheckSpec.from_dict(self.source_check.to_dict()))
         if len(self.result_fields) > MAX_ITEMS:
             raise ValueError("constraint result fields are too many")
         for field_name in self.result_fields:
@@ -302,6 +330,8 @@ class ConstraintSpec:
         # Omission preserves historical contract serialization and frozen digests.
         if self.verification_scope is not None:
             result["verification_scope"] = self.verification_scope
+        if self.source_check is not None:
+            result["source_check"] = self.source_check.to_dict()
         return result
 
     @classmethod
@@ -320,6 +350,7 @@ class ConstraintSpec:
             verification=value.get("verification"),  # type: ignore[arg-type]
             result_fields=tuple(result_fields),
             verification_scope=value.get("verification_scope"),  # type: ignore[arg-type]
+            source_check=SourceCheckSpec.from_dict(value["source_check"]) if "source_check" in value else None,
         )
 
 

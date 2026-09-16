@@ -119,7 +119,7 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
                 try:
                     _, contract = _parent(store, parent_id)
                     if contract is not None:
-                        validate_evaluator_capabilities(contract)
+                        validate_evaluator_capabilities(contract, invocation="snapshot")
                 except UnsupportedEvaluatorConstraintsError as exc:
                     details = exc.details()
                 except (EvolutionError, AttributeError, KeyError, TypeError, ValueError):
@@ -472,7 +472,7 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                     stage, category = "capability_check", "unsupported_verification"
                     # Recompute from the retained contract rather than trusting exception prose.
                     try:
-                        validate_evaluator_capabilities(contract)
+                        validate_evaluator_capabilities(contract, invocation="snapshot")
                     except UnsupportedEvaluatorConstraintsError as unsupported:
                         unsupported_constraints = unsupported.details()
                     else:

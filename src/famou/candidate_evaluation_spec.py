@@ -48,6 +48,7 @@ class CandidateEvaluationError(ValueError):
         "output_changed", "harness_changed", "snapshot_changed", "report_invalid",
         "process_failed", "process_timed_out", "output_limit_exceeded",
         "process_cleanup_failed", "process_start_failed", "incomplete", "write_failed",
+        "unsupported_constraints", "source_constraints_invalid",
     })
 
     def __init__(self, code: str) -> None:

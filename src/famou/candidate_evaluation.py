@@ -33,10 +33,19 @@ from .candidate_execution_runner import (
 )
 from .candidate_workspace_plan import CandidateWorkspaceError
 from .evaluator import _structured_content_check
+from .source_constraints import (
+    MAX_SOURCE_CHECK_BYTES,
+    parse_source_check_evidence,
+    source_check_evidence,
+    source_constraints,
+    source_failure_report,
+    validate_source_capabilities,
+)
 
 _MAX_MANIFEST_BYTES = 128 * 1024
 _REQUEST_PROTOCOL = "lunar-candidate-evaluation-request-v1"
 _RECORD_PROTOCOL = "lunar-candidate-evaluation-v1"
+_SOURCE_RECORD_PROTOCOL = "lunar-candidate-evaluation-source-v1"
 
 
 def _fail(code):
@@ -310,12 +319,15 @@ class CandidateEvaluationResult:
 
     def to_dict(self):
         manifest = json.loads(self._manifest_json)
-        return {
+        result = {
             "status": self.status, "observation": "evaluation-time", "evaluation_sha256": self.digest(),
             "binding": manifest["binding"], "report": manifest["report"],
             "output_contract_valid": manifest["output_contract_valid"],
             "harness_invoked": manifest["harness_invoked"],
         }
+        if manifest["protocol"] == _SOURCE_RECORD_PROTOCOL:
+            result["source_constraints_valid"] = manifest["source_constraints_valid"]
+        return result
 
 
 def _tree_names(chain, expected_files):
@@ -361,10 +373,12 @@ def inspect_candidate_evaluation(evaluation_path, *, expected_evaluation_sha256=
             if manifest_file.content is None:
                 _fail("incomplete")
             raw = manifest_file.content
-            manifest = _object(strict_json(raw), {
+            manifest = strict_json(raw)
+            extended = isinstance(manifest, dict) and manifest.get("protocol") == _SOURCE_RECORD_PROTOCOL
+            manifest = _object(manifest, {
                 "protocol", "schema_version", "observation", "evaluation_identity", "binding",
                 "files", "report", "output_contract_valid", "harness_invoked",
-            })
+            } | ({"source_constraints_valid"} if extended else set()))
             if canonical_json(manifest) != raw:
                 _fail("invalid")
             if expected_evaluation_sha256 is not None and _sha(raw) != expected_evaluation_sha256:
@@ -372,7 +386,8 @@ def inspect_candidate_evaluation(evaluation_path, *, expected_evaluation_sha256=
             node = _object(manifest["evaluation_identity"], {"device", "inode"})
             if any(type(value) is not int or not 0 <= value < 2**64 for value in node.values()):
                 _fail("invalid")
-            if (manifest["protocol"] != _RECORD_PROTOCOL or manifest["schema_version"] != "1"
+            if (manifest["protocol"] not in {_RECORD_PROTOCOL, _SOURCE_RECORD_PROTOCOL}
+                    or manifest["schema_version"] != "1"
                     or manifest["observation"] != "evaluation-time"
                     or manifest["evaluation_identity"] != evidence._node(os.fstat(chain.fd))):
                 _fail("identity_mismatch")
@@ -382,6 +397,8 @@ def inspect_candidate_evaluation(evaluation_path, *, expected_evaluation_sha256=
             request_file = _Observation(path / "request.json", _MAX_MANIFEST_BYTES, stack, code="snapshot_changed")
             request = strict_json(request_file.content)
             contract, evaluator = _request_values(request)
+            if bool(source_constraints(contract)) != extended:
+                _fail("identity_mismatch")
             if request_file.content != canonical_json(request) or manifest["binding"] != request["binding"]:
                 _fail("identity_mismatch")
             expected = {
@@ -390,13 +407,17 @@ def inspect_candidate_evaluation(evaluation_path, *, expected_evaluation_sha256=
                 **{"inputs/" + item["target"]: None for item in request["inputs"]},
                 **{item["path"]: None for item in request["outputs"] if item["present"]},
             }
+            if extended:
+                expected["source-checks.json"] = None
             if set(files) != set(expected):
                 _fail("invalid")
             observations = {}
             for name in expected:
                 maximum = (evaluator.harness_size if name == "evaluator.py" else
                            MAX_REPORT_BYTES if name == "report.json" else
-                           _MAX_MANIFEST_BYTES if name == "request.json" else 16 * 1024 * 1024)
+                           MAX_SOURCE_CHECK_BYTES if name == "source-checks.json" else
+                           _MAX_MANIFEST_BYTES if name == "request.json"
+                           else 16 * 1024 * 1024)
                 observed = _Observation(path / name, maximum, stack, code="snapshot_changed")
                 descriptor = _object(files[name], {"size", "sha256", "device", "inode"})
                 if any(type(descriptor[key]) is not int or not 0 <= descriptor[key] < 2**64
@@ -419,16 +440,35 @@ def inspect_candidate_evaluation(evaluation_path, *, expected_evaluation_sha256=
                 if observed and (len(content) != item["size"] or _sha(content) != item["sha256"]):
                     _fail("identity_mismatch")
                 valid = _format_valid(spec, content) and valid
+            source_valid, source_evidence = True, None
+            if extended:
+                try:
+                    validate_source_capabilities(contract)
+                    source_evidence = parse_source_check_evidence(
+                        observations["source-checks.json"].content, contract,
+                        bundle_sha256=request["binding"]["bundle_sha256"],
+                        source_file_table_sha256=request["binding"]["source_file_table_sha256"],
+                    )
+                    source_valid = source_evidence["validity"]
+                except (ValueError, TypeError, KeyError):
+                    _fail("source_constraints_invalid")
+                if (type(manifest["source_constraints_valid"]) is not bool
+                        or manifest["source_constraints_valid"] != source_valid):
+                    _fail("invalid")
             if (type(manifest["output_contract_valid"]) is not bool
                     or type(manifest["harness_invoked"]) is not bool
-                    or manifest["output_contract_valid"] != valid or manifest["harness_invoked"] != valid):
+                    or manifest["output_contract_valid"] != valid
+                    or manifest["harness_invoked"] != (valid and source_valid)):
                 _fail("invalid")
             report = parse_candidate_evaluation_report(observations["report.json"].content, evaluator_id=evaluator.evaluator_id)
             manifest_report = parse_candidate_evaluation_report(
                 canonical_json(manifest["report"]), evaluator_id=evaluator.evaluator_id,
             )
+            forced_report = (_invalid_report(evaluator.evaluator_id) if not valid else
+                             source_failure_report(evaluator.evaluator_id, source_evidence)
+                             if not source_valid else None)
             if (manifest_report.to_dict() != report.to_dict()
-                    or (not valid and report.to_dict() != _invalid_report(evaluator.evaluator_id).to_dict())):
+                    or (forced_report is not None and report.to_dict() != forced_report.to_dict())):
                 _fail("identity_mismatch")
             _tree_names(chain, {*expected, "evaluation.json"})
             for observed in [manifest_file, request_file, *observations.values()]:
@@ -445,6 +485,11 @@ def evaluate_candidate_execution(
 ):
     """Snapshot and score one successful attempt. Allocated evaluation trees are retained."""
     contract = _contract(contract)
+    try:
+        validate_source_capabilities(contract)
+    except (ValueError, TypeError):
+        _fail("unsupported_constraints")
+    extended = bool(source_constraints(contract))
     evaluator = parse_candidate_evaluation_spec(evaluator)
     pins = {
         "expected_admission_sha256": expected_admission_sha256,
@@ -503,6 +548,8 @@ def evaluate_candidate_execution(
                 observations.append(observed)
                 if len(observed.content) != item.size or _sha(observed.content) != item.sha256:
                     _fail("source_changed")
+            source_evidence = source_check_evidence(contract, plan.bundle) if extended else None
+            source_valid = source_evidence["validity"] if extended else True
             input_observations = []
             for item in admission.inputs:
                 observed = _Observation(inputs / item.target, item.size, stack, code="input_changed")
@@ -561,7 +608,7 @@ def evaluate_candidate_execution(
             for observed in observations:
                 observed.check()
             executable = None
-            if valid:
+            if valid and source_valid:
                 executable = _Executable(Path(evaluator.command[0]))
                 stack.callback(_close, executable.close)
                 executable.check()
@@ -577,8 +624,11 @@ def evaluate_candidate_execution(
                     _fail(error or "process_failed")
                 report = parse_candidate_evaluation_report(stdout, evaluator_id=evaluator.evaluator_id)
                 report_bytes = stdout
-            else:
+            elif not valid:
                 report = _invalid_report(evaluator.evaluator_id)
+                report_bytes = canonical_json(report.to_dict())
+            else:
+                report = source_failure_report(evaluator.evaluator_id, source_evidence)
                 report_bytes = canonical_json(report.to_dict())
             for observed in [*observations, *snapshots.values()]:
                 observed.check()
@@ -590,15 +640,25 @@ def evaluate_candidate_execution(
                     or evidence._read(attempt_chain, "launch-intent.json") != (intent_bytes, intent_descriptor)):
                 _fail("identity_mismatch")
             tree.sync_and_check()
+            if extended:
+                # The output harness must not supply or observe this independent evidence.
+                tree.write("source-checks.json", canonical_json(source_evidence, maximum=MAX_SOURCE_CHECK_BYTES))
+                snapshots["source-checks.json"] = _Observation(
+                    destination / "source-checks.json", MAX_SOURCE_CHECK_BYTES, stack, code="snapshot_changed",
+                )
             tree.write("report.json", report_bytes)
             report_file = _Observation(destination / "report.json", MAX_REPORT_BYTES, stack, code="snapshot_changed")
             manifest = {
-                "protocol": _RECORD_PROTOCOL, "schema_version": "1", "observation": "evaluation-time",
+                "protocol": _SOURCE_RECORD_PROTOCOL if extended else _RECORD_PROTOCOL,
+                "schema_version": "1", "observation": "evaluation-time",
                 "evaluation_identity": evidence._node(os.fstat(tree.fd)), "binding": request["binding"],
                 "files": {**{name: observed.descriptor for name, observed in snapshots.items()},
                           "report.json": report_file.descriptor},
-                "report": report.to_dict(), "output_contract_valid": valid, "harness_invoked": valid,
+                "report": report.to_dict(), "output_contract_valid": valid,
+                "harness_invoked": valid and source_valid,
             }
+            if extended:
+                manifest["source_constraints_valid"] = source_valid
             for observed in observations:
                 observed.check()
             tree.write("evaluation.json", canonical_json(manifest))

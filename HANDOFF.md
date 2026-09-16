@@ -6,6 +6,41 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 119：源码文件数独立检查与交付（2026-09-17）
+
+合同支持 `verification_scope=source` 配合 `source_check={kind:python_file_count,minimum:N}`，
+N 为 1..64 的整数，仅允许精确字段。检查按完整已验证 bundle 中的小写 `.py` 路径计数，
+空文件也计入；不证明语法、helper 调用、代码有效性、依赖或真实输入读取。字段缺省保持
+旧合同 bytes/digest 不变，非法/null/错误 scope 拒绝，不将行为要求改写为文件数。
+
+自动 snapshot evaluator 接受这种硬源码约束，compiler/auditor 只对其余输出硬约束生成
+探针，完整合同仍固定在摘要中。legacy candidate invocation、无检查器的 source、soft
+source 和 execution 要求仍提前拒绝；显式 bundle pipeline 和直接评测同样复验能力。
+
+独立评测先复验全部源码字节，再对 bundle 执行本地确定性检查；源码不合格时不调用输出
+harness，保留 validity=0/score=0/quality=null 的报告。输出 schema 失败优先，源码通过
+仍不能覆盖输出评测失败。`source-checks.json` 绑定完整合同/bundle/source table，包含每项
+计数/阈值/结果；仅在输出 harness 返回后由 controller 写入。证据上限 256KiB，报告最多
+32 条错误但证据保留完整失败列表。新 evaluation 使用 `lunar-candidate-evaluation-source-v1`，
+inspect 重算证据，旧无检查记录保持原协议/字段；不重跑任何候选或 evaluator。
+
+选优使用合并后的最终报告，source-aware 交付采用 `lunar-bundle-delivery-source-v1`，
+携带 `evaluation/source-checks.json` 并重验实际源码集合/字节、合同、bundle 与结果。
+去掉证据/合同或部分协议降级均拒绝，旧不透明交付仍按原协议读取。完整自洽重写需要外部
+expected digest 才能辨别，便携自查不等于身份认证。父任务交付/终态恢复沿用已有摘要绑定。
+
+新增 94 项离线测试：schema/probe/helper 34、独立评测 25、交付 33、自动流程 2。
+自动 CLI 生成单文件高分 9 和双文件 2/6/7，前者因源码约束无效且跳过输出 harness，最终
+交付 7；两种终态恢复保留 1/1/1/4/4 compiler/auditor/Agent/candidate 次数及唯一交付。
+另一本地选优场景同时拒绝源码失败和输出失败。277 项相关回归及 78 项交付回归通过；
+旧 112 quickstart 仍为 1/2/6/7，终态次数不变。最终全仓 **5912 passed, 1 skipped in
+364.74s**，JUnit 零失败/错误，冻结后无实现修改。Ruff、compileall、installed CLI、Specify、
+120 个文档链接和 diff 检查通过，已按授权提交推送。详见 `specs/119-source-file-verification/validation.md`。
+
+没有真实模型、外部框架或冻结槽重跑，113/115/117 仍分别 0/2；本轮不证明真实有效率
+提升。下一步在支持的验证范围内独立登记当前版本真实闭环；执行行为要求仍不能通过
+源码计数替代。外部多文件 seed、全链路预算/取消和 detached 继续后置。
+
 ## Feature 118：合同格式兼容与评测器能力预检（2026-09-16）
 
 合同入口接受严格 JSON，或完整的单层小写 json 代码块（LF 分隔、仅外层 ASCII JSON

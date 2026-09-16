@@ -130,18 +130,17 @@ class UnsupportedEvaluatorConstraintsError(EvaluatorBundleError):
                 for identifier, scope in self.unsupported_constraints]
 
 
-def validate_evaluator_capabilities(contract: AlgorithmProblemContract) -> None:
+def validate_evaluator_capabilities(contract: AlgorithmProblemContract, *, invocation="candidate") -> None:
     """Retain all requirements; never interpret verification strength as evidence scope.
 
     Unscoped historical contracts preserve their original probe-coverage assumptions. Both
-    generated invocation modes use synthetic input/output probes, not source/execution evidence.
+    generated invocation modes use synthetic input/output probes. Only the snapshot controller
+    additionally verifies supported source counts outside those probes.
     """
-    verified = AlgorithmProblemContract.from_dict(contract.to_dict())
-    unsupported = tuple(
-        (item.id, item.verification_scope)
-        for item in (*verified.hard_constraints, *verified.soft_constraints)
-        if item.verification_scope in {"source", "execution"}
-    )
+    from .source_constraints import unsupported_source_constraints
+
+    _bundle_protocol(invocation)
+    unsupported = unsupported_source_constraints(contract, allow_source_checks=invocation == "snapshot")
     if unsupported:
         raise UnsupportedEvaluatorConstraintsError(unsupported)
 
@@ -429,7 +428,7 @@ def compile_evaluator_bundle(
         raise TypeError("contract must be an AlgorithmProblemContract")
     timeout = _timeout(timeout)
     _bundle_protocol(invocation)
-    validate_evaluator_capabilities(contract)
+    validate_evaluator_capabilities(contract, invocation=invocation)
     if invocation == "snapshot":
         from .candidate_evaluation_spec import candidate_output_contract_sha256
 
@@ -467,7 +466,7 @@ def compile_evaluator_bundle(
         continuation_guard()
     if not isinstance(result, RuntimeResult):
         raise EvaluatorBundleError("evaluator compiler returned an invalid runtime result")
-    envelope = _parse_envelope(result.text, contract)
+    envelope = _parse_envelope(result.text, contract, invocation=invocation)
     staging = Path(tempfile.mkdtemp(prefix=".evaluator-bundle-", dir=root))
     try:
         objective_path = staging / "objective.md"
@@ -583,7 +582,7 @@ def load_evaluator_bundle(
     """Load a frozen bundle after exact file, mode, schema, and digest verification."""
     timeout = _timeout(timeout)
     protocol = _bundle_protocol(invocation)
-    validate_evaluator_capabilities(contract)
+    validate_evaluator_capabilities(contract, invocation=invocation)
     raw_root = Path(root).expanduser()
     if raw_root.is_symlink():
         raise EvaluatorBundleError("frozen evaluator bundle must not be a symlink")
@@ -639,7 +638,7 @@ def load_evaluator_bundle(
     for name, label in (("probes.json", "compiler"), ("audit.json", "audit")):
         path = root / name
         try:
-            stored_suite = _parse_probe_suite(path.read_text(encoding="utf-8"), contract, label=label)
+            stored_suite = _parse_probe_suite(path.read_text(encoding="utf-8"), contract, label=label, invocation=invocation)
             if path.read_text(encoding="utf-8") != _canonical_probe_suite(stored_suite):
                 raise EvaluatorBundleError(f"frozen evaluator {label} suite is not canonical")
         except (OSError, UnicodeDecodeError) as exc:
@@ -677,7 +676,7 @@ def load_evaluator_bundle(
     )
 
 
-def _parse_envelope(raw: str, contract: AlgorithmProblemContract) -> EvaluatorBundleEnvelope:
+def _parse_envelope(raw: str, contract: AlgorithmProblemContract, *, invocation="candidate") -> EvaluatorBundleEnvelope:
     if not isinstance(raw, str) or not raw.strip():
         raise EvaluatorBundleError("evaluator compiler returned empty output")
     if len(raw.encode("utf-8")) > MAX_BUNDLE_RESPONSE_BYTES:
@@ -705,7 +704,7 @@ def _parse_envelope(raw: str, contract: AlgorithmProblemContract) -> EvaluatorBu
     _validate_source(source)
     probes = _parse_probes(payload["probes"], _required_probe_paths(contract))
     suite = _validate_probe_suite(
-        payload["constraint_coverage"], probes, payload["score_order"], contract
+        payload["constraint_coverage"], probes, payload["score_order"], contract, invocation=invocation,
     )
     return EvaluatorBundleEnvelope(
         objective,
@@ -717,7 +716,7 @@ def _parse_envelope(raw: str, contract: AlgorithmProblemContract) -> EvaluatorBu
 
 
 def _parse_probe_suite(
-    raw: str, contract: AlgorithmProblemContract, *, label: str = "audit"
+    raw: str, contract: AlgorithmProblemContract, *, label: str = "audit", invocation="candidate",
 ) -> ProbeSuite:
     if not isinstance(raw, str) or not raw.strip():
         raise EvaluatorBundleError(f"evaluator {label} returned empty output")
@@ -741,7 +740,7 @@ def _parse_probe_suite(
     required_probe_paths = _required_probe_paths(contract)
     probes = _parse_probes(payload["probes"], required_probe_paths)
     return _validate_probe_suite(
-        payload["constraint_coverage"], probes, payload["score_order"], contract, label=label
+        payload["constraint_coverage"], probes, payload["score_order"], contract, label=label, invocation=invocation,
     )
 
 
@@ -754,6 +753,32 @@ def _required_probe_paths(contract: AlgorithmProblemContract) -> frozenset[str]:
     )
 
 
+def _output_constraint_ids(contract, invocation):
+    from .source_constraints import source_constraints
+
+    source_ids = {item.id for item in source_constraints(contract)} if invocation == "snapshot" else set()
+    return tuple(item.id for item in contract.hard_constraints if item.id not in source_ids)
+
+
+def _source_check_prompt(contract, invocation):
+    from .source_constraints import source_constraints
+
+    checks = source_constraints(contract) if invocation == "snapshot" else ()
+    if not checks:
+        return ""
+    return (
+        "\n\nSource requirements are checked independently by Lunar against the verified source bundle. "
+        "Do not inspect source or try to infer source structure from input/output content. "
+        "The evaluator must check exactly these output constraint IDs: "
+        + json.dumps(_output_constraint_ids(contract, invocation)) + ". "
+        "Return constraint_coverage with exactly those IDs and one invalid probe per such ID. "
+        "Do not include these independently checked source IDs in output probes/coverage: "
+        + json.dumps([item.id for item in checks]) + ". "
+        "At least two valid output probes and strict score ordering are still required. "
+        "Output validity is combined with source checks by Lunar; do not claim source verification."
+    )
+
+
 def _validate_probe_suite(
     coverage_value: object,
     probes: tuple[EvaluatorProbe, ...],
@@ -761,8 +786,10 @@ def _validate_probe_suite(
     contract: AlgorithmProblemContract,
     *,
     label: str = "evaluator",
+    invocation: str = "candidate",
 ) -> ProbeSuite:
-    constraint_ids = tuple(item.id for item in contract.hard_constraints)
+    validate_evaluator_capabilities(contract, invocation=invocation)
+    constraint_ids = _output_constraint_ids(contract, invocation)
     coverage = _string_array(coverage_value, f"{label} constraint coverage")
     if len(coverage) != len(set(coverage)) or set(coverage) != set(constraint_ids):
         raise EvaluatorBundleError(
@@ -1252,7 +1279,14 @@ def _compiler_prompt(
             _snapshot_invocation_prompt(),
             1,
         )
-    return prompt
+    scope_prompt = _source_check_prompt(contract, invocation)
+    if scope_prompt:
+        # Replace only fixed instructions, never user-supplied contract/profile strings.
+        header, context_section = prompt.split("Canonical contract:\n", 1)
+        header = header.replace("every hard constraint", "every output constraint")
+        header = header.replace("per hard constraint", "per output constraint")
+        prompt = header + "Canonical contract:\n" + context_section
+    return prompt + scope_prompt
 
 
 def _compile_audit_suite(
@@ -1286,7 +1320,7 @@ def _compile_audit_suite(
         continuation_guard()
     if not isinstance(result, RuntimeResult):
         raise EvaluatorBundleError("evaluator auditor returned an invalid runtime result")
-    return _parse_probe_suite(result.text, contract)
+    return _parse_probe_suite(result.text, contract, invocation=invocation)
 
 
 def _run_isolated(
@@ -1329,7 +1363,12 @@ def _auditor_prompt(
     )
     if invocation == "snapshot":
         prompt = _snapshot_invocation_prompt() + "\n\n" + prompt
-    return prompt
+    scope_prompt = _source_check_prompt(contract, invocation)
+    if scope_prompt:
+        header, context_section = prompt.split("Canonical contract:\n", 1)
+        header = header.replace("per hard constraint", "per output constraint")
+        prompt = header + "Canonical contract:\n" + context_section
+    return prompt + scope_prompt
 
 
 def _canonical_probe_suite(suite: ProbeSuite) -> str:

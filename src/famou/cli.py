@@ -2705,7 +2705,8 @@ def _bundle_preparation_payload(store: Store, run_id: str) -> dict[str, object] 
         preparation = {
             **preparation,
             "capability_hint": (
-                "Generated evaluators verify outputs only. These requirements need independent "
+                "Generated evaluators verify outputs only. Lunar separately checks declared minimum "
+                "Python file counts. These requirements need independent "
                 "source or execution checkers; retrying evaluator generation cannot verify them."
             ),
         }

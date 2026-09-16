@@ -294,6 +294,7 @@ def _validate_contract_shape(value: object) -> None:
                     "verification",
                     "result_fields",
                     "verification_scope",
+                    "source_check",
                 }:
                     raise ContractCompilationError("constraint contains unknown fields")
     evolution = value.get("evolution")
@@ -570,6 +571,14 @@ class RuntimeContractCompiler:
             "relabel source/execution requirements as output or drop them to fit an evaluator. "
             "If a material scope is ambiguous, request clarification. Use empty arrays when no "
             "constraints are specified.\n"
+            '- A source constraint may additionally declare source_check with exactly '
+            '{"kind":"python_file_count","minimum":2}; minimum is an integer 1..64, never '
+            "a boolean. This counts distinct declared paths ending in lowercase .py, including "
+            "empty files. Use it only for an explicit minimum Python-file count requirement. "
+            "It does not prove syntax validity, helper imports, useful code, runtime dependencies "
+            "or actual input use. Never replace those requirements with file count. Unsupported "
+            "source requirements keep source scope without a fabricated checker. Do not emit "
+            "source_check for output or execution constraints.\n"
             "- outputs: an optional array of objects with path (unique relative path string below "
             'output/), format ("json", "jsonl", "csv", or "text"), optional fields (array of '
             "unique field-name strings, not an object; empty for text), optional required (JSON "

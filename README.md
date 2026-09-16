@@ -1401,13 +1401,23 @@ Known usage is a 11309-token subtotal, with timeout consumption unknown. There i
 multi-file delivery or generated-evaluator quality result from these acceptance campaigns.
 
 Feature 118 adds explicit constraint `verification_scope`: `output`, `source`, or `execution`.
-Generated evaluators currently support output checks. A declared source/execution requirement
-stops preparation before a compiler/auditor request and appears in `evolution.preparation` with
+Generated evaluators support output checks. A source/execution requirement without a supported
+independent checker stops preparation before a compiler/auditor request and appears in `evolution.preparation` with
 category `unsupported_verification` and the affected IDs/scopes. The contract is retained; retrying
 generation cannot supply the missing independent checker. No requirement is removed because it is
 partial or has empty result fields. Older unscoped contracts keep their existing digests and probe
 coverage. This does not prove helper imports, standard-library-only execution or actual input use.
 See [118 capability and framing checks](specs/118-contract-protocol-capabilities/quickstart.md).
+
+Feature 119 supports one hard source requirement: `verification_scope="source"` with
+`source_check={"kind":"python_file_count","minimum":2}` (integer minimum 1–64). Lunar counts
+distinct declared paths ending in lowercase `.py`, including empty files, against the verified
+source bundle. The output evaluator checks the remaining output requirements. A source failure
+forces an invalid result and skips the output harness; source success cannot override output failure.
+Source-check evidence is retained and recomputed during inspection, ranking and portable delivery,
+without rerunning the program. This proves the declared file count, not helper imports or behavior.
+Unsupported source, soft source and execution requirements still stop before evaluator generation.
+See [119 source verification](specs/119-source-file-verification/quickstart.md).
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

@@ -37,6 +37,7 @@ from .candidate_execution_evidence import (
 from .candidate_input_staging import stage_candidate_execution_inputs
 from .candidate_workspace import materialize_candidate_source_bundle
 from .candidate_workspace_plan import build_candidate_workspace_plan, parse_candidate_workspace_plan
+from .source_constraints import validate_source_capabilities
 
 _PROTOCOL = "lunar-population-bundle-v1"
 _BUNDLE_NAME = "bundle-manifest.json"
@@ -224,12 +225,15 @@ def read_bundle_delivery_materials(workspace, candidate, *, authority=None):
         selected = {item["path"] for item in request["outputs"] if item["present"]}
         selected.update("inputs/" + item["target"] for item in request["inputs"])
         selected.update({"report.json", "evaluator.py"})
+        if "source-checks.json" in manifest["files"]:
+            selected.add("source-checks.json")
         for name in sorted(selected):
             descriptor = manifest["files"][name]
             content = _read(root / name, descriptor["size"])
             if len(content) != descriptor["size"] or _sha(content) != descriptor["sha256"]:
                 _fail("evaluation_mismatch")
-            target = {"report.json": "evaluation/report.json", "evaluator.py": "evaluation/evaluator.py"}.get(name, name)
+            target = {"report.json": "evaluation/report.json", "evaluator.py": "evaluation/evaluator.py",
+                      "source-checks.json": "evaluation/source-checks.json"}.get(name, name)
             material[target] = content
         material["evaluation/spec.json"] = canonical_json(request["evaluator"])
         material["contract.json"] = canonical_json(request["contract"])
@@ -289,6 +293,10 @@ class MultiFileCandidatePipeline:
         return replace(config, **values)
 
     def validate_context(self, context, authority):
+        try:
+            validate_source_capabilities(context.contract)
+        except (TypeError, ValueError):
+            _fail("unsupported_constraints")
         configured = self.configure(context.config)
         if configured.to_dict() != context.config.to_dict() or context.initial_seeds:
             _fail("profile_invalid")
