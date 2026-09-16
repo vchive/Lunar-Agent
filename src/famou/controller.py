@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .agent_loop import AgentInputRequired
 from .agents import (
@@ -113,6 +113,10 @@ from .routing import DomainRouter, RouteDecision
 from .runtime import Runtime, RuntimeExecutionError
 from .seed_handoff import SeedAdmissionError, SeedManifest, admit_seed_manifest
 from .store import Store
+
+if TYPE_CHECKING:
+    from .bundle_delivery import BundleDeliveryResult
+    from .bundle_evolution import MultiFileCandidatePipeline
 
 
 class LocalController:
@@ -657,6 +661,7 @@ class LocalController:
         seed_evaluator_kind: str = "exact_harness",
         seed_dependency_sha256: str | None = None,
         seed_environment_sha256: str | None = None,
+        bundle_pipeline: MultiFileCandidatePipeline | None = None,
     ) -> tuple[Run, StrategyResult]:
         """Execute or resume an evolution strategy while retaining SQLite run authority."""
         run = self.store.get_run(run_id)
@@ -666,6 +671,14 @@ class LocalController:
             raise TypeError("contract must be an AlgorithmProblemContract")
         if contract.evolution.strategy == "loop":
             raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        if bundle_pipeline is not None:
+            from .bundle_evolution import MultiFileCandidatePipeline
+
+            if not isinstance(bundle_pipeline, MultiFileCandidatePipeline):
+                raise TypeError("bundle_pipeline must be a MultiFileCandidatePipeline")
+            if seed_manifest is not None:
+                raise EvolutionError("bundle_population_seed_import_unsupported")
+            evolution_config = bundle_pipeline.configure(evolution_config)
         contract_path = Path(run.workspace) / "evolution" / "contract.json"
         if not contract_path.is_file():
             raise EvolutionError("evolution run is missing its canonical contract")
@@ -953,6 +966,7 @@ class LocalController:
                 evaluate=evaluator,
                 config=evolution_config,
                 initial_seeds=admitted_seeds,
+                bundle_pipeline=bundle_pipeline,
                 # Bind native offspring receipts to the same evaluator/dependency/environment
                 # authority as an admitted seed batch.  For ordinary runs these remain unset and
                 # the evolution layer resolves its path-free native protocol defaults.
@@ -1150,6 +1164,107 @@ class LocalController:
             settled = self.store.settle_run(run.id)
             raise EvolutionError(error) from exc
 
+    def deliver_bundle_evolution(
+        self, run_id: str, destination_root: str | Path,
+    ) -> BundleDeliveryResult:
+        """Copy selected multi-file source and scored snapshots after read-only validation.
+
+        This explicit API publishes a portable private directory. It does not invoke a candidate
+        or the historical parent-run materialization and delivery lifecycle.
+        """
+        from .bundle_delivery import publish_bundle_delivery
+        from .bundle_evolution import read_bundle_delivery_materials
+
+        run = self.store.get_run(run_id)
+        if run is None or run.status != RunStatus.SUCCEEDED:
+            raise EvolutionError("bundle_delivery_requires_successful_run")
+        workspace = Path(run.workspace)
+        try:
+            destination = Path(destination_root).expanduser().absolute()
+            evidence_root = workspace / "evolution"
+            # Adding a child to a retained evaluation tree invalidates its strict inventory.
+            # Keep delivery copies outside all run evolution evidence, including case aliases.
+            if any(parent.samefile(evidence_root) for parent in (destination, *destination.parents)):
+                raise EvolutionError("bundle_delivery_destination_conflict")
+            # Store artifact rows bind the completed selection, preventing a later archive/state
+            # rewrite from silently choosing a different candidate for the same finished run.
+            snapshots = self._materialization_artifact_snapshots(run, workspace)
+            contract_path = workspace / "evolution" / "contract.json"
+            contract_bytes = _read_bounded_regular_file(
+                contract_path, MAX_STATE_BYTES, error="bundle_delivery_contract_invalid",
+            )
+            contract_rows = [row for row in self.store.list_artifacts(run.id)
+                             if row.get("path") == "evolution/contract.json"
+                             and row.get("kind") == "evolution_contract"]
+            if not contract_rows or any(
+                row.get("sha256") != hashlib.sha256(contract_bytes).hexdigest()
+                or row.get("size") != len(contract_bytes) for row in contract_rows
+            ):
+                raise EvolutionError("bundle_delivery_contract_invalid")
+            contract = AlgorithmProblemContract.from_dict(json.loads(contract_bytes))
+            state = json.loads(snapshots["evolution/state.json"])
+            payload = json.loads(snapshots["evolution/result.json"])
+            result = StrategyResult(**payload)
+            if (result.strategy != "population" or result.status not in {"completed", "stagnated"}
+                    or state.get("status") != result.status
+                    or state.get("iteration") != result.iterations):
+                raise EvolutionError("bundle_delivery_selection_invalid")
+            stored_config = dict(state["config"])
+            if stored_config.pop("command_sha256", None) is not None:
+                raise EvolutionError("bundle_delivery_configuration_invalid")
+            config = EvolutionConfig(**stored_config)
+
+            def inactive(*args):
+                del args
+                raise EvolutionError("bundle_delivery_execution_forbidden")
+
+            strategy = PopulationStrategy(EvolutionContext(
+                contract=contract, workspace=workspace, generate=inactive, evaluate=inactive,
+                config=config,
+            ))
+            strategy.validate_ordinary_resume_integrity()
+            archive = strategy.archive
+            canonical_result = archive.result(
+                result.strategy, result.status, result.iterations, result.error,
+            )
+            if _canonical_json_bytes(canonical_result.to_dict()) != _canonical_json_bytes(payload):
+                raise EvolutionError("bundle_delivery_selection_invalid")
+            self._validate_materialization_child_events(run, contract, result)
+            selected = archive.best()
+            if selected is None or selected.bundle_evidence is None:
+                raise EvolutionError("bundle_delivery_requires_bundle_candidate")
+            sidecars = {
+                (Path(candidate.code_path).parent / filename).as_posix(): (kind, MAX_ARCHIVE_LINE_BYTES)
+                for candidate in archive.records()
+                for filename, kind in (
+                    (ORDINARY_RECORD_FILENAME, "evolution_candidate_record"),
+                    (ORDINARY_RECEIPT_FILENAME, "evolution_candidate_receipt"),
+                )
+            }
+            bound = self._materialization_artifact_snapshots(run, workspace, additional=sidecars)
+            if any(bound[name] != content for name, content in snapshots.items()):
+                raise EvolutionError("bundle_delivery_selection_invalid")
+            snapshots = bound
+            materials = read_bundle_delivery_materials(
+                workspace, selected, authority=strategy.integrity_authority,
+            )
+            # Material reads must not let an intervening selection rewrite escape the original
+            # ledger-bound snapshots. Publication receives immutable bytes after this check.
+            if snapshots != self._materialization_artifact_snapshots(run, workspace, additional=sidecars):
+                raise EvolutionError("bundle_delivery_selection_invalid")
+            identity = {
+                "candidate_id": selected.candidate_id,
+                "contract_sha256": contract.digest(),
+                "bundle_sha256": selected.bundle_evidence["bundle_sha256"],
+                "receipt_sha256": selected.receipt_sha256,
+                "evaluation_sha256": selected.bundle_evidence["evaluation_sha256"],
+            }
+            return publish_bundle_delivery(destination, identity=identity, materials=materials)
+        except EvolutionError:
+            raise
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            raise EvolutionError("bundle_delivery_invalid") from exc
+
     @staticmethod
     def _decode_materialization_identity_json(
         content: bytes,
@@ -1167,6 +1282,8 @@ class LocalController:
         self,
         child: Run,
         child_root: Path,
+        *,
+        additional: dict[str, tuple[str, int]] | None = None,
     ) -> dict[str, bytes]:
         """Read terminal evidence only when its immutable ledger identity still agrees."""
 
@@ -1174,6 +1291,7 @@ class LocalController:
             "evolution/archive.jsonl": ("evolution_archive", MAX_ARCHIVE_BYTES),
             "evolution/state.json": ("evolution_state", MAX_STATE_BYTES),
             "evolution/result.json": ("result", MAX_STATE_BYTES),
+            **(additional or {}),
         }
         tasks = self.store.list_tasks(child.id)
         if len(tasks) != 1:
@@ -1229,6 +1347,8 @@ class LocalController:
                     raise EvolutionError("materialization candidate archive is invalid")
                 payload = json.loads(line)
                 candidate = Candidate.from_dict(payload)
+                if candidate.bundle_evidence is not None:
+                    raise EvolutionError("bundle_candidate_requires_bundle_delivery")
                 if isinstance(payload, dict) and {
                     "source_sha256",
                     "receipt_sha256",

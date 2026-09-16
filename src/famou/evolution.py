@@ -167,6 +167,24 @@ def _canonical_sha256(value: object) -> str:
     return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
 
 
+def _validate_bundle_attempt_ownership(
+    candidates: Iterable[tuple[str, dict[str, Any] | None]],
+) -> None:
+    """One retained execution/evaluation can belong to only one ordinary candidate."""
+
+    owners: dict[tuple[str, str], str] = {}
+    for candidate_id, evidence in candidates:
+        if evidence is None:
+            continue
+        from .bundle_evolution import validate_bundle_evidence_shape
+
+        evidence = validate_bundle_evidence_shape(evidence)
+        for name in ("run_root", "evaluation_path"):
+            previous = owners.setdefault((name, evidence[name]), candidate_id)
+            if previous != candidate_id:
+                raise EvolutionError("bundle_candidate_execution_reused")
+
+
 def _protocol_identity(label: str, payload: Mapping[str, Any] | None = None) -> str:
     body: dict[str, Any] = {"protocol": label, "schema_version": "1"}
     if payload:
@@ -735,6 +753,8 @@ class CandidateDraft:
     source: str
     filename: str = "candidate.py"
     metadata: dict[str, Any] = field(default_factory=dict)
+    # When present this is the complete source tree, including ``filename`` and its exact source.
+    source_files: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, str) or not self.source.strip():
@@ -745,6 +765,22 @@ class CandidateDraft:
         encoded = json.dumps(self.metadata, ensure_ascii=False, sort_keys=True).encode("utf-8")
         if len(encoded) > MAX_METADATA_BYTES:
             raise EvolutionError("candidate metadata exceeds the bounded metadata limit")
+        if self.source_files is not None:
+            from .bundle_evolution import validate_bundle_draft
+
+            validate_bundle_draft(self, "0" * 64)
+            object.__setattr__(self, "source_files", dict(self.source_files))
+
+    @classmethod
+    def from_files(
+        cls,
+        files: dict[str, str],
+        entrypoint: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> CandidateDraft:
+        if not isinstance(files, dict) or not isinstance(entrypoint, str) or entrypoint not in files:
+            raise EvolutionError("bundle_candidate_draft_invalid")
+        return cls(files[entrypoint], entrypoint, {} if metadata is None else metadata, files)
 
 
 @dataclass(frozen=True)
@@ -1361,9 +1397,9 @@ class PopulationConfig:
 class CandidateReceipt:
     """Canonical, evaluator-bound receipt for an ordinary candidate.
 
-    The shape intentionally mirrors the verified seed receipt while adding the local lineage and
-    runner identities needed by native population candidates.  It is kept in this module so the
-    ordinary path does not create a dependency cycle with ``seed_handoff``.
+    Version 1 retains the single-file receipt shape. Version 2 additionally binds the complete
+    source bundle and retained independent evaluation. The local lineage and runner identities
+    remain shared with ordinary population candidates.
     """
 
     schema_version: str
@@ -1389,10 +1425,17 @@ class CandidateReceipt:
     error_info: tuple[dict[str, str], ...]
     receipt_sha256: str
     execution_sha256: str | None = None
+    bundle_evidence: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if self.schema_version != ORDINARY_CANDIDATE_RECEIPT_SCHEMA_VERSION:
+        if self.schema_version not in (ORDINARY_CANDIDATE_RECEIPT_SCHEMA_VERSION, "2"):
             raise EvolutionError("ordinary_candidate_receipt_invalid")
+        if (self.schema_version == "2") != (self.bundle_evidence is not None):
+            raise EvolutionError("ordinary_candidate_receipt_invalid")
+        if self.bundle_evidence is not None:
+            from .bundle_evolution import validate_bundle_evidence_shape
+
+            object.__setattr__(self, "bundle_evidence", validate_bundle_evidence_shape(self.bundle_evidence))
         _safe_id(self.candidate_id, "candidate receipt candidate_id")
         for name in (
             "source_sha256",
@@ -1455,7 +1498,7 @@ class CandidateReceipt:
             raise EvolutionError("ordinary_candidate_receipt_invalid")
 
     def canonical_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "candidate_id": self.candidate_id,
             "source_sha256": self.source_sha256,
@@ -1479,6 +1522,9 @@ class CandidateReceipt:
             "error_info": list(self.error_info),
             "execution_sha256": self.execution_sha256,
         }
+        if self.schema_version == "2":
+            payload["bundle_evidence"] = self.bundle_evidence
+        return payload
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.canonical_payload(), "receipt_sha256": self.receipt_sha256}
@@ -1502,10 +1548,11 @@ class CandidateReceipt:
         iteration: int,
         island_id: int | None,
         execution_sha256: str | None = None,
+        bundle_evidence: dict[str, Any] | None = None,
     ) -> CandidateReceipt:
         normalized = _sanitized_evaluation(report)
         payload = {
-            "schema_version": ORDINARY_CANDIDATE_RECEIPT_SCHEMA_VERSION,
+            "schema_version": "2" if bundle_evidence is not None else ORDINARY_CANDIDATE_RECEIPT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "source_sha256": source_sha256,
             "contract_sha256": contract_sha256,
@@ -1528,6 +1575,10 @@ class CandidateReceipt:
             "error_info": list(normalized.error_info),
             "execution_sha256": execution_sha256,
         }
+        if bundle_evidence is not None:
+            from .bundle_evolution import validate_bundle_evidence_shape
+
+            payload["bundle_evidence"] = validate_bundle_evidence_shape(bundle_evidence)
         return cls(**payload, receipt_sha256=_canonical_sha256(payload))
 
     @classmethod
@@ -1559,6 +1610,8 @@ class CandidateReceipt:
             "receipt_sha256",
             "execution_sha256",
         }
+        if value.get("schema_version") == "2":
+            required.add("bundle_evidence")
         if set(value) != required:
             raise EvolutionError("ordinary_candidate_receipt_invalid")
         errors = value["error_info"]
@@ -1588,6 +1641,7 @@ class CandidateReceipt:
             error_info=tuple(errors),
             receipt_sha256=value["receipt_sha256"],
             execution_sha256=value["execution_sha256"],
+            bundle_evidence=value.get("bundle_evidence"),
         )
 
     def evaluation_report(self) -> EvaluationReport:
@@ -1619,6 +1673,7 @@ class Candidate:
     source_sha256: str | None = None
     receipt_sha256: str | None = None
     integrity: dict[str, Any] | None = None
+    bundle_evidence: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _safe_id(self.candidate_id, "candidate_id")
@@ -1646,6 +1701,12 @@ class Candidate:
             raise ValueError("candidate receipt_sha256 must be a lowercase SHA-256 digest or null")
         if (self.source_sha256 is None) != (self.receipt_sha256 is None):
             raise ValueError("candidate source and receipt digests must be supplied together")
+        if self.bundle_evidence is not None:
+            from .bundle_evolution import validate_bundle_evidence_shape
+
+            if self.source_sha256 is None or self.receipt_sha256 is None or self.integrity is None:
+                raise ValueError("candidate bundle evidence requires receipt digests and integrity")
+            object.__setattr__(self, "bundle_evidence", validate_bundle_evidence_shape(self.bundle_evidence))
         if self.integrity is not None:
             if not isinstance(self.integrity, dict):
                 raise ValueError("candidate integrity projection must be an object or null")
@@ -1677,6 +1738,8 @@ class Candidate:
             payload["source_sha256"] = self.source_sha256
             payload["receipt_sha256"] = self.receipt_sha256
             payload["integrity"] = self.integrity or {}
+        if self.bundle_evidence is not None:
+            payload["bundle_evidence"] = self.bundle_evidence
         return payload
 
     @classmethod
@@ -1697,6 +1760,7 @@ class Candidate:
             source_sha256=value.get("source_sha256"),  # type: ignore[arg-type]
             receipt_sha256=value.get("receipt_sha256"),  # type: ignore[arg-type]
             integrity=value.get("integrity"),  # type: ignore[arg-type]
+            bundle_evidence=value.get("bundle_evidence"),  # type: ignore[arg-type]
         )
 
 
@@ -1941,6 +2005,10 @@ class CommandCandidateGenerator:
             "archive": [item.to_dict() for item in request.archive[-32:]],
             "workspace": str(request.workspace),
         }
+        if request.parent is not None and request.parent.bundle_evidence is not None:
+            from .bundle_evolution import read_candidate_source_files
+
+            payload["parent_source_files"] = read_candidate_source_files(request.workspace, request.parent)
         request_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
         try:
             completed = subprocess.run(
@@ -1965,13 +2033,20 @@ class CommandCandidateGenerator:
             decoded = json.loads(output)
         except json.JSONDecodeError:
             return CandidateDraft(output)
-        if isinstance(decoded, dict) and "source" in decoded:
-            return CandidateDraft(decoded["source"], decoded.get("filename", "candidate.py"), decoded.get("metadata", {}))
+        def draft_from_object(item: dict[str, Any]) -> CandidateDraft:
+            if "files" in item:
+                if "source" in item or "filename" in item:
+                    raise EvolutionError("bundle_candidate_draft_invalid")
+                return CandidateDraft.from_files(item["files"], item.get("entrypoint"), item.get("metadata", {}))
+            return CandidateDraft(item["source"], item.get("filename", "candidate.py"), item.get("metadata", {}))
+
+        if isinstance(decoded, dict) and ("source" in decoded or "files" in decoded):
+            return draft_from_object(decoded)
         if isinstance(decoded, list):
             return tuple(
-                CandidateDraft(item["source"], item.get("filename", "candidate.py"), item.get("metadata", {}))
+                draft_from_object(item)
                 for item in decoded
-                if isinstance(item, dict) and "source" in item
+                if isinstance(item, dict) and ("source" in item or "files" in item)
             )
         raise EvolutionError("candidate generator JSON must contain source or a source array")
 
@@ -2066,6 +2141,7 @@ class EvolutionContext:
     evaluator_kind: str | None = None
     dependency_sha256: str | None = None
     environment_sha256: str | None = None
+    bundle_pipeline: Any | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -2352,6 +2428,8 @@ def _prepare_initial_seed(
     candidate_id = _safe_id(value.candidate_id, "verified seed candidate_id")
     if not isinstance(value.draft, CandidateDraft):
         raise TypeError("verified seed draft is invalid")
+    if value.draft.source_files is not None:
+        raise ValueError("verified seed requires a single-file draft")
     if not isinstance(value.evaluation, EvaluationReport):
         raise TypeError("verified seed evaluation is invalid")
     if value.evaluation.validity != 1 or not math.isfinite(
@@ -3344,6 +3422,8 @@ class CandidateArchive:
                         "created_at",
                         *integrity_fields,
                     }
+                    if "bundle_evidence" in payload:
+                        ordinary_fields.add("bundle_evidence")
                     if set(payload) != ordinary_fields:
                         raise EvolutionError("ordinary_candidate_record_invalid")
             candidate = Candidate.from_dict(payload)
@@ -3787,6 +3867,9 @@ class CandidateArchive:
         ]
         if not ordinary:
             return validated_records
+        _validate_bundle_attempt_ownership(
+            (candidate.candidate_id, candidate.bundle_evidence) for candidate in ordinary
+        )
         if authority is None:
             expected = self._default_candidate_authority()
         elif isinstance(authority, CandidateIntegrityAuthority):
@@ -3892,6 +3975,8 @@ class CandidateArchive:
                     or receipt.island_id != candidate.island_id
                     or _canonical_json_bytes(receipt.evaluation_report().to_dict())
                     != _canonical_json_bytes(candidate.evaluation.to_dict())
+                    or _canonical_json_bytes(receipt.bundle_evidence)
+                    != _canonical_json_bytes(candidate.bundle_evidence)
                 ):
                     raise EvolutionError("ordinary_candidate_integrity_mismatch")
                 integrity = candidate.integrity
@@ -3905,6 +3990,17 @@ class CandidateArchive:
                     "receipt_sha256": receipt.receipt_sha256,
                     "source_sha256": source_digest,
                 }
+                if candidate.bundle_evidence is not None:
+                    from .bundle_evolution import validate_candidate_bundle_evidence
+
+                    expected_projection["bundle_evidence_sha256"] = _canonical_sha256(candidate.bundle_evidence)
+                    validate_candidate_bundle_evidence(
+                        self.workspace,
+                        candidate.bundle_evidence,
+                        code_path=candidate.code_path,
+                        evaluation=candidate.evaluation,
+                        authority=expected,
+                    )
                 if _canonical_json_bytes(integrity) != _canonical_json_bytes(
                     expected_projection
                 ):
@@ -3963,10 +4059,13 @@ class CandidateArchive:
         execution_sha256: str | None = None,
         source_snapshot: _HeldRegularFileSnapshot | None = None,
         execution_snapshot: _HeldRegularFileSnapshot | None = None,
+        bundle_evidence: dict[str, Any] | None = None,
     ) -> Candidate:
         self._guard_active_write(strategy)
         if strategy == "openevolve":
             raise EvolutionError("openevolve_candidate_requires_verified_seed_commit")
+        if draft.source_files is not None and bundle_evidence is None:
+            raise EvolutionError("bundle_candidate_evidence_required")
         if candidate_id is not None:
             _safe_id(candidate_id, "candidate_id")
             if strategy == "population" and candidate_id.startswith("seed-"):
@@ -3988,6 +4087,14 @@ class CandidateArchive:
         source_bytes = draft.source.encode("utf-8")
         source_sha256 = hashlib.sha256(source_bytes).hexdigest()
         normalized_evaluation = _sanitized_evaluation(evaluation)
+        if bundle_evidence is not None:
+            from .bundle_evolution import validate_bundle_evidence_shape
+
+            bundle_evidence = validate_bundle_evidence_shape(bundle_evidence)
+        _validate_bundle_attempt_ownership([
+            *((candidate.candidate_id, candidate.bundle_evidence) for candidate in existing_records),
+            (candidate_id, bundle_evidence),
+        ])
         if strategy == "population":
             if integrity_authority is None:
                 authority = self._default_candidate_authority()
@@ -3995,6 +4102,11 @@ class CandidateArchive:
                 authority = integrity_authority
             else:
                 authority = CandidateIntegrityAuthority.from_dict(dict(integrity_authority))
+            if draft.source_files is not None:
+                from .bundle_evolution import validate_bundle_draft
+
+                if validate_bundle_draft(draft, authority.contract_sha256).digest() != bundle_evidence["bundle_sha256"]:
+                    raise EvolutionError("bundle_candidate_source_mismatch")
             state = self.read_state()
             marker_names = {
                 "candidate_integrity_schema_version",
@@ -4043,7 +4155,7 @@ class CandidateArchive:
                     raise EvolutionError("ordinary_candidate_integrity_mismatch") from exc
                 if archived_authority.to_dict() != authority.to_dict() or any(
                     getattr(archived_receipt, name) != getattr(authority, name)
-                    for name in authority_fields
+                    for name in authority_fields - {"schema_version"}
                 ):
                     raise EvolutionError("ordinary_candidate_integrity_authority_mismatch")
             metadata = _validate_ordinary_metadata(draft.metadata)
@@ -4082,6 +4194,7 @@ class CandidateArchive:
                 iteration=iteration,
                 island_id=island_id,
                 execution_sha256=execution_sha256,
+                bundle_evidence=bundle_evidence,
             )
             projection = {
                 **authority.to_dict(),
@@ -4093,6 +4206,8 @@ class CandidateArchive:
                 "receipt_sha256": receipt.receipt_sha256,
                 "source_sha256": source_sha256,
             }
+            if bundle_evidence is not None:
+                projection["bundle_evidence_sha256"] = _canonical_sha256(bundle_evidence)
             candidate = Candidate(
                 candidate_id=candidate_id,
                 code_path=path.relative_to(self.workspace).as_posix(),
@@ -4106,6 +4221,7 @@ class CandidateArchive:
                 source_sha256=source_sha256,
                 receipt_sha256=receipt.receipt_sha256,
                 integrity=projection,
+                bundle_evidence=bundle_evidence,
             )
             receipt_text = json.dumps(
                 receipt.to_dict(),
@@ -4174,6 +4290,16 @@ class CandidateArchive:
                 observed_execution = hashlib.sha256(execution_snapshot.content).hexdigest()
             if observed_execution != execution_sha256:
                 raise EvolutionError("ordinary_candidate_execution_mismatch")
+            if bundle_evidence is not None:
+                from .bundle_evolution import validate_candidate_bundle_evidence
+
+                validate_candidate_bundle_evidence(
+                    self.workspace,
+                    bundle_evidence,
+                    code_path=candidate.code_path,
+                    evaluation=normalized_evaluation,
+                    authority=authority,
+                )
 
         validate_publication_inputs()
         record_path = path.parent / ORDINARY_RECORD_FILENAME
@@ -4974,6 +5100,8 @@ class _BaseStrategy:
         self.archive._guard_active_write(self.name)
         self.config = context.config
         self.integrity_authority = resolve_candidate_integrity_authority(context)
+        if context.bundle_pipeline is not None:
+            context.bundle_pipeline.validate_context(context, self.integrity_authority)
         # Keep the evaluator's structured feedback available to a generator during this live
         # process while persisting only the receipt-safe projection.  The map is deliberately
         # in-memory and is empty on resume, so evaluator prose cannot cross the durable boundary.
@@ -5033,6 +5161,13 @@ class _BaseStrategy:
         parent: Candidate | None,
         island_id: int | None,
     ) -> Candidate:
+        if self.context.bundle_pipeline is not None:
+            return self.context.bundle_pipeline.persist(
+                self, draft, iteration=iteration, generation=generation, parent=parent,
+                island_id=island_id,
+            )
+        if draft.source_files is not None:
+            raise _InitialCandidateFailure("candidate_failed")
         candidate_id = self.archive.next_id()
         source_snapshot: _HeldRegularFileSnapshot | None = None
         execution_snapshot: _HeldRegularFileSnapshot | None = None
@@ -5416,6 +5551,14 @@ class LoopStrategy:
 
 
 def _tokens(candidate: Candidate, workspace: Path) -> set[str]:
+    if candidate.bundle_evidence is not None:
+        from .bundle_evolution import read_candidate_source_files
+
+        try:
+            sources = read_candidate_source_files(workspace, candidate)
+        except (OSError, UnicodeDecodeError, EvolutionError):
+            return set()
+        return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", "\n".join(sources.values())))
     try:
         raw_path = workspace / candidate.code_path
         _reject_symlink_components(raw_path, workspace, "candidate code path")
@@ -6740,6 +6883,10 @@ class PopulationStrategy(_BaseStrategy):
             raise EvolutionError("population_outcome_state_mismatch")
 
     def run(self) -> StrategyResult:
+        if self.context.bundle_pipeline is None and any(
+            candidate.bundle_evidence is not None for candidate in self.archive.records()
+        ):
+            raise EvolutionError("bundle_candidate_pipeline_required")
         state = self._seed_resume_gate(self._load_state())
         self._validate_ordinary_resume_evidence(state)
         active = self._active(state)

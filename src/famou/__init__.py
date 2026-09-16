@@ -60,6 +60,13 @@ from .benchmark_task import (
 from .benchmark_task import (
     EvaluatorIdentity as BenchmarkTaskEvaluatorIdentity,
 )
+from .bundle_delivery import BundleDeliveryResult, inspect_bundle_delivery
+from .bundle_evolution import (
+    MultiFileCandidatePipeline,
+    load_bundle_pipeline,
+    read_bundle_delivery_materials,
+    read_candidate_source_files,
+)
 from .candidate_bundle import (
     CANDIDATE_BUNDLE_PROTOCOL,
     CANDIDATE_BUNDLE_SCHEMA_VERSION,
@@ -351,6 +358,7 @@ __all__ = [
     "BenchmarkTaskEnvelope",
     "BenchmarkTaskError",
     "BenchmarkTaskEvaluatorIdentity",
+    "BundleDeliveryResult",
     "CallableContractCompiler",
     "Candidate",
     "CandidateArchive",
@@ -418,6 +426,7 @@ __all__ = [
     "LoopStrategy",
     "ModelIdentity",
     "ModelProfile",
+    "MultiFileCandidatePipeline",
     "OffspringOutcome",
     "OpenEvolveHandoffError",
     "OpenEvolveStrategy",
@@ -511,8 +520,10 @@ __all__ = [
     "export_shinka_envelope",
     "export_shinka_result",
     "famou_case_content_digest",
+    "inspect_bundle_delivery",
     "inspect_candidate_evaluation",
     "inspect_candidate_execution_record",
+    "load_bundle_pipeline",
     "load_evaluator_bundle",
     "materialize_candidate_source_bundle",
     "normalize_feedback",
@@ -529,6 +540,8 @@ __all__ = [
     "prepare_producer_seed_manifest",
     "producer_bundle_dependency_sha256",
     "profile_sha256",
+    "read_bundle_delivery_materials",
+    "read_candidate_source_files",
     "reconcile_remote_state",
     "remote_cancel",
     "remote_continue_experiment",

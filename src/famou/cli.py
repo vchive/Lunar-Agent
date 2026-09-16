@@ -430,6 +430,28 @@ def build_parser() -> argparse.ArgumentParser:
     _add_home(evolve_parser)
     _add_json(evolve_parser)
 
+    bundle_evolve_parser = subparsers.add_parser(
+        "evolve-bundle", help="evolve complete source bundles with a pinned local evaluator",
+    )
+    bundle_evolve_parser.add_argument("contract", type=Path, help="algorithm contract JSON")
+    bundle_evolve_parser.add_argument("--profile", type=Path, required=True, help="bundle pipeline profile JSON")
+    bundle_evolve_parser.add_argument("--generator-command", required=True, help="explicit generator command receiving a request JSON path")
+    bundle_evolve_parser.add_argument("--workspace", type=Path, required=True, help="evolution workspace")
+    bundle_evolve_parser.add_argument("--resume", action="store_true", help="validate and resume the existing run")
+    bundle_evolve_parser.add_argument("--run-id", help="existing run ID required with --resume")
+    bundle_evolve_parser.add_argument("--destination-root", type=Path, help="existing directory for the selected source and scored outputs")
+    bundle_evolve_parser.add_argument("--max-rounds", type=int)
+    bundle_evolve_parser.add_argument("--stagnation-rounds", type=int)
+    bundle_evolve_parser.add_argument("--population-size", type=int, default=8)
+    bundle_evolve_parser.add_argument("--offspring-per-iteration", type=int, default=1)
+    bundle_evolve_parser.add_argument("--islands", type=int, default=1)
+    bundle_evolve_parser.add_argument("--migration-interval", type=int, default=0)
+    bundle_evolve_parser.add_argument("--migration-rate", type=float, default=0.1)
+    bundle_evolve_parser.add_argument("--seed", type=int)
+    bundle_evolve_parser.add_argument("--timeout", type=float, default=900.0, help="generator timeout in seconds")
+    _add_home(bundle_evolve_parser)
+    _add_json(bundle_evolve_parser)
+
     benchmark_parser = subparsers.add_parser(
         "benchmark", help="compare native evolution strategies on one local contract"
     )
@@ -991,6 +1013,13 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_evaluation_parser.add_argument("--evaluation-sha256", dest="expected_evaluation_sha256")
     _add_home(inspect_evaluation_parser)
     _add_json(inspect_evaluation_parser)
+    inspect_delivery_parser = candidate_bundle_commands.add_parser(
+        "inspect-delivery", help="verify a portable bundle delivery without execution or initialization",
+    )
+    inspect_delivery_parser.add_argument("delivery", type=Path, help="retained delivery directory")
+    inspect_delivery_parser.add_argument("--delivery-sha256", dest="expected_delivery_sha256")
+    _add_home(inspect_delivery_parser)
+    _add_json(inspect_delivery_parser)
     memory_parser = subparsers.add_parser("memory", help="inspect explicit local memory")
     memory_parser.add_argument("query", nargs="?", help="optional lexical recall query")
     memory_parser.add_argument("--scope", help="limit results to global or run:<run-id>")
@@ -2599,6 +2628,72 @@ def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[st
         "detached": True,
         "input_data": input_data,
     }
+
+
+def _evolve_bundle(args: argparse.Namespace) -> dict[str, object]:
+    """Validate an explicit multi-file profile before creating its ledger-backed run."""
+    from ._benchmark_files import absolute_path, read_regular_file
+    from .bundle_evolution import load_bundle_pipeline
+    from .candidate_evaluation_spec import candidate_output_contract_sha256
+
+    if args.resume != bool(args.run_id):
+        raise ValueError("bundle_evolution_resume_requires_run_id")
+    try:
+        contract = AlgorithmProblemContract.from_dict(_strict_json_loads(
+            read_regular_file(absolute_path(args.contract), MAX_CONTRACT_BYTES),
+        ))
+    except (EvolutionError, OSError, TypeError, ValueError, RecursionError):
+        raise ValueError("bundle_evolution_contract_invalid") from None
+    if contract.evolution.strategy != "population":
+        raise ValueError("bundle_evolution_requires_population")
+    pipeline = load_bundle_pipeline(args.profile)
+    candidate_output_contract_sha256(contract.outputs)
+    command = _parse_command(args.generator_command, "--generator-command")
+    evolution_config = pipeline.configure(EvolutionConfig(
+        strategy="population",
+        max_rounds=(contract.evolution.max_rounds if args.max_rounds is None else args.max_rounds),
+        stagnation_rounds=(contract.evolution.stagnation_rounds
+                           if args.stagnation_rounds is None else args.stagnation_rounds),
+        population_size=args.population_size,
+        offspring_per_iteration=args.offspring_per_iteration,
+        num_islands=args.islands,
+        migration_interval=args.migration_interval,
+        migration_rate=args.migration_rate,
+        rng_seed=args.seed,
+        timeout_seconds=args.timeout,
+        generator_fingerprint=_adapter_fingerprint(
+            command, kind="bundle-generator", name="command-generator", role="solver",
+        ),
+    ))
+    generator = CommandCandidateGenerator(command, args.timeout)
+    workspace = absolute_path(args.workspace)
+    if args.destination_root is not None:
+        from ._candidate_workspace_io import DirectoryChain
+
+        # A misspelled delivery destination must not spend a generation/evaluation budget.
+        destination = DirectoryChain(absolute_path(args.destination_root), "destination_changed")
+        destination.close()
+    controller = LocalController(_config(args), build_runtime("mock", None, None, None, None))
+    if args.resume:
+        run = controller.store.get_run(args.run_id)
+        if run is None:
+            raise ValueError("bundle_evolution_run_missing")
+        if workspace != absolute_path(run.workspace):
+            raise ValueError("bundle_evolution_workspace_mismatch")
+    else:
+        run = controller.create_evolution_run(contract, workspace=workspace)
+    settled, result = controller.run_evolution(
+        run.id, contract, generator, pipeline, evolution_config,
+        resume=args.resume, bundle_pipeline=pipeline,
+    )
+    payload = {
+        **result.to_dict(), "run_id": run.id, "run_status": settled.status.value,
+        "workspace": str(settled.workspace), "contract_sha256": contract.digest(),
+    }
+    if args.destination_root is not None and result.status in {"completed", "stagnated"}:
+        delivery = controller.deliver_bundle_evolution(run.id, args.destination_root)
+        payload["delivery"] = {**delivery.to_dict(), "delivery_path": str(delivery.delivery_path)}
+    return payload
 
 
 def _evolve(config: Config, args: argparse.Namespace) -> dict[str, object]:
@@ -4404,6 +4499,14 @@ def main(argv: list[str] | None = None) -> int:
             _emit(_benchmark_comparison_validate_result(args), args.json)
             return 0
         if args.command == "candidate-bundle":
+            if args.candidate_bundle_command == "inspect-delivery":
+                from .bundle_delivery import inspect_bundle_delivery
+
+                delivery = inspect_bundle_delivery(
+                    args.delivery, expected_delivery_sha256=args.expected_delivery_sha256,
+                )
+                _emit({**delivery.to_dict(), "delivery_path": str(delivery.delivery_path)}, args.json)
+                return 0
             if args.candidate_bundle_command == "evaluate":
                 result = _candidate_bundle_evaluate(args)
                 _emit(result, args.json)
@@ -4431,6 +4534,10 @@ def main(argv: list[str] | None = None) -> int:
                 _emit(result, args.json)
                 return 0 if result["status"] == "succeeded" else 1
             raise ValueError("candidate_bundle_invalid")
+        if args.command == "evolve-bundle":
+            payload = _evolve_bundle(args)
+            _emit(payload, args.json)
+            return 0 if payload["status"] in {"completed", "stagnated"} else 1
         config = _config(args)
         if args.command == "init":
             _emit({"home": str(config.home), "status": "initialized"}, args.json)

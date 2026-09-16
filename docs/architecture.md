@@ -510,7 +510,52 @@ an optional caller-pinned manifest digest, not cryptographic proof that a harnes
 
 The output observation is at evaluation time; it does not upgrade Feature 107 into a process-exit
 output snapshot. There is no atomic multi-file guarantee or host dependency authentication.
-Candidate/receipt/archive integration and controller recovery remain the next milestones.
+Feature 109 connects this evidence to the native population loop as described below.
+
+### Native multi-file population and portable delivery
+
+`bundle_evolution.py` provides an explicitly configured `MultiFileCandidatePipeline`. A
+`CandidateDraft` may hold a complete `source_files` map, including its entrypoint. Its existing
+`source` and `filename` fields retain their meaning. Entry point `source_sha256` remains compatible;
+an explicit `bundle_evidence` projection binds the full bundle, source root, new attempt root,
+plan/admission/completion and independent evaluation. Bundle receipts use schema 2; the legacy
+schema 1 canonical bytes and hashes remain unchanged.
+
+The pipeline reuses `PopulationStrategy` and `CandidateArchive.persist` at their persistence seam.
+It configures authority from evaluator, runner, complete admitted inputs and declared dependency/
+environment fingerprints; it revalidates the contract and profile before launching. Source files
+are staged under `evolution/candidates/<id>`, while every execution is allocated separately under
+`evolution/bundle-attempts/.bundle-run-*`. Features 103–108 then materialize, stage, record execution
+and evaluate the snapshot. Archive publication binds the sanitized local report and rechecks the
+complete evidence using the existing append, rollback and publication-unknown machinery.
+
+One retained execution/evaluation cannot register multiple candidate IDs. Failed/uncertain attempts
+survive source staging cleanup and do not produce synthetic scored candidates. Selection, lineage,
+islands, migration and offspring outcome journals remain in the existing loop. Bundle source
+context and novelty include helper files. `CommandCandidateGenerator` accepts complete source maps
+and adds verified `parent_source_files` to requests for bundle parents; legacy request shape stays
+unchanged. Agent-generated and imported SeedManifest candidates still use their single-file path.
+
+`LocalController.run_evolution(..., bundle_pipeline=...)` indexes ordinary v2 record/receipt
+sidecars using the existing Store. `evolve-bundle` validates profile/declarations before creating
+state and exposes execution, selection, terminal resume and optional delivery in one command.
+Read-only resume verifies committed bundle and evaluation evidence; uncertain pending population
+publication is rejected rather than replayed. Active-process cancellation and generic parent-run
+recovery remain broader orchestration work; per-process bounds and between-attempt cancellation
+checks apply to this local path.
+
+`deliver_bundle_evolution` rechecks Store-bound contract, archive, state, result, record/receipt rows,
+events and canonical best selection. It copies verified immutable bytes through `bundle_delivery.py`
+into a fresh private directory outside the retained evolution tree. `delivery.json` binds the full
+source, scored outputs, inputs, evaluator code/spec, contract and report by size/SHA-256, plus selected
+candidate/receipt/evaluation identities. This portable byte manifest permits relocating the delivery;
+the original inode-bound 107/108 evidence is not relocated. Incomplete copies are retained and cannot
+be inspected as completed deliveries. No source execution occurs during selection, delivery or
+inspection. The former single-file output materialization API explicitly rejects bundle candidates.
+
+Output snapshots remain evaluation-time observations; the new integration does not authenticate the
+host interpreter/dependency closure or add an OS sandbox. The runnable fixture and current validation
+are in `specs/109-bundle-population-integration/`.
 
 ### Frozen effect protocols
 

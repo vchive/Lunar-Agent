@@ -2,7 +2,8 @@
 
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
-Feature 108 已完成第一项的本地实现与样例，下一步把多文件评测接入演化和交付；
+Feature 108/109 已完成多文件评测、原生 population 选优和显式本地交付；下一步聚焦
+普通任务入口、Agent 多文件生成和恢复编排，外部 producer 的多文件接线仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
@@ -13,6 +14,23 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-16：多文件原生 population 与完整交付
+
+Feature 109 已通过 `MultiFileCandidatePipeline` 复用原生 population/archive：完整源码 map
+经过 103–108 的物化、执行和独立评测，再发布 v2 receipt；旧 v1 数据与摘要保持兼容。
+本地 command producer 可以读取完整 parent 源码并只修改 helper。谱系、代数、island、迁移、
+有效性优先选优和 checkpoint 沿用已有搜索循环；同一 execution/evaluation 不能冒充多个候选。
+失败/未知尝试保留原目录，terminal resume 只复验，不追加执行。
+
+`evolve-bundle` 提供一条显式入口完成生成、评分、选优及可选交付。Controller 校验 Store
+绑定的选择结果后，交付完整源码、已评分输出快照、输入与 evaluator 材料，独立 byte manifest
+支持复制后的只读检查。原 107/108 inode-bound 证据保留原位。可运行样例见
+[109 quickstart](../specs/109-bundle-population-integration/quickstart.md)。
+
+这完成了本地多文件闭环；普通任务自动路由、Agent 自动生成多文件与 harness、parent-run
+交付/统一恢复以及 OpenEvolve/Shinka 的多文件 seed 导入继续后置接线。本轮没有新真实模型
+或外部框架运行，不能把 fixture 分数视为当前版本效果提升。
 
 ## 2026-09-14：CLI 热启动入口
 

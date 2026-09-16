@@ -1239,7 +1239,7 @@ returns `uncertain`; complete evidence returns `recorded` with the independent p
 `runner_result.status`. Both paths check the intended plan/admission and optional caller pins.
 Recording failure or timeout remains failure or timeout, and cannot authorize a score or Candidate.
 No raw output or local path is stored in these execution records. Independent evaluation is
-available below; receipt/archive and resume integration remain separate work. See the runnable
+available below; native population integration is described after evaluation. See the runnable
 [107 quickstart](specs/107-candidate-execution-evidence/quickstart.md).
 
 Feature 108 independently evaluates a successful recorded multi-file candidate:
@@ -1264,8 +1264,42 @@ remain available for read-only inspection. `evaluate` exits 1 for an invalid res
 The output observation is explicitly at **evaluation time**, not proof of output bytes at process
 exit. Inspection checks retained local consistency; a previously saved `--evaluation-sha256`
 also pins the manifest. The host interpreter and dependency closure are not authenticated, and
-this is not a sandbox. Candidate/archive/population/controller integration is the next step.
+this is not a sandbox.
 See the complete [108 quickstart](specs/108-candidate-independent-evaluation/quickstart.md).
+
+Feature 109 connects complete source bundles to native population search and delivery:
+
+```bash
+lunar-agent evolve-bundle contract.json --profile bundle-profile.json \
+  --generator-command '/absolute/python /absolute/generator.py' \
+  --workspace ./bundle-run --destination-root ./deliveries --json
+lunar-agent candidate-bundle inspect-delivery ./deliveries/.bundle-delivery-ID \
+  --delivery-sha256 SAVED_SHA256 --json
+```
+
+The existing delivery root must be outside the run's `evolution` evidence directory. The explicit
+profile fixes candidate command, inputs, harness and evaluator limits. A command generator emits
+`{"entrypoint":"solve/main.py","files":{"solve/main.py":"...","solve/helper.py":"..."}}`;
+bundle parents provide a verified `parent_source_files` map. Python callers can use
+`CandidateDraft.from_files(...)` and `MultiFileCandidatePipeline` with `LocalController.run_evolution`.
+
+Every candidate receives its own execution and independent evaluation. Receipt v2 binds all source
+files and retained evaluation evidence while v1 receipts keep their original hashes. Existing
+population selection, lineage, islands, migration and checkpoints consume the local report; an
+invalid candidate's claimed high score cannot win. Failed or uncertain attempts remain retained.
+Resume uses the same command, profile and population options plus `--resume --run-id ID`; a terminal
+resume validates saved results without generating or running candidates again.
+
+Delivery contains the selected complete source, scored output snapshot, declared inputs, contract,
+harness, evaluator spec and report. Its byte manifest supports copying and read-only inspection;
+original inode-bound execution/evaluation evidence stays at its retained location. A delivery does
+not rerun the candidate. Follow the standalone [109 quickstart](specs/109-bundle-population-integration/quickstart.md)
+to run the complete path locally without a model or external framework.
+
+This is an explicit local bundle mode. Normal solving remains the default. Automatic Agent-based
+multi-file generation, default task routing and parent-run delivery are still separate work;
+OpenEvolve/Shinka seed imports still accept single-file candidates. These local fixtures do not
+establish current-model effectiveness or relative WebAgent performance.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

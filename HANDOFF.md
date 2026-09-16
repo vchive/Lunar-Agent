@@ -1,5 +1,48 @@
 # Lunar-Agent 交接记录
 
+## Feature 109：多文件原生 population 与完整交付（2026-09-16）
+
+已把 Feature 103–108 接入现有 population/archive/controller，新增 `bundle_evolution.py`
+和 `bundle_delivery.py`。`CandidateDraft.from_files` 表达含入口的完整 UTF-8 source map；
+普通 Candidate 保留入口 `source_sha256`，另用显式 `bundle_evidence` 绑定整个 bundle、
+plan/admission/completion 和独立评测。多文件 receipt 为 v2，原 v1 字节/摘要与旧 Candidate
+JSON 保持兼容。同一 execution/evaluation 不能登记成两个不同 candidate ID。
+
+`MultiFileCandidatePipeline` 固定 candidate argv、完整输入描述、harness/spec、显式环境与
+限额，并在启动前重验契约/配置及实际输入/harness 字节。完整源码保存在原 candidates
+目录，每次运行另建 `evolution/bundle-attempts/.bundle-run-*`。执行/评测失败或 archive
+发布未知均保留已分配现场；只清理未发布的可复用源码 staging。登记复用原 record/receipt/
+archive 的事务与校验，选优、谱系、代数、island、实际迁移、失败 outcome 和 resume 沿用
+现有 population 循环。bundle parent 的 command request 包含复验后的 `parent_source_files`，
+novelty 使用全部源码。配置/源码/评测漂移时不重用旧证据。
+
+新 CLI `evolve-bundle CONTRACT --profile PROFILE --generator-command COMMAND --workspace ROOT`
+提供显式本地生成、执行、评分、选优、terminal resume 与可选 `--destination-root` 交付；
+声明/profile 校验先于 home/Store 初始化。`--resume --run-id ID` 使用相同配置只复验终态，
+不新增候选执行。`candidate-bundle inspect-delivery PATH [--delivery-sha256 SHA]` 无初始化
+只读复验。公开 Python pipeline、source accessor 和 delivery inspection API 已导出。
+
+Controller 交付前检查 Store 绑定的 contract/archive/state/result、全部 v2 record/receipt、
+事件和 canonical best。交付包含完整源码、已评分输出、输入、contract、harness/spec 和
+report；165 文件及长路径有完整 fixture。新的私有目录保存可移植 byte manifest，原 107/108
+inode-bound 证据保留原位，不复制后冒充原记录。终态完成且有有效结果时，可交付包含早期
+可恢复候选失败的运行，失败结果仍保留。旧 single-file materialization 明确拒绝 bundle。
+
+真实本地双文件 fixture 的独立分数为 **1、2、0、9**；越界候选自报高分仍无效，最终选中
+9 分候选。可运行 quickstart 使用父代完整 helper 源码产生 **1、2、6、7**，交付 7 分版本；
+原样执行通过，terminal resume 前后 candidate/generator 次数均 **4 → 4**。聚焦覆盖旧
+v1 hash、helper-only 身份、迁移、恢复、源码/评测漂移、发布失败/未知、完整交付与 CLI。
+产品冻结后全仓 **5113 passed, 1 skipped in 277.57s**（含新增 100 项），JUnit 零失败/错误；
+全 src/tests Ruff、compileall、Specify、installed CLI、公开 API 和可运行 quickstart 通过。
+复制后的交付也通过原 digest 复验。详见 `specs/109-bundle-population-integration/validation.md`。
+
+下一步优先把正常任务入口和 Agent 多文件生成接到这条已通路径，再接 parent-run 的正常
+交付、统一预算/取消/恢复。OpenEvolve/Shinka 的 SeedManifest 与通用 material 仍为单文件；
+真实外部 producer、当前版本模型效果和收益尚未验收，新的测量须独立登记。不新增用户
+attestation 流程。输出仍是评测时快照；不认证 host interpreter/依赖闭包，不是 OS 沙箱。
+本轮没有模型/provider/外部框架/WebAgent 运行，历史冻结测量不改；只在本地 main 提交，
+不 push。README、architecture、系统评估、路线图和 109 specs 已同步。
+
 ## Feature 108：多文件独立评测与输出快照（2026-09-16）
 
 新增 `candidate_evaluation_spec.py` / `candidate_evaluation.py`，公开
