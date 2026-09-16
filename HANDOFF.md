@@ -21,6 +21,24 @@
 零新增调用。先冻结manifest、提交推送，再启动新槽；详见
 `specs/120-supported-scope-acceptance/`。当前尚无本轮真实结果。
 
+## Feature 120：支持范围真实验收完成（2026-09-17）
+
+登记 commit `f3b575c5bf86019b27529339c88f6f936a779654` 已先推送，manifest SHA
+`d8dd67c250161aed751ebf85ae10f330b03c8eedfaeb7356011e4e4ff7f7270e`。两题沿用117预算与
+模型，仅把任务要求收敛到可独立验证的硬源码文件数检查（至少2个小写 `.py`）；不声称
+helper 导入、依赖限制或实际输入读取。两槽均只运行一次并完成清理，最终 **0/2**。
+
+两题各先完成合同编译（已知 5,236 / 10,925 tokens），合同均包含登记的
+`python_file_count minimum=2` source check；随后 evaluator preparation 的第二个请求分别
+在约600.004/600.003秒 `open_response` transport timeout。没有冻结 evaluator、候选、输出
+交付、源码证据或 holdout；quality/gap 均 null。四次请求已知小计 **16,161 tokens**
+（2,881 input / 13,280 output），超时消费与费用未知。24个 holdout 未运行，未重试/恢复/补槽。
+详见 `specs/120-supported-scope-acceptance/postrun/report.md`；历史113/115/117各0/2不改写。
+
+304项相关离线回归、source-aware分析与登记测试通过；112 quickstart仍为1/2/6/7、终态
+调用数1/1/1/4/4。真实评测器生成仍是当前瓶颈，下一步应定位模型/网关长响应或拆分准备阶段，
+不能继续只延长时限或把超时消费当零。
+
 ## Feature 119：源码文件数独立检查与交付（2026-09-17）
 
 合同支持 `verification_scope=source` 配合 `source_check={kind:python_file_count,minimum:N}`，

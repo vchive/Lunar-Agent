@@ -16,6 +16,10 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：支持范围真实验收仍为 0/2
+
+Feature 120 先推送独立登记后运行两题，任务只要求可验证的 `python_file_count minimum=2` source check，保留数学输入/输出与117预算。两题合同编译成功，但 evaluator preparation 均在600秒 `open_response` 超时；无候选、交付或质量，已知用量16,161 tokens，费用和超时消费未知。113/115/117/120 各自0/2保持独立。不能把这次结果解释为旧 helper/import/input-read 语义或 WebAgent 对照。见 [120报告](../specs/120-supported-scope-acceptance/postrun/report.md)。
+
 ## 2026-09-17：源码文件数独立验证与完整交付
 
 Feature 119 将显式的最少 Python 文件数要求接到独立评测、population 选优和父任务交付。

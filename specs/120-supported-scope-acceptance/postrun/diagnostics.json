@@ -1,0 +1,342 @@
+{
+  "campaign_id": "acceptance120-glm-5.2-supported-scope-20260917",
+  "completed_responses": 2,
+  "cost_micros": null,
+  "diagnostic_only": true,
+  "known_usage_subtotal": {
+    "input_tokens": 2881,
+    "output_tokens": 13280,
+    "total_tokens": 16161
+  },
+  "manifest_sha256": "d8dd67c250161aed751ebf85ae10f330b03c8eedfaeb7356011e4e4ff7f7270e",
+  "provider_requests": 4,
+  "registration_commit": "f3b575c5bf86019b27529339c88f6f936a779654",
+  "schema_version": "1",
+  "slots": [
+    {
+      "attempt_id": "slot-001-attempt-001",
+      "case_key": "budget_selection",
+      "cli_input_request": null,
+      "cli_preparation": {
+        "attempt_id": "preparation-ed9a3fc8ae560e941a02310fc04db666",
+        "error_category": "runtime_error",
+        "parent_run_id": "92fe9b98374842419490e71fc1fd1f3d",
+        "recoverable": true,
+        "resume_hint": "Run resume with the same home and runtime settings to retry evaluator preparation.",
+        "schema_version": "1",
+        "stage": "evaluator_compile",
+        "status": "failed"
+      },
+      "cli_run_status": "running",
+      "cli_status": "failed",
+      "constraint_scopes": [
+        {
+          "id": "hc_output_types",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_valid_unique_ids",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_weight_capacity",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_item_count_limit",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_summary_agreement",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_python_file_count",
+          "scope": "source",
+          "source_check": {
+            "kind": "python_file_count",
+            "minimum": 2
+          }
+        }
+      ],
+      "contract_sha256": "4d0248a092d2c317a722b78a7f51804a763bd71f1a1400959e32120ff67669a2",
+      "has_compiled_plan": true,
+      "index": 1,
+      "parent_run_id": "92fe9b98374842419490e71fc1fd1f3d",
+      "preparation_events": [
+        {
+          "payload": {
+            "attempt_id": "preparation-ed9a3fc8ae560e941a02310fc04db666",
+            "error_category": null,
+            "parent_run_id": "92fe9b98374842419490e71fc1fd1f3d",
+            "recoverable": false,
+            "schema_version": "1",
+            "stage": "preparation",
+            "status": "started"
+          },
+          "type": "bundle_preparation_started"
+        },
+        {
+          "payload": {
+            "attempt_id": "preparation-ed9a3fc8ae560e941a02310fc04db666",
+            "error_category": "runtime_error",
+            "parent_run_id": "92fe9b98374842419490e71fc1fd1f3d",
+            "recoverable": true,
+            "schema_version": "1",
+            "stage": "evaluator_compile",
+            "status": "failed"
+          },
+          "type": "bundle_preparation_failed"
+        }
+      ],
+      "registered_source_contract_valid": true,
+      "request_observations": [
+        {
+          "elapsed_seconds": 44.327214875025675,
+          "failure_reason": null,
+          "index": 1,
+          "observation": null,
+          "outcome": "succeeded",
+          "response_model": "glm-5.2",
+          "usage": {
+            "input_tokens": 1381,
+            "output_tokens": 3855,
+            "total_tokens": 5236
+          }
+        },
+        {
+          "elapsed_seconds": 600.0036220839247,
+          "failure_reason": "transport_timeout",
+          "index": 2,
+          "observation": {
+            "elapsed_ms": 600003,
+            "phase": "open_response",
+            "request_timeout_ms": 600000
+          },
+          "outcome": "provider_error",
+          "response_model": null,
+          "usage": null
+        }
+      ],
+      "responses": [
+        {
+          "complete_original_text_verified": true,
+          "redaction_applied": false,
+          "request_index": 1,
+          "stage_hint": "contract_compiler",
+          "text_sha256": "158b698e917082fff5de7a31f6e11617816e8cf3575ef6ed46f744eb67bb6319",
+          "text_utf8_bytes": 3817,
+          "tool_call_count": 0,
+          "truncated": false
+        }
+      ],
+      "stderr_bytes": 0,
+      "store_status": "running",
+      "tasks": [
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "contract-intake",
+          "state": "succeeded"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "92fe9b98-data_discovery",
+          "state": "ready"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "92fe9b98-formulate",
+          "state": "waiting"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "92fe9b98-solve",
+          "state": "waiting"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "92fe9b98-verify",
+          "state": "waiting"
+        }
+      ]
+    },
+    {
+      "attempt_id": "slot-002-attempt-001",
+      "case_key": "worker_assignment",
+      "cli_input_request": null,
+      "cli_preparation": {
+        "attempt_id": "preparation-fac5534ab244dc49b451058ff4fa75c0",
+        "error_category": "runtime_error",
+        "parent_run_id": "d930d4421d6b4d6b9e091eeff070a903",
+        "recoverable": true,
+        "resume_hint": "Run resume with the same home and runtime settings to retry evaluator preparation.",
+        "schema_version": "1",
+        "stage": "evaluator_compile",
+        "status": "failed"
+      },
+      "cli_run_status": "running",
+      "cli_status": "failed",
+      "constraint_scopes": [
+        {
+          "id": "hc_output_types",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_id_existence",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_job_uniqueness",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_eligibility",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_capacity",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_all_workers_loads",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_summary_agreement",
+          "scope": "output",
+          "source_check": null
+        },
+        {
+          "id": "hc_python_file_count",
+          "scope": "source",
+          "source_check": {
+            "kind": "python_file_count",
+            "minimum": 2
+          }
+        }
+      ],
+      "contract_sha256": "4cd35850c4e265480a23d9f16a03d0850dc15c836d7293e1842b53dd1485d17c",
+      "has_compiled_plan": true,
+      "index": 2,
+      "parent_run_id": "d930d4421d6b4d6b9e091eeff070a903",
+      "preparation_events": [
+        {
+          "payload": {
+            "attempt_id": "preparation-fac5534ab244dc49b451058ff4fa75c0",
+            "error_category": null,
+            "parent_run_id": "d930d4421d6b4d6b9e091eeff070a903",
+            "recoverable": false,
+            "schema_version": "1",
+            "stage": "preparation",
+            "status": "started"
+          },
+          "type": "bundle_preparation_started"
+        },
+        {
+          "payload": {
+            "attempt_id": "preparation-fac5534ab244dc49b451058ff4fa75c0",
+            "error_category": "runtime_error",
+            "parent_run_id": "d930d4421d6b4d6b9e091eeff070a903",
+            "recoverable": true,
+            "schema_version": "1",
+            "stage": "evaluator_compile",
+            "status": "failed"
+          },
+          "type": "bundle_preparation_failed"
+        }
+      ],
+      "registered_source_contract_valid": true,
+      "request_observations": [
+        {
+          "elapsed_seconds": 118.24653687502723,
+          "failure_reason": null,
+          "index": 1,
+          "observation": null,
+          "outcome": "succeeded",
+          "response_model": "glm-5.2",
+          "usage": {
+            "input_tokens": 1500,
+            "output_tokens": 9425,
+            "total_tokens": 10925
+          }
+        },
+        {
+          "elapsed_seconds": 600.0028285830049,
+          "failure_reason": "transport_timeout",
+          "index": 2,
+          "observation": {
+            "elapsed_ms": 600002,
+            "phase": "open_response",
+            "request_timeout_ms": 600000
+          },
+          "outcome": "provider_error",
+          "response_model": null,
+          "usage": null
+        }
+      ],
+      "responses": [
+        {
+          "complete_original_text_verified": true,
+          "redaction_applied": false,
+          "request_index": 1,
+          "stage_hint": "contract_compiler",
+          "text_sha256": "b053e792ff9fb56c4325f895e58e063d9ca5f497b2026a62412533f323dc09f3",
+          "text_utf8_bytes": 6626,
+          "tool_call_count": 0,
+          "truncated": false
+        }
+      ],
+      "stderr_bytes": 0,
+      "store_status": "running",
+      "tasks": [
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "contract-intake",
+          "state": "succeeded"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "d930d442-data_discovery",
+          "state": "ready"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "d930d442-formulate",
+          "state": "waiting"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "d930d442-solve",
+          "state": "waiting"
+        },
+        {
+          "has_last_error": false,
+          "has_nonempty_question": false,
+          "id": "d930d442-verify",
+          "state": "waiting"
+        }
+      ]
+    }
+  ],
+  "total_usage_complete": false
+}
