@@ -6,6 +6,21 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 120：支持范围内真实验收登记（2026-09-17）
+
+当前产品固定 `c5695088c83bf69188bd7ae222056c8b63233656`，准备独立的两例 GLM-5.2
+真实闭环验收。保留113/115/117 的数学输入、oracle/24 holdout、模型/网关、population
+2+1/seed113 和117 的600秒单调用/3600秒每题、16请求、160000 observed-token 阈值。
+新任务明确只要求至少两个小写 `.py` 路径，并要求合同记录硬 source 文件数检查；不再
+要求 helper 导入、standard-library-only 或实际读取每个输入。产品及任务范围都变化，
+不能视为旧任务成功或单一修复的因果对照。113/115/117 各自0/2保持冻结。
+
+登记/worker/source-aware analyzer 已实现：新主指标必须有硬 minimum2 合同、完整源码
+检查交付证据及独立可行输出；仅有两个文件不算成功。完整保留失败/未知消费，每槽仅一次，
+不回答、不恢复、无补槽。304项相关离线回归通过，本地112 quickstart选出7分且终态恢复
+零新增调用。先冻结manifest、提交推送，再启动新槽；详见
+`specs/120-supported-scope-acceptance/`。当前尚无本轮真实结果。
+
 ## Feature 119：源码文件数独立检查与交付（2026-09-17）
 
 合同支持 `verification_scope=source` 配合 `source_check={kind:python_file_count,minimum:N}`，
