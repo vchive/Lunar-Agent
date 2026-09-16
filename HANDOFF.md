@@ -6,6 +6,16 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 117：延长时限的独立真实验收登记（2026-09-16）
+
+新验收固定产品 `9a26a73`，沿用 115 的两道任务、输入、GLM-5.2/网关、oracle/24 holdout、
+population 2+1/seed 113、16 请求和 160000 observed-token stop threshold；单请求/普通
+Agent invocation/本地进程限时从 180 改为 600 秒，每题总限时从 1200 改为 3600 秒。
+每题仅一次，无答复、恢复重试、补槽或模型回退；两题仍独立 /2，113/115 冻结不动。
+登记目录 `specs/117-extended-deadline-acceptance/`；先验证并 commit/push 再启动。
+产品与时限都变了，不构成单一修复的因果比较。网关身份复核一致，费用仍未知，已知
+token 阈值不能限制服务器未报告消费。结果与启动提交将在完成后补充。
+
 ## Feature 116：真实问题等待与评测器准备失败恢复（2026-09-16）
 
 Store 的 pending_input、answer_input、settle_run 和 scheduler 使用相同的非空问题规则。
