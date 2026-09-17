@@ -4,7 +4,9 @@
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
 evaluator/profile 准备和父任务交付/终态恢复；Feature130已补完整合同封装示例并保持
-strict parser；后续聚焦新的独立真实闭环，外部 producer 的多文件
+strict parser；Feature131的合同已通过，但evaluator compiler等待响应头600.004秒后超时，
+仍无真实自动多文件交付；后续先处理evaluator生成延迟与超时语义，再基于修复产品登记
+新的独立真实运行。外部 producer 的多文件
 接线与运行中取消编排仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
@@ -16,6 +18,22 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-17：同任务合同通过，evaluator compiler 超时
+
+Feature131固定产品`c730483`，先push登记`1993f11`后运行与129相同任务、provider、预算、
+population和seed的唯一槽。contract compiler在25.237秒HTTP200返回，已知3656tokens并通过
+原生合同验证；129的封装失败在这一个同任务样本中未复现，但不能据此声称130有因果收益。
+evaluator compiler随后在等待响应头时于600.004秒`transport_timeout`；没有HTTP状态、响应
+正文或已知用量，总用量保持null。该里程碑不能区分provider排队、模型生成或其他远端延迟。
+
+结果primary/preparation/joint均0/1，0/8 holdout执行，没有冻结evaluator、candidate或
+delivery；quality/gap为null，清理和21份证据复验通过。见
+[131报告](../specs/131-small-multifile-recheck/postrun/report.md)。原始transport台账保留
+首请求HTTP200，公开`results.json`未投影该字段；CLI/worker失败且runner pid/pgid为空后，
+SQLite父run仍为`running`、任务为1 ready/3 waiting/1 succeeded。它们未导致成功误判或
+残留进程，后续补安全HTTP状态投影与持久终态一致性。下一步先处理evaluator生成延迟和
+超时语义，再在产品修复后登记新运行；不重开131。外部producer多文件接线继续后置。
 
 ## 2026-09-17：合同响应完整封装示例
 

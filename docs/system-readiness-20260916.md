@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 130。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 131。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -100,6 +100,18 @@ shape、不复制任务事实。生产parser和contract shape校验未改，缺s
 7168 passed/1 skipped/24 deselected，固定旧产品24 passed。没有真实请求，129仍为0/1；
 后续实测必须以新Feature独立登记并先push，不能把本轮当作成功率或真实闭环证据。
 
+Feature131固定产品`c730483`，先push登记`1993f11`后执行与129相同任务、provider、预算、
+population和seed的唯一槽。contract compiler在25.237秒HTTP200返回，已知3656tokens，
+原生合同验证通过；129的封装失败在这个同任务样本中没有复现，但不能据此归因于130。
+evaluator compiler随后在等待响应头时于600.004秒`transport_timeout`，没有HTTP状态、响应
+正文或已知用量；该里程碑不能区分provider排队、模型生成或其他远端延迟。总用量因此为
+null。primary/preparation/joint均0/1，0/8 holdout执行，没有evaluator、candidate或delivery，
+quality/gap为null；清理和21份证据库存复验通过。见
+[131 report](../specs/131-small-multifile-recheck/postrun/report.md)。原始transport台账中的
+首请求HTTP200未进入公开`results.json`投影；CLI/worker已失败且runner pid/pgid为空，但
+SQLite父run仍为`running`、任务为1 ready/3 waiting/1 succeeded。两项均未造成成功误判或
+残留进程，后续分别补安全HTTP状态投影和持久终态一致性。
+
 Lunar 已有可运行的本地 Agent 和完整的单文件 population 演化链路。多文件链路也已接通
 生成、独立执行与评分、Candidate/receipt/archive、下一代选择、terminal resume 和完整
 源码/已评分输出交付。用户可通过 `evolve-bundle` 或普通 `solve --evolve --bundle-profile`
@@ -158,8 +170,10 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
    124修复request字段说明缺口，125新独立诊断通过自测但被audit挡住：生成代码和自测
    同时误读输入根结构，最终0/1。126/127已统一格式准入并补本地失败诊断，128独立小型
    准备实测达到冻结1/1、留出8/8。129新闭环尝试因contract响应缺status成为0/1；130已
-   离线补完整封装示例但没有实测。下一步独立登记小型真实多文件闭环，覆盖自动准备到
-   父任务交付。具体旧超时原因仍未知，尚无真实多文件有效交付；
+   离线补完整封装示例。131的合同通过，但evaluator compiler等待响应头600.004秒后超时，
+   仍为0/1且未进入候选或交付。下一步先处理evaluator生成延迟与超时语义，并清理父run
+   持久终态和安全HTTP状态投影；产品修复后才新登记下一次真实运行。具体远端耗时原因
+   仍未知，尚无真实多文件有效交付；
    不补旧槽、不改失败分母，也不把本地协议验证当成模型成功率或质量已提高。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
@@ -189,6 +203,10 @@ Feature 108 的快照明确是评测时观察：107 completion 仍不包含执�
 - [117 延长时限验收](../specs/117-extended-deadline-acceptance/postrun/report.md)：`9a26a73`
   完成 0/2，evaluator 请求在 600 秒超时，另一题合同原始响应含 Markdown 代码块而被
   拒绝。三请求、两响应，已知用量小计 11309 tokens，超时消费未知；没有 evaluator/交付。
+- [131 同任务复查](../specs/131-small-multifile-recheck/postrun/report.md)：`c730483`
+  完成0/1；合同在25.237秒HTTP200返回并通过验证，evaluator compiler在等待响应头时于
+  600.004秒超时。仅首请求3656tokens已知，总用量null；没有evaluator、候选、交付或
+  holdout。封装失败未复现不构成130的因果证据，也没有当前版本真实多文件闭环成功。
 - Feature 084–112 的融合与证据工作主要由本地 fixture 验证。尚无当前多文件链路或真实
   OpenEvolve/Shinka 搜索带来的增益结论。
 

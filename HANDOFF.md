@@ -6,6 +6,31 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 131：合同通过，evaluator compiler 等待响应头超时（2026-09-17）
+
+固定产品`c730483`，登记提交`1993f11`先push后运行新的唯一槽；manifest SHA
+`5d4f42808eb00e1e0c5fc9258256d4f72439dd788a9dc2fbe91389da522cf43e`，78product/
+16measurement/153history pins。任务、provider、预算、population和seed与129相同，仅更新
+产品与campaign身份，并固定引用128/129 manifest。
+
+contract compiler在25.237秒返回HTTP200，已知用量3656tokens（1754input+1902output），
+原生合同通过严格验证，`contract_verified=true`；129漏`status`的封装失败在这一个同任务
+样本中没有复现，但不能据此声称130有因果收益。随后evaluator compiler在等待响应头时于
+600.004秒`transport_timeout`；没有HTTP状态、响应正文或已知用量，最后本地里程碑为
+`wait_response_headers`，不能区分provider排队、模型生成或其他远端延迟。总用量保持null，
+不能用首个请求的3656tokens代替。
+
+正式结果primary/preparation/joint均0/1，0/8 holdout执行，quality/gap均null；没有冻结
+evaluator、candidate、delivery或额外请求。总626.814秒、exit1，清理通过、剩余观察PID[]。
+21份证据共155485bytes，文件集合、大小和SHA复验匹配；独立审计无阻断项。原始transport
+台账保留首请求HTTP200，但公开`results.json`未投影该状态；CLI失败后父run持久状态仍为
+`running`，没有造成成功误判或残留进程，后续作为产品终态一致性清理。
+
+完整记录见`specs/131-small-multifile-recheck/postrun/report.md`及`validation.md`。下一步
+先处理evaluator生成延迟与超时语义，再在产品修复后新登记真实运行；不重开131。当前仍无
+真实自动多文件端到端成功结果，128只证明独立evaluator准备1/1与holdout 8/8。外部producer
+多文件seed、全链路预算/取消与detached继续后置。
+
 ## Feature 130：合同响应完整封装示例（2026-09-17）
 
 合同compiler提示现在在既有封装规则与详细schema之间给出完整`needs_input`和`compiled`

@@ -1,0 +1,132 @@
+{
+  "campaign_id": "acceptance131-glm-5.2-small-multifile-20260917",
+  "cleanup_verified": true,
+  "elapsed_seconds": 626.8139362080256,
+  "exit_code": 1,
+  "frozen": null,
+  "gap": null,
+  "holdouts": {
+    "executed": 0,
+    "execution_count_scope": "retained_snapshot_started_rows",
+    "matched": 0,
+    "planned": 8,
+    "recorded": 0,
+    "rows": []
+  },
+  "joint_success": 0,
+  "known_optimum": 3,
+  "local_failure": null,
+  "manifest_sha256": "5d4f42808eb00e1e0c5fc9258256d4f72439dd788a9dc2fbe91389da522cf43e",
+  "optimal": false,
+  "planned_attempts": 1,
+  "preparation_success": 0,
+  "primary_success": 0,
+  "process_status": "exited",
+  "product": {
+    "contract_verified": true,
+    "delivery_verified": false,
+    "errors": [
+      "output_unavailable",
+      "preparation_unverified"
+    ],
+    "optimal": false,
+    "optimum": 3,
+    "output_check": {
+      "quality": null,
+      "validity": false
+    },
+    "preparation": {
+      "error_category": "runtime_error",
+      "recoverable": true,
+      "stage": "evaluator_compile",
+      "status": "failed"
+    },
+    "preparation_verified": false,
+    "primary_valid_completion": false,
+    "product_status": "failed",
+    "product_success": false,
+    "quality": null,
+    "quality_gap": null,
+    "source_check_protocol": null,
+    "source_check_validity": null,
+    "source_checks": [],
+    "source_delivery_protocol": null,
+    "source_evidence_verified": false,
+    "source_python_count": 0
+  },
+  "product_commit": "c730483080d5f53e5bb2d24e4bb2d2d9f45e984e",
+  "quality": null,
+  "registration_commit": "1993f112323f018e791c34b4e09176a2789ebdc5",
+  "schema_version": "1",
+  "transport": [
+    {
+      "elapsed_ms": 25236,
+      "index": 1,
+      "outcome": "response",
+      "request_body_bytes": 8740,
+      "response_body_bytes": 9608,
+      "stage": "contract_compiler",
+      "transport_observation": {
+        "elapsed_ms": 25220,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 600003,
+      "index": 2,
+      "outcome": "failure",
+      "request_body_bytes": 18920,
+      "response_body_bytes": 0,
+      "stage": "evaluator_compiler",
+      "transport_observation": {
+        "elapsed_ms": 140,
+        "http_exchange_index": 1,
+        "last_milestone": "wait_response_headers"
+      }
+    }
+  ],
+  "usage": {
+    "cost_micros": null,
+    "finished_requests": 2,
+    "known_usage": {
+      "input_tokens": 1754,
+      "output_tokens": 1902,
+      "total_tokens": 3656
+    },
+    "pending_requests": [],
+    "provider_requests": 2,
+    "requests": [
+      {
+        "elapsed_seconds": 25.23724637494888,
+        "failure_reason": null,
+        "index": 1,
+        "outcome": "succeeded",
+        "request_sha256": "ad96fc9ffb5fe939aef9f995a054790ebd794d26ca4734f58c6c4d9799d88d82",
+        "request_timeout_seconds": 600.0,
+        "response_status": null,
+        "stage": "contract_compiler",
+        "usage": {
+          "input_tokens": 1754,
+          "output_tokens": 1902,
+          "total_tokens": 3656
+        }
+      },
+      {
+        "elapsed_seconds": 600.004296500003,
+        "failure_reason": "transport_timeout",
+        "index": 2,
+        "outcome": "provider_error",
+        "request_sha256": "004c13a6df4bb61514ea6bf5bb8c3474d9f55fc4a3c9fcf69b6cd4becae06377",
+        "request_timeout_seconds": 600.0,
+        "response_status": null,
+        "stage": "evaluator_compiler",
+        "usage": null
+      }
+    ],
+    "total_usage": null,
+    "usage_complete": false
+  },
+  "worker_stage": "preparation_check",
+  "worker_status": "failed"
+}
