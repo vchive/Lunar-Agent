@@ -6,6 +6,26 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 125：修复后的独立准备诊断，登记待运行（2026-09-17）
+
+固定产品eefe389，沿用123整份合同（problem_id也保留）、输入limit3、8个holdout、GLM-5.2
+与provider、600秒/请求、1320秒总墙钟、最多2请求和160000观测token阈值。新独立/1根
+`.lunar/diagnostic125-glm-5.2-snapshot-protocol-20260917`，不重开123。compiler一次，只有
+原生自测通过才audit一次；冻结后运行8个预声明holdout，每项5秒，无重试/恢复/替补。
+
+产品代码未改；四个测量模块与123字节一致，observer只改独立loader名，campaign明确校验
+其余固定条件相同。新离线112项及合并325项测试通过；正确target fixture完成2请求/14次
+本地harness，错误path fixture只完成1请求/1次probe，未audit/freeze。登记fixture改用
+临时Git仓库，保留原product_changed/push检查，不新增依赖固定旧产品的常规测试。
+112 quickstart仍选7，终态1/1/1/4/4调用与唯一交付保持；独立审查及历史字节检查通过。
+
+manifest SHA `c76a7f4802ad2691fc0c400c3525f9e38f4c520399a1a6a9f8f8e4506ea43a12`，
+77product/14measurement/91history pins；首请求16751bytes，SHA
+`ed75c5972decd24dff57bbdc47f4e92e0ea96ab7a811bb1c8acc9e7efa52e56f`。prepare/verify均离线，
+尚无真实调用。先正常提交推送登记，再启动唯一槽位并只读汇总；见
+`specs/125-snapshot-protocol-diagnostic/validation.md`。单次结果不证明124因果收益、旧超时
+原因或真实多文件交付。113/115/117/120仍各自0/2，123仍0/1；125仅planned，尚无结果。
+
 ## Feature 124：补齐 snapshot 请求结构与路径说明（2026-09-17）
 
 共享 compiler/auditor 提示现在给出完整 request 结构，明确 inputs[] 只有

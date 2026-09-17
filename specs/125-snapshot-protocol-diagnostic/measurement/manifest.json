@@ -1,0 +1,601 @@
+{
+  "campaign_id": "diagnostic125-glm-5.2-snapshot-protocol-20260917",
+  "campaign_root": ".lunar/diagnostic125-glm-5.2-snapshot-protocol-20260917",
+  "compiler_request": {
+    "bytes": 16751,
+    "sha256": "ed75c5972decd24dff57bbdc47f4e92e0ea96ab7a811bb1c8acc9e7efa52e56f"
+  },
+  "concurrency": 1,
+  "condition_changes": {
+    "campaign_id": {
+      "current": "diagnostic125-glm-5.2-snapshot-protocol-20260917",
+      "previous": "diagnostic123-glm-5.2-small-evaluator-20260917"
+    },
+    "campaign_root": {
+      "current": ".lunar/diagnostic125-glm-5.2-snapshot-protocol-20260917",
+      "previous": ".lunar/diagnostic123-glm-5.2-small-evaluator-20260917"
+    },
+    "compiler_request": {
+      "current": {
+        "bytes": 16751,
+        "sha256": "ed75c5972decd24dff57bbdc47f4e92e0ea96ab7a811bb1c8acc9e7efa52e56f"
+      },
+      "previous": {
+        "bytes": 12353,
+        "sha256": "47522ad19d409ef7208d6d775a200de42fbaed5f60d74e589056b4f26790f89e"
+      }
+    },
+    "product_commit": {
+      "current": "eefe389d14c2380ceb7db9089636f6a5ebe15e2a",
+      "previous": "519fea5ca70ac1ede3df356ee7391112801ab45d"
+    }
+  },
+  "contract": {
+    "assumptions": [],
+    "decision_variables": [
+      "The integer value in output/result.json."
+    ],
+    "deliverables": [
+      "output/result.json"
+    ],
+    "evolution": {
+      "max_rounds": 1,
+      "stagnation_rounds": 1,
+      "strategy": "population"
+    },
+    "hard_constraints": [
+      {
+        "description": "The output value must have Python type(value) is int after JSON parsing and satisfy 0 <= value <= the independently read input limit. Report error_info code valid-value for a violation.",
+        "id": "valid-value",
+        "result_fields": [
+          "value"
+        ],
+        "source": "explicit_assumption",
+        "verification": "independent",
+        "verification_scope": "output"
+      }
+    ],
+    "inputs": [
+      {
+        "fields": {
+          "limit": "A nonnegative JSON integer, excluding booleans and floats."
+        },
+        "format": "json",
+        "key": null,
+        "path": "limit.json"
+      }
+    ],
+    "objective": {
+      "direction": "maximize",
+      "name": "Independently read value"
+    },
+    "outputs": [
+      {
+        "description": "A JSON object with the integer decision value.",
+        "fields": [
+          "value"
+        ],
+        "format": "json",
+        "path": "output/result.json",
+        "required": true
+      }
+    ],
+    "problem_id": "small-evaluator-diagnostic-123",
+    "problem_type": "continuous",
+    "schema_version": "1",
+    "soft_constraints": [],
+    "statement": "Read the nonnegative JSON integer limit from limit.json. The required output output/result.json is a JSON object containing value. A valid value is a JSON integer, excluding booleans and floats, with 0 <= value <= limit. Maximize value. The evaluator must independently read both files and recompute the result: validity=1, quality=value, and combined_score=value for valid outputs; otherwise validity=0, quality=null, combined_score=0, and an error_info entry with code valid-value. There are no source or execution constraints.",
+    "success_criteria": [
+      "Verify the value bound and type independently and use value as the exact valid score."
+    ]
+  },
+  "contract_sha256": "3e119717ee10541c100d5f6efb999c8e154c144fc1be244967c6c41307154122",
+  "cost_micros": null,
+  "failure_quality": null,
+  "historical_files": {
+    "specs/113-real-multifile-acceptance/measurement/analyze.py": "bec0b16c156d5dc2f108385d5fba35c0611290eee85a2b9565259711ddeff481",
+    "specs/113-real-multifile-acceptance/measurement/campaign.py": "42f471d2bc11221f8058927fbd4b23dc1e5ab4b4a4f0bc33d4891957299eb3ed",
+    "specs/113-real-multifile-acceptance/measurement/manifest.json": "9f30acf0db6e672331c86a3efc46a964fb71d4c1d8a4cd2fe287ee9ec8e6e367",
+    "specs/113-real-multifile-acceptance/measurement/runtime_guard.py": "60e977c82706c3aa16e3384875a3c4780ca04a228c48e25d0fd0e422dba704d5",
+    "specs/113-real-multifile-acceptance/measurement/tasks.py": "71cccdad4a74052393b0d0417e3a0813fe0129454492580313c08000ed408a65",
+    "specs/113-real-multifile-acceptance/measurement/worker.py": "1bf33788904828c66519cf13b0feb54c4ca7f0d2065c4c4aae482e5917bf5b56",
+    "specs/113-real-multifile-acceptance/plan.md": "b22ea372941b03cddaaf93bd0544bda3b746825b7c9056ff825e3ad924fb7556",
+    "specs/113-real-multifile-acceptance/postrun/diagnostics.json": "27e2ee8c0289b125126bc5f6dadef457b7fd996e0585c2ceb5040df36c28545d",
+    "specs/113-real-multifile-acceptance/postrun/evidence.json": "35301922804a56e148bb66e57058b95b987eea2eb0efa16cf0ba44864900070b",
+    "specs/113-real-multifile-acceptance/postrun/report.md": "728fa0b683a097df68a9996b21ce831a7cf65687d891a97d55fb15401ea51dd1",
+    "specs/113-real-multifile-acceptance/postrun/results.json": "53c159463654cd7be416dec208b55cf07ea8d58d527c2e9626bebb76c37d5ea7",
+    "specs/113-real-multifile-acceptance/quickstart.md": "7de3afa42ad07c27c409a00e62970ee07cabca5f00944ec0bfdcc534e5004348",
+    "specs/113-real-multifile-acceptance/spec.md": "0fd81a3eb2493da44c12d1cdd6ad5f6d92a9b9c83829fe894b22ffd0ecf6ebb2",
+    "specs/113-real-multifile-acceptance/tasks.md": "0100d3b5e36ffbbce3b02aed81a0f0b4d1be687b679d2d5f2f9301632e108781",
+    "specs/113-real-multifile-acceptance/validation.md": "2e614152345b9cbfdabbd87e1dbabab0ac33211503023f2524437def290938a6",
+    "specs/115-isolated-intake-acceptance/measurement/campaign.py": "e906723b06b823d37d6458482dddaaf76f6d14ef81030a2f0b8d475c0b99e020",
+    "specs/115-isolated-intake-acceptance/measurement/manifest.json": "a4be47bfc2d6d02446fac1834f34ce8176a92017694cb6d71f8508e364f8a6c9",
+    "specs/115-isolated-intake-acceptance/measurement/response_guard.py": "9c732a7dcec3298d464ee63f40411df8dd741392b26bc12cff253a49b292047b",
+    "specs/115-isolated-intake-acceptance/measurement/worker.py": "075537e92621230b09198553286c78c969c19baed1d36ab6f0cdbb70b88906c8",
+    "specs/115-isolated-intake-acceptance/plan.md": "6a9f9274e4e9e130461a8e580b9a2f2c4cb15aecd3d84cd4c5834290890da883",
+    "specs/115-isolated-intake-acceptance/postrun/diagnostics.json": "7137b403c73c1aa28c09b9f05428258b728722f6fb17c08fabf0957af28a0b36",
+    "specs/115-isolated-intake-acceptance/postrun/evidence.json": "371e5f89a6ffaf359b02e507239f58ce62a2de2ff5b6a3f8c4150a2bcf9f9a10",
+    "specs/115-isolated-intake-acceptance/postrun/report.md": "fc29befd57d28c7e714316085e517ff67e2bf3112bda2c219295a046a0793fb9",
+    "specs/115-isolated-intake-acceptance/postrun/results.json": "2caef87859611993bb287f81a0e80ff5a2fe50772c81d28c37c756ebb335233c",
+    "specs/115-isolated-intake-acceptance/quickstart.md": "7ea1e8d71b8704002dbd8a333f6800984115a4d9e435989bb6a76ce8aa44a6eb",
+    "specs/115-isolated-intake-acceptance/spec.md": "3fe3278610029d05c63ac0d3778a3c97346de36a2a291766aa2fba67b51eb2bc",
+    "specs/115-isolated-intake-acceptance/tasks.md": "b4424ae91c42cf277e8d8cf6d4fecb5aede402d58417ab737028a9f3ad890bbf",
+    "specs/115-isolated-intake-acceptance/validation.md": "a86550978cd232720b21e13a4119a305fa1cb6ceaba1803d163873a00768ee4b",
+    "specs/117-extended-deadline-acceptance/measurement/campaign.py": "a8e3431b042d44020b6c586dae24bd33017c5ae6a751315fe5a10dc1c3759ec2",
+    "specs/117-extended-deadline-acceptance/measurement/manifest.json": "822d46f6cc9bfd0850129bf4455bd32eb4652b7f9a07f3dabe9b4a8066b43ec2",
+    "specs/117-extended-deadline-acceptance/measurement/response_guard.py": "9c732a7dcec3298d464ee63f40411df8dd741392b26bc12cff253a49b292047b",
+    "specs/117-extended-deadline-acceptance/measurement/worker.py": "075537e92621230b09198553286c78c969c19baed1d36ab6f0cdbb70b88906c8",
+    "specs/117-extended-deadline-acceptance/plan.md": "c94ac03bf1198a1bc3c27249f0aa22a08370c3106a59657fb3dfae25db96022f",
+    "specs/117-extended-deadline-acceptance/postrun/diagnostics.json": "c6f40502798c0a01a1c957f41b63336633e068059386473050ffc49aff2e1dc3",
+    "specs/117-extended-deadline-acceptance/postrun/evidence.json": "aa8c561ca5d15ac6dd1504a37e2155f59c5c85ed60578b6a7b09a2b797e52164",
+    "specs/117-extended-deadline-acceptance/postrun/report.md": "456a32dd7b77c15765a5db836bd270a5f3cc119d18da480e6ee938ecd07688ed",
+    "specs/117-extended-deadline-acceptance/postrun/results.json": "88434fceaf171a52996ebfec6abb41ac8416b91755557d40f010ef94246ceff9",
+    "specs/117-extended-deadline-acceptance/quickstart.md": "722a1d724e97ef8f7c2cd3b9acd2bc6b8fb8bad66b6de871fbbb0d96496f0244",
+    "specs/117-extended-deadline-acceptance/spec.md": "75e33c6e68adef7853029bb1e223ad914e204b6276b170bc573ce4ba9750c16b",
+    "specs/117-extended-deadline-acceptance/tasks.md": "1fa540994af07051385049852bd1ba3db71fce457cc1be54dab5c8fff12a801b",
+    "specs/117-extended-deadline-acceptance/validation.md": "9f889a7a8110061a870ea126faa3497ec2876530a9f453a9102b4d780dbf1348",
+    "specs/120-supported-scope-acceptance/measurement/campaign.py": "a725155f1d748bde23c65714284fb1ffe763cff3a2d7b54f2aec4ed411010ed7",
+    "specs/120-supported-scope-acceptance/measurement/manifest.json": "d8dd67c250161aed751ebf85ae10f330b03c8eedfaeb7356011e4e4ff7f7270e",
+    "specs/120-supported-scope-acceptance/measurement/response_guard.py": "9c732a7dcec3298d464ee63f40411df8dd741392b26bc12cff253a49b292047b",
+    "specs/120-supported-scope-acceptance/measurement/source_analysis.py": "a740e441839bea0bd5cf82758e1ddda23a2f276eca020473b72e28768c8a9e38",
+    "specs/120-supported-scope-acceptance/measurement/task_scope.py": "2007a16a9531600447c517e59cd25efe16f286aecaac54ce265f4625c2c9aa13",
+    "specs/120-supported-scope-acceptance/measurement/worker.py": "075537e92621230b09198553286c78c969c19baed1d36ab6f0cdbb70b88906c8",
+    "specs/120-supported-scope-acceptance/plan.md": "1a443cb23924b8b7193c7f6505c6eda31338dfe43156824c646fe2a6376ac0b4",
+    "specs/120-supported-scope-acceptance/postrun/diagnostics.json": "259402dd1f31aa21809ed527bbdb99e5b939c533c4205bc81dc2dd3e1b16a1c1",
+    "specs/120-supported-scope-acceptance/postrun/evidence.json": "4183a2c452a70216042f8522c5ce255b62ae826fe070283f6ff0e6d552c1fa0f",
+    "specs/120-supported-scope-acceptance/postrun/report.md": "f8a0257fe65bc2493b74fd5734f212c5b564a8a2a7933eeb04d2d156a7243303",
+    "specs/120-supported-scope-acceptance/postrun/results.json": "9dba1d6f14bf307b20df3f0058e3f6ab1382f3eb65854733875f2a836cf1a3d1",
+    "specs/120-supported-scope-acceptance/quickstart.md": "9a0eacb95c99e2658058a93e2da70ba60ff2fc0439f3d56f4dd74869f0cc6800",
+    "specs/120-supported-scope-acceptance/spec.md": "9236027b07d43ce01af83098b0794e665fb86a5a35840112d32d1452c55944ca",
+    "specs/120-supported-scope-acceptance/tasks.md": "5d11fdee6af2705a25b5f765d65d267a068b7eb814cad376a3fd647e0b7c658c",
+    "specs/120-supported-scope-acceptance/validation.md": "982cee4a90252c3f7ae70dd1cb46bd79b41dc463fd056b1b1b20f819436a6ec7",
+    "specs/121-evaluator-prompt-protocol/diagnostics/README.md": "bf9ea763e03ee1eb16940ddebff4f2c1dbc55163b165f7e0d2fe4e1f92f37b1a",
+    "specs/121-evaluator-prompt-protocol/diagnostics/analyze_requests.py": "4194f6e509f41a5d89cd0b52a25bc8c6e4131c24c083644e046bdb5c53630fd8",
+    "specs/121-evaluator-prompt-protocol/diagnostics/request-analysis.json": "ddc724648b70e56417680fecaeb1cebdcd343f94f08e013c7ef9b412ef050d9e",
+    "specs/121-evaluator-prompt-protocol/plan.md": "111ff2cd9985a994e1b76e5935e5a127b8938cbf3fa1b9bc60cc6c93e6d2153c",
+    "specs/121-evaluator-prompt-protocol/quickstart.md": "f06c1aeaf490f607772fabb69415abd11b5ecee9177745d360d2f1fd008c5ba7",
+    "specs/121-evaluator-prompt-protocol/spec.md": "c8e30fecb444f3ddc78f5ad79717d5888bae5954303a0220c7cf9ff68c7c07f6",
+    "specs/121-evaluator-prompt-protocol/tasks.md": "91a6d3dfa79e8d273837214313e51cb0047ad8e333e89d90f5a112c0a784f546",
+    "specs/121-evaluator-prompt-protocol/validation.md": "556029e324d013bc96758077a08739f032e5a2ff7aa756900ea2abe30fb94a8d",
+    "specs/122-transport-milestone-observation/plan.md": "12c8347be6f5bc66353e13d1ac6004ab8b7f4d02a32c9a8a654549a80204c393",
+    "specs/122-transport-milestone-observation/quickstart.md": "5e191e8dfcd2bd6d5f8f484a8923c18f90f69eb4fa042dc65977f0ee757fb1dd",
+    "specs/122-transport-milestone-observation/spec.md": "b6b764cef6e67e26f6681cb97f77c5124f01b4c6a309b599022fef7bce086ea8",
+    "specs/122-transport-milestone-observation/tasks.md": "ee724ac194d6d004576abe755e3e484946e2a4098f2603a8754fa48cfd789d68",
+    "specs/122-transport-milestone-observation/validation.md": "14e310bd854d08c93de5a9e6a63ae5516e6d565bf78d65fd8e498a955d6fd029",
+    "specs/123-small-evaluator-diagnostic/measurement/analysis.py": "8d8795a5eb76b8a6cdc7c71392dd7d56fcaa8fb633f758c028408fe263bb4189",
+    "specs/123-small-evaluator-diagnostic/measurement/campaign.py": "2810593ac050c6c36548814ef07eb3c0587953e1608b9273da8cef0645d54561",
+    "specs/123-small-evaluator-diagnostic/measurement/case.py": "b8a9ba91c697c297c511005e67dce283eb9dd6ece70b4bc44859c5fd048b1b1a",
+    "specs/123-small-evaluator-diagnostic/measurement/manifest.json": "9d05c7d95eb427f60d7be7a93dbfb8c7c53ec50904169e0391053292315f60a7",
+    "specs/123-small-evaluator-diagnostic/measurement/observation.py": "28602f748db8a901f60775f8bbabcc27de3037083b4e2aeded05f621afbfc4cb",
+    "specs/123-small-evaluator-diagnostic/measurement/supervision.py": "597331067a61ee93942df7c32413662f70e9f37d9b934c0e22d234e5d8de57df",
+    "specs/123-small-evaluator-diagnostic/measurement/worker.py": "9a284e41996820929e6e318e7b3037392f397878f98069e6a110217b5ee92cfc",
+    "specs/123-small-evaluator-diagnostic/plan.md": "8e3eaf3509a43cdfdb3072cdf7eec74d31026cf6a3d3d35bde7b1bf9b22b8f22",
+    "specs/123-small-evaluator-diagnostic/postrun/evidence.json": "b560dc4a1beb69e688a7e4a75ac080cc0d20f3c351322df836fa0f17da4275c7",
+    "specs/123-small-evaluator-diagnostic/postrun/inspect_compiler_response.py": "36381bc63a12904198cf06f2d1b6f1e28045a887d1a160eab1d040624755ecc6",
+    "specs/123-small-evaluator-diagnostic/postrun/report.md": "ffb49ac9c49640caaba058690fcaf6ee3087d82304d140dd8f0f4aa2ddae15fa",
+    "specs/123-small-evaluator-diagnostic/postrun/results.json": "6f459361a349cf9a7aa3c7aca2c1e4e83bb5433bdcb1c536541e1c2def29e0e6",
+    "specs/123-small-evaluator-diagnostic/postrun/static-response.json": "56ea345dc04782396ef6ffe014a806afd9e2b9541e7182b17ac637bf098aa8b4",
+    "specs/123-small-evaluator-diagnostic/quickstart.md": "dfa09fede805de2cd78018e19524aa19b7c294192cce246f833d115bfbce90d8",
+    "specs/123-small-evaluator-diagnostic/spec.md": "925a8da4816152b81127fa11ffedd5674b2a549e357275f95aec62bb5e663ae3",
+    "specs/123-small-evaluator-diagnostic/tasks.md": "d18c2a35d37e499d9d3abaa1b6a5e47b4b9632c1f4dd1c921270b7a75b608f75",
+    "specs/123-small-evaluator-diagnostic/validation.md": "a2ff8ab5bd6328f8a01ec57031705d7348533b2db95c4919ee332d21488fd71b",
+    "specs/124-snapshot-request-protocol/plan.md": "aaed35458dda3334328b8f29228a4faa6e8f4592811a66bdca0b89e708d2d8b1",
+    "specs/124-snapshot-request-protocol/quickstart.md": "35db8969c7da264ea3b2d74d083abb04a963f743032d8f526230c8aa8474665b",
+    "specs/124-snapshot-request-protocol/spec.md": "c73733664def160166ddcb2b9538500b9d82da0372051058a4e08a74fd0f159b",
+    "specs/124-snapshot-request-protocol/tasks.md": "ebe87779e5f86aa9de417293d9330e6fe85c07e8b400178764f2f78f1da702fa",
+    "specs/124-snapshot-request-protocol/validation.md": "b71590478ff7b94d1345970b50bdb485b8223def958422e5535832a99d7980a7"
+  },
+  "holdouts": [
+    {
+      "expected": {
+        "combined_score": 0,
+        "constraint_code": "valid-value",
+        "quality": null,
+        "validity": 0
+      },
+      "limit": 1,
+      "name": "limit-1-value-minus-1",
+      "probe": {
+        "constraint_id": "valid-value",
+        "expected_validity": 0,
+        "files": [
+          {
+            "content": "{\"limit\":1}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":-1}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-1-value-minus-1"
+      },
+      "value": -1
+    },
+    {
+      "expected": {
+        "combined_score": 0,
+        "constraint_code": null,
+        "quality": 0,
+        "validity": 1
+      },
+      "limit": 1,
+      "name": "limit-1-value-0",
+      "probe": {
+        "constraint_id": null,
+        "expected_validity": 1,
+        "files": [
+          {
+            "content": "{\"limit\":1}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":0}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-1-value-0"
+      },
+      "value": 0
+    },
+    {
+      "expected": {
+        "combined_score": 1,
+        "constraint_code": null,
+        "quality": 1,
+        "validity": 1
+      },
+      "limit": 1,
+      "name": "limit-1-value-1",
+      "probe": {
+        "constraint_id": null,
+        "expected_validity": 1,
+        "files": [
+          {
+            "content": "{\"limit\":1}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":1}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-1-value-1"
+      },
+      "value": 1
+    },
+    {
+      "expected": {
+        "combined_score": 0,
+        "constraint_code": "valid-value",
+        "quality": null,
+        "validity": 0
+      },
+      "limit": 1,
+      "name": "limit-1-value-2",
+      "probe": {
+        "constraint_id": "valid-value",
+        "expected_validity": 0,
+        "files": [
+          {
+            "content": "{\"limit\":1}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":2}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-1-value-2"
+      },
+      "value": 2
+    },
+    {
+      "expected": {
+        "combined_score": 0,
+        "constraint_code": null,
+        "quality": 0,
+        "validity": 1
+      },
+      "limit": 3,
+      "name": "limit-3-value-0",
+      "probe": {
+        "constraint_id": null,
+        "expected_validity": 1,
+        "files": [
+          {
+            "content": "{\"limit\":3}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":0}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-3-value-0"
+      },
+      "value": 0
+    },
+    {
+      "expected": {
+        "combined_score": 2,
+        "constraint_code": null,
+        "quality": 2,
+        "validity": 1
+      },
+      "limit": 3,
+      "name": "limit-3-value-2",
+      "probe": {
+        "constraint_id": null,
+        "expected_validity": 1,
+        "files": [
+          {
+            "content": "{\"limit\":3}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":2}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-3-value-2"
+      },
+      "value": 2
+    },
+    {
+      "expected": {
+        "combined_score": 3,
+        "constraint_code": null,
+        "quality": 3,
+        "validity": 1
+      },
+      "limit": 3,
+      "name": "limit-3-value-3",
+      "probe": {
+        "constraint_id": null,
+        "expected_validity": 1,
+        "files": [
+          {
+            "content": "{\"limit\":3}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":3}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-3-value-3"
+      },
+      "value": 3
+    },
+    {
+      "expected": {
+        "combined_score": 0,
+        "constraint_code": "valid-value",
+        "quality": null,
+        "validity": 0
+      },
+      "limit": 3,
+      "name": "limit-3-value-4",
+      "probe": {
+        "constraint_id": "valid-value",
+        "expected_validity": 0,
+        "files": [
+          {
+            "content": "{\"limit\":3}\n",
+            "path": "data/raw/limit.json"
+          },
+          {
+            "content": "{\"value\":4}\n",
+            "path": "output/result.json"
+          }
+        ],
+        "name": "limit-3-value-4"
+      },
+      "value": 4
+    }
+  ],
+  "input_profile": {
+    "files": [
+      {
+        "fields": [
+          {
+            "name": "limit",
+            "null_count": 0,
+            "type": "integer",
+            "unique_count": 1
+          }
+        ],
+        "format": "json",
+        "path": "data/raw/limit.json",
+        "row_count": 1,
+        "sha256": "a87f29f60db7ebd0d5269a34a8be49b964bb77e62ee38f77987aced80accb5c7",
+        "size": 12
+      }
+    ],
+    "schema_version": "1"
+  },
+  "input_sha256": "a87f29f60db7ebd0d5269a34a8be49b964bb77e62ee38f77987aced80accb5c7",
+  "input_utf8": "{\"limit\":3}\n",
+  "joint": "verified freeze and 8 of 8 snapshot agreement / 1 planned preparation",
+  "limitations": [
+    "small_synthetic_task_not_original120_tasks",
+    "no_causal_latency_claim",
+    "no_solver_delivery_or_source_behavior",
+    "no_os_sandbox",
+    "holdouts_not_in_model_context_but_locally_accessible",
+    "observed_token_threshold_not_server_cap",
+    "unknown_timeout_usage",
+    "local_milestones_not_provider_execution_telemetry"
+  ],
+  "limits": {
+    "holdout_seconds": 5,
+    "max_requests": 2,
+    "request_seconds": 600,
+    "token_stop_threshold": 160000,
+    "wall_seconds": 1320
+  },
+  "measurement_files": {
+    "specs/113-real-multifile-acceptance/measurement/runtime_guard.py": "60e977c82706c3aa16e3384875a3c4780ca04a228c48e25d0fd0e422dba704d5",
+    "specs/125-snapshot-protocol-diagnostic/measurement/analysis.py": "8d8795a5eb76b8a6cdc7c71392dd7d56fcaa8fb633f758c028408fe263bb4189",
+    "specs/125-snapshot-protocol-diagnostic/measurement/campaign.py": "8c712b165f07bc14a656b833be0bdc4ac6ebd36b50e0273668e4d06cb42b57e7",
+    "specs/125-snapshot-protocol-diagnostic/measurement/case.py": "b8a9ba91c697c297c511005e67dce283eb9dd6ece70b4bc44859c5fd048b1b1a",
+    "specs/125-snapshot-protocol-diagnostic/measurement/observation.py": "af50a561f7a99e979075b698a639138ba5bef3261b3dda201667b911692e510a",
+    "specs/125-snapshot-protocol-diagnostic/measurement/supervision.py": "597331067a61ee93942df7c32413662f70e9f37d9b934c0e22d234e5d8de57df",
+    "specs/125-snapshot-protocol-diagnostic/measurement/worker.py": "9a284e41996820929e6e318e7b3037392f397878f98069e6a110217b5ee92cfc",
+    "specs/125-snapshot-protocol-diagnostic/plan.md": "5ac6f3d7d7f5094f4fefcb791afd04a592475b64acecf2aa566ea1ba4ad0df21",
+    "specs/125-snapshot-protocol-diagnostic/quickstart.md": "e1cc8f0781358c816b7311431b67ce76506b4f76d3adee65db31e2a82071b1a8",
+    "specs/125-snapshot-protocol-diagnostic/spec.md": "59c3d5d8d8e04722b6e812424222a4ccb2f94e70e87e542329757c3d1403b838",
+    "tests/test_measurement125_case.py": "ab70f9b024de5df8c884544227c1b3f0d7b23069f71454c88c59c5b259349141",
+    "tests/test_measurement125_observation.py": "441123222b8a5aaac16eec184652b402795997a657f87182df76ff140cda0ddb",
+    "tests/test_measurement125_registration.py": "55bc061c65cfc461529f5ee69154881229c3a11a248a8720d31eed672926b073",
+    "tests/test_measurement125_runner.py": "66bc622f0f68c04fb892df9dde4367e4b64e3c3f5791baf4a0ca366e60e65162"
+  },
+  "planned_attempts": 1,
+  "previous_campaign": {
+    "campaign_id": "diagnostic123-glm-5.2-small-evaluator-20260917",
+    "compiler_request": {
+      "bytes": 12353,
+      "sha256": "47522ad19d409ef7208d6d775a200de42fbaed5f60d74e589056b4f26790f89e"
+    },
+    "manifest_sha256": "9d05c7d95eb427f60d7be7a93dbfb8c7c53ec50904169e0391053292315f60a7",
+    "product_commit": "519fea5ca70ac1ede3df356ee7391112801ab45d"
+  },
+  "primary": "verified evaluator freeze / 1 planned preparation",
+  "product_commit": "eefe389d14c2380ceb7db9089636f6a5ebe15e2a",
+  "product_files": {
+    "pyproject.toml": "8fd742cef4a752ad6f375d88abba538e790c56a74bfb8adfcaaa5c8315c248fb",
+    "src/famou/__init__.py": "70772a091e4a427fc700cbc1b25bcd594b344f8e8c8a6393e4cdcc7d3b8f4c77",
+    "src/famou/__main__.py": "c37e180af36da9d718b66357b937c35beed81287a5cb096164c66cdebbd08c5b",
+    "src/famou/_benchmark_files.py": "49194a2c702f9940cb313e4dfc8c946302a616cd94880786c5738bcac1d6748f",
+    "src/famou/_candidate_workspace_io.py": "d577a13cfef87658320dc69adf924ab22a20539d66b0ac807aa2b0d791aa2f9d",
+    "src/famou/agent_bundle_generation.py": "7040fbde9030f0e1d497e0087f1e419c0c1829eb652ba6962455c8ee5c551a63",
+    "src/famou/agent_evolution.py": "051317ec0e366712783ade42feb833eda49475b744e6dc1a2a76e2d126fe422c",
+    "src/famou/agent_loop.py": "1981e212b6ec415a855f6407590ec613428ed928c3ff0968eaa76aa8ce8ef311",
+    "src/famou/agents.py": "17ae7a9437477721149c1187b5356e8fb91845c0c0ce9bad2ccfb9011bb26596",
+    "src/famou/algorithm.py": "24d68be86100590d0a5a1f54f12cda40670deb430fcccafd2bd48f8e220396ae",
+    "src/famou/artifacts.py": "f5b6fffe53756d8cf823921caa93fb4b85002ca28fc6c1780a41b4d967359506",
+    "src/famou/automatic_solve_bundle.py": "faf5a0f68f7cd65af045502f49e30a93af2fda894d18477af2adad348dbab513",
+    "src/famou/benchmark.py": "be5d28961d1b9ea120c12a8b916fce8c8fde9fc2bbbfbf057f14cbc3193f0650",
+    "src/famou/benchmark_comparison.py": "430e0ffac85b70d97a82ac4361075fb3dae382b7fdf91a9a460bc0bdbec9935c",
+    "src/famou/benchmark_result.py": "183421adb94fcc0d9079528eee3b1b9448599cf2a57719e70149310e997d0d59",
+    "src/famou/benchmark_task.py": "596bd032953161ecafe832235d1ab68282e92c17c7773fb7ab7f4f30831ab1f1",
+    "src/famou/budget.py": "ea98b4e0ba50ef354ba6001ab176302732dcce74c02ee879413481ee30cf70fb",
+    "src/famou/bundle_delivery.py": "65cf4d682716dd932ba2ce34e25209c59951da5d0a9773052b862179fa9985a7",
+    "src/famou/bundle_evolution.py": "60aaddeacfd690cf37bd217f0163a65b017432a91d21c2916ab78debd5b3ec70",
+    "src/famou/bundle_parent_delivery.py": "00581df8d19d53c02562a0ff6b5666c584ee2986b392b724f6abd2966ff6f9fc",
+    "src/famou/candidate_bundle.py": "25b191893156a067f9983c0de5a3d9d284d3d2d870cc7671b78debb7f958726d",
+    "src/famou/candidate_evaluation.py": "76f28c53324e9b97b5caed5f489a2cf43d6ac8a52f62397efeb8535ce59af7ac",
+    "src/famou/candidate_evaluation_spec.py": "fa13dd54256b32b1c3341e86d6dbcdcc67de8f3afe7227be5bfd973f939b7278",
+    "src/famou/candidate_execution.py": "784ae7c5009f3fad9ffb0d72e3e830d6baf20bba325c44cabc32b136ed1e439a",
+    "src/famou/candidate_execution_evidence.py": "95bf7705dd535b579c7dbac4954b3f9e462207bb6c8655099660fd9c9de61758",
+    "src/famou/candidate_execution_runner.py": "f65027bc2b35f3ace0fc14b45e6b130d08aedeaee029dd9e13e045d02abde701",
+    "src/famou/candidate_input_staging.py": "b2ab6ffaea8cbc4f8122a679c0c442e85aa568449b98f71c1ab82bf23e7e48ce",
+    "src/famou/candidate_workspace.py": "1c41f7d8f22cfaab3ab364164a629901d0f2b0062bea2d64c4b2182f8be3bb2f",
+    "src/famou/candidate_workspace_plan.py": "7e42c1d3f937e50abb65a05bcce2493e910832f7b86ba30956291d419f5a879f",
+    "src/famou/cli.py": "453ab86a4cac9d6b1154bf8a1b10aa4385c66ad2dbe72498a233c87128ae28c8",
+    "src/famou/config.py": "036d5ec0a2de65d142a89eb517441679e290e7be25495ac9457dff48a44dc264",
+    "src/famou/controller.py": "2e959d2876b966e1066319e75756ae3dbdf6de11e8f4d7eb17b26407432c99a8",
+    "src/famou/conversational.py": "dba2eac2d5046050f1a978c585693d7864d010985324b91de33f3c9417189d99",
+    "src/famou/data_profile.py": "ac10c30e901051d1d54c93ddef307110395440302eec76d9c3ebfbc643ed98d6",
+    "src/famou/deep_effect_trial.py": "2d48659c6094be57b4a573aabfd70d5aaa98fbc80083d3da9427841a0335788e",
+    "src/famou/deep_feedback.py": "5eca17ca5c140e949259394948a4f10277b128f41fe887a861d868d40b6f06e7",
+    "src/famou/diagnostic_snapshot.py": "9083aa8698bd4477dba490ff1a5123bc86fe4bc7904f24c57422ec4cd7f53f1e",
+    "src/famou/effect_adapters.py": "16d786a6a6dbf67af2fd7341a268909fada3a7183734a5eb04e22a0f0cf68232",
+    "src/famou/effect_kit.py": "3f7503c70bfdf55638ea9562f5fea4cb30a2f8e8449916c52de827e5d058c342",
+    "src/famou/effect_preflight.py": "dcad050bb67e5c51e501d54fc2fafbc358a7c24dbcefce1632e37351992b5407",
+    "src/famou/effect_trial.py": "6b21712f9f45f26f28d43ebe7d057dfa0c9ecb024de295623bafc286eb6c2652",
+    "src/famou/evaluator.py": "a30f77d4f7a8a5f426c5bc44ff92123aed21dbe7b4f9ed9a5b4e0eb1e5e35fdb",
+    "src/famou/evaluator_bundle.py": "6d1f3bc43c1b1ac3ac3566798d60cafad1094ea02c408c8cf8d221bba2a76412",
+    "src/famou/evolution.py": "0f1e648d98d52e2a85a141eda5d0f50f53f8c9e3cfce6039632bef48dad501fd",
+    "src/famou/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
+    "src/famou/host_session.py": "db63d52cfcab8200c7c895e60a391abe65038daee88e481842a520bb703abc95",
+    "src/famou/http_transport.py": "53ce3a5264c4a6efecdf9f71873a1e74b20445c06c793cf4707f202b522f0e16",
+    "src/famou/materialization_attestation.py": "26c3ef40e97c73d0375e58b0304ced955200248b63b66089cd914895db15a330",
+    "src/famou/materialization_delivery.py": "c12001d839027ef12c5b0bfecdbb90f33cb907c62a68d8f185dfa5ceb453c03b",
+    "src/famou/materialization_diagnostics.py": "ea79a572e99ba2938df96697a4e0e5002ebe230ab4c10857d89f2b6dda80c8c0",
+    "src/famou/materialization_evidence_bundle.py": "ab770b767352a286d477491bf22e15a3a7a37d033e2333a98f82ab30c894819e",
+    "src/famou/materialization_execution.py": "d4f775b9babf5287a63d2436bea35a5ca68eac534c6b9126c61a2dd3ce5a9f09",
+    "src/famou/materialization_launch.py": "ab6e11e4e70330bb10efbdc24e1c644cbbdcc8cfecf4a66a35dd8d1104c5f94a",
+    "src/famou/materialization_publication.py": "5a654d818e742cbf8bb3c68a7e0a5717c60673cbeb756751a21ffa3aabd0779d",
+    "src/famou/memory.py": "0bfc0f101c293cd99392651b61bf0689473ece167badb77970ba4bf1aa330e78",
+    "src/famou/model_profile.py": "d819544d1e6564903c884546eee06d81d0125e0c0330754ee6695d83035aa145",
+    "src/famou/models.py": "9c0ae0668fd245e3d6dbbef7214e2ae41bf45a806e2e32a372e9548eec1078f9",
+    "src/famou/openevolve_handoff.py": "9a0b01a583e2e2c058bcb9dd2b8aea82354b8913f477c73d2e11bf46e794f7fa",
+    "src/famou/output_publication.py": "4b95f261b027fc20c61833034eecfd27352e9cfef25b2c1a639ce5e050aebc55",
+    "src/famou/policy.py": "5b8eb9fe10f701953386f68865ce3448a748e734becd07e3ed62a2e2aa8ad44b",
+    "src/famou/producer_handoff.py": "d89d9af174ffb6f7d1a569ecaa95e72ddf154471b4108a6e65ae004b75c98261",
+    "src/famou/profiles.py": "b58e741735c16aabbe31ae959c145e8c38a174564c6d905e102ae38903338b30",
+    "src/famou/recovery.py": "f09d07e34bc79590efa3f14cbb7541f2693fff660d94a44b80aeb9fc0080b313",
+    "src/famou/remote_evolution.py": "b3f2fbbb7b761d9f412f0d04443cbd9dc5dce2ecc8e4977ca985f4849075c998",
+    "src/famou/remote_material_handoff.py": "8dd041668e8e56e6e122f837ce32edcefeb042aba12a9740b20ca5efd1073697",
+    "src/famou/routing.py": "ef7b556408a6d5175046653094c70edfab7b21bfb798eb49f82271780d0a1fbf",
+    "src/famou/runtime.py": "0da90160894958ddc65d2ef79daa9892116de6eda9db61779c173031f74ea225",
+    "src/famou/seed_handoff.py": "7ebf0ad659f3a91c30911744410c1fa5b08911a2fd39d0f91077f4b971510947",
+    "src/famou/shinka_handoff.py": "499b57d51c56e2182dfb730356eb688e940ff17018790717f8ef1895a697ad56",
+    "src/famou/solve_bundle.py": "14dd548447dcd88467152571429cdd0afd76a7112067832aa6c7f87ebe2f3d9f",
+    "src/famou/source_constraints.py": "dee865cd32b3f3314491235f89434c78f4ba2b77ee489b765312211a425eb870",
+    "src/famou/staged_workflow.py": "430447ec342093673a9b3630525268e15d3dafb4bd2f21fcf9d8f094126f78c5",
+    "src/famou/store.py": "18018a678213476ffd3de9edeb9c1d2a6b2cd6a684e3990f039b4ef330e6e92d",
+    "src/famou/subject_diagnostics.py": "2dc984c2dbff2053b828e7ffd36a97dce6ca231ce8b1422a2218021cf50114de",
+    "src/famou/tools.py": "a7910e9950904ecfe913660e988d06282394f9410366565cc1c4744d80207419",
+    "src/famou/transcript.py": "25a9e8cacdd6defca28e267bcd8cf192e46aaa617f9fdf0ad99da661aedeadc8",
+    "src/famou/workflow_checkpoint.py": "13f94f70e906a6ddaf3e0bf870f14d302d6e1725f3f4129f0091f02e738ee6cb"
+  },
+  "provider": {
+    "chat_endpoint_sha256": "61b6f5eb8b3e2e3f694e2e4a70fec8d0f6beabc60b19d9f9ecedfcac80efed0a",
+    "configured_model": "gpt-6-astra",
+    "configured_reasoning_effort": "ultra",
+    "configured_wire_api": "responses",
+    "credential_present": true,
+    "endpoint_sha256": "8c73b2da99925bc9b811eecc7cea7a97af0fdb75a7310e0aa6f24e8d1ab47b15",
+    "native_reasoning_parameter": null,
+    "native_wire_api": "chat_completions",
+    "requested_model": "glm-5.2",
+    "source": "cc_switch_selected_codex_provider"
+  },
+  "registered_utc": "2026-09-17T06:32:23.032679+00:00",
+  "response_capture": {
+    "credential_redacted": true,
+    "max_prefix_bytes": 65536,
+    "private": true,
+    "scope": "parsed_assistant_text_only"
+  },
+  "retries_or_replacements": 0,
+  "runtime": {
+    "famou_module": "/Users/liminghan/Documents/lunar_agent/src/famou/__init__.py",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "python": "/Users/liminghan/miniforge3/bin/python3.13",
+    "python_sha256": "86755d704d9f697ab6aa5185029d44c4da08279a255f9a71bd138bec4b98e283",
+    "python_version": "3.13.12"
+  },
+  "runtime_options": {
+    "contract_compiler": false,
+    "history": false,
+    "invocation": "snapshot",
+    "message_roles": [
+      "system",
+      "user"
+    ],
+    "runtime": "AgentLoopRuntime.run_isolated",
+    "solver": false,
+    "source_checks": false,
+    "tools": 0
+  },
+  "sampling": {
+    "max_tokens": null,
+    "policy": "native_omissions_provider_defaults_uncontrolled",
+    "reasoning_effort": null,
+    "response_format": null,
+    "stream": false,
+    "temperature": null
+  },
+  "schedule": [
+    {
+      "attempt_id": "attempt-001",
+      "index": 1
+    }
+  ],
+  "schema_version": "1",
+  "secondary": "exact registered snapshot agreement / 8 planned holdouts"
+}
