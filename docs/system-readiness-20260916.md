@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 126。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 127。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -71,6 +71,15 @@ Feature 126 已让合成输入和真实画像共用格式解析：compiler/audit
 不改变旧完成率；下一步补准确本地准备阶段/原因，再独立登记真实诊断。
 
 ## 当前判断
+
+Feature 127 已为compiler/auditor响应准入及本地preflight提供固定原因和数字位置，自动
+准备记录schema2/local_failure，JSON/文本status可见；旧schema1和runtime恢复保持。
+位置字段拒绝bool/超界，详情复验parent/attempt/start和阶段关系，坏详情降级，取消/终态/
+输入漂移/已准备结果优先。仅描述本地失败检查，不暴露生成内容、不授予重试或评分权限。
+提示、解析器、冻结身份未改；244项新测试通过，最终当前代码6770 passed/1 skipped，历史
+固定快照24 passed，双阶段exit0。离线验证见
+[127 validation](../specs/127-evaluator-preparation-diagnostics/validation.md)。下一步固定产品，
+另行登记真实小型准备诊断；没有新的真实成功率，旧campaign保持封存。
 
 Lunar 已有可运行的本地 Agent 和完整的单文件 population 演化链路。多文件链路也已接通
 生成、独立执行与评分、Candidate/receipt/archive、下一代选择、terminal resume 和完整

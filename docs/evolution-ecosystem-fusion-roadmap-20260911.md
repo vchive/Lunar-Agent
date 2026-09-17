@@ -16,6 +16,16 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：本地准备失败细分
+
+Feature 127 在原生检查位置产生compiler/auditor响应或preflight阶段、固定原因和有限数字
+位置。自动准备通过既有失败事件持久化schema2/local_failure，JSON/文本status只展示复验
+通过的详情；取消、终态、输入漂移和准备成功优先。旧记录、runtime恢复、严格审计/冻结
+和模型提示不变，不保存生成内容或异常原文，不新增自动重试。process/response原因仍有
+明确粗粒度边界。244项新测试及112恢复通过；最终当前6770 passed/1 skipped、历史固定
+快照24 passed，整体exit0。见[127记录](../specs/127-evaluator-preparation-diagnostics/validation.md)。
+下一步固定当前产品，另行登记新的小型真实诊断；125与所有旧槽不重开或补分。
+
 ## 2026-09-17：合成输入统一格式准入
 
 Feature 126 复用真实画像的JSON/JSONL/CSV/text解析，在compiler/audit每组第一个probe

@@ -41,6 +41,7 @@ from .data_profile import (
     validate_input_format,
 )
 from .evaluator import acceptance_evaluator
+from .evaluator_diagnostics import EvaluatorPreparationDiagnostic
 from .evolution import CandidateExecution, CandidateInputArtifact, EvolutionError
 from .runtime import Runtime, RuntimeResult
 
@@ -126,6 +127,30 @@ _SECRET = re.compile(
 
 class EvaluatorBundleError(EvolutionError):
     """A bounded evaluator compilation, preflight, or integrity failure."""
+
+
+class EvaluatorPreparationError(EvaluatorBundleError):
+    """A local preparation failure with a controller-owned, bounded observation."""
+
+    def __init__(self, message: str, diagnostic: EvaluatorPreparationDiagnostic) -> None:
+        if type(diagnostic) is not EvaluatorPreparationDiagnostic:
+            raise TypeError("invalid evaluator preparation diagnostic")
+        self.diagnostic = EvaluatorPreparationDiagnostic.from_dict(diagnostic.to_dict())
+        super().__init__(message)
+
+
+class _ProbeFailure(EvaluatorBundleError):
+    """Internal check identity; only a preflight caller can attach a preparation stage."""
+
+    def __init__(self, message: str, reason: str) -> None:
+        self.reason = reason
+        super().__init__(message)
+
+
+def _local_failure(message, stage, reason, *, probe_index=None, input_index=None, order_index=None):
+    return EvaluatorPreparationError(message, EvaluatorPreparationDiagnostic(
+        stage, reason, probe_index, input_index, order_index,
+    ))
 
 
 class UnsupportedEvaluatorConstraintsError(EvaluatorBundleError):
@@ -475,9 +500,12 @@ def compile_evaluator_bundle(
         raise EvaluatorBundleRuntimeError("evaluator_compile") from exc
     if continuation_guard is not None:
         continuation_guard()
-    if not isinstance(result, RuntimeResult):
-        raise EvaluatorBundleError("evaluator compiler returned an invalid runtime result")
-    envelope = _parse_envelope(result.text, contract, invocation=invocation)
+    try:
+        if not isinstance(result, RuntimeResult):
+            raise EvaluatorBundleError("evaluator compiler returned an invalid runtime result")
+        envelope = _parse_envelope(result.text, contract, invocation=invocation)
+    except (EvaluatorBundleError, ValueError, TypeError, RecursionError) as exc:
+        raise _local_failure(str(exc), "compiler_response", "response_invalid") from exc
     staging = Path(tempfile.mkdtemp(prefix=".evaluator-bundle-", dir=root))
     try:
         objective_path = staging / "objective.md"
@@ -509,7 +537,8 @@ def compile_evaluator_bundle(
             or _sha256(path) != frozen_inputs[path.name]
             for path in current
         ):
-            raise EvaluatorBundleError("evaluator preflight modified the frozen bundle inputs")
+            raise _local_failure("evaluator preflight modified the frozen bundle inputs",
+                                 "compiler_preflight", "evidence_changed")
         audit_suite = _compile_audit_suite(
             runtime,
             contract,
@@ -539,7 +568,8 @@ def compile_evaluator_bundle(
             or _sha256(path) != frozen_inputs[path.name]
             for path in current
         ):
-            raise EvaluatorBundleError("evaluator audit modified the frozen bundle inputs")
+            raise _local_failure("evaluator audit modified the frozen bundle inputs",
+                                 "auditor_preflight", "evidence_changed")
         manifest = _manifest(
             contract,
             objective_path,
@@ -1076,7 +1106,7 @@ def _snapshot_probe(evaluator, probe, contract, workspace, timeout):
         supplied = {item.path: item.content.encode("utf-8") for item in probe.files}
         declared = {"data/raw/" + item.path for item in contract.inputs} | {item.path for item in contract.outputs}
         if set(supplied) - declared:
-            raise EvaluatorBundleError("snapshot probe contains undeclared files")
+            raise _ProbeFailure("snapshot probe contains undeclared files", "file_set_invalid")
         descriptors = _inputs(tuple(
             CandidateExecutionInput(item.path, "synthetic_probe", len(supplied["data/raw/" + item.path]),
                                     hashlib.sha256(supplied["data/raw/" + item.path]).hexdigest())
@@ -1086,7 +1116,7 @@ def _snapshot_probe(evaluator, probe, contract, workspace, timeout):
         for item in sorted(contract.outputs, key=lambda output: output.path):
             content = supplied.get(item.path)
             if not _format_valid(item, content):
-                raise EvaluatorBundleError("snapshot probe violates the declared output schema")
+                raise _ProbeFailure("snapshot probe violates the declared output schema", "output_schema_invalid")
             outputs.append({"path": item.path, "present": content is not None,
                             "size": len(content) if content is not None else None,
                             "sha256": hashlib.sha256(content).hexdigest() if content is not None else None})
@@ -1115,22 +1145,31 @@ def _snapshot_probe(evaluator, probe, contract, workspace, timeout):
             observed = {name: _Observation(workspace / name, len(content), stack, code="snapshot_changed")
                         for name, content in copies.items()}
             if any(item.content != copies[name] for name, item in observed.items()):
-                raise EvaluatorBundleError("snapshot evaluator probe files changed")
+                raise _ProbeFailure("snapshot evaluator probe files changed", "evidence_changed")
             _tree_names(chain, copies)
             executable = _Executable(Path(spec.command[0]))
             stack.callback(executable.close)
-            stdout, _, status, _, _ = _bounded_process_bytes(
-                [*spec.command, "evaluator.py", "request.json"], cwd=str(workspace),
-                environment=dict(spec.environment), timeout=spec.timeout_seconds,
-                output_limit=MAX_REPORT_BYTES, capture_limit=MAX_REPORT_BYTES,
-            )
+            try:
+                stdout, _, status, _, _ = _bounded_process_bytes(
+                    [*spec.command, "evaluator.py", "request.json"], cwd=str(workspace),
+                    environment=dict(spec.environment), timeout=spec.timeout_seconds,
+                    output_limit=MAX_REPORT_BYTES, capture_limit=MAX_REPORT_BYTES,
+                )
+            except OSError as exc:
+                raise _ProbeFailure("snapshot evaluator preflight failed", "process_failed") from exc
             if status != "succeeded":
-                raise EvaluatorBundleError("snapshot evaluator process failed or exceeded its limits")
-            report = parse_candidate_evaluation_report(stdout, evaluator_id=COMPILED_BUNDLE_EVALUATOR_ID)
-            for item in observed.values():
-                item.check()
-            executable.check()
-            _tree_names(chain, copies)
+                raise _ProbeFailure("snapshot evaluator process failed or exceeded its limits", "process_failed")
+            try:
+                report = parse_candidate_evaluation_report(stdout, evaluator_id=COMPILED_BUNDLE_EVALUATOR_ID)
+            except (ValueError, TypeError, RecursionError) as exc:
+                raise _ProbeFailure("snapshot evaluator preflight failed", "report_invalid") from exc
+            try:
+                for item in observed.values():
+                    item.check()
+                executable.check()
+                _tree_names(chain, copies)
+            except (OSError, ValueError, TypeError) as exc:
+                raise _ProbeFailure("snapshot evaluator preflight failed", "evidence_changed") from exc
         return report
     except (OSError, KeyError, TypeError, ValueError) as exc:
         raise EvaluatorBundleError("snapshot evaluator preflight failed") from exc
@@ -1146,31 +1185,48 @@ def _preflight(
     label: str,
     invocation: str = "candidate",
 ) -> None:
+    stage = "auditor_preflight" if label == "audit" else "compiler_preflight"
+    try:
+        _preflight_suite(evaluator, suite, contract, staging, timeout, label=label,
+                         invocation=invocation, stage=stage)
+    except EvaluatorPreparationError:
+        raise
+    except (EvaluatorBundleError, OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
+        raise _local_failure(str(exc), stage, "preflight_failed") from exc
+
+
+def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, invocation, stage):
     # Admit the whole suite before executing even its first probe. This is creation-time
     # validation only; loading an existing frozen bundle never replays its probes.
-    for probe in suite.probes:
+    for probe_index, probe in enumerate(suite.probes, 1):
         supplied = {item.path: item.content for item in probe.files}
-        for item in contract.inputs:
+        for input_index, item in enumerate(contract.inputs, 1):
             try:
                 validate_input_format(item.format, supplied["data/raw/" + item.path].encode("utf-8"))
             except (DataProfileError, KeyError, UnicodeError):
-                raise EvaluatorBundleError(
-                    f"{label} probe input violates the declared input format"
+                raise _local_failure(
+                    f"{label} probe input violates the declared input format",
+                    stage, "input_format_invalid", probe_index=probe_index, input_index=input_index,
                 ) from None
     reports: dict[str, EvaluationReport] = {}
     probe_root = staging / f".{label}-preflight"
-    for probe in suite.probes:
+    for probe_index, probe in enumerate(suite.probes, 1):
         workspace = probe_root / probe.name
         workspace.mkdir(parents=True)
         if invocation == "snapshot":
-            report = _snapshot_probe(evaluator, probe, contract, workspace, timeout)
+            try:
+                report = _snapshot_probe(evaluator, probe, contract, workspace, timeout)
+            except _ProbeFailure as exc:
+                raise _local_failure(str(exc), stage, exc.reason, probe_index=probe_index) from exc
             reports[probe.name] = report
             if report.validity != probe.expected_validity:
-                raise EvaluatorBundleError(f"{label} constraint probe {probe.name} returned wrong validity")
+                raise _local_failure(f"{label} constraint probe {probe.name} returned wrong validity",
+                                     stage, "validity_mismatch", probe_index=probe_index)
             if probe.constraint_id is not None and not any(
                 item.get("code") == probe.constraint_id for item in report.error_info
             ):
-                raise EvaluatorBundleError(f"{label} constraint probe {probe.name} did not report {probe.constraint_id}")
+                raise _local_failure(f"{label} constraint probe {probe.name} did not report {probe.constraint_id}",
+                                     stage, "constraint_code_missing", probe_index=probe_index)
             continue
         candidate = workspace / "candidate.py"
         candidate.write_text("# synthetic evaluator probe\n", encoding="utf-8")
@@ -1202,28 +1258,35 @@ def _preflight(
                 rules[0] if len(rules) == 1 else {"all": rules}
             )
             if validator is None or not validator.evaluate("", workspace).passed:
-                raise EvaluatorBundleError(
-                    f"{label} probe {probe.name} violates the declared output schema"
+                raise _local_failure(
+                    f"{label} probe {probe.name} violates the declared output schema",
+                    stage, "output_schema_invalid", probe_index=probe_index,
                 )
-        report = _run_evaluator(evaluator, candidate, timeout)
+        try:
+            report = _run_evaluator(evaluator, candidate, timeout)
+        except _ProbeFailure as exc:
+            raise _local_failure(str(exc), stage, exc.reason, probe_index=probe_index) from exc
         if report.validity != probe.expected_validity:
-            raise EvaluatorBundleError(
-                f"{label} constraint probe {probe.name} returned wrong validity"
+            raise _local_failure(
+                f"{label} constraint probe {probe.name} returned wrong validity",
+                stage, "validity_mismatch", probe_index=probe_index,
             )
         if probe.constraint_id is not None and not any(
             item.get("code") == probe.constraint_id for item in report.error_info
         ):
-            raise EvaluatorBundleError(
-                f"{label} constraint probe {probe.name} did not report {probe.constraint_id}"
+            raise _local_failure(
+                f"{label} constraint probe {probe.name} did not report {probe.constraint_id}",
+                stage, "constraint_code_missing", probe_index=probe_index,
             )
         reports[probe.name] = report
-    for order in suite.score_order:
+    for order_index, order in enumerate(suite.score_order, 1):
         if not (
             reports[order.better].combined_score
             > reports[order.worse].combined_score
         ):
-            raise EvaluatorBundleError(
-                f"{label} score order failed: {order.better} must beat {order.worse}"
+            raise _local_failure(
+                f"{label} score order failed: {order.better} must beat {order.worse}",
+                stage, "score_order_mismatch", order_index=order_index,
             )
     shutil.rmtree(probe_root)
 
@@ -1248,21 +1311,23 @@ def _run_evaluator(evaluator: Path, candidate: Path, timeout: float) -> Evaluati
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise EvaluatorBundleError("frozen evaluator timed out") from exc
+        raise _ProbeFailure("frozen evaluator timed out", "process_failed") from exc
     except OSError as exc:
-        raise EvaluatorBundleError("frozen evaluator could not start") from exc
+        raise _ProbeFailure("frozen evaluator could not start", "process_failed") from exc
+    except UnicodeError as exc:
+        raise _ProbeFailure("frozen evaluator returned an invalid EvaluationReport", "report_invalid") from exc
     if completed.returncode != 0:
-        raise EvaluatorBundleError("frozen evaluator exited unsuccessfully")
+        raise _ProbeFailure("frozen evaluator exited unsuccessfully", "process_failed")
     if (
         len(completed.stdout.encode("utf-8")) > MAX_EVALUATOR_OUTPUT_BYTES
         or len(completed.stderr.encode("utf-8")) > MAX_EVALUATOR_OUTPUT_BYTES
     ):
-        raise EvaluatorBundleError("frozen evaluator output exceeds the bounded size")
+        raise _ProbeFailure("frozen evaluator output exceeds the bounded size", "process_failed")
     try:
         payload = json.loads(completed.stdout)
         return EvaluationReport.from_dict(payload)
-    except (json.JSONDecodeError, TypeError, ValueError) as exc:
-        raise EvaluatorBundleError("frozen evaluator returned an invalid EvaluationReport") from exc
+    except (json.JSONDecodeError, TypeError, ValueError, RecursionError) as exc:
+        raise _ProbeFailure("frozen evaluator returned an invalid EvaluationReport", "report_invalid") from exc
 
 
 def _candidate_evidence_snapshot(
@@ -1567,9 +1632,12 @@ def _compile_audit_suite(
         raise EvaluatorBundleRuntimeError("evaluator_audit") from exc
     if continuation_guard is not None:
         continuation_guard()
-    if not isinstance(result, RuntimeResult):
-        raise EvaluatorBundleError("evaluator auditor returned an invalid runtime result")
-    return _parse_probe_suite(result.text, contract, invocation=invocation)
+    try:
+        if not isinstance(result, RuntimeResult):
+            raise EvaluatorBundleError("evaluator auditor returned an invalid runtime result")
+        return _parse_probe_suite(result.text, contract, invocation=invocation)
+    except (EvaluatorBundleError, ValueError, TypeError, RecursionError) as exc:
+        raise _local_failure(str(exc), "auditor_response", "response_invalid") from exc
 
 
 def _run_isolated(
@@ -1732,6 +1800,7 @@ def _remove_tree(path: Path) -> None:
 __all__ = [
     "EvaluatorBundleError",
     "EvaluatorBundleRuntimeError",
+    "EvaluatorPreparationError",
     "FrozenEvaluatorBundle",
     "SolverScoringContract",
     "compile_evaluator_bundle",

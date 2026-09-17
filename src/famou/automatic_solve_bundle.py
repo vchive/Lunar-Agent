@@ -24,11 +24,13 @@ from .evaluator_bundle import (
     BUNDLE_FILES,
     COMPILED_BUNDLE_EVALUATOR_ID,
     EvaluatorBundleRuntimeError,
+    EvaluatorPreparationError,
     UnsupportedEvaluatorConstraintsError,
     compile_evaluator_bundle,
     load_evaluator_bundle,
     validate_evaluator_capabilities,
 )
+from .evaluator_diagnostics import LOCAL_FAILURE_STAGES, EvaluatorPreparationDiagnostic
 from .evolution import CandidateInputArtifact, EvolutionError
 from .models import RunStatus
 from .solve_bundle import (
@@ -61,7 +63,7 @@ class AutomaticBundlePreparationError(EvolutionError):
 
 
 def _observation(parent_id, attempt_id, *, status, stage, category=None, recoverable=False,
-                 unsupported_constraints=None):
+                 unsupported_constraints=None, local_failure=None):
     observation = {
         "schema_version": "1", "parent_run_id": parent_id, "attempt_id": attempt_id,
         "status": status, "stage": stage, "error_category": category,
@@ -69,7 +71,33 @@ def _observation(parent_id, attempt_id, *, status, stage, category=None, recover
     }
     if unsupported_constraints is not None:
         observation["unsupported_constraints"] = unsupported_constraints
+    if local_failure is not None:
+        observation["schema_version"] = "2"
+        observation["local_failure"] = local_failure
     return observation
+
+
+def _read_local_failure(raw, *, stage, parent, parent_id, attempt_id, relevant):
+    """Optional details require stricter binding than the backward-compatible coarse projection."""
+    fields = {"schema_version", "parent_run_id", "attempt_id", "status", "stage",
+              "error_category", "recoverable", "local_failure"}
+    if (set(raw) != fields or raw.get("schema_version") != "2" or raw.get("status") != "failed"
+            or raw.get("error_category") != "validation_error" or raw.get("recoverable") is not False
+            or raw.get("parent_run_id") != parent_id or attempt_id is None
+            or parent is None or parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}):
+        return None
+    starts = [item for item in relevant[:-1] if item.get("type") == _STARTED
+              and isinstance(item.get("payload"), dict)
+              and item["payload"].get("parent_run_id") == parent_id
+              and item["payload"].get("attempt_id") == attempt_id]
+    expected = _observation(parent_id, attempt_id, status="started", stage="preparation")
+    if len(starts) != 1 or starts[0]["payload"] != expected:
+        return None
+    try:
+        detail = EvaluatorPreparationDiagnostic.from_dict(raw["local_failure"])
+    except (TypeError, ValueError):
+        return None
+    return detail.to_dict() if detail.stage == stage else None
 
 
 def _record_observation(store, parent_id, kind, observation):
@@ -89,10 +117,11 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
     if not isinstance(attempt_id, str) or re.fullmatch(r"preparation-[0-9a-f]{32}", attempt_id) is None:
         attempt_id = None
     stage = raw.get("stage") if isinstance(raw, dict) else None
-    if not isinstance(stage, str) or stage not in _STAGES:
+    if not isinstance(stage, str) or stage not in _STAGES | LOCAL_FAILURE_STAGES:
         stage = "preparation"
     result = _observation(
-        parent_id, attempt_id, status="unknown", stage=stage, category="interrupted",
+        parent_id, attempt_id, status="unknown",
+        stage=stage if stage in _STAGES else "preparation", category="interrupted",
     )
     parent = store.get_run(parent_id)
     if parent is not None and parent.status == RunStatus.CANCELLED:
@@ -105,6 +134,13 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
     if prepared is not None:
         return _observation(parent_id, None, status="prepared", stage="profile_publish")
     if latest["type"] == _FAILED and isinstance(raw, dict):
+        if raw.get("schema_version") == "2" or "local_failure" in raw or stage in LOCAL_FAILURE_STAGES:
+            detail = _read_local_failure(raw, stage=stage, parent=parent, parent_id=parent_id,
+                                         attempt_id=attempt_id, relevant=relevant)
+            if detail is not None:
+                return _observation(parent_id, attempt_id, status="failed", stage=stage,
+                                    category="validation_error", local_failure=detail)
+            return {**result, "status": "failed", "error_category": "validation_error"}
         category = raw.get("error_category")
         matched_start = any(
             item.get("type") == _STARTED and isinstance(item.get("payload"), dict)
@@ -468,6 +504,14 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
             except Exception as exc:
                 category, recoverable = "validation_error", False
                 unsupported_constraints = None
+                local_failure = None
+                if type(exc) is EvaluatorPreparationError:
+                    try:
+                        if type(exc.diagnostic) is EvaluatorPreparationDiagnostic:
+                            local_failure = EvaluatorPreparationDiagnostic.from_dict(exc.diagnostic.to_dict()).to_dict()
+                            stage = local_failure["stage"]
+                    except (AttributeError, TypeError, ValueError):
+                        pass
                 if isinstance(exc, UnsupportedEvaluatorConstraintsError):
                     stage, category = "capability_check", "unsupported_verification"
                     # Recompute from the retained contract rather than trusting exception prose.
@@ -490,14 +534,19 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                 current_parent = controller.store.get_run(parent.id)
                 if current_parent is not None and current_parent.status == RunStatus.CANCELLED:
                     category, recoverable = "cancelled", False
+                    local_failure = None
                 elif current_parent is not None and current_parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
                     category, recoverable = "validation_error", False
+                    local_failure = None
+                if local_failure is None and stage in LOCAL_FAILURE_STAGES:
+                    stage = "preparation"
                 if category != "unsupported_verification":
                     unsupported_constraints = None
                 observation = _observation(
                     parent.id, attempt_id, status="failed", stage=stage,
                     category=category, recoverable=recoverable,
                     unsupported_constraints=unsupported_constraints,
+                    local_failure=local_failure,
                 )
                 _record_observation(controller.store, parent.id, _FAILED, observation)
                 raise AutomaticBundlePreparationError(

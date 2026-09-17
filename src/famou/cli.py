@@ -1308,6 +1308,11 @@ def _print_status(config: Config, run_id: str) -> int:
         print(f"evaluator_preparation: {preparation['status']}")
         if preparation.get("error_category"):
             print(f"preparation_error: {preparation['stage']}: {preparation['error_category']}")
+        if preparation.get("local_failure"):
+            detail = preparation["local_failure"]
+            positions = " ".join(f"{key}={detail[key]}" for key in
+                                 ("probe_index", "input_index", "order_index") if detail[key] is not None)
+            print(f"preparation_local_failure: {detail['reason']}" + (f" {positions}" if positions else ""))
         if preparation.get("resume_hint"):
             print(preparation["resume_hint"])
         if preparation.get("capability_hint"):

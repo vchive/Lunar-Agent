@@ -6,6 +6,31 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 127：本地评测器准备失败原因（2026-09-17）
+
+新EvaluatorPreparationDiagnostic仅含schema_version、stage、reason、probe_index、input_index、
+order_index。固定四阶段compiler/auditor response/preflight，严格枚举/索引关系，位置为1起
+整数，拒绝bool，probe/order上限64、input上限32，不含生成内容、路径、名称或异常正文。
+原生控制流区分响应准入、输入格式、输出schema、进程、报告、validity、约束码、分数顺序；
+snapshot保留既有file set/文件完整性检查，bundle完整性失败无虚构probe位置，无法细分的
+本地异常保留preflight_failed。响应内source/envelope等仍统一response_invalid；process
+仍粗分process_failed，不推断超时/退出/输出限额具体根因。candidate已有检查范围不扩张。
+
+异常携带诊断经过正常staging清理。自动准备仅为有效的精确类型写schema2/local_failure，
+外层stage一致，validation_error/recoverable=false；读取复验精确字段、阶段/原因/位置、
+parent/attempt和唯一匹配started。坏详情降级，取消/终态/输入漂移/已完成优先。schema1、
+runtime恢复和旧冻结加载不变；diagnostic不授予恢复/评分/交付权限。JSON和文本status均
+展示有效原因，数字位置仅在已知时展示。显式用户继续沿用既有逻辑，无自动重试/repair。
+
+新增244项测试通过，当前全仓6770 passed/1 skipped，历史固定快照24 passed，双阶段exit0、
+临时worktree清理。冻结6份实现/测试、1616份旧spec/test及125/123/120的16/15/46份保留证据
+均未变；Ruff、compileall、CLI、Specify及143个链接通过，独立审查无阻塞项。完整记录见
+`specs/127-evaluator-preparation-diagnostics/validation.md`，按授权正常提交推送。
+112 quickstart仍选7分，恢复保持1/1/1/4/4调用和唯一交付。提示词、response parser、manifest
+和冻结身份未改；私有信号不会把冻结后的生产评分错误冒充准备错误。本轮不调用真实模型，
+不执行125捕获源码，所有旧测量分母不变。下一步固定已验证产品，另行登记并先push一项
+新的小型准备诊断，再按compiler一次/条件audit和预声明holdout执行；不重开历史槽。
+
 ## Feature 126：合成输入复用真实格式准入（2026-09-17）
 
 data_profile公开纯validate_input_format，与真实画像共用_parse_input及原有_utf8/_records。

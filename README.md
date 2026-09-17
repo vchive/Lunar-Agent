@@ -1406,6 +1406,14 @@ permits `answer`; dependency waits no longer appear as a user question. Interrup
 reported as unknown, without a claim about provider completion or usage. See the offline
 [116 recovery checks](specs/116-preparation-recovery-state/quickstart.md).
 
+Local evaluator preparation failures now expose optional `evolution.preparation.local_failure`.
+It identifies compiler/auditor response admission or preflight, a fixed reason such as
+`input_format_invalid`, `report_invalid` or `validity_mismatch`, and one-based probe/input/ordering
+positions where known. These observations describe the failing local check without storing file
+contents, paths, probe names or exception prose. They remain nonrecoverable validation failures;
+runtime recovery rules and frozen evaluator reuse are unchanged. Older observations still load,
+and invalid optional detail is omitted. See [127 diagnostics](specs/127-evaluator-preparation-diagnostics/quickstart.md).
+
 The independently registered [117 run](specs/117-extended-deadline-acceptance/postrun/report.md)
 on Feature 116 extended request/process limits to 600 seconds and task limits to 3600 seconds,
 retaining the other task/model/budget conditions. It still completed **0/2**: one evaluator request
