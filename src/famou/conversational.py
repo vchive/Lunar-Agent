@@ -313,6 +313,94 @@ def _validate_contract_shape(value: object) -> None:
                 raise ContractCompilationError("output contains unknown fields")
 
 
+_NEEDS_INPUT_ENVELOPE_EXAMPLE = """{
+  "status": "needs_input",
+  "questions": [
+    {
+      "question": "Which objective should be optimized?",
+      "options": [
+        "minimize time",
+        "minimize cost"
+      ]
+    }
+  ],
+  "evidence": [
+    "The goal does not specify an objective."
+  ]
+}"""
+
+
+_COMPILED_ENVELOPE_EXAMPLE = """{
+  "status": "compiled",
+  "contract": {
+    "schema_version": "1",
+    "problem_id": "example-assignment",
+    "problem_type": "assignment",
+    "statement": "Assign each item to one bin and minimize total cost.",
+    "inputs": [
+      {
+        "path": "items.json",
+        "format": "json",
+        "fields": {
+          "items": "Items to assign.",
+          "bins": "Available bins.",
+          "costs": "Assignment costs by item and bin."
+        },
+        "key": null
+      }
+    ],
+    "decision_variables": [
+      "The selected bin for each item."
+    ],
+    "objective": {
+      "name": "total cost",
+      "direction": "minimize",
+      "metrics": []
+    },
+    "hard_constraints": [
+      {
+        "id": "one-bin-per-item",
+        "description": "Assign every item to exactly one bin.",
+        "source": "user_confirmed",
+        "verification": "independent",
+        "result_fields": [
+          "assignments"
+        ],
+        "verification_scope": "output"
+      }
+    ],
+    "soft_constraints": [],
+    "success_criteria": [
+      "Every item is assigned and total cost is reported."
+    ],
+    "deliverables": [
+      "output/result.json"
+    ],
+    "assumptions": [],
+    "outputs": [
+      {
+        "path": "output/result.json",
+        "format": "json",
+        "fields": [
+          "assignments",
+          "total_cost"
+        ],
+        "required": true,
+        "description": "Assignments and their total cost."
+      }
+    ],
+    "evolution": {
+      "strategy": "population",
+      "max_rounds": 5,
+      "stagnation_rounds": 3
+    }
+  },
+  "evidence": [
+    "The goal specifies its input, objective, constraints, and output."
+  ]
+}"""
+
+
 def build_algorithm_plan(goal: str, contract: AlgorithmProblemContract) -> PlanDocument:
     """Build the conservative baseline DAG used after intake succeeds."""
     problem_id = contract.problem_id
@@ -543,7 +631,15 @@ class RuntimeContractCompiler:
             'strings). Do not include contract.\n'
             '- For status="compiled", include contract: a complete object with the schema below. '
             'Do not include questions.\n'
-            "- Either envelope may include evidence: an array of non-empty strings.\n\n"
+            "- Either envelope may include evidence: an array of non-empty strings. Every response "
+            "must include the top-level status field.\n\n"
+            "Complete envelope examples follow. They demonstrate JSON shape only. Replace all "
+            "example task content with facts from the user goal and explicit answer; never copy "
+            "the example task content.\n\n"
+            "needs_input example:\n"
+            f"{_NEEDS_INPUT_ENVELOPE_EXAMPLE}\n\n"
+            "compiled example:\n"
+            f"{_COMPILED_ENVELOPE_EXAMPLE}\n\n"
             "Contract schema (no additional keys):\n"
             '- schema_version: string "1". problem_id: a safe identifier string. '
             'problem_type: one of "scheduling", "routing", "packing", "assignment", '

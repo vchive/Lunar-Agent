@@ -3,7 +3,8 @@
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
-evaluator/profile 准备和父任务交付/终态恢复；后续聚焦已确认的协议问题及真实闭环，外部 producer 的多文件
+evaluator/profile 准备和父任务交付/终态恢复；Feature130已补完整合同封装示例并保持
+strict parser；后续聚焦新的独立真实闭环，外部 producer 的多文件
 接线与运行中取消编排仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
@@ -15,6 +16,15 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-17：合同响应完整封装示例
+
+Feature130在isolated contract compiler提示中增加完整needs_input/compiled严格JSON示例，
+两者显式status、分支字段互斥；compiled例经生产parser/dataclass验证。示例只说明shape，
+任务内容须按当前goal/answer替换。生产parser与shape校验未改，contract-only仍拒绝，不推断
+缺失status、不repair或retry。99项聚焦、104项相关回归和112恢复通过；全仓当前7168 passed/
+1 skipped/24 deselected，固定旧产品24 passed，双阶段exit0。独立审查无问题。本轮无真实
+请求，129保持0/1；下一次真实检查必须新登记并先push，不能重开旧槽。
 
 ## 2026-09-17：自动多文件验收暴露合同封装遗漏
 

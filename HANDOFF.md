@@ -6,6 +6,26 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 130：合同响应完整封装示例（2026-09-17）
+
+合同compiler提示现在在既有封装规则与详细schema之间给出完整`needs_input`和`compiled`
+严格JSON。两例都显式包含顶层status；前者仅含questions/evidence，后者含完整contract/
+evidence且无questions。compiled例覆盖inputs fields对象、outputs fields数组、output范围硬约束
+和population参数，内容自洽并直接通过生产parser/dataclass。提示明确示例只说明shape，所有
+任务事实必须按当前goal/answer替换，不能复制示例内容。
+
+生产`_parse_response`和`_validate_contract_shape`未改；删掉相同compiled例的status仍固定拒绝
+`compiler response must be status=compiled with contract`，没有推断、repair、retry或额外请求。
+99项聚焦及104项相关回归通过；112 quickstart仍选7分，恢复调用数保持1/1/1/4/4、交付1份。
+全仓双阶段exit0：当前7168 passed/1 skipped/24 deselected，固定旧产品24 passed；Ruff、
+compileall、Specify、空白检查与独立审查通过。完整记录见
+`specs/130-contract-envelope-examples/validation.md`。
+
+本轮没有真实模型调用，不改变129的0/1或任何历史分母，也不能证明示例会提高遵循率。
+下一步若继续真实验证，须以Feature131独立登记并先push固定产品、任务、provider和预算，
+再运行新的唯一槽；不能重开或修补129。外部producer多文件seed、全链路预算/取消与detached
+继续后置。
+
 ## Feature 129：真实自动多文件验收在合同封装处失败（2026-09-17）
 
 固定产品b951857，登记08624f5先push后运行新的唯一槽。manifest SHA
