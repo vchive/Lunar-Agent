@@ -6,6 +6,22 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 123：小型评测器诊断已登记，待唯一一次执行（2026-09-17）
+
+固定产品519fea5，独立/1诊断只直接调用原生snapshot evaluator准备，仍用AgentLoopRuntime
+的system+user隔离调用；没有合同编译、普通求解器或source要求。整数value在输入limit范围
+内并最大化，一项output hard constraint；输入为limit3，8个预声明holdout覆盖limit1/3。
+compiler一次，只有原生解析/源码/自测接受后才audit一次，最多2请求，600秒/请求，1320秒
+监督总墙钟同时覆盖本地自测/holdout；冻结后每holdout5秒，无重试、恢复、替补。
+
+登记manifest SHA `9d05c7d95eb427f60d7be7a93dbfb8c7c53ec50904169e0391053292315f60a7`，
+目录 `specs/123-small-evaluator-diagnostic`；102项新测试、403项相关回归及112恢复示例
+通过，测量实现/测试已冻结。prepare/verify零模型调用，必须先commit/push才run。
+新根 `.lunar/diagnostic123-glm-5.2-small-evaluator-20260917` 只允许分配一次；summarize
+只读留存结果，不执行任何模型/evaluator。分别报freeze/1、holdout agreement/8、joint/1。
+私有文本只留本地；transport旁路记录与旧calls账本独立，成功ModelTurn仍不新增字段。
+细节见 `specs/123-small-evaluator-diagnostic/validation.md`。113/115/117/120仍各自0/2。
+
 ## Feature 122：本地 HTTP 里程碑与兼容诊断（2026-09-17）
 
 有界 HTTP worker 增加固定三字段 TransportObservation：last_milestone、
