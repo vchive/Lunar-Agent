@@ -6,6 +6,31 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 128：小型真实准备与留出检查通过（2026-09-17）
+
+固定产品b951857，登记38c323c先push后启动独立唯一槽；manifest SHA
+`460da2cedd52c9cf4774139df084129685c1bd686372f2662c5c683421d59a48`。
+保留125整份合同、输入/profile、8项holdout、GLM-5.2/provider、采样缺省和预算；没有
+改产品、重试、恢复、替补或手动补请求。测量新增严格六字段local_failure可选采集与复验。
+
+compiler380.010秒HTTP200并通过3项自测，auditor125.088秒HTTP200并通过5项独立探针；
+评测器成功冻结，8项预声明holdout各执行一次且全部精确匹配。结果freeze1/1、holdout8/8、
+joint1/1；记录用量完整43630tokens（8563input+35067output），费用/quality/gap未知/null。
+总墙钟507.148秒、exit0、清理通过、剩余观察PID[]；local_failure=null，真实失败分支没有
+在本次成功执行中触发。不能把这次准备成功写成多文件solver交付或126/127因果收益。
+
+209项新增测量测试、325项相关回归、112恢复示例通过，独立审查无阻塞项。78product/
+15measurement/118history pins、11份冻结实现/测试和1701份旧产品/spec/test字节不变；
+63份保留证据与125/123/120的16/15/46份旧证据size/SHA匹配。两请求18082/20616bytes
+离线重建hash一致；仅静态解析，未重放生成代码。3/5项probe输入均为JSON对象。
+完整记录见`specs/128-format-admission-diagnostic/postrun/report.md`与validation.md。
+
+下一步独立登记一项支持范围内的小型真实多文件任务，贯穿自动solve合同准备、compiler/
+auditor、候选生成、执行、独立评分、选优和父任务交付，使用确定性双源码文件要求和
+独立输出检查，并在调用前固定预算。113/115/117/120仍各自0/2，123/125仍各自0/1，旧槽
+保持封存；8项整数holdout不覆盖全部bool/float类型规则。外部producer多文件seed、
+全链路预算/取消与detached继续后置。
+
 ## Feature 127：本地评测器准备失败原因（2026-09-17）
 
 新EvaluatorPreparationDiagnostic仅含schema_version、stage、reason、probe_index、input_index、

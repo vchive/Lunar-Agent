@@ -40,3 +40,22 @@ fully test boolean/float rejection or prove generic correctness. There is no sol
 generation or multi-file delivery in this measurement. It cannot establish causal benefit from
 126/127 or resolve the old provider timeout causes. Historical 113/115/117/120 stay separately
 0/2 and 123/125 separately 0/1, regardless of this result.
+
+## Completed real measurement
+
+Registration 38c323cefeccd3ca62539f950029d26b5b769df0 was pushed before the sole start.
+The real attempt completed in 507.148s with exit 0 and verified cleanup: **freeze 1/1, holdouts
+8/8, joint 1/1**. Both native requests returned HTTP 200, recorded usage is complete at 43630
+tokens and cost remains unknown. local_failure is null on this successful path.
+
+Summary publication ran once. All 63 retained files match the inventory, all registered pins and
+11 frozen implementation/test hashes match, and both request bodies reconstruct offline to the
+recorded hashes. Historical evidence and the 1701-file preservation baseline remain unchanged.
+No generated code or holdout was re-executed during post-run analysis. See the
+[report](postrun/report.md), [results](postrun/results.json) and [inventory](postrun/evidence.json).
+Independent post-run review also verified all 74305 retained bytes, each holdout's input/output
+and independent mathematical result (five valid, three invalid), the read-only frozen files and
+recomputed fingerprint, accounting, push-before-start order and process cleanup. No issue found.
+Final manifest verification, Ruff, Specify and whitespace checks pass; all 50 local Markdown
+links in the updated handoff/status/feature documents resolve. Product and measurement bytes
+remain fixed; no further product regression was needed for these report-only changes.

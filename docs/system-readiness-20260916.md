@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 127。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 128。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -78,8 +78,15 @@ Feature 127 已为compiler/auditor响应准入及本地preflight提供固定原�
 输入漂移/已准备结果优先。仅描述本地失败检查，不暴露生成内容、不授予重试或评分权限。
 提示、解析器、冻结身份未改；244项新测试通过，最终当前代码6770 passed/1 skipped，历史
 固定快照24 passed，双阶段exit0。离线验证见
-[127 validation](../specs/127-evaluator-preparation-diagnostics/validation.md)。下一步固定产品，
-另行登记真实小型准备诊断；没有新的真实成功率，旧campaign保持封存。
+[127 validation](../specs/127-evaluator-preparation-diagnostics/validation.md)。
+
+Feature 128 已在固定产品b951857、先push登记38c323c后完成新的唯一小型诊断：compiler/
+auditor均HTTP200，3项自测与5项独立探针通过，冻结1/1，8项预声明holdout全部精确匹配，
+联合1/1。耗时507.148秒、记录用量完整43630tokens、费用未知、清理通过。209项测量测试与
+325项相关回归通过，63份保留证据和全部固定pins复验通过。见
+[128 report](../specs/128-format-admission-diagnostic/postrun/report.md)。这次没有solver或
+多文件交付，也不证明通用评测正确性或126/127因果改善；8项整数检查不完整覆盖bool/float。
+下一步用新独立登记的小型多文件任务验证自动solve到父任务交付的完整真实路径。
 
 Lunar 已有可运行的本地 Agent 和完整的单文件 population 演化链路。多文件链路也已接通
 生成、独立执行与评分、Candidate/receipt/archive、下一代选择、terminal resume 和完整
@@ -137,8 +144,9 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 1. 113/115/117/120 各自为0/2。118/119已修复合同兼容和支持范围内的源码检查，
    121/122补齐生成协议和传输观测；123小型准备诊断收到响应后本地失败，为独立0/1。
    124修复request字段说明缺口，125新独立诊断通过自测但被audit挡住：生成代码和自测
-   同时误读输入根结构，最终0/1。下一步统一真实输入/probe格式准入并补本地失败诊断，
-   再固定独立测量。具体旧超时原因仍未知，尚无真实多文件有效交付；
+   同时误读输入根结构，最终0/1。126/127已统一格式准入并补本地失败诊断，128独立小型
+   准备实测达到冻结1/1、留出8/8。下一步独立登记小型真实多文件闭环，覆盖自动准备到
+   父任务交付。具体旧超时原因仍未知，尚无真实多文件有效交付；
    不补旧槽、不改失败分母，也不把本地协议验证当成模型成功率或质量已提高。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
