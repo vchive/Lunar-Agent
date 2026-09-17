@@ -41,3 +41,28 @@ parity. Source count permits empty files and does not prove dependency/helper/in
 integer holdouts do not cover all boolean/float rules. Cost/provider defaults remain unknown.
 Summarization reads retained evidence only; it never executes a candidate/evaluator or resumes
 the native run. Historical denominators remain unchanged.
+
+## Completed real measurement
+
+Registration08624f593aa07714ef94452ec015811a70e485aa was pushed before the only start.
+The single contract request completed HTTP200 in45.509s, with complete4076-token accounting.
+Native parsing rejected a contract-only envelope missing status=compiled. Durable task failure
+and pure parser inspection agree. No compiled plan, evaluator, candidate, delivery or holdout
+execution occurred. Primary/preparation/joint are0/1; official quality/gap remain null. Supervisor
+finished47.339s,exit1,cleanup verified with no remaining observed PIDs.
+
+Summary ran once. All16retained files/122657bytes match their inventory after read-only diagnosis.
+Native request reconstruction matches6268bytes and recorded SHA256
+641f2b1b84a6e4ec006d1d902d00bf2fcf87007447a32d6488a0fe293ba3aa53. Captured assistant text is
+complete2045bytes, no truncation/redaction; its SHA is
+01dab63e1cdfb8ad09bc1b889275fbb8814440d5e586da3f7e624a32e56c95d5. No generated code was executed
+after completion, and no retry/repair/normalization was applied. See[report](postrun/report.md).
+
+Results SHA256:ea537172d2e6a4cd2ab7566529331b40a5c84200325baba8ad13a0fbddf72c35.
+Evidence inventory SHA256:0081524e22cc3e53a418a40f62a138b82b44124571f63eab475245be3614f761.
+
+Independent post-run review verified push-before-start order,78/16/133registration pins, the full
+inventory before/after inspection, durable native rejection, request reconstruction, accounting
+and cleanup. No new issue found. Final manifest/whitespace/Specify and local link checks pass;
+all12implementation/test and1721historical baseline hashes remain unchanged. Report-only updates
+do not require repeating the already-passed product regression.

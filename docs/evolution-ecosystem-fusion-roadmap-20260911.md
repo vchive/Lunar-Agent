@@ -16,6 +16,16 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：自动多文件验收暴露合同封装遗漏
+
+Feature129固定产品b951857，先push独立登记08624f5后执行唯一原生多文件solve。合同请求
+45.509秒HTTP200、4076tokens，但响应漏必需status=compiled，严格parser拒绝；没有进入
+evaluator、候选或交付，primary/preparation/joint均0/1，0/8holdout执行。总47.339秒，清理
+通过，官方quality/gap为null；没有重试、修补或额外请求。183项新测量测试、353项相关
+回归及112恢复通过；见[129报告](../specs/129-small-multifile-acceptance/postrun/report.md)。
+下一步补完整compiled/needs_input封装示例与离线请求检查，保持strict parser，不推断缺失
+状态。128及更早结果不变，新真实验证仍需新登记；外部producer多文件接线与全链路取消后置。
+
 ## 2026-09-17：小型真实准备诊断通过
 
 Feature 128 固定产品b951857，独立登记38c323c先push后运行唯一槽。compiler/auditor均

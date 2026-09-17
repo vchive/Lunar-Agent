@@ -6,6 +6,32 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 129：真实自动多文件验收在合同封装处失败（2026-09-17）
+
+固定产品b951857，登记08624f5先push后运行新的唯一槽。manifest SHA
+`63a056263387dbee5c9282fffb21182c9eb2fd51b6354cf871b5d4b06af10ad9`，78product/
+16measurement/133history pins；任务读取limit3、最大化整数value，要求至少两个.py路径。
+原生solve --evolve --multi-file，最多20请求、600秒/次、2400秒总墙钟、160000观测token。
+
+唯一contract compiler请求45.509秒HTTP200、4076tokens（1225input+2851output）；完整
+2045bytes响应顶层只有contract，缺少必需status=compiled。原生parser拒绝，task_failed
+记录同一固定错误；没有合同、evaluator、候选或交付。primary/preparation/joint均0/1，
+0/8holdout执行，官方quality/gap为null。总47.339秒、exit1、清理通过、剩余观察PID[]。
+没有重试、恢复、替补、修补响应或额外请求。下一轮不能重开这个槽。
+
+183项新测量测试、353项相关回归与112终态恢复通过。独立审查修正候选请求停止后本地
+holdout仍可执行、部分失败的官方quality门控、交付input/evaluator/spec绑定。SQLite
+只读连接在中断WAL后会改SHM，因此分析现在读取临时DB/WAL副本；实际中断writer测试
+验证WAL行可见且原证据不变。产品、12份实现/测试、1721份旧文件与历史证据保持原bytes。
+16份本轮证据122657bytes复验匹配；请求6268bytes从冻结提示离线重建hash一致。
+完整记录见`specs/129-small-multifile-acceptance/postrun/report.md`及validation.md。
+
+下一步补合同compiler的完整compiled/needs_input JSON封装示例与新离线检查；现有提示
+已经说明status要求，不能把漏字段说成规则未提供。保持strict parser，不猜测缺失status、
+不执行旧捕获；修复后若要真实验证必须新登记。128的准备1/1与8/8保持，113/115/117/120
+各0/2、123/125各0/1不变；仍没有真实多文件闭环成功。外部producer多文件seed、全链路
+预算/取消与detached继续后置。
+
 ## Feature 128：小型真实准备与留出检查通过（2026-09-17）
 
 固定产品b951857，登记38c323c先push后启动独立唯一槽；manifest SHA

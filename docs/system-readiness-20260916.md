@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 128。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 129。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -86,7 +86,13 @@ auditor均HTTP200，3项自测与5项独立探针通过，冻结1/1，8项预声
 325项相关回归通过，63份保留证据和全部固定pins复验通过。见
 [128 report](../specs/128-format-admission-diagnostic/postrun/report.md)。这次没有solver或
 多文件交付，也不证明通用评测正确性或126/127因果改善；8项整数检查不完整覆盖bool/float。
-下一步用新独立登记的小型多文件任务验证自动solve到父任务交付的完整真实路径。
+Feature129随后独立登记08624f5并push，固定同一产品运行小型真实自动多文件任务。唯一
+合同请求45.509秒HTTP200，4076tokens；响应顶层仅contract、缺少status=compiled，原生
+parser拒绝，未进入evaluator或候选。primary/preparation/joint均0/1，0/8holdout执行，
+quality/gap为null；总47.339秒、exit1、清理通过。183项新测量测试和353项相关回归通过，
+16份证据复验匹配。见[129 report](../specs/129-small-multifile-acceptance/postrun/report.md)。
+仍未完成真实多文件交付；下一步补完整合同响应封装示例及离线检查，保留严格字段验证。
+现有提示已描述status规则，不能归因于规则缺失，也不能据此证明提示修复必有效；旧槽不重开。
 
 Lunar 已有可运行的本地 Agent 和完整的单文件 population 演化链路。多文件链路也已接通
 生成、独立执行与评分、Candidate/receipt/archive、下一代选择、terminal resume 和完整
