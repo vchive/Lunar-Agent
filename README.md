@@ -1793,9 +1793,17 @@ automation boundary for Codex, Hermes, OpenClaw, and scripts.
 ## Development
 
 ```bash
-uv run pytest
+uv run --extra dev python tools/run_tests.py --junit-dir .lunar/test-results
 uv run --extra lint ruff check .
 ```
+
+Full validation runs current tests in this checkout and 24 frozen registration tests in a temporary
+checkout of `5560eb9`, using the same Python interpreter. Those tests deliberately require the
+registered product bytes; their source and guards remain unchanged. Both phases must pass, with
+separate JUnit reports in `.lunar/test-results`. The runner needs local Git history (CI fetches it),
+verifies frozen imports and registered file hashes, and removes the temporary checkout afterward.
+Use `python -m pytest tests/<file>.py` for focused current tests; a direct unfiltered pytest run on
+new product code will correctly fail the old registration fixtures' `product_changed` prerequisite.
 
 See the [quickstart](specs/001-standalone-local-agent/quickstart.md) for the recovery scenario and
 the [runtime contract](specs/001-standalone-local-agent/contracts/runtime-adapter.md) before adding

@@ -964,20 +964,85 @@ def _snapshot_spec(source: bytes, timeout: float):
     )
 
 
+def _snapshot_request_example() -> dict[str, object]:
+    """Request shape only; the contract and identity values must be supplied by the controller."""
+    from .candidate_evaluation_spec import CandidateEvaluationSpec
+    from .candidate_execution import CandidateExecutionInput
+
+    illustrative_digest = "0" * 64
+    evaluator = CandidateEvaluationSpec(
+        harness_sha256=illustrative_digest, harness_size=1,
+        command=("/illustrative/python", "-I"), evaluator_id=COMPILED_BUNDLE_EVALUATOR_ID,
+        environment=(("LANG", "C.UTF-8"),), timeout_seconds=5,
+    )
+    return {
+        "protocol": "lunar-candidate-evaluation-request-v1", "schema_version": "1",
+        "observation": "evaluation-time",
+        "binding": dict.fromkeys((
+            "workspace_plan_sha256", "admission_sha256", "bundle_sha256",
+            "source_file_table_sha256", "launch_intent_sha256", "completion_sha256",
+            "contract_sha256", "evaluator_fingerprint", "input_file_table_sha256",
+            "output_contract_sha256",
+        ), illustrative_digest),
+        "contract": {}, "evaluator": evaluator.to_dict(),
+        "inputs": [CandidateExecutionInput(
+            "nested/example.txt", "opaque-label", 0, hashlib.sha256(b"").hexdigest(),
+        ).to_dict()],
+        "outputs": [
+            {"path": "output/example.json", "present": True, "size": 3,
+             "sha256": hashlib.sha256(b"{}\n").hexdigest()},
+            {"path": "output/optional.txt", "present": False, "size": None, "sha256": None},
+        ],
+    }
+
+
 def _snapshot_invocation_prompt() -> str:
+    example = json.dumps(_snapshot_request_example(), ensure_ascii=False, separators=(",", ":"))
     return (
         "The Python evaluator receives request.json as sys.argv[1], using protocol "
-        "lunar-candidate-evaluation-request-v1 and observation='evaluation-time'. Its cwd contains "
-        "only evaluator.py, request.json, declared inputs/<target>, and present output/<path> files. "
-        "The request includes contract, evaluator, inputs, outputs (path/present/size/sha256), and "
-        "binding digests. The evaluator must read inputs at inputs/<target> and outputs at their "
-        "declared paths; it must not read candidate source, data/raw, execution.json, or original "
-        "locations. It must leave every file unchanged and create no files. It must print only one JSON report containing exactly "
-        "schema_version='1', evaluator_id='compiled-bundle', validity (integer 0 or 1), quality, "
-        "combined_score, detailed_scores, and error_info, at most 32 KiB. Invalid reports must have "
-        "combined_score=0 and an explanatory error_info. Probe file declarations still use data/raw/ "
-        "and output/; preflight maps declared data/raw/<target> to inputs/<target>. Include no "
-        "undeclared probe files. Synthetic probes are not candidate execution evidence."
+        "lunar-candidate-evaluation-request-v1, schema_version='1', and "
+        "observation='evaluation-time'. Its cwd contains only evaluator.py, request.json, "
+        "declared inputs/<target>, and present files at outputs[].path. The request has exactly "
+        "protocol, schema_version, observation, binding, contract, evaluator, inputs, outputs. "
+        "contract is the full canonical contract object supplied below; the private input profile "
+        "is generation context only, not a request field.\n\n"
+        "inputs is an array sorted by target. Each entry has exactly target (relative logical "
+        "input name), source_label (opaque string label), size (nonnegative integer byte count), "
+        "sha256 (64 lowercase hex characters). Runtime inputs[] has no path field. Read each "
+        "file with Path('inputs') / item['target'], preserving all nested directories. "
+        "contract.inputs[].path equals that target; profile.files[].path and probe input file "
+        "paths instead use data/raw/<target>. For example, contract path nested/example.txt "
+        "becomes runtime target nested/example.txt, runtime file inputs/nested/example.txt, "
+        "and profile/probe path data/raw/nested/example.txt. source_label is not a file location. "
+        "A zero-byte input still has a descriptor and a file; size=0 does not mean absent.\n\n"
+        "outputs is an array sorted by path with one entry per declared contract output. Each "
+        "entry has exactly path (string already beginning output/), present (boolean), size, "
+        "sha256. Read Path(item['path']) verbatim when present is true; do not prepend output/ "
+        "again. A present output has nonnegative integer size and a 64-character lowercase hex "
+        "sha256. An absent output stays in the array with present=false, size=null, sha256=null "
+        "and no file. Optional outputs may be absent; missing required or schema-invalid outputs "
+        "fail local validation before this evaluator runs.\n\n"
+        "binding contains exactly the ten digest fields shown below, each a 64-character "
+        "lowercase hex identity. evaluator contains its protocol/version, source hash/byte size, "
+        "command (array of strings), evaluator_id, environment (string-to-string object), "
+        "positive timeout_seconds, and positive integer byte limits as shown. These are "
+        "controller-supplied identity and execution metadata, not file locations or scores; "
+        "do not execute command or access its interpreter path. Compute validity and objective "
+        "from the declared contract and snapshot input/output contents.\n\n"
+        "The following JSON illustrates field names/types only. contract={} stands for the full "
+        "canonical contract, not an empty runtime contract. Example paths, labels, digests and "
+        "execution settings are illustrative, not task constants or an executable request; do "
+        "not copy them into evaluator code or probe declarations. The protocol/version strings "
+        "and evaluator_id='compiled-bundle' are fixed.\n"
+        f"Snapshot request shape (illustrative metadata; contract is expanded at runtime):\n{example}\n\n"
+        "The evaluator must not read candidate source, data/raw, execution.json, or original "
+        "locations. It must leave every file unchanged and create no files. It must print only "
+        "one JSON report containing exactly schema_version='1', evaluator_id='compiled-bundle', "
+        "validity (integer 0 or 1), quality, combined_score, detailed_scores, and error_info, at "
+        f"most {MAX_REPORT_BYTES} bytes. Invalid reports must have combined_score=0 and an "
+        "explanatory error_info. Probe file declarations still use data/raw/ and output/; "
+        "preflight maps declared data/raw/<target> to inputs/<target>. Include no undeclared "
+        "probe files. Synthetic probes are not candidate execution evidence."
     )
 
 

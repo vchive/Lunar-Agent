@@ -6,6 +6,37 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 124：补齐 snapshot 请求结构与路径说明（2026-09-17）
+
+共享 compiler/auditor 提示现在给出完整 request 结构，明确 inputs[] 只有
+target/source_label/size/sha256，读取 inputs/<target> 并保留嵌套目录；contract input.path
+等于 target，profile/probe 的 path 则有 data/raw/ 前缀。outputs[].path 已含 output/，
+直接读取；可选输出缺失仍有 present=false/size=null/sha256=null 描述项。零字节输入仍有
+文件；source_label、binding 和 evaluator 配置是元数据。示例使用原生序列化器和明确占位
+contract/虚构解释器路径，不复制实际私有值或主机路径，任务 contract/profile 各保留一份。
+
+新增8项测试通过，捕获6次真实本地compiler/auditor预检和2次实际candidate/evaluator请求，
+覆盖嵌套输入、UTF-8字节、零字节与可选输出缺失。独立构造的target读取成功，path误用在
+首个有效probe被拒绝，未进入audit/freeze；没有运行或修补123的私有源码。88项相关回归
+通过，112 quickstart仍选7分，终态恢复保留1/1/1/4/4调用与一个交付副本。独立审查通过，
+产品实现与测试冻结后未改。首次直接全仓6286 passed/1 skipped/24 setup errors，均为
+123旧登记fixture要求519fea5而正确拒绝当前product_changed；这24项在独立5560eb9快照
+全部通过。新增显式双阶段 `tools/run_tests.py` 与18项隔离/清理/失败传播测试，CI与README
+同步；当前代码跑当前测试，旧24节点在固定快照跑，任阶段失败整体失败，不跳过或改guard。
+最终双阶段通过：当前 **6304 passed/1 skipped/24 deselected，418.44s**；固定历史快照
+**24 passed，15.30s**，整体exit0，临时worktree已清理，两个JUnit均零失败/错误。
+5项实现/测试/CI冻结hash未变；Ruff、compileall、CLI、Specify及135个文档链接通过。
+完整记录见 `specs/124-snapshot-request-protocol/validation.md`，按授权正常提交推送。
+
+AST确认src只新增纯示例helper、修改snapshot提示，旧candidate提示字节一致；解析、request
+构造、调用、冻结身份和恢复均不变。共享说明1079→5329bytes，不能声称变快或模型更稳定。
+历史73个spec/17个测量测试、123的69history/14measurement pins、注册版本77product pins
+与123的15份/120的46份保留证据均复验通过。113/115/117/120仍各自0/2，123仍0/1。
+
+下一步在本轮提交推送后，单独登记并先推送修复后的新小型准备诊断，再真实检查
+compiler自测、条件auditor、冻结及预声明holdout；不重开123槽，不改变旧分母。当前尚无
+真实多文件闭环成功，外部多文件seed、全链路预算/取消与detached继续后置。
+
 ## Feature 123：小型诊断0/1，定位输入描述字段不匹配（2026-09-17）
 
 固定产品519fea5，独立/1诊断只直接调用原生snapshot evaluator准备，仍用AgentLoopRuntime

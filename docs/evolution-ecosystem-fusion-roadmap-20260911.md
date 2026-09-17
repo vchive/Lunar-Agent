@@ -16,6 +16,18 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：补齐 snapshot 请求结构并验证实际路径
+
+Feature 124 在共享compiler/auditor提示中给出完整request形状，明确runtime inputs[].target
+和contract/profile/probe/output各处path的映射，直接读取已含output/的输出路径。占位示例
+不重复任务上下文、不带主机路径；source_label与binding/evaluator字段只作元数据。
+8项新增测试验证真实预检/生产请求、嵌套/零字节输入及可选输出缺失；独立构造的path误用
+在audit/freeze前失败。88项相关回归和112恢复示例通过；24项历史登记测试依赖旧产品，
+已用明确双阶段验证入口分配到固定快照，18项隔离/清理测试和CI接线完成。最终当前代码
+6304 passed/1 skipped，历史快照24 passed，整体exit0。见
+[124验证](../specs/124-snapshot-request-protocol/validation.md)。本轮未调用真实模型，四轮/2
+与123的/1均保持原失败结果；下一步单独登记修复后的准备诊断，不重放旧槽。
+
 ## 2026-09-17：小型评测器诊断返回响应，定位本地接口误用
 
 Feature 123 固定519fea5并先推送登记，单独/1诊断在242.848秒收到compiler HTTP200，
