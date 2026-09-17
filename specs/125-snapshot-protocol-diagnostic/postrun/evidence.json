@@ -1,0 +1,69 @@
+{
+  "files": {
+    "attempt-001/calls.jsonl": {
+      "sha256": "20f67d3d59461aec671faeab3efe997791b87c1ac9adadb26975329e40cb07ce",
+      "size": 1342
+    },
+    "attempt-001/contract.json": {
+      "sha256": "2c96955a4f95a1949e0a4f280887ea6a8a298dfeb1b787c7319b3030d8c1ae41",
+      "size": 2020
+    },
+    "attempt-001/finished.json": {
+      "sha256": "f22d02e0724fb75cbbe1ed29970617fb4e8b8cd2b7a101081efe2e2e5fa37694",
+      "size": 174
+    },
+    "attempt-001/input-profile.json": {
+      "sha256": "ee04777d09db4a9fda709129cf3cadbec20acd51fd416dd7e4190f8b076dff5b",
+      "size": 400
+    },
+    "attempt-001/preparation-started.json": {
+      "sha256": "1408636c18b7a60f6cdb7a48c9d869075b466b9ba3df99962761dc396e05477e",
+      "size": 29
+    },
+    "attempt-001/responses/response-001.json": {
+      "sha256": "98d22c0e8f84501a2dc1a3b9baceadaefa1abf6c69ecba4869e88e1e7bf88c7d",
+      "size": 4513
+    },
+    "attempt-001/responses/response-002.json": {
+      "sha256": "df7dcfe97c175d2b8130c7a0868346d2d976a3d58e79bc20b769b106b3db2c8b",
+      "size": 1654
+    },
+    "attempt-001/started.json": {
+      "sha256": "2567103d7b05c5736c219e944cbfe4b7d3232a6f574f823cb759f86e94face0f",
+      "size": 244
+    },
+    "attempt-001/stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "attempt-001/stdout.log": {
+      "sha256": "8f15338ea246987f1dda4a416faab875ace6ee70df520ca682efee8749e82c38",
+      "size": 97
+    },
+    "attempt-001/transport.jsonl": {
+      "sha256": "52b2cbdcf1fa7ecc102aad1466799ca7b4ec32420788a1c8f5dde98918e65dc5",
+      "size": 1192
+    },
+    "attempt-001/worker-finished.json": {
+      "sha256": "f1178c9a000827904fc9d108b2b5778c73d14100b98bafef51c8e46c6e9ccb5b",
+      "size": 618
+    },
+    "attempt-001/worker-started.json": {
+      "sha256": "a2324103f436b88479f4fe960a967905d984d047b0b2ec8fdcf60a2631903b5f",
+      "size": 106
+    },
+    "attempt-001/workspace/data/raw/limit.json": {
+      "sha256": "a87f29f60db7ebd0d5269a34a8be49b964bb77e62ee38f77987aced80accb5c7",
+      "size": 12
+    },
+    "finished.json": {
+      "sha256": "0333e3c78bdf4e5256fe2ca3c11a6a9701151a17acfb4b12f417b3f2d39422b5",
+      "size": 333
+    },
+    "started.json": {
+      "sha256": "20fe2b97ee6c05307069da49a14a860a075c6eb98cc34b7e7fefbfe35bfcfebc",
+      "size": 283
+    }
+  },
+  "schema_version": "1"
+}

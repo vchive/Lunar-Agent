@@ -16,6 +16,17 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：独立audit拦住输入结构误读
+
+Feature 125 固定eefe389、登记ef29c36先push再执行独立/1诊断，保留123任务和预算。
+compiler326.682秒后通过自测，auditor50.640秒返回，均HTTP200；本地准备拒绝，未冻结，
+0/8holdout执行，最终freeze/joint0/1，用量完整36499tokens，清理通过。静态检查发现源码
+把JSON整根当整数，3个自测输入也用了标量；audit的5个输入符合合同的{limit:整数}对象，
+首个有效对象会被源码类型检查拒绝。audit阻止错误冻结，不重放或修补本次源码。
+下一步复用真实输入的格式准入验证合成probe，补精确本地失败阶段；不推断任意业务schema，
+不放宽审查。123与125保持各自0/1，旧四轮/2不改；尚无真实多文件交付或因果收益。
+详见[125报告](../specs/125-snapshot-protocol-diagnostic/postrun/report.md)。
+
 ## 2026-09-17：补齐 snapshot 请求结构并验证实际路径
 
 Feature 124 在共享compiler/auditor提示中给出完整request形状，明确runtime inputs[].target

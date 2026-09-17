@@ -51,10 +51,47 @@ Registration must be committed and pushed before the single real attempt. Its pu
 and the measured outcome will be recorded after launch; until then125 has one planned attempt,
 not a completed result. Existing113/115/117/120 remain separately0/2, and123 remains0/1.
 
+## After launch
+
+Registrationef29c36c0868b57489af1c16c095bdb2fb133676 was pushed before the one attempt. Both
+requests returnedHTTP200: compiler326.682s/28538tokens and auditor50.640s/7961tokens. Native
+compiler self-tests were accepted, but preparation failed after audit response with
+EvaluatorBundleError. Freeze/joint remain0/1; zero of eight holdouts executed. Total usage is
+complete36499tokens (8069input+28430output), cost/quality/gap unknown/null. Supervisor378.853s,
+exit1, cleanup verified, no remaining observed PIDs. See [report](postrun/report.md).
+
+Independent read-only verification matched16 retained files, all77/14/91pin groups,10frozen files,
+and exact reconstructed request bytes/hashes for both roles. Two private assistant captures are
+complete, unredacted/untruncated3958/1120bytes. Transport last milestones are final response headers,
+not provider computation/queue telemetry. HTTP bodies are length/hash metadata only.
+
+Pure static parsing accepts compiler and auditor envelopes. It exposes a new sufficient semantic
+defect: compiler code treats the complete JSON input root as an integer, and all three compiler
+probe inputs are scalar integers. The contract and all five auditor inputs are objects with limit;
+the source's root-type guard therefore rejects the first valid auditor object. This was not a
+traceback or generated-code replay. Private code/text stays unpublished, and the0/1 result stays
+sealed. Postrun static inspection validation is recorded after the standalone inspector is checked.
+
+The standalone postrun inspector and **29 independent synthetic tests passed in0.176s**. Tests
+forbid model/compiler/probe/process execution and cover complete capture binding, manifest/pin/
+inventory/file-set/worker tampering, strict root-shape oracle handling and the recognized AST
+branch. No private retained response is required by CI tests. The inspector reproduced its public
+JSON byte-for-byte, SHA256 `9d93dc126274c46f8c687577a09dbb6919407aa40f33b67940e43f5318eb487c`.
+This adds141new tests in total (112 preregistration+29 postrun) without changing any preregistered
+measurement/test file. All10 frozen files and77/14/91pins still match after analysis.
+
+Final historical re-audit confirms185 prior tracked files and all15old123/46old120 retained files
+unchanged. The125 inventory matches16/16files. Ruff/compileall/Specify/whitespace and documentation
+links pass; product124 remains unchanged, so its full regression baseline is retained rather than
+claimed as a new full run. Independent evidence/report review confirms the separate failed
+denominator, complete usage and static-only diagnosis. Results are ready for the authorized push.
+
 ## Local logs
 
 `/private/tmp/lunar125-scope.json`, `/private/tmp/lunar125-history-before.json`,
 `/private/tmp/lunar125-related.log/.xml`, `/private/tmp/lunar125-quickstart.log`.
 Additional logs: `/private/tmp/lunar125-tests.xml`, `/private/tmp/lunar125-runner-tests.xml`,
 `/private/tmp/lunar125-combined.log/.xml`, `/private/tmp/lunar125-freeze.json`.
+Postrun logs: `/private/tmp/lunar125-run.log`, `/private/tmp/lunar125-summary.log`,
+`/private/tmp/lunar125-static-tests.xml`, `/private/tmp/lunar125-static-check.json`.
 These are local validation records rather than portable real-measurement evidence.

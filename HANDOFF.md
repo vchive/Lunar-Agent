@@ -6,7 +6,7 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
-## Feature 125：修复后的独立准备诊断，登记待运行（2026-09-17）
+## Feature 125：compiler自测通过，独立audit阻止错误冻结（2026-09-17）
 
 固定产品eefe389，沿用123整份合同（problem_id也保留）、输入limit3、8个holdout、GLM-5.2
 与provider、600秒/请求、1320秒总墙钟、最多2请求和160000观测token阈值。新独立/1根
@@ -19,12 +19,28 @@
 临时Git仓库，保留原product_changed/push检查，不新增依赖固定旧产品的常规测试。
 112 quickstart仍选7，终态1/1/1/4/4调用与唯一交付保持；独立审查及历史字节检查通过。
 
-manifest SHA `c76a7f4802ad2691fc0c400c3525f9e38f4c520399a1a6a9f8f8e4506ea43a12`，
-77product/14measurement/91history pins；首请求16751bytes，SHA
-`ed75c5972decd24dff57bbdc47f4e92e0ea96ab7a811bb1c8acc9e7efa52e56f`。prepare/verify均离线，
-尚无真实调用。先正常提交推送登记，再启动唯一槽位并只读汇总；见
-`specs/125-snapshot-protocol-diagnostic/validation.md`。单次结果不证明124因果收益、旧超时
-原因或真实多文件交付。113/115/117/120仍各自0/2，123仍0/1；125仅planned，尚无结果。
+登记ef29c36先push后执行唯一槽。manifest SHA
+`c76a7f4802ad2691fc0c400c3525f9e38f4c520399a1a6a9f8f8e4506ea43a12`，
+77product/14measurement/91history pins；两请求16751/19504bytes，均离线重建hash匹配。
+compiler326.682秒HTTP200并通过原生自测，随后auditor50.640秒HTTP200；本地准备最终
+EvaluatorBundleError，未冻结，freeze/joint均0/1，0/8holdout执行。用量完整36499tokens
+（8069input+28430output），费用/quality/gap未知/null。监督378.853秒、exit1，清理通过、
+剩余观察PID[]。两份3958/1120bytes私有响应完整且无截断/脱敏，16份保留证据size/SHA匹配。
+
+纯静态解析确认compiler3probe、auditor5probe均格式可解析。新源码正确使用target/path，
+但把整个JSON输入根当整数：L21读取整根，L38–39拒绝非int，L52–53发无效报告，没有读取
+limit字段。compiler的3份输入也是标量整数，audit5份则是符合合同的{limit:整数}对象。
+因此首个有效audit输入被该分支拒绝；这是静态充分缺陷，未保留原traceback，也未重跑任何
+捕获代码。独立audit提供了区分案例并阻止错误冻结，不能说成auditor失效。
+
+下一步统一合成probe与真实输入已有的格式准入：profile解析已拒绝JSON标量，但probe只
+预检输出格式。复用现有JSON/JSONL/CSV/text规则，避免从自然语言fields推断强制schema，
+不要求合成数据复制私有行数/类型统计。再补细粒度本地失败阶段/原因，保持audit与冻结严格，
+不repair/retry。产品及10份测量/测试冻结bytes未变，旧证据复验通过；完整报告见
+`specs/125-snapshot-protocol-diagnostic/postrun/report.md`。单次推进不证明124因果收益或
+完整多文件成功。113/115/117/120仍各自0/2，123和125分别0/1，旧槽保持封存。
+另新增29项纯静态诊断测试通过，本轮共141项新测试；分析脚本核验固定证据后只解析
+JSON/AST，报告可逐字复现，SHA `9d93dc126274c46f8c687577a09dbb6919407aa40f33b67940e43f5318eb487c`。
 
 ## Feature 124：补齐 snapshot 请求结构与路径说明（2026-09-17）
 
