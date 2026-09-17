@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 120。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 121。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -20,6 +20,12 @@
 ## Feature 120 真实验收结果
 
 Feature 120 在已推送登记 `f3b575c` 上按支持范围运行两题，结果 **0/2**。两题合同编译分别耗时约44秒和118秒，随后 evaluator preparation 请求都在600秒 `open_response` 超时；无 evaluator、候选、交付或 holdout，已知用量16,161 tokens，超时消费/费用未知。详见 [120 report](../specs/120-supported-scope-acceptance/postrun/report.md)。
+
+Feature 121 随后离线补齐 evaluator compiler/auditor 的完整响应/报告格式、源码限制和
+合成测试数据规则；新增51项测试通过，最终全仓 **6049 passed, 1 skipped**，保持解析、
+调用与恢复协议。原120请求从冻结源码
+重建且哈希匹配，没有重复历史/合同。请求大小不证明超时原因，121没有真实模型结果，
+不能据此更新多文件有效率。见 [121 validation](../specs/121-evaluator-prompt-protocol/validation.md)。
 
 ## 当前判断
 

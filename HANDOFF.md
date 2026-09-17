@@ -6,6 +6,33 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 121：评测器生成协议补全与离线请求诊断（2026-09-17）
+
+离线从 `c569508` Git 源码重建120四个请求，SHA全部匹配；评测器请求分别9,723/11,366
+bytes，合同与结构画像各一份、system/user各一条，无工具/历史或应用重试。请求未发送
+temperature/max_tokens/reasoning_effort；配置里的推理档位并不等于这条路径的实际参数。
+`open_response` 还包含连接/等待响应头等阶段，不能区分模型计算、队列或网关原因。
+诊断只发布字节数/计数/摘要，读取10个历史文件前与固定evidence inventory核验。
+
+另行确认 compiler/auditor 提示缺少 probe/files/score_order、报告detail/error完整结构，
+只说标准库却未说明AST白名单，且没有交代无效业务探针仍须满足输出schema。现在共享
+完整占位示例、字段类型、文件路径映射、计数/字节限额、允许导入与禁止调用/属性/字符串
+规则；说明可构造小型合成数据，不能从结构画像恢复真实私有值。source检查仍在controller，
+auditor只拿冻结source/objective，不拿compiler自测数据。只有两个现有prompt函数改变，
+解析器、source validator、模型调用、冻结身份和终态恢复均未修改。
+
+新增51项离线测试（prompt34、只读诊断17）通过；真实本地预检和112 quickstart仍选7分，
+恢复维持1/1/1/4/4调用和一个交付副本。最终全仓 **6049 passed, 1 skipped in 403.54s**，
+JUnit零失败/错误，冻结后无实现修改；Ruff、compileall、Specify、128个文档链接和历史指纹
+复验通过。完整记录见 `specs/121-evaluator-prompt-protocol/validation.md`。
+同旧输入构造的新请求为17,058/18,734 bytes，未发送；本轮是协议完整性修复，不是已证实
+的延迟或成功率提升。113/115/117/120仍各自0/2，不运行旧verifier重新登记产品指纹。
+
+现有边界保留：最多62个输出硬约束可同时容纳两条有效探针，每条探针最多32个必需路径；
+仅能由缺失/坏格式成立的约束未必能构造schema有效反例。不能静默排除要求。后续先在冻结
+版本上设计可区分响应阶段的独立小规模诊断；不再单纯加长超时或重开旧槽。外部多文件seed、
+全链路预算/取消与detached模式仍后置。
+
 ## Feature 120：支持范围真实验收完成（2026-09-17）
 
 登记 commit `f3b575c5bf86019b27529339c88f6f936a779654` 已先推送，manifest SHA

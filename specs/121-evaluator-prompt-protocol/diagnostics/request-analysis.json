@@ -1,0 +1,221 @@
+{
+  "analysis": "offline_frozen_request_reconstruction",
+  "campaign_id": "acceptance120-glm-5.2-supported-scope-20260917",
+  "evidence_manifest_commit": "566fbb6b9ec58850f0658fde7b3e3215a7666ba5",
+  "evidence_manifest_sha256": "4183a2c452a70216042f8522c5ce255b62ae826fe070283f6ff0e6d552c1fa0f",
+  "evidence_sha256": {
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-001-attempt-001/calls.jsonl": "d66728e7729a303a69b043005ab9f9e4b7d74655b71602818afff5f8e584c341",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-001-attempt-001/responses/response-001.json": "6c5e68e17ffda5d3cfa2cdc2c31c5a8bc6fff00a1366d355142eb277004b7852",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-001-attempt-001/workspace/data/raw/items.json": "27f3dbe5c23c30667c3e115ec2a9ea10325b956d82aa8ad6f981256a1075a2ef",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-001-attempt-001/workspace/data/raw/limits.json": "affa2191da14644c42fb7962d0779071d578248dc9b53d67d81b30a4ec475da0",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-001-attempt-001/workspace/solve/contract.json": "024fda22f04590629bd7bbfd8dbb000d256bd012d92441a8c515d23482811558",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-002-attempt-001/calls.jsonl": "5a515a7c6d015337d2e148b535dba9beb5b58fdf30f440d6bfad9503ab01c9f3",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-002-attempt-001/responses/response-001.json": "0dabe68efeb791cec2459a1ba31d8233189f1e9a7c5ea4a48a85def8ee52dd4d",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-002-attempt-001/workspace/data/raw/jobs.json": "59238ba2706f61816dbf4768881fac24505866bd98ae8ef73569d9768434e9ca",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-002-attempt-001/workspace/data/raw/workers.json": "c0b31928914c4c9762416654aaee820685917a9df5b99ee3322e4e3635d74db6",
+    ".lunar/acceptance120-glm-5.2-supported-scope-20260917/slot-002-attempt-001/workspace/solve/contract.json": "557efe3d41b1fec4c71ded639853f10f5e5a477d1c64e0a2ff86e7ca0fc0145b"
+  },
+  "findings": [
+    "All four reconstructed request bodies match recorded SHA-256 digests exactly.",
+    "Each request has exactly one isolated system message and one user message; no tools or history are sent.",
+    "Each evaluator prompt contains its contract and structural input profile once.",
+    "Request bodies omit temperature, max_tokens, reasoning_effort and response_format.",
+    "Native application and campaign guard issue no retry after either timeout.",
+    "Both evaluator calls reached the local 600-second deadline with phase open_response and no observed HTTP status."
+  ],
+  "limits": [
+    "Request hashes identify locally constructed bodies; they do not prove provider receipt or execution.",
+    "open_response covers process startup, connection and waiting for response headers; it does not identify the remote cause.",
+    "Redirects, proxy behavior, gateway retries, queue time and model generation time are not separately observed.",
+    "Nonstreaming requests provide no partial model progress; timed-out response length, usage and cost remain unknown.",
+    "Byte counts are not token counts and do not establish context overflow or a timeout cause.",
+    "The configured provider's reasoning effort is not sent in these native request bodies; provider defaults remain uncontrolled.",
+    "Reported output tokens and captured assistant text do not establish a reasoning-token breakdown."
+  ],
+  "model_requests_made": 0,
+  "product_commit": "c5695088c83bf69188bd7ae222056c8b63233656",
+  "registration_sha256": "d8dd67c250161aed751ebf85ae10f330b03c8eedfaeb7356011e4e4ff7f7270e",
+  "schema_version": "1",
+  "source": "local_git_product_snapshot_verified_against_registration",
+  "source_sha256": {
+    "src/famou/agent_loop.py": "1981e212b6ec415a855f6407590ec613428ed928c3ff0968eaa76aa8ce8ef311",
+    "src/famou/algorithm.py": "24d68be86100590d0a5a1f54f12cda40670deb430fcccafd2bd48f8e220396ae",
+    "src/famou/automatic_solve_bundle.py": "faf5a0f68f7cd65af045502f49e30a93af2fda894d18477af2adad348dbab513",
+    "src/famou/conversational.py": "dba2eac2d5046050f1a978c585693d7864d010985324b91de33f3c9417189d99",
+    "src/famou/data_profile.py": "ac10c30e901051d1d54c93ddef307110395440302eec76d9c3ebfbc643ed98d6",
+    "src/famou/evaluator_bundle.py": "896ab15305f105aedc111b77063074f0c28cd49d70e54802dc175a69241bf6a6",
+    "src/famou/evolution.py": "0f1e648d98d52e2a85a141eda5d0f50f53f8c9e3cfce6039632bef48dad501fd",
+    "src/famou/http_transport.py": "507a8814a846fbd0c2ec0dbde3f455ca69483fd44e0034e432b8deb962a03151",
+    "src/famou/runtime.py": "26dca0012ef1d0814bf181a4d3f024a21695d8bbe8e9ee2955bb8cfe15b8f0a0"
+  },
+  "tasks": [
+    {
+      "attempt_id": "slot-001-attempt-001",
+      "case_key": "budget_selection",
+      "completed_contract_response": {
+        "capture_redaction_applied": false,
+        "capture_truncated": false,
+        "text_sha256": "158b698e917082fff5de7a31f6e11617816e8cf3575ef6ed46f744eb67bb6319",
+        "text_utf8_bytes": 3817
+      },
+      "evaluator_context": {
+        "contract_occurrences": 1,
+        "contract_utf8_bytes": 4911,
+        "minimum_synthetic_probe_count": 7,
+        "output_hard_constraint_count": 5,
+        "profile_occurrences": 1,
+        "profile_utf8_bytes": 893,
+        "source_hard_constraint_count": 1
+      },
+      "requests": [
+        {
+          "elapsed_seconds": 44.327214875025675,
+          "failure_reason": null,
+          "index": 1,
+          "message_roles": [
+            "system",
+            "user"
+          ],
+          "observation": null,
+          "outcome": "succeeded",
+          "recorded_hash_matches": true,
+          "request_body_utf8_bytes": 7031,
+          "request_fields": [
+            "model",
+            "messages",
+            "stream"
+          ],
+          "request_sha256": "b50347d9a45fccc6aad50128f044d68f1ddcc8ae85695c37317169aaf8d40453",
+          "response_status": null,
+          "stage": "contract_compiler",
+          "stream": false,
+          "system_prompt_utf8_bytes": 222,
+          "timeout_seconds": 600.0,
+          "tool_count": 0,
+          "usage": {
+            "input_tokens": 1381,
+            "output_tokens": 3855,
+            "total_tokens": 5236
+          },
+          "user_prompt_utf8_bytes": 6559
+        },
+        {
+          "elapsed_seconds": 600.0036220839247,
+          "failure_reason": "transport_timeout",
+          "index": 2,
+          "message_roles": [
+            "system",
+            "user"
+          ],
+          "observation": {
+            "elapsed_ms": 600003,
+            "phase": "open_response",
+            "request_timeout_ms": 600000
+          },
+          "outcome": "provider_error",
+          "recorded_hash_matches": true,
+          "request_body_utf8_bytes": 9723,
+          "request_fields": [
+            "model",
+            "messages",
+            "stream"
+          ],
+          "request_sha256": "ef0a1d07d3eab179cf299b2a2938436adcfd57b3796ecdb8ad0ba9d38681b3f4",
+          "response_status": null,
+          "stage": "evaluator_compiler",
+          "stream": false,
+          "system_prompt_utf8_bytes": 222,
+          "timeout_seconds": 600.0,
+          "tool_count": 0,
+          "usage": null,
+          "user_prompt_utf8_bytes": 8743
+        }
+      ],
+      "unique_request_hashes": 2
+    },
+    {
+      "attempt_id": "slot-002-attempt-001",
+      "case_key": "worker_assignment",
+      "completed_contract_response": {
+        "capture_redaction_applied": false,
+        "capture_truncated": false,
+        "text_sha256": "b053e792ff9fb56c4325f895e58e063d9ca5f497b2026a62412533f323dc09f3",
+        "text_utf8_bytes": 6626
+      },
+      "evaluator_context": {
+        "contract_occurrences": 1,
+        "contract_utf8_bytes": 6568,
+        "minimum_synthetic_probe_count": 9,
+        "output_hard_constraint_count": 7,
+        "profile_occurrences": 1,
+        "profile_utf8_bytes": 754,
+        "source_hard_constraint_count": 1
+      },
+      "requests": [
+        {
+          "elapsed_seconds": 118.24653687502723,
+          "failure_reason": null,
+          "index": 1,
+          "message_roles": [
+            "system",
+            "user"
+          ],
+          "observation": null,
+          "outcome": "succeeded",
+          "recorded_hash_matches": true,
+          "request_body_utf8_bytes": 7619,
+          "request_fields": [
+            "model",
+            "messages",
+            "stream"
+          ],
+          "request_sha256": "3ede19028e8be330d78852936c1521123a2fbf97162cd50cfd8b3d9a5bec8096",
+          "response_status": null,
+          "stage": "contract_compiler",
+          "stream": false,
+          "system_prompt_utf8_bytes": 222,
+          "timeout_seconds": 600.0,
+          "tool_count": 0,
+          "usage": {
+            "input_tokens": 1500,
+            "output_tokens": 9425,
+            "total_tokens": 10925
+          },
+          "user_prompt_utf8_bytes": 7133
+        },
+        {
+          "elapsed_seconds": 600.0028285830049,
+          "failure_reason": "transport_timeout",
+          "index": 2,
+          "message_roles": [
+            "system",
+            "user"
+          ],
+          "observation": {
+            "elapsed_ms": 600002,
+            "phase": "open_response",
+            "request_timeout_ms": 600000
+          },
+          "outcome": "provider_error",
+          "recorded_hash_matches": true,
+          "request_body_utf8_bytes": 11366,
+          "request_fields": [
+            "model",
+            "messages",
+            "stream"
+          ],
+          "request_sha256": "34ad6756914a93cedbfc2d21f2c8795878abb4cd857642c66a4838e2cc0be77f",
+          "response_status": null,
+          "stage": "evaluator_compiler",
+          "stream": false,
+          "system_prompt_utf8_bytes": 222,
+          "timeout_seconds": 600.0,
+          "tool_count": 0,
+          "usage": null,
+          "user_prompt_utf8_bytes": 10290
+        }
+      ],
+      "unique_request_hashes": 2
+    }
+  ]
+}

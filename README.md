@@ -1424,6 +1424,11 @@ completed **0/2** on the supported file-count scope. Both contracts compiled; bo
 requests timed out at 600 seconds before any candidate or delivery. Known usage was 16,161 tokens;
 timeout consumption and cost are unknown. This does not establish real multi-file reliability.
 
+[121 protocol work](specs/121-evaluator-prompt-protocol/validation.md) supplies the compiler and
+independent auditor with complete response/report shapes and the actual source restrictions.
+Its offline diagnostic reproduces the old request hashes, and no model request was made for 121.
+This fixes missing generation instructions; it has no measured latency or success-rate result.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

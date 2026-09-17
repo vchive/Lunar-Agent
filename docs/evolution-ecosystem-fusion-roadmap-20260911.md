@@ -16,6 +16,14 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：评测器生成协议补全
+
+Feature 121 将完整 probe/file/ordering、报告嵌套结构与实际源码限制写入两种生成角色的
+共享提示，并区分schema有效的业务反例与私有值恢复。51项离线测试通过；解析、模型调用
+和冻结恢复不变。离线重建120的四个原请求，SHA匹配，未发现重复上下文；open_response
+仍不能说明远端耗时原因。没有新的真实测量，四轮历史分母仍各自0/2。后续诊断须独立登记，
+不靠反复加长时限或补槽。详见 [121验证](../specs/121-evaluator-prompt-protocol/validation.md)。
+
 ## 2026-09-17：支持范围真实验收仍为 0/2
 
 Feature 120 先推送独立登记后运行两题，任务只要求可验证的 `python_file_count minimum=2` source check，保留数学输入/输出与117预算。两题合同编译成功，但 evaluator preparation 均在600秒 `open_response` 超时；无候选、交付或质量，已知用量16,161 tokens，费用和超时消费未知。113/115/117/120 各自0/2保持独立。不能把这次结果解释为旧 helper/import/input-read 语义或 WebAgent 对照。见 [120报告](../specs/120-supported-scope-acceptance/postrun/report.md)。

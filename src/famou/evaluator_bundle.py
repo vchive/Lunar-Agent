@@ -22,7 +22,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .algorithm import AlgorithmProblemContract, EvaluationReport
+from .algorithm import (
+    MAX_ERROR_INFO,
+    MAX_METRICS,
+    MAX_REPORT_BYTES,
+    AlgorithmProblemContract,
+    EvaluationReport,
+)
 from .data_profile import (
     DataProfileError,
     build_private_input_profile,
@@ -1249,6 +1255,141 @@ def _build_input_profile(
         raise EvaluatorBundleError(str(exc)) from exc
 
 
+def _response_example(*, compiler: bool) -> dict[str, object]:
+    """Wire shape only: every source, path and content placeholder needs task semantics."""
+    example = {
+        "schema_version": "1",
+        "constraint_coverage": ["constraint-id"],
+        "probes": [
+            {"name": name, "constraint_id": None if validity else "constraint-id",
+             "expected_validity": validity,
+             "files": [
+                 {"path": "data/raw/<declared-input>", "content": "<synthetic input text>"},
+                 {"path": "output/<declared-output>", "content": "<synthetic output text>"},
+             ]}
+            for name, validity in (("valid-better", 1), ("valid-worse", 1), ("violates-constraint", 0))
+        ],
+        "score_order": [{"better": "valid-better", "worse": "valid-worse"}],
+    }
+    if compiler:
+        example.update(objective="<validity and scoring definition>",
+                       evaluator_source="<complete Python script as a JSON string>")
+    return example
+
+
+def _report_examples() -> dict[str, object]:
+    """Both examples pass the report parser; values are illustrative, never task scores."""
+    return {
+        "valid": {
+            "schema_version": "1", "evaluator_id": COMPILED_BUNDLE_EVALUATOR_ID,
+            "validity": 1, "quality": 1, "combined_score": 1,
+            "detailed_scores": {"objective": {"value": 1, "direction": "maximize"}},
+            "error_info": [],
+        },
+        "invalid": {
+            "schema_version": "1", "evaluator_id": COMPILED_BUNDLE_EVALUATOR_ID,
+            "validity": 0, "quality": None, "combined_score": 0, "detailed_scores": {},
+            "error_info": [{"code": "constraint-id", "message": "Constraint violation."}],
+        },
+    }
+
+
+def _response_protocol_prompt(contract, *, invocation: str, compiler: bool) -> str:
+    coverage = _output_constraint_ids(contract, invocation)
+    required = sorted(_required_probe_paths(contract))
+    allowed = sorted({*("data/raw/" + item.path for item in contract.inputs),
+                      *(item.path for item in contract.outputs)})
+    response = json.dumps(_response_example(compiler=compiler), ensure_ascii=False, separators=(",", ":"))
+    extra = (
+        "objective and evaluator_source are nonempty JSON strings, respectively at most "
+        f"{MAX_OBJECTIVE_BYTES} and {MAX_EVALUATOR_BYTES} UTF-8 bytes. "
+        "evaluator_source holds a complete script, with newlines escaped within the JSON string. "
+        if compiler else "Return only the probe suite; no objective or evaluator_source fields. "
+    )
+    return (
+        "\n\nResponse shape (replace every placeholder with task-specific values):\n"
+        + response + "\n"
+        "The example specifies types, not an answer or a ready-made probe set. Return exactly the "
+        "shown field names at every level; no extra fields, duplicate keys, Markdown or prose. "
+        "schema_version is the string '1'. JSON numbers must be finite. "
+        + extra
+        + f"The complete response is at most {MAX_BUNDLE_RESPONSE_BYTES} UTF-8 bytes. "
+        "constraint_coverage is an array of distinct strings containing exactly these IDs: "
+        + json.dumps(coverage) + ". "
+        "probes is an array; each object has exactly name, constraint_id, expected_validity, files. "
+        f"Use 2..{MAX_PROBES} probes with unique names matching [A-Za-z0-9][A-Za-z0-9_.-]{{0,127}}. "
+        "expected_validity is integer 0 or 1, never boolean. Valid probes have constraint_id=null; "
+        "each invalid probe names one output constraint ID and the evaluator must include that "
+        "exact code in error_info. Supply exactly one invalid probe per coverage ID and at least "
+        "two valid probes. Keep synthetic instances small while preserving every required case; "
+        "do not copy the private profile's row count just to match its size. "
+        f"files is an array of 1..{MAX_PROBE_FILES} objects with exactly path and content. "
+        "content is nonempty file text, not a nested JSON object or a file-path reference; encode "
+        "JSON/CSV/etc. as a JSON string. No NUL or credential-like content. File paths are unique "
+        "within each probe. Every probe includes these paths: "
+        + json.dumps(required) + ". Allowed paths are: " + json.dumps(allowed) + ". "
+        f"Each content is at most {MAX_PROBE_FILE_BYTES} UTF-8 bytes, and all probe file contents "
+        f"together at most {MAX_PROBE_BYTES} bytes. Even expected_validity=0 probes must satisfy "
+        "the declared output format and required fields: use business-value violations, not "
+        "missing required files, malformed JSON/CSV or missing declared fields. Schema validation "
+        "runs before the evaluator. Do not drop a hard constraint or silently relabel it to "
+        "avoid this rule. score_order is an array of objects with exactly better and worse, "
+        f"between 1 and {MAX_PROBES} entries. Each pair names two distinct valid probes and "
+        "requires a strictly larger combined_score for better. Use a small shared synthetic input "
+        "instance for the two ordered outputs when the task allows it. One ordering pair suffices. "
+        "All source requirements remain outside output probe coverage."
+    )
+
+
+def _evaluation_report_prompt(invocation: str) -> str:
+    identity = (
+        f"evaluator_id must be exactly '{COMPILED_BUNDLE_EVALUATOR_ID}'. "
+        if invocation == "snapshot" else
+        f"Choose a stable safe evaluator_id; '{COMPILED_BUNDLE_EVALUATOR_ID}' is suitable. "
+    )
+    return (
+        "\n\nReport shape examples (illustrative values, not task scores):\n"
+        + json.dumps(_report_examples(), separators=(",", ":")) + "\n"
+        "The evaluator prints one report object, not this example wrapper. It has exactly "
+        "schema_version, evaluator_id, validity, quality, combined_score, detailed_scores, error_info. "
+        "schema_version is '1'; validity is integer 0 or 1, never boolean. "
+        + identity
+        + "combined_score is finite, nonnegative and higher-is-better, and must equal 0 when "
+        "validity=0. quality is null or a finite nonnegative number; use null when unavailable. "
+        "For invalid outputs use quality=null and at least one error. Define the score mapping "
+        "from independently recomputed objective values; do not negate a minimization cost into "
+        "a negative combined_score. detailed_scores is an object keyed by safe metric names, "
+        f"at most {MAX_METRICS} entries. Each value has exactly value (finite number, may be "
+        "negative) and direction ('maximize' or 'minimize'). error_info is an array of at most "
+        f"{MAX_ERROR_INFO} objects with exactly code (safe identifier) and message (nonempty text, "
+        "at most 512 UTF-8 bytes). Use empty objects/arrays where appropriate, never scalar "
+        "detailed_scores or string errors. Identifiers use letters, digits, underscore, dot or "
+        "hyphen; start with a letter or digit and keep at most 128 characters. "
+        f"The entire report is at most {MAX_REPORT_BYTES} UTF-8 bytes. No NaN, Infinity, booleans "
+        "as numbers, extra output or log text on stdout. Use json.dumps(..., allow_nan=False). "
+        "On each invalid probe, include its constraint_id as one error code."
+    )
+
+
+def _source_policy_prompt() -> str:
+    return (
+        "\n\nEvaluator source policy: only deterministic standard-library code with imports from "
+        + json.dumps(sorted(_ALLOWED_IMPORTS)) + ". Other standard-library modules are rejected. "
+        "Read declared files with pathlib.Path.read_text/read_bytes or Path.open in r/rt/rb mode; "
+        "the built-in open function is rejected even for reads. Do not create, change or delete "
+        "files, execute/import candidate code, start processes, access the network or use external "
+        "paths. Include if __name__ == '__main__': and a normal script entry point. "
+        "The static validator forbids direct calls to "
+        + json.dumps(sorted(_DANGEROUS_CALLS | {"__import__"})) + ". It also rejects attributes "
+        "starting with '__', the attribute 'modules', and any attribute named "
+        + json.dumps(sorted(_DANGEROUS_ATTRIBUTES)) + ", even on strings or other benign objects. "
+        "Every stripped string literal starting with '/', '~' or '../', or containing '/../', "
+        "is rejected as an external path even when it is not used as a filename. "
+        "Use simple explicit parsing, loops and dictionaries within these restrictions. "
+        "Reject invalid submitted values explicitly and recompute summaries/objectives from inputs."
+    )
+
+
 def _compiler_prompt(
     contract: AlgorithmProblemContract, input_profile: dict[str, object], *, invocation: str = "candidate",
 ) -> str:
@@ -1262,13 +1403,16 @@ def _compiler_prompt(
         "path whose sibling workspace already contains verified data/raw, output, and "
         "execution.json. It must independently recompute every hard constraint and objective from "
         "those files, print exactly one strict EvaluationReport, use only deterministic standard "
-        "library modules, and include an if __name__ == '__main__' entry point. combined_score is "
+        "library modules allowed by the source policy below, and include an if __name__ == '__main__' "
+        "entry point. combined_score is "
         "always higher-is-better. Provide exactly one expected_validity=0 synthetic probe per hard "
         "constraint with matching constraint_id/error_info.code, at least two valid probes, and at "
         "least one strict better/worse score_order assertion. Probe files may exist only under "
         "data/raw/ or output/. Do not return markdown, commands, credentials, or external paths.\n\n"
         "The private input profile contains structural counts and types only. Use observed fields "
-        "to align parsing, but do not infer business semantics or constraints from missing values.\n\n"
+        "to align parsing, but do not infer business semantics or constraints from missing values. "
+        "Construct small synthetic input/output values from the declared business semantics for "
+        "probes; they are not the private dataset and need not reproduce its row counts.\n\n"
         f"Canonical contract:\n{context}\n\n"
         f"Private input profile SHA-256: {profile_digest}\n"
         f"Private input profile:\n{profile}"
@@ -1286,7 +1430,8 @@ def _compiler_prompt(
         header = header.replace("every hard constraint", "every output constraint")
         header = header.replace("per hard constraint", "per output constraint")
         prompt = header + "Canonical contract:\n" + context_section
-    return prompt + scope_prompt
+    return (prompt + scope_prompt + _response_protocol_prompt(contract, invocation=invocation, compiler=True)
+            + _evaluation_report_prompt(invocation) + _source_policy_prompt())
 
 
 def _compile_audit_suite(
@@ -1353,8 +1498,9 @@ def _auditor_prompt(
         "ordering. Probe boundary cases, duplicate/omitted entities, and false rejection where relevant. "
         "Each probe must include every declared input and required output, using only relative paths "
         "below data/raw/ or output/. Do not return evaluator code, fixes, markdown, credentials, commands, "
-        "external paths, or prose. The private profile contains structure only; never invent or request raw "
-        "values. You have deliberately not received the compiler's self probes.\n\n"
+        "external paths, or prose. The private profile contains structure only: never request or "
+        "attempt to recover private raw values. Construct your own small synthetic values from the "
+        "declared semantics instead. You have deliberately not received the compiler's self probes.\n\n"
         f"Canonical contract:\n{context}\n\n"
         f"Private input profile SHA-256: {profile_sha256(input_profile)}\n"
         f"Private input profile:\n{profile}\n\n"
@@ -1368,7 +1514,8 @@ def _auditor_prompt(
         header, context_section = prompt.split("Canonical contract:\n", 1)
         header = header.replace("per hard constraint", "per output constraint")
         prompt = header + "Canonical contract:\n" + context_section
-    return prompt + scope_prompt
+    return (prompt + scope_prompt + _response_protocol_prompt(contract, invocation=invocation, compiler=False)
+            + _evaluation_report_prompt(invocation) + _source_policy_prompt())
 
 
 def _canonical_probe_suite(suite: ProbeSuite) -> str:
