@@ -30,10 +30,15 @@ from .algorithm import (
     EvaluationReport,
 )
 from .data_profile import (
+    MAX_PROFILE_DEPTH,
+    MAX_PROFILE_FIELD_BYTES,
+    MAX_PROFILE_FIELDS,
+    MAX_PROFILE_ROWS,
     DataProfileError,
     build_private_input_profile,
     canonical_profile_json,
     profile_sha256,
+    validate_input_format,
 )
 from .evaluator import acceptance_evaluator
 from .evolution import CandidateExecution, CandidateInputArtifact, EvolutionError
@@ -1141,6 +1146,17 @@ def _preflight(
     label: str,
     invocation: str = "candidate",
 ) -> None:
+    # Admit the whole suite before executing even its first probe. This is creation-time
+    # validation only; loading an existing frozen bundle never replays its probes.
+    for probe in suite.probes:
+        supplied = {item.path: item.content for item in probe.files}
+        for item in contract.inputs:
+            try:
+                validate_input_format(item.format, supplied["data/raw/" + item.path].encode("utf-8"))
+            except (DataProfileError, KeyError, UnicodeError):
+                raise EvaluatorBundleError(
+                    f"{label} probe input violates the declared input format"
+                ) from None
     reports: dict[str, EvaluationReport] = {}
     probe_root = staging / f".{label}-preflight"
     for probe in suite.probes:
@@ -1403,6 +1419,29 @@ def _response_protocol_prompt(contract, *, invocation: str, compiler: bool) -> s
         "requires a strictly larger combined_score for better. Use a small shared synthetic input "
         "instance for the two ordered outputs when the task allows it. One ordering pair suffices. "
         "All source requirements remain outside output probe coverage."
+        + _input_format_prompt()
+    )
+
+
+def _input_format_prompt() -> str:
+    return (
+        "\n\nSynthetic input format admission: before any probe in a compiler or auditor suite "
+        "executes, every declared input in every probe must pass the same format parser used "
+        "for private input profiling, including expected_validity=0 probes. All inputs use UTF-8. "
+        "JSON roots must be an object or an array of objects (including {} or []), never a scalar. "
+        "JSONL uses one object per nonblank line; blank lines and no records are allowed. "
+        "JSON/JSONL reject duplicate object keys and non-finite numbers at every nesting level. "
+        "CSV requires nonempty, unique headers and every row must have the same width; "
+        "a header-only CSV is allowed. Text has no record schema. "
+        f"Record inputs allow at most {MAX_PROFILE_ROWS} records and {MAX_PROFILE_FIELDS} distinct "
+        f"top-level fields. Field names are nonempty, at most {MAX_PROFILE_FIELD_BYTES} UTF-8 bytes, "
+        "without NUL or credential-like text. JSON/JSONL nesting is at most "
+        f"{MAX_PROFILE_DEPTH} levels, counting the root as 1 and each child value as one level. "
+        "Probe content must still satisfy the nonempty text and byte limits above. "
+        "These checks validate format only: they do not enforce business field presence, types, "
+        "ranges, or object-versus-array semantics. Design the evaluator and probes from the "
+        "declared task semantics. Synthetic inputs need not match private row counts, unique/null "
+        "counts or inferred field types; field descriptions are not an executable schema."
     )
 
 

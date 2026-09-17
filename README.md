@@ -268,6 +268,13 @@ probe suite. Search starts only after both suites prove constraint validity, mat
 and strict score ordering. This catches correlated evaluator/self-test omissions such as accepting
 duplicate entities merely because row counts match.
 
+Before the first probe in either suite runs, every synthetic input must pass the same format
+parser as real input profiling: JSON objects or arrays of objects, JSONL object records, CSV with
+valid headers and row widths, or UTF-8 text. This also applies to probes with invalid outputs.
+Small synthetic inputs may differ from private row counts and field statistics; admission does
+not infer business schemas from field descriptions. Existing frozen bundles load without replaying
+probes or reapplying this creation-time check. See [126 validation](specs/126-synthetic-input-format/validation.md).
+
 Lunar-Agent hashes and freezes `objective.md`, `evaluator.py`, canonical `probes.json`, independent
 `audit.json`, canonical `input-profile.json`, and `manifest.json` under the intake run. The profile
 and audit digests are part of bundle identity. Resume re-profiles current ledger-bound bytes and

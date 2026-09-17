@@ -16,6 +16,18 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：合成输入统一格式准入
+
+Feature 126 复用真实画像的JSON/JSONL/CSV/text解析，在compiler/audit每组第一个probe
+执行前检查全部声明输入，candidate/snapshot两种模式均覆盖。格式错误不再靠evaluator
+自测发现；无效输出的输入仍须格式合法。小型/空数组/混合字段合成数据保留，不推断业务
+schema，不复制私有统计。旧bundle保留既有身份和结构校验，不重新执行历史probe，
+也不施加新增输入格式准入。
+81项新测试、240项相关回归及112恢复示例通过，独立审查无问题；最终当前代码6526 passed/
+1 skipped、固定历史快照24 passed，整体exit0。完整结果见
+[126验证](../specs/126-synthetic-input-format/validation.md)。下一步补本地失败阶段和原因，
+然后另行登记真实诊断。本轮未调用真实模型，125的0/1及所有旧分母不变。
+
 ## 2026-09-17：独立audit拦住输入结构误读
 
 Feature 125 固定eefe389、登记ef29c36先push再执行独立/1诊断，保留123任务和预算。

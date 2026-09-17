@@ -6,6 +6,31 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 126：合成输入复用真实格式准入（2026-09-17）
+
+data_profile公开纯validate_input_format，与真实画像共用_parse_input及原有_utf8/_records。
+JSON只接受对象/对象数组，JSONL只接受对象记录，CSV校验表头和行宽，text按UTF-8读取；
+保留重复键、非有限数、字段/深度/行数限制，递归/Unicode异常归一为DataProfileError。
+不从fields描述推断schema，不要求合成数据复制私有行数、字段类型或统计值。
+
+compiler和audit两种suite、candidate和snapshot两种调用均在第一项probe执行/创建workspace
+之前检查整组所有声明输入，expected_validity=0也不豁免。compiler格式失败不会调用auditor；
+audit格式失败不运行任何audit harness、不冻结；固定错误只含阶段和格式类别，不含输入
+或解析器原文。共享提示说明可执行规则和边界。旧bundle保留既有身份和结构校验，不重放
+探针或施加新增输入格式准入；profile bytes、协议、source/output审查和严格冻结边界保持。
+
+新增81项离线测试、240项相关回归及独立审查通过；112 quickstart仍选7分，终态恢复保持
+1/1/1/4/4调用及一个交付副本。最初72项先复现60失败/12通过；新fixture不读取或执行125
+捕获源码。最终当前代码6526 passed/1 skipped，历史固定快照24 passed；双阶段exit0，
+临时worktree已清理。冻结的3份实现/测试、1610份既有spec/test和125/123/120的16/15/46份
+保留证据均未变。Ruff、compileall、CLI、Specify及140个文档链接通过。完整记录见
+`specs/126-synthetic-input-format/validation.md`，按授权正常提交推送。
+
+下一步补有界、controller自有的本地准备失败阶段/原因，随后才另行固定登记真实诊断。
+本轮没有真实模型调用；格式合法不保证业务字段、值类型、范围或评测正确。113/115/117/120
+仍各自0/2，123和125各自0/1，真实多文件交付尚未成功验收。外部多文件seed、全链路预算/
+取消与detached继续后置。历史campaign和测量登记不可重开、重钉产品或改写。
+
 ## Feature 125：compiler自测通过，独立audit阻止错误冻结（2026-09-17）
 
 固定产品eefe389，沿用123整份合同（problem_id也保留）、输入limit3、8个holdout、GLM-5.2

@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 125。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 126。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -60,6 +60,15 @@ evaluator的整根类型检查会拒绝有效对象。独立audit阻止了错误
 真实输入既有格式准入，并补准确本地阶段诊断；不从描述字段推断通用schema，不修补旧响应。
 见[125 report](../specs/125-snapshot-protocol-diagnostic/postrun/report.md)。这仍未完成真实
 多文件交付，不构成124因果收益；123与125分母各自独立，均0/1。
+
+Feature 126 已让合成输入和真实画像共用格式解析：compiler/audit整组输入在第一个probe
+执行前准入，两种调用模式和无效输出探针均覆盖。JSON标量、坏CSV等会提前失败；
+不要求私有行数/类型统计匹配，不将fields描述当schema。共享提示同步，旧冻结bundle
+保持只读恢复，不重新执行或准入历史probe。81项新测试、240项相关回归、112终态恢复
+和独立审查通过；最终当前代码6526 passed/1 skipped，历史固定快照24 passed，整体exit0。
+全仓与历史核验见
+[126 validation](../specs/126-synthetic-input-format/validation.md)。本轮没有真实模型调用，
+不改变旧完成率；下一步补准确本地准备阶段/原因，再独立登记真实诊断。
 
 ## 当前判断
 

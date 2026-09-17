@@ -55,29 +55,45 @@ def build_private_input_profile(
         descriptor = descriptors[relative]
         content = _verified_bytes(root, descriptor)
         format_name = spec.format.strip().lower()
-        if format_name not in SUPPORTED_PROFILE_FORMATS:
-            raise DataProfileError(f"unsupported input profile format: {format_name}")
+        parsed = _parse_input(format_name, content)
         base: dict[str, object] = {
             "path": relative,
             "format": format_name,
             "size": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
         }
-        if format_name == "text":
-            text = _utf8(content)
-            base.update({"line_count": len(text.splitlines()), "fields": []})
+        if isinstance(parsed, str):
+            base.update({"line_count": len(parsed.splitlines()), "fields": []})
         else:
-            records = _records(format_name, content)
             base.update(
                 {
-                    "row_count": len(records),
-                    "fields": _field_profiles(records),
+                    "row_count": len(parsed),
+                    "fields": _field_profiles(parsed),
                 }
             )
         files.append(base)
     profile: dict[str, object] = {"schema_version": "1", "files": files}
     canonical_profile_json(profile)
     return profile
+
+
+def validate_input_format(format_name: str, content: bytes) -> None:
+    """Admit input syntax using profile rules, without inferring a business schema.
+
+    Callers retain their own content byte limits; record/field/depth limits are shared
+    with private profiling. No filesystem access, profile statistics or execution occurs.
+    """
+    _parse_input(format_name, content)
+
+
+def _parse_input(format_name: str, content: bytes) -> str | list[dict[str, object]]:
+    format_name = format_name.strip().lower()
+    if format_name not in SUPPORTED_PROFILE_FORMATS:
+        raise DataProfileError(f"unsupported input profile format: {format_name}")
+    try:
+        return _utf8(content) if format_name == "text" else _records(format_name, content)
+    except (RecursionError, UnicodeError) as exc:
+        raise DataProfileError("input exceeds supported encoding or nesting limits") from exc
 
 
 def canonical_profile_json(profile: dict[str, object]) -> str:
@@ -280,4 +296,5 @@ __all__ = [
     "build_private_input_profile",
     "canonical_profile_json",
     "profile_sha256",
+    "validate_input_format",
 ]
