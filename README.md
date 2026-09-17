@@ -1445,6 +1445,14 @@ CONNECT/TLS, and received headers may precede a redirect. Final status and coars
 remain separate. Only fixed names and integers enter this detail; request bytes, TLS, proxies,
 redirects, deadlines and retries are unchanged. No new real model result is claimed.
 
+The independently registered [123 small diagnostic](specs/123-small-evaluator-diagnostic/postrun/report.md)
+finished **0/1** evaluator preparations. Its compiler request returned HTTP200 in243 seconds
+(20,831 reported tokens), then local preparation rejected the evaluator; no auditor or holdout ran.
+Static inspection found that generated code looked for input descriptor `path`, while the native
+field is `target`. The snapshot prompt does not yet specify that nested input shape completely.
+This identifies a concrete next repair, without establishing the cause of120's timeouts or real
+multi-file delivery. No attempt was retried; historical denominators remain separate.
+
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,

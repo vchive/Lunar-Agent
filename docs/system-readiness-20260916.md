@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 122。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 123。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -35,6 +35,13 @@ subject schema5，历史1–4和粗 phase/status 保留；请求参数和时限�
 445项相关回归通过，最终全仓 **6200 passed, 1 skipped**；恢复与历史字节复验通过。
 这为下一次独立登记的小型 evaluator 准备诊断提供工具，没有新的真实模型测量，
 113/115/117/120仍各自0/2。见 [122 validation](../specs/122-transport-milestone-observation/validation.md)。
+
+Feature 123 随后先推送独立登记再执行一项小型合成evaluator准备诊断。唯一compiler请求
+在242.848秒HTTP200返回（20831tokens、费用未知），随后本地自测拒绝；freeze/joint均0/1，
+没有auditor或8项holdout执行。静态检查确认生成源码把input descriptor的target误认成path，
+使有效probe提前被判无效。下一步补齐snapshot request的实际嵌套结构和本地一致性检查。
+这个诊断没有solver/多文件交付，不证明原120超时根因或真实闭环已成功。见
+[123 report](../specs/123-small-evaluator-diagnostic/postrun/report.md)。
 
 ## 当前判断
 

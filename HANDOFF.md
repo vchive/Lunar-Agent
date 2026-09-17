@@ -6,7 +6,7 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
-## Feature 123：小型评测器诊断已登记，待唯一一次执行（2026-09-17）
+## Feature 123：小型诊断0/1，定位输入描述字段不匹配（2026-09-17）
 
 固定产品519fea5，独立/1诊断只直接调用原生snapshot evaluator准备，仍用AgentLoopRuntime
 的system+user隔离调用；没有合同编译、普通求解器或source要求。整数value在输入limit范围
@@ -14,13 +14,30 @@
 compiler一次，只有原生解析/源码/自测接受后才audit一次，最多2请求，600秒/请求，1320秒
 监督总墙钟同时覆盖本地自测/holdout；冻结后每holdout5秒，无重试、恢复、替补。
 
-登记manifest SHA `9d05c7d95eb427f60d7be7a93dbfb8c7c53ec50904169e0391053292315f60a7`，
-目录 `specs/123-small-evaluator-diagnostic`；102项新测试、403项相关回归及112恢复示例
-通过，测量实现/测试已冻结。prepare/verify零模型调用，必须先commit/push才run。
-新根 `.lunar/diagnostic123-glm-5.2-small-evaluator-20260917` 只允许分配一次；summarize
-只读留存结果，不执行任何模型/evaluator。分别报freeze/1、holdout agreement/8、joint/1。
-私有文本只留本地；transport旁路记录与旧calls账本独立，成功ModelTurn仍不新增字段。
-细节见 `specs/123-small-evaluator-diagnostic/validation.md`。113/115/117/120仍各自0/2。
+登记034b1847eaf0cc043ac87e179ebd72de5fc1fb90已先push；manifest SHA
+`9d05c7d95eb427f60d7be7a93dbfb8c7c53ec50904169e0391053292315f60a7`。唯一请求HTTP200，
+242.848秒后完整返回，但本地preparation抛EvaluatorBundleError，尚未audit/freeze；最终
+freeze和joint均0/1，0/8 holdout执行，quality/gap为null。已知总用量20831 tokens
+（2688input+18143output），费用未知。首请求12353bytes，SHA与登记相符；HTTP体79074
+bytes仅留长度/摘要，assistant text5365bytes完整保存在本地且无脱敏/截断。最后传输点为
+response_headers_received/index1/242766ms，不能倒推出连接/排队/模型计算各自耗时。
+supervisor总244.044秒、worker退出1，cleanup通过，无剩余已观察进程。
+
+独立只读诊断确认JSON envelope、3978bytes源码AST、3个probe格式与静态oracle均通过。
+生成代码L58使用input entry.get('path')，native input descriptor却是
+target/source_label/size/sha256；L61–63因找不到声明而返回validity0，尚未读inputs/limit.json，
+足以使首个有效自测失败。输出descriptor的path使用正确，不应一起改成target。
+121/122的snapshot prompt只说明inputs/<target>文件位置，未明确inputs[]嵌套字段，也没
+区分它与contract.inputs[].path/profile.files[].path。**下一步补齐真实request对象格式与
+descriptor示例，并用本地真实snapshot request验证提示一致性**；不能修好后重放此槽。
+此为静态充分缺陷，不是实际traceback重放，也不证明提示遗漏是唯一原因或修复必成功。
+
+102项新测试、403项相关回归及112恢复示例通过。77product/14measurement/69history pins
+和15个retained文件size/SHA复验均通过；测量实现未改，产品仍519fea5。
+根 `.lunar/diagnostic123-glm-5.2-small-evaluator-20260917` 已封存，summarize只读执行一次。
+证据与静态诊断见 `specs/123-small-evaluator-diagnostic/postrun/report.md`，静态检查脚本不
+执行生成代码；私有响应/源码不公开。113/115/117/120仍各自0/2，不推断旧超时根因，也不
+视为121因果延迟收益或真实多文件交付。外部多文件seed、全链路预算/取消、detached仍后置。
 
 ## Feature 122：本地 HTTP 里程碑与兼容诊断（2026-09-17）
 

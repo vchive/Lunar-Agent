@@ -16,6 +16,15 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：小型评测器诊断返回响应，定位本地接口误用
+
+Feature 123 固定519fea5并先推送登记，单独/1诊断在242.848秒收到compiler HTTP200，
+20831 tokens用量完整；随后本地准备失败，未调用auditor/freeze/8个holdout，最终0/1。
+静态检查发现生成代码在inputs[]寻找path而非实际target，导致有效probe提前被判无效；
+此前提示没有明确该嵌套字段，也未区分contract/profile中的path。下一步补齐真实snapshot
+request示例并与本地产生的对象验证一致，保留此次失败且不重放旧槽。该证据不能解释120
+超时或声称多文件闭环成功。见 [123报告](../specs/123-small-evaluator-diagnostic/postrun/report.md)。
+
 ## 2026-09-17：本地 HTTP 里程碑诊断
 
 Feature 122 在不改请求、TLS/代理/重定向或时限的前提下记录最后本地连接/写入/响应头
