@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 121。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-17 更新至 Feature 122。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -26,6 +26,15 @@ Feature 121 随后离线补齐 evaluator compiler/auditor 的完整响应/报告
 调用与恢复协议。原120请求从冻结源码
 重建且哈希匹配，没有重复历史/合同。请求大小不证明超时原因，121没有真实模型结果，
 不能据此更新多文件有效率。见 [121 validation](../specs/121-evaluator-prompt-protocol/validation.md)。
+
+Feature 122 为有界 HTTP 请求补充最后本地里程碑、第几次 HTTP 交换和经过毫秒数，
+分别记录进入连接、连接返回、请求写入调用返回和响应头返回（含中间重定向）等已观察点，
+不保证失败时仍处于该阶段。
+连接仍合并 DNS/TCP/代理隧道/TLS，写入返回不证明远端接收或模型执行。新详细失败使用
+subject schema5，历史1–4和粗 phase/status 保留；请求参数和时限不变。新增151项测试和
+445项相关回归通过，最终全仓 **6200 passed, 1 skipped**；恢复与历史字节复验通过。
+这为下一次独立登记的小型 evaluator 准备诊断提供工具，没有新的真实模型测量，
+113/115/117/120仍各自0/2。见 [122 validation](../specs/122-transport-milestone-observation/validation.md)。
 
 ## 当前判断
 

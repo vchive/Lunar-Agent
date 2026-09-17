@@ -6,6 +6,38 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 122：本地 HTTP 里程碑与兼容诊断（2026-09-17）
+
+有界 HTTP worker 增加固定三字段 TransportObservation：last_milestone、
+http_exchange_index、elapsed_ms。里程碑依次为 worker_ready、prepare_request、connect、
+send_request、wait_response_headers、response_headers_received；每次 urllib HTTP 交换
+递增序号，代理 CONNECT 留在 connect 内。毫秒从 parent transport start 算起，worker_ready
+表示请求IPC/config已接受。连接包含DNS/TCP/代理隧道/TLS，写入返回不证明远端接收/执行。
+中间302响应头不冒充最终状态，慢重定向响应体与第二跳慢头可分辨；这不是服务端根因诊断。
+
+通过继承标准库 handler.do_open 和 connect/request/getresponse，仅包观测，不复制TLS
+context/ALPN逻辑或修改请求。粗phase/status、deadline、单PID/lifeline清理、正文限额均保留。
+IPC最多256条里程碑，达到上限或观测时钟失效时明确丢弃可选细节并继续原请求；旧2/3帧
+协议仍有效。没有完整观测或worker非零退出丢失观测均表示未知，不能说没有发送或消费为零。
+
+TransportResponse/TransportFailure具有可选observation；ModelRequestFailure另存
+transport_observation，包括HTTP完成后的响应解析失败。成功ModelTurn和直接无界路径不变。
+subject仅在原v4及同节点typed detail均有效时写schema5，缺失/畸形detail回退，旧1–4可读。
+新字段只有固定名字与整数，不记录端点、认证、代理、头、正文或异常原文。
+
+新增151项本地HTTP/TLS/代理/重定向、发送/DNS/启动阻塞、严格IPC和normal/deep诊断测试
+通过；相关回归445项通过，独立审查无阻塞项。112 quickstart仍交付7分，恢复保持
+1/1/1/4/4调用和一个交付副本。最终全仓 **6200 passed, 1 skipped in 415.59s**，JUnit
+零失败/错误，冻结后未改实现；Ruff、compileall、CLI、Specify、130个文档链接和历史字节
+复验通过。Python3.11另验证语法/导入/标准库hook，行为测试在仓库3.13执行。
+完整记录见 `specs/122-transport-milestone-observation/validation.md`，按既有授权正常提交推送。
+
+没有真实模型调用，113/115/117/120仍分别0/2。下一步固定并推送新独立登记：一项小型
+合成snapshot evaluator准备诊断（整数value在输入limit范围内并最大化），compiler一次，
+只有原生解析/源码/自测通过才调用auditor，最多两请求；600秒/请求，加独立supervisor总墙钟
+覆盖本地自测。仅冻结后执行预声明快照holdout，使用独立/1分母。不得当作完整多文件交付、
+真实算法质量或121的因果延迟改善。外部多文件seed、全链路预算/取消与detached仍后置。
+
 ## Feature 121：评测器生成协议补全与离线请求诊断（2026-09-17）
 
 离线从 `c569508` Git 源码重建120四个请求，SHA全部匹配；评测器请求分别9,723/11,366

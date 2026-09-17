@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from .agent_loop import AgentInputRequired, ProfileBudgetFailure
+from .http_transport import TransportObservation, normalize_transport_observation
 from .model_profile import BudgetFailureEvidence, UsageSnapshot
 from .runtime import (
     MAX_REQUEST_OBSERVATION_MS,
@@ -184,10 +185,11 @@ def normalize_diagnostic(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or "schema_version" not in value:
         raise ValueError("invalid diagnostic fields")
     version = value.get("schema_version")
-    if type(version) is not str or version not in {"1", "2", "3", "4"}:
+    if type(version) is not str or version not in {"1", "2", "3", "4", "5"}:
         raise ValueError("invalid diagnostic version")
     additional = {"2": {"budget"}, "3": {"model_failure"},
-                  "4": {"model_failure", "request_observation"}}.get(version, set())
+                  "4": {"model_failure", "request_observation"},
+                  "5": {"model_failure", "request_observation", "transport_observation"}}.get(version, set())
     if set(value) != _FIELDS | additional:
         raise ValueError("invalid diagnostic fields")
     if value["kind"] != "subject_failure":
@@ -214,7 +216,7 @@ def normalize_diagnostic(value: object) -> dict[str, object]:
         if (value["stage"], value["code"], value["http_status"]) != ("runtime", "budget_exceeded", None):
             raise ValueError("invalid diagnostic budget classification")
         return {**value, "budget": _normalize_budget(value["budget"])}
-    if version in {"3", "4"}:
+    if version in {"3", "4", "5"}:
         if value["stage"] != "model" or value["code"] not in {"model_failed", "model_http_failed", "timeout"}:
             raise ValueError("invalid model failure classification")
         failure = _normalize_model_failure(value["model_failure"])
@@ -223,9 +225,14 @@ def normalize_diagnostic(value: object) -> dict[str, object]:
             raise ValueError("inconsistent model failure status")
         if value["code"] == "model_http_failed" and status is None:
             raise ValueError("missing model HTTP failure status")
-        if version == "4":
-            return {**value, "model_failure": failure, "request_observation":
-                    _normalize_request_observation(value["request_observation"], failure["reason"])}
+        if version in {"4", "5"}:
+            normalized = {**value, "model_failure": failure, "request_observation":
+                          _normalize_request_observation(value["request_observation"], failure["reason"])}
+            if version == "5":
+                normalized["transport_observation"] = normalize_transport_observation(
+                    value["transport_observation"],
+                )
+            return normalized
         return {**value, "model_failure": failure}
     return dict(value)
 
@@ -417,6 +424,7 @@ class SubjectDiagnosticObserver:
         budget = None
         model_failure = None
         request_observation = None
+        transport_observation = None
         model_failure_checked = False
         current: BaseException | None = error
         seen: set[int] = set()
@@ -446,6 +454,18 @@ class SubjectDiagnosticObserver:
                     except (TypeError, ValueError, AttributeError):
                         # Timing belongs only to this accepted evidence node; retain v3 if invalid.
                         pass
+                    if request_observation is not None:
+                        try:
+                            detail = current.transport_observation
+                            if type(detail) is TransportObservation:
+                                transport_observation = normalize_transport_observation({
+                                    "last_milestone": detail.last_milestone,
+                                    "http_exchange_index": detail.http_exchange_index,
+                                    "elapsed_ms": detail.elapsed_ms,
+                                })
+                        except (TypeError, ValueError, AttributeError):
+                            # Optional detail cannot replace the accepted coarse failure evidence.
+                            pass
             if isinstance(current, HTTPError) and _integer(current.code, 100, 599):
                 http_status = current.code
                 if self.stage == "model":
@@ -487,10 +507,19 @@ class SubjectDiagnosticObserver:
         if model_failure is not None:
             try:
                 if request_observation is not None:
-                    return normalize_diagnostic({
+                    timed = normalize_diagnostic({
                         **payload, "schema_version": "4", "model_failure": model_failure,
                         "request_observation": request_observation,
                     })
+                    if transport_observation is not None:
+                        try:
+                            return normalize_diagnostic({
+                                **timed, "schema_version": "5",
+                                "transport_observation": transport_observation,
+                            })
+                        except (TypeError, ValueError):
+                            pass
+                    return timed
             except (TypeError, ValueError):
                 pass
             try:

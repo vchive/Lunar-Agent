@@ -512,6 +512,13 @@ it does not identify a server or network root cause. Invalid timing falls back t
 versions 1–3 remain readable. See [Feature 079](specs/079-model-failure-evidence/spec.md) and
 [Feature 080](specs/080-model-request-timing/spec.md).
 
+Version 5 additionally retains the bounded worker's last local milestone, HTTP exchange index and
+elapsed milliseconds from transport start. This can distinguish connect, request-write and header
+progress, including redirect hops, while preserving the coarse phase and final status. Invalid or
+missing detail falls back to the existing projection; versions1–4 remain readable. Local writes
+returning do not establish remote receipt or execution. See
+[Feature 122](specs/122-transport-milestone-observation/spec.md).
+
 These observations describe only a request that propagated a typed failure. They do not log a live
 request, survive an outer process kill, recover failed-request usage or change retries and scoring.
 Milliseconds are rounded down; a positive timeout below one millisecond appears as zero, while
@@ -1428,6 +1435,15 @@ timeout consumption and cost are unknown. This does not establish real multi-fil
 independent auditor with complete response/report shapes and the actual source restrictions.
 Its offline diagnostic reproduces the old request hashes, and no model request was made for 121.
 This fixes missing generation instructions; it has no measured latency or success-rate result.
+
+[122 transport observations](specs/122-transport-milestone-observation/quickstart.md) add the last
+local connection/write/header milestone, HTTP exchange index and elapsed milliseconds to bounded
+transport results. Valid detailed model failures use subject diagnostic version5; versions1–4 keep
+their existing meaning. `wait_response_headers` means the local request-write call returned,
+not that the provider received it or began model execution. Connection includes DNS/TCP/proxy
+CONNECT/TLS, and received headers may precede a redirect. Final status and coarse failure phase
+remain separate. Only fixed names and integers enter this detail; request bytes, TLS, proxies,
+redirects, deadlines and retries are unchanged. No new real model result is claimed.
 
 A completed observation from the transport-free remote lifecycle can use
 `famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts

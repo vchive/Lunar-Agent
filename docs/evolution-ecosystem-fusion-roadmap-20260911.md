@@ -16,6 +16,16 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
 
+## 2026-09-17：本地 HTTP 里程碑诊断
+
+Feature 122 在不改请求、TLS/代理/重定向或时限的前提下记录最后本地连接/写入/响应头
+里程碑和 HTTP 交换序号。接入 subject schema5，旧1–4仍可读；中间重定向状态不冒充
+最终响应状态，连接阶段不声称能区分 DNS/TCP/TLS，写入返回不证明服务端已经执行。
+本地测试后继续固定产品，下一步独立登记一项小型合成 evaluator 准备诊断（compiler一次，
+只有原生校验通过才调用auditor，最多两请求），再检查冻结和预声明快照holdout。
+这轮没有真实模型调用，四轮历史结果仍各自0/2；完整多文件真实交付仍待验收。
+详见 [122验证](../specs/122-transport-milestone-observation/validation.md)。
+
 ## 2026-09-17：评测器生成协议补全
 
 Feature 121 将完整 probe/file/ordering、报告嵌套结构与实际源码限制写入两种生成角色的

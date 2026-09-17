@@ -7,6 +7,7 @@ the supervisor owns one PID and never signals that shared group.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import math
 import os
@@ -27,6 +28,13 @@ MAX_RESULT_BYTES = 12 * 1024 * 1024
 MAX_BODY_BYTES = 8 * 1024 * 1024
 MAX_ERROR_BYTES = 2000
 MAX_TIMEOUT_SECONDS = 86400
+MAX_TRANSPORT_OBSERVATION_MS = 10**12
+MAX_TRANSPORT_MILESTONES = 256
+_OBSERVATION_FIELDS = {"last_milestone", "http_exchange_index", "elapsed_ms"}
+_MILESTONES = (
+    "worker_ready", "prepare_request", "connect", "send_request",
+    "wait_response_headers", "response_headers_received",
+)
 _PHASE_FIELDS = {"kind", "phase", "status"}
 _TERMINAL_FIELDS = {"kind", "outcome", "reason", "cause", "status", "body"}
 _CAUSE_REASONS = {
@@ -38,9 +46,35 @@ _CAUSE_REASONS = {
 
 
 @dataclass(frozen=True)
+class TransportObservation:
+    """Last local milestone, never a provider activity or remote receipt claim."""
+
+    last_milestone: str
+    http_exchange_index: int
+    elapsed_ms: int
+
+
+def normalize_transport_observation(value: object) -> dict[str, object]:
+    if type(value) is not dict or set(value) != _OBSERVATION_FIELDS:
+        raise ValueError("invalid transport observation fields")
+    milestone, index, elapsed = (
+        value["last_milestone"], value["http_exchange_index"], value["elapsed_ms"],
+    )
+    if type(milestone) is not str or milestone not in _MILESTONES:
+        raise ValueError("invalid transport milestone")
+    if (type(index) is not int or not 0 <= index <= MAX_TRANSPORT_MILESTONES
+            or (index == 0) != (milestone == "worker_ready")):
+        raise ValueError("invalid transport exchange index")
+    if type(elapsed) is not int or not 0 <= elapsed <= MAX_TRANSPORT_OBSERVATION_MS:
+        raise ValueError("invalid transport observation time")
+    return dict(value)
+
+
+@dataclass(frozen=True)
 class TransportResponse:
     status: int
     body: bytes
+    observation: TransportObservation | None = None
 
 
 class TransportFailure(Exception):
@@ -48,11 +82,12 @@ class TransportFailure(Exception):
 
     def __init__(
         self, phase="open_response", reason="transport_error", status=None,
-        cause="local_error", body=b"",
+        cause="local_error", body=b"", observation=None,
     ):
         super().__init__("HTTP transport failed")
         self.phase, self.reason, self.status = phase, reason, status
         self.cause, self.body = cause, body
+        self.observation = observation
 
 
 def validate_timeout(timeout: object) -> float:
@@ -106,17 +141,65 @@ def _phase(frame, previous):
     return phase, status
 
 
+class _Progress:
+    """Validate bounded legacy/coarse and optional detailed worker progress together."""
+
+    def __init__(self):
+        self.phase = None
+        self.observation = None
+        self.count = 0
+        self.unavailable = False
+
+    def accept(self, frame):
+        if type(frame) is not dict:
+            raise ValueError("invalid transport progress")
+        if frame.get("kind") == "phase":
+            if (self.observation is not None
+                    and self.observation.last_milestone != "response_headers_received"):
+                raise ValueError("body phase before observed response headers")
+            self.phase = _phase(frame, self.phase)
+            return
+        if self.phase != ("open_response", None) or self.unavailable:
+            raise ValueError("invalid transport observation order")
+        if frame == {"kind": "observation_unavailable"}:
+            self.observation, self.unavailable = None, True
+            return
+        if set(frame) != _OBSERVATION_FIELDS | {"kind"} or frame["kind"] != "milestone":
+            raise ValueError("invalid transport milestone fields")
+        if self.count >= MAX_TRANSPORT_MILESTONES:
+            raise ValueError("too many transport milestones")
+        value = normalize_transport_observation({key: frame[key] for key in _OBSERVATION_FIELDS})
+        observation = TransportObservation(**value)
+        previous = self.observation
+        if previous is None:
+            expected = ("worker_ready", 0)
+        elif previous.last_milestone in {"worker_ready", "response_headers_received"}:
+            expected = ("prepare_request", previous.http_exchange_index + 1)
+        else:
+            expected = (_MILESTONES[_MILESTONES.index(previous.last_milestone) + 1],
+                        previous.http_exchange_index)
+        if (observation.last_milestone, observation.http_exchange_index) != expected:
+            raise ValueError("invalid transport milestone order")
+        if previous is not None and observation.elapsed_ms < previous.elapsed_ms:
+            raise ValueError("decreasing transport observation time")
+        self.observation = observation
+        self.count += 1
+
+
 def _decode_result(raw: bytes) -> TransportResponse:
     if len(raw) > MAX_RESULT_BYTES or not raw.endswith(b"\n"):
         raise ValueError("invalid transport result size or framing")
     lines = raw.splitlines()
-    if not 2 <= len(lines) <= 3:
+    if not 2 <= len(lines) <= MAX_TRANSPORT_MILESTONES + 4:
         raise ValueError("invalid transport frame count")
-    phase = None
+    progress = _Progress()
     for line in lines[:-1]:
         if len(line) > 512:
             raise ValueError("transport phase too large")
-        phase = _phase(_load(line), phase)
+        progress.accept(_load(line))
+    phase = progress.phase
+    if phase is None:
+        raise ValueError("missing transport phase")
     item = _load(lines[-1])
     if type(item) is not dict or set(item) != _TERMINAL_FIELDS or item["kind"] != "terminal":
         raise ValueError("invalid transport terminal")
@@ -125,7 +208,8 @@ def _decode_result(raw: bytes) -> TransportResponse:
     if item["outcome"] == "response":
         if phase[0] != "read_response_body" or item["reason"] is not None or item["cause"] is not None:
             raise ValueError("inconsistent transport response")
-        return TransportResponse(item["status"], _bytes(item["body"], MAX_BODY_BYTES))
+        return TransportResponse(item["status"], _bytes(item["body"], MAX_BODY_BYTES),
+                                 progress.observation)
     if item["outcome"] != "failure" or type(item["cause"]) is not str:
         raise ValueError("invalid transport failure")
     reason = _CAUSE_REASONS.get(item["cause"])
@@ -139,11 +223,11 @@ def _decode_result(raw: bytes) -> TransportResponse:
         if phase[0] not in {"open_response", "read_response_body"} or item["body"] != "":
             raise ValueError("invalid transport failure body or phase")
         body = b""
-    raise TransportFailure(phase[0], reason, phase[1], item["cause"], body)
+    raise TransportFailure(phase[0], reason, phase[1], item["cause"], body, progress.observation)
 
 
 def _deadline_failure(raw: bytes) -> TransportFailure:
-    phase = None
+    progress = _Progress()
     try:
         if len(raw) > MAX_RESULT_BYTES:
             raise ValueError("oversized progress")
@@ -155,13 +239,16 @@ def _deadline_failure(raw: bytes) -> TransportFailure:
             value = _load(line)
             if type(value) is dict and value.get("kind") == "terminal":
                 break
-            phase = _phase(value, phase)
+            progress.accept(value)
     except (ValueError, TypeError, KeyError, UnicodeError):
-        phase = None
+        progress = _Progress()
+    phase = progress.phase
     if phase is not None and phase[0] == "read_http_error_body":
-        return TransportFailure(phase[0], "http_error", phase[1], "http_error")
+        return TransportFailure(phase[0], "http_error", phase[1], "http_error",
+                                observation=progress.observation)
     phase = phase or ("open_response", None)
-    return TransportFailure(phase[0], "transport_timeout", phase[1], "timeout")
+    return TransportFailure(phase[0], "transport_timeout", phase[1], "timeout",
+                            observation=progress.observation)
 
 
 def _worker_command(lifeline: int) -> list[str]:
@@ -291,6 +378,98 @@ def _guardian(lifeline):
         os._exit(73)
 
 
+class _MilestoneEmitter:
+    def __init__(self, started):
+        self.started = started
+        self.index = 0
+        self.count = 0
+        self.elapsed = 0
+
+    def emit(self, milestone, index):
+        if self.count > MAX_TRANSPORT_MILESTONES:
+            return
+        try:
+            elapsed = math.floor((monotonic() - self.started) * 1000)
+            value = normalize_transport_observation({
+                "last_milestone": milestone, "http_exchange_index": index, "elapsed_ms": elapsed,
+            })
+            if self.count == MAX_TRANSPORT_MILESTONES or elapsed < self.elapsed:
+                raise ValueError("transport observation unavailable")
+        except Exception:  # noqa: BLE001 - optional clock observation cannot change the request
+            # Neither observation limits nor an invalid clock should alter the request outcome.
+            self.count = MAX_TRANSPORT_MILESTONES + 1
+            _emit({"kind": "observation_unavailable"})
+            return
+        _emit({"kind": "milestone", **value})
+        self.elapsed = elapsed
+        self.count += 1
+
+    def begin_exchange(self):
+        self.index += 1
+        self.emit("prepare_request", self.index)
+        return self.index
+
+
+class _ObservedConnection:
+    """Wrap native calls; do not replace sockets, TLS contexts or proxy tunneling."""
+
+    def connect(self):
+        self._milestones.emit("connect", self._exchange_index)
+        result = super().connect()
+        self._milestones.emit("send_request", self._exchange_index)
+        return result
+
+    def request(self, *args, **kwargs):
+        result = super().request(*args, **kwargs)
+        # Only a local write-return observation: remote receipt/execution is unknown.
+        self._milestones.emit("wait_response_headers", self._exchange_index)
+        return result
+
+    def getresponse(self):
+        response = super().getresponse()
+        # This may be a redirect. Never project this intermediate status as the final status.
+        self._milestones.emit("response_headers_received", self._exchange_index)
+        return response
+
+
+class _ObservedHTTPConnection(_ObservedConnection, http.client.HTTPConnection):
+    pass
+
+
+class _ObservedHTTPSConnection(_ObservedConnection, http.client.HTTPSConnection):
+    pass
+
+
+class _ObservedHandler:
+    def __init__(self, milestones):
+        self._milestones = milestones
+        super().__init__()
+
+    def do_open(self, http_class, req, **kwargs):
+        index = self._milestones.begin_exchange()
+        observed_class = {
+            http.client.HTTPConnection: _ObservedHTTPConnection,
+            http.client.HTTPSConnection: _ObservedHTTPSConnection,
+        }[http_class]
+
+        def connection(*args, **kw):
+            instance = observed_class(*args, **kw)
+            instance._milestones = self._milestones
+            instance._exchange_index = index
+            return instance
+
+        # Inherit https_open unchanged: Python versions differ in context/check_hostname/ALPN.
+        return super().do_open(connection, req, **kwargs)
+
+
+class _ObservedHTTPHandler(_ObservedHandler, urllib_request.HTTPHandler):
+    pass
+
+
+class _ObservedHTTPSHandler(_ObservedHandler, urllib_request.HTTPSHandler):
+    pass
+
+
 def _worker(lifeline):
     import resource
 
@@ -326,12 +505,15 @@ def _worker(lifeline):
     os.environ.update(trust)
     if config["proxy_source"] == "environment":
         urllib_request.proxy_bypass = lambda host: proxy_bypass_environment(host, proxies)
-    opener = urllib_request.build_opener(
-        urllib_request.ProxyHandler(proxies), urllib_request.HTTPSHandler(),
-    )
+    milestones = _MilestoneEmitter(deadline - seconds)
     request = Request(item["endpoint"], data=body, headers=item["headers"], method=item["method"])
     status = None
     _emit({"kind": "phase", "phase": "open_response", "status": None})
+    milestones.emit("worker_ready", 0)
+    opener = urllib_request.build_opener(
+        urllib_request.ProxyHandler(proxies),
+        _ObservedHTTPHandler(milestones), _ObservedHTTPSHandler(milestones),
+    )
     remaining = deadline - monotonic()
     if remaining <= 0:
         _terminal(None, b"", cause="timeout")

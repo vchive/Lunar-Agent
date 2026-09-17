@@ -101,7 +101,7 @@ def test_real_http_failure_has_typed_projection(tmp_path, status, body, reason):
         with pytest.raises(rt.RuntimeExecutionError) as caught:
             runtime.complete([{"role": "user", "content": SECRET}], timeout=1)
     payload = observer_payload(tmp_path, caught.value)
-    assert payload["schema_version"] == "4"
+    assert payload["schema_version"] == "5"
     assert payload["model_failure"] == {"reason": reason, "response_status": status}
     assert payload["code"] == ("model_http_failed" if status >= 400 else "model_failed")
     assert payload["http_status"] == (status if status >= 400 else None)

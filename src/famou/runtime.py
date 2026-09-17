@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
-from .http_transport import TransportFailure, exchange, validate_timeout
+from .http_transport import TransportFailure, TransportObservation, exchange, validate_timeout
 
 MAX_ENVELOPE_ARTIFACTS = 32
 MAX_ENVELOPE_BYTES = 256 * 1024
@@ -111,12 +111,21 @@ class ModelRequestFailure(RuntimeExecutionError):
         super().__init__(message)
         self.evidence = ModelFailureEvidence(reason, response_status)
         self.observation: ModelRequestObservation | None = None
+        self.transport_observation: TransportObservation | None = None
 
 
 def _request_clock() -> float | None:
     try:
         return monotonic()
     except Exception:  # noqa: BLE001 - observing time cannot change request execution
+        return None
+
+
+def _transport_detail(value: object) -> TransportObservation | None:
+    try:
+        observation = value.observation
+        return observation if type(observation) is TransportObservation else None
+    except Exception:  # noqa: BLE001 - optional evidence must not mask the HTTP outcome
         return None
 
 
@@ -566,6 +575,7 @@ class OpenAICompatibleRuntime:
         request = Request(self.endpoint, data=body, headers=headers, method="POST")
         observed_status = None
         phase = "open_response"
+        transport_observation = None
         started = _request_clock()
         try:
             try:
@@ -574,6 +584,7 @@ class OpenAICompatibleRuntime:
                         response = exchange(request, timeout)
                     except TransportFailure as failure:
                         phase, observed_status = failure.phase, failure.status
+                        transport_observation = _transport_detail(failure)
                         if failure.cause == "http_error":
                             cause = HTTPError("", failure.status, "HTTP request failed", {}, None)
                             detail = self._redact(failure.body.decode("utf-8", errors="replace"))
@@ -589,6 +600,7 @@ class OpenAICompatibleRuntime:
                             message = "could not reach model endpoint: HTTP transport failed"
                         raise ModelRequestFailure(message, failure.reason, failure.status) from cause
                     status, raw = response.status, response.body
+                    transport_observation = _transport_detail(response)
                     observed_status = _observed_response_status(status)
                 else:
                     with urlopen(request, timeout=timeout) as response:
@@ -648,6 +660,7 @@ class OpenAICompatibleRuntime:
             )
         except ModelRequestFailure as exc:
             if type(exc) is ModelRequestFailure:
+                exc.transport_observation = transport_observation
                 try:
                     exc.observation = _request_observation(phase, started, timeout)
                 except Exception:  # noqa: BLE001, S110 - preserve error without logging request data
