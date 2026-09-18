@@ -268,7 +268,13 @@ class AgentLoopRuntime:
         response_models: list[str | None] = []
         usages: list[dict[str, int] | None] = []
         while True:
-            remaining = self._remaining_timeout(started, effective_timeout)
+            try:
+                remaining = self._remaining_timeout(started, effective_timeout)
+            except AgentLoopTimeout:
+                self._set_candidate_diagnostic(
+                    budget_id, effective_max_steps, tool_steps, 0, False, "timeout", "model_turn",
+                )
+                raise
             self._check_profile_request(ledger, require_complete=usage_ledger is not None)
             if model_turns and stage_boundary is not None:
                 self._update_invocation(
@@ -329,7 +335,13 @@ class AgentLoopRuntime:
                 },
             )
             if self.profile is not None:
-                self._remaining_timeout(started, effective_timeout)
+                try:
+                    self._remaining_timeout(started, effective_timeout)
+                except AgentLoopTimeout:
+                    self._set_candidate_diagnostic(
+                        budget_id, effective_max_steps, tool_steps, 0, False, "timeout", "response",
+                    )
+                    raise
             if not turn.tool_calls:
                 if not turn.text:
                     self._set_candidate_diagnostic(
@@ -389,7 +401,13 @@ class AgentLoopRuntime:
             self._append_transcript(messages[-1])
             for call in turn.tool_calls:
                 if self.profile is not None:
-                    self._remaining_timeout(started, effective_timeout)
+                    try:
+                        self._remaining_timeout(started, effective_timeout)
+                    except AgentLoopTimeout:
+                        self._set_candidate_diagnostic(
+                            budget_id, effective_max_steps, tool_steps, 1, False, "timeout", "tool",
+                        )
+                        raise
                 # An attempted tool can already have side effects when it raises or overruns.
                 tool_steps += 1
                 self._last_tool_steps = tool_steps
@@ -442,7 +460,13 @@ class AgentLoopRuntime:
                     started, transcript_complete=self._durable_transcript_complete(messages),
                 )
                 if self.profile is not None:
-                    self._remaining_timeout(started, effective_timeout)
+                    try:
+                        self._remaining_timeout(started, effective_timeout)
+                    except AgentLoopTimeout:
+                        self._set_candidate_diagnostic(
+                            budget_id, effective_max_steps, tool_steps, 1, False, "timeout", "tool",
+                        )
+                        raise
                 if result.awaiting_input:
                     raise AgentInputRequired(
                         result.input_question or result.output[:8_000], result.input_options

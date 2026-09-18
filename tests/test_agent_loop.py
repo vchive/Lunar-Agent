@@ -195,6 +195,26 @@ def test_candidate_local_timeout_is_typed_as_timed_out(tmp_path: Path) -> None:
     assert candidate_failure_reason(AgentLoopTimeout("deadline")) == "timeout"
 
 
+def test_candidate_local_timeout_updates_diagnostic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    model = FixtureModel([ModelTurn("complete candidate")])
+    runtime = AgentLoopRuntime(model)
+    clock = iter((1.0, 2.0))
+    monkeypatch.setattr("famou.agent_loop.time.monotonic", lambda: next(clock))
+
+    with pytest.raises(AgentLoopTimeout):
+        runtime.run(
+            "finish", tmp_path, timeout=0.01,
+            max_tool_steps=2, budget_id="candidate-timeout",
+        )
+
+    diagnostic = runtime.last_candidate_diagnostic
+    assert diagnostic is not None
+    assert diagnostic["outcome"] == "timed_out"
+    assert diagnostic["reason"] == "timeout"
+    assert diagnostic["phase"] == "model_turn"
+    assert diagnostic["completion"] is False
+
+
 def test_agent_loop_reports_candidate_budget_completion(tmp_path: Path) -> None:
     model = FixtureModel([ModelTurn("complete candidate")])
     runtime = AgentLoopRuntime(model, max_steps=40)
