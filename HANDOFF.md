@@ -7,6 +7,22 @@
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## Feature 135：未配置 profile 的 Agent-loop 预算可见性与步数诊断（2026-09-18，已完成）
+
+AgentLoopRuntime 的普通 `run` 请求现在始终使用请求副本附加既有
+`lunar_runtime_budget` advisory：未配置 ModelProfile 时仍显示当前剩余工具调用数；传入有限
+wall timeout 时显示同一单调时钟计算出的剩余秒数和有效命令窗口；token/cost 继续为 null。
+profiled loop 的快照、UsageLedger、超时准入和 `run_isolated` 的无 advisory 行为保持不变。
+快照不写入 replayable messages、SessionTranscript 或持久调用状态，每次请求只含一份当前值。
+
+整批工具调用超过剩余额度时仍在 assistant/transcript append 和任何工具执行之前原子拒绝，
+新增 `AgentStepLimitEvidence`/`AgentStepLimitReached` 类型以及 attempted_tool_calls 和
+tool_steps_remaining 字段；旧异常文本和事件类型保持兼容。没有重试、repair、前缀执行或
+提高 max_steps。27 项聚焦测试、共享 runtime/interactive/evolution/master-planning 回归、
+Ruff、compileall 和 diff 检查通过。该功能只改善诊断和请求内提示，不能保证模型完成候选，
+也没有重开或修改 Feature 134 的任何测量证据。详见
+`specs/135-unprofiled-agent-budget-visibility/validation.md`。
+
 ## Feature 134：真实准备与 8 项留出通过，未完成交付（2026-09-18）
 
 按 SDD 完成规格、方案、测量实现和离线验证后，登记提交 `358f738` 已先推送再启动

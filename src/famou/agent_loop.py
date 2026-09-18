@@ -83,6 +83,24 @@ class InvocationDiagnostics:
     boundary: bool = False
 
 
+@dataclass(frozen=True)
+class AgentStepLimitEvidence:
+    """Bounded local evidence for rejecting an over-limit tool-call batch."""
+
+    max_steps: int
+    tool_steps: int
+    attempted_tool_calls: int
+    tool_steps_remaining: int
+
+
+class AgentStepLimitReached(RuntimeExecutionError):
+    """A whole model tool-call batch exceeded the remaining loop allowance."""
+
+    def __init__(self, evidence: AgentStepLimitEvidence) -> None:
+        self.evidence = evidence
+        super().__init__(f"agent loop exceeded max steps ({evidence.max_steps})")
+
+
 class StageBoundary(RuntimeExecutionError):
     """Cooperative pause after a complete, durably paired tool round."""
 
@@ -289,11 +307,22 @@ class AgentLoopRuntime:
                     metadata=metadata,
                 )
             if tool_steps + len(turn.tool_calls) > self.max_steps:
+                evidence = AgentStepLimitEvidence(
+                    max_steps=self.max_steps,
+                    tool_steps=tool_steps,
+                    attempted_tool_calls=len(turn.tool_calls),
+                    tool_steps_remaining=max(0, self.max_steps - tool_steps),
+                )
                 self._emit(
                     "agent_step_limit_reached",
-                    {"max_steps": self.max_steps, "tool_steps": tool_steps},
+                    {
+                        "max_steps": evidence.max_steps,
+                        "tool_steps": evidence.tool_steps,
+                        "attempted_tool_calls": evidence.attempted_tool_calls,
+                        "tool_steps_remaining": evidence.tool_steps_remaining,
+                    },
                 )
-                raise RuntimeExecutionError(f"agent loop exceeded max steps ({self.max_steps})")
+                raise AgentStepLimitReached(evidence)
             messages.append(self._assistant_message(turn))
             self._append_transcript(messages[-1])
             for call in turn.tool_calls:
@@ -352,10 +381,8 @@ class AgentLoopRuntime:
         tool_steps: int, ledger: UsageLedger | None,
     ) -> list[dict[str, object]]:
         """Refresh advisory budget facts on a request copy, never on replayable history."""
-        if ledger is None:
-            return messages
-        profile = ledger.profile
-        usage = ledger.snapshot
+        profile = ledger.profile if ledger is not None else None
+        usage = ledger.snapshot if ledger is not None else None
         command_timeout = (
             min(self.tools.command_timeout, remaining)
             if self.tools.allow_exec and remaining is not None else None
@@ -369,11 +396,12 @@ class AgentLoopRuntime:
             ),
             "tokens_remaining": (
                 profile.max_total_tokens - usage.total_tokens
-                if profile.max_total_tokens is not None else None
+                if profile is not None and usage is not None and profile.max_total_tokens is not None else None
             ),
             "cost_micros_remaining": (
                 profile.max_cost_micros - usage.cost_micros
-                if profile.max_cost_micros is not None and usage.cost_micros is not None else None
+                if profile is not None and usage is not None and profile.max_cost_micros is not None
+                and usage.cost_micros is not None else None
             ),
         }
         guidance = (

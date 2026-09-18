@@ -227,7 +227,10 @@ def test_nonstaged_subject_messages_remain_without_master_role_context(tmp_path,
 
     assert receipt["status"] == "completed" and model.turn == 2
     for messages in model.messages:
-        assert messages[0] == {"role": "system", "content": HERMES_SYSTEM_PROMPT}
+        assert messages[0]["role"] == "system"
+        system = messages[0]["content"]
+        assert system.startswith(HERMES_SYSTEM_PROMPT)
+        assert system.count("<lunar_runtime_budget>") == 1
         prompt = next(message["content"] for message in messages if message["role"] == "user")
         expected = "normal-mode subject" if mode == "normal" else "deep-evolution subject in outer round 1/5"
         assert prompt.startswith("You are the " + expected)

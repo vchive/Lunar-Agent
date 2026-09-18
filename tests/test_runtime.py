@@ -195,7 +195,7 @@ def test_current_profile_budget_reaches_http_request_only_for_normal_profiled_lo
     assert secret not in json.dumps(ModelHandler.observed["body"])
     system = messages[0]["content"]
     opening, closing = "<lunar_runtime_budget>\n", "\n</lunar_runtime_budget>"
-    if mode != "run" or not with_profile:
+    if mode == "run_isolated":
         assert "lunar_runtime_budget" not in system
         return
 
@@ -211,9 +211,13 @@ def test_current_profile_budget_reaches_http_request_only_for_normal_profiled_lo
         for key in fields
     )
     assert 0 < snapshot["remaining_seconds"] <= 2
-    assert snapshot["tool_steps_remaining"] == 8
-    assert snapshot["tokens_remaining"] == 100
-    assert snapshot["cost_micros_remaining"] == 200
+    assert snapshot["tool_steps_remaining"] == (8 if with_profile else 40)
+    if with_profile:
+        assert snapshot["tokens_remaining"] == 100
+        assert snapshot["cost_micros_remaining"] == 200
+    else:
+        assert snapshot["tokens_remaining"] is None
+        assert snapshot["cost_micros_remaining"] is None
     if allow_exec:
         assert 0 < snapshot["command_timeout_seconds"] <= snapshot["remaining_seconds"]
     else:

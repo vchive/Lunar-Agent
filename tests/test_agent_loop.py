@@ -2,11 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
+from famou.agent_loop import AgentLoopRuntime, AgentStepLimitEvidence, AgentStepLimitReached
 from famou.memory import MemoryStore
 from famou.profiles import ModelProfile
 from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
 from famou.tools import LocalToolRegistry
+from famou.transcript import SessionTranscript
 
 
 class FixtureModel:
@@ -119,6 +120,63 @@ def test_agent_loop_step_limit_is_a_runtime_failure(tmp_path: Path) -> None:
         assert "max steps" in str(exc)
     else:
         raise AssertionError("step limit should fail the runtime")
+
+
+def test_agent_loop_rejects_over_limit_tool_batch_atomically_with_evidence(tmp_path: Path) -> None:
+    model = FixtureModel([
+        ModelTurn(
+            "also has text, but the batch is too large",
+            (
+                ToolCall("1", "write_file", {"path": "first.txt", "content": "one"}),
+                ToolCall("2", "write_file", {"path": "second.txt", "content": "two"}),
+            ),
+        ),
+    ])
+    events: list[tuple[str, dict[str, object]]] = []
+    transcript = SessionTranscript(tmp_path / "transcript.jsonl")
+    runtime = AgentLoopRuntime(model, max_steps=1, transcript=transcript)
+    runtime.set_event_sink(lambda event_type, payload: events.append((event_type, payload)))
+
+    with pytest.raises(AgentStepLimitReached) as failure:
+        runtime.run("save both", tmp_path)
+
+    assert failure.value.evidence == AgentStepLimitEvidence(
+        max_steps=1,
+        tool_steps=0,
+        attempted_tool_calls=2,
+        tool_steps_remaining=1,
+    )
+    assert events[-1] == (
+        "agent_step_limit_reached",
+        {
+            "max_steps": 1,
+            "tool_steps": 0,
+            "attempted_tool_calls": 2,
+            "tool_steps_remaining": 1,
+        },
+    )
+    assert len(model.requests) == 1
+    assert not (tmp_path / "first.txt").exists()
+    assert not (tmp_path / "second.txt").exists()
+    assert all(message["role"] in {"system", "user"} for message in transcript.load())
+
+
+def test_agent_loop_accepts_tool_free_final_when_no_steps_remain(tmp_path: Path) -> None:
+    model = FixtureModel([ModelTurn("complete enough")])
+    runtime = AgentLoopRuntime(model, max_steps=1)
+
+    result = runtime.run("finish", tmp_path, tool_steps_offset=1)
+
+    assert result.text == "complete enough"
+    system = model.requests[0][0][0]["content"]
+    assert '"tool_steps_remaining": 0' in system
+
+
+def test_agent_loop_empty_tool_free_final_remains_a_failure(tmp_path: Path) -> None:
+    model = FixtureModel([ModelTurn("")])
+
+    with pytest.raises(RuntimeExecutionError, match="without a final text result"):
+        AgentLoopRuntime(model).run("finish", tmp_path)
 
 
 def test_agent_loop_aggregates_complete_provider_telemetry(tmp_path: Path) -> None:

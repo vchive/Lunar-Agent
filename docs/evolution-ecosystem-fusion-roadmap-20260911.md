@@ -4,9 +4,9 @@
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
 evaluator/profile 准备和父任务交付/终态恢复；Feature130已补完整合同封装示例并保持
-strict parser。Feature132已补请求失败详情，133已完成独立preparation请求和总墙钟预算，
+strict parser。Feature132已补请求失败详情，133已完成独立preparation请求和总墙钟预算，135已补无profile预算可见性和整批步数拒绝诊断，
 保留116的显式恢复语义。Feature134独立真实验收已通过准备1/1和8/8留出，但没有父任务
-交付，primary/joint仍0/1。三次生成均触及登记工具预算，下一步按SDD离线验证每候选
+交付，primary/joint仍0/1。三次生成均触及登记工具预算，135已补请求内剩余步数与墙钟提示，下一步按SDD离线验证每候选
 显式预算和完成诊断。外部producer多文件接线、全链路预算、运行中
 取消编排和detached仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。

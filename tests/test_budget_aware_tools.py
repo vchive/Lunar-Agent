@@ -87,18 +87,43 @@ def test_profile_snapshot_tracks_time_steps_spend_and_does_not_persist(tmp_path,
     assert len(model.requests[3]) == 2
 
 
-def test_snapshot_has_null_spend_without_ceilings_and_no_profile_has_no_hint(tmp_path):
-    model = Model([ModelTurn("done")])
+def test_snapshot_has_null_spend_without_ceilings_and_unprofiled_steps_time(
+    tmp_path, monkeypatch,
+):
+    clock = Clock()
+    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
     tools = LocalToolRegistry(allow_exec=True, command_timeout=3)
-    AgentLoopRuntime(model, tools=tools, profile=ModelProfile("p", "fixture")).run(
-        "solve", tmp_path
+    transcript = SessionTranscript(tmp_path / "transcript.jsonl")
+    model = Model([
+        ModelTurn("", (ToolCall("1", "list_dir", {}),)),
+        ModelTurn("done"),
+    ], clock)
+    AgentLoopRuntime(model, tools=tools, max_steps=3, transcript=transcript).run(
+        "solve", tmp_path / "finite", timeout=10, tool_steps_offset=1,
     )
-    hint = snapshot(model.requests[0])
-    assert hint["tokens_remaining"] is None and hint["cost_micros_remaining"] is None
-    assert hint["command_timeout_seconds"] == 3
+
+    first, second = map(snapshot, model.requests)
+    assert first == {
+        "schema_version": "1", "remaining_seconds": 10.0,
+        "tool_steps_remaining": 2, "command_timeout_seconds": 3,
+        "tokens_remaining": None, "cost_micros_remaining": None,
+    }
+    assert second == first | {"remaining_seconds": 9.0, "tool_steps_remaining": 1}
+
+    # Each provider request receives one fresh envelope; snapshots are not accumulated.
+    for request in model.requests:
+        system = next(message["content"] for message in request if message["role"] == "system")
+        assert system.count("<lunar_runtime_budget>") == 1
+    assert "lunar_runtime_budget" not in transcript.path.read_text()
+
     legacy = Model([ModelTurn("done")])
-    AgentLoopRuntime(legacy, tools=tools).run("legacy", tmp_path)
-    assert "lunar_runtime_budget" not in str(legacy.requests)
+    AgentLoopRuntime(legacy, tools=tools).run("legacy", tmp_path / "unbounded")
+    unbounded = snapshot(legacy.requests[0])
+    assert unbounded["remaining_seconds"] is None
+    assert unbounded["tool_steps_remaining"] == 40
+    assert unbounded["command_timeout_seconds"] is None
+    assert unbounded["tokens_remaining"] is None
+    assert unbounded["cost_micros_remaining"] is None
 
 
 def test_explicit_ledger_carries_usage_across_staged_invocations(tmp_path):
