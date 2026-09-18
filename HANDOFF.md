@@ -7,6 +7,22 @@
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## Feature 137：run 墙钟预算传播到 Agent 请求（2026-09-18，离线完成）
+
+`BudgetSpec.max_runtime_seconds` 现在会收紧实际执行请求：显式 `run_agent()` delegation 和
+普通 `resume()` worker 在调用 adapter/runtime 前，都会取得同一次 controller 执行的剩余
+单调时钟预算，并传入 `min(原请求超时, 剩余 run 时间)`。同步多任务与并发 worker 共享同一
+起始时刻，后续任务不会重新获得完整 `Config.runtime_timeout`。剩余时间耗尽继续走既有
+`BudgetExceeded("max_runtime_seconds", ...)` 与幂等 `budget_exceeded` 台账；取消、活动 runtime
+fan-out、进程组清理和迟到结果丢弃语义保持。
+
+专项 fixture/controller/adapter/runtime/budget 回归为 116 passed；完整当前回归为
+7941 passed、1 skipped、24 deselected，冻结 Feature 123 阶段为 24 passed。Ruff、compileall、
+Specify 前置与 diff 检查通过，冻结阶段复核 77 个产品、14 个 measurement 和 69 个历史 pin。
+Feature 134 规格与 retained campaign 路径不在工作树 diff 中；本轮没有 provider 请求、真实
+campaign、evaluator、生成代码执行或 WebAgent 重跑。规格与证据边界见
+`specs/137-run-wall-clock-budget/`。
+
 ## Feature 136：候选阶段显式工具预算与完成诊断（2026-09-18，离线完成）
 
 已实现并通过离线验证。`CandidateGenerationBudget` 在每次单文件或 bundle 候选请求前固定

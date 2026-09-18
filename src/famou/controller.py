@@ -3462,6 +3462,9 @@ class LocalController:
         artifacts = ArtifactStore(run.workspace, self.store, run.id)
         try:
             self._materialize_task_input_data(run, task_root)
+            request_timeout = self._remaining_runtime_timeout(
+                run.id, budget, started, effective_timeout
+            )
             request = AgentRequest(
                 run_id=run.id,
                 task_id=task.id,
@@ -3469,7 +3472,7 @@ class LocalController:
                 prompt=effective_prompt,
                 required_capabilities=requested,
                 workspace=task_root,
-                timeout=effective_timeout,
+                timeout=request_timeout,
             )
         except (TypeError, ValueError) as exc:
             error = self._sanitize_error(exc)
@@ -3750,7 +3753,10 @@ class LocalController:
                 if not self._task_is_running(task.id):
                     self._discard_late_result(run.id, task.id, attempt.id)
                     return
-                result = runtime.run(prompt, task_root, self.config.runtime_timeout)
+                runtime_timeout = self._remaining_runtime_timeout(
+                    run.id, budget, started, self.config.runtime_timeout
+                )
+                result = runtime.run(prompt, task_root, runtime_timeout)
                 if not self._task_is_running(task.id):
                     self._discard_late_result(run.id, task.id, attempt.id)
                     return
@@ -3818,6 +3824,8 @@ class LocalController:
                     exc.options,
                 )
             except Exception as exc:  # noqa: BLE001 - runtime boundary must persist all failures
+                if self._task_is_running(task.id):
+                    self._enforce_runtime_deadline(run.id, budget, started)
                 error = self._sanitize_error(exc)
                 if self._task_is_running(task.id):
                     self._record_session_artifact(run, task.id, runtime)
@@ -4227,6 +4235,40 @@ class LocalController:
         artifact_bytes = sum(int(item["size"]) for item in self.store.list_artifacts(run_id))
         if artifact_bytes > budget.max_artifact_bytes:
             self._budget_fail(run_id, "max_artifact_bytes", artifact_bytes, budget.max_artifact_bytes)
+
+    def _remaining_runtime_timeout(
+        self,
+        run_id: str,
+        budget: BudgetSpec,
+        started: float,
+        configured_timeout: float | None,
+    ) -> float:
+        """Return the request timeout left in the shared run wall-clock budget."""
+        elapsed = max(0.0, time.monotonic() - started)
+        remaining = float(budget.max_runtime_seconds) - elapsed
+        if remaining <= 0:
+            self._budget_fail(
+                run_id,
+                "max_runtime_seconds",
+                elapsed,
+                budget.max_runtime_seconds,
+            )
+        if configured_timeout is None:
+            return remaining
+        return min(float(configured_timeout), remaining)
+
+    def _enforce_runtime_deadline(
+        self, run_id: str, budget: BudgetSpec, started: float
+    ) -> None:
+        """Persist a wall-clock failure when a running worker crossed its deadline."""
+        elapsed = max(0.0, time.monotonic() - started)
+        if elapsed >= budget.max_runtime_seconds:
+            self._budget_fail(
+                run_id,
+                "max_runtime_seconds",
+                elapsed,
+                budget.max_runtime_seconds,
+            )
 
     def _budget_fail(self, run_id: str, limit: str, actual: float, maximum: float) -> None:
         reason = str(BudgetExceeded(limit, actual, maximum))
