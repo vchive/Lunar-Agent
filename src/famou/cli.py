@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -250,6 +251,16 @@ def build_parser() -> argparse.ArgumentParser:
     solve_parser.add_argument("--migration-rate", type=float)
     solve_parser.add_argument("--seed", type=int)
     solve_parser.add_argument("--timeout", type=float)
+    solve_parser.add_argument(
+        "--evaluator-preparation-timeout",
+        type=float,
+        help="per-request deadline for the automatic multi-file evaluator compiler and auditor",
+    )
+    solve_parser.add_argument(
+        "--evaluator-preparation-wall-timeout",
+        type=float,
+        help="total deadline for one automatic multi-file evaluator preparation attempt",
+    )
     _add_runtime_options(solve_parser)
     _add_input_options(solve_parser)
     _add_home(solve_parser)
@@ -291,6 +302,16 @@ def build_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("run_id")
     resume_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a conversational multi-file evolution run")
     resume_parser.add_argument("--multi-file", action="store_true", help="continue an automatically prepared multi-file solve")
+    resume_parser.add_argument(
+        "--evaluator-preparation-timeout",
+        type=float,
+        help="matching automatic multi-file evaluator compiler/auditor request deadline",
+    )
+    resume_parser.add_argument(
+        "--evaluator-preparation-wall-timeout",
+        type=float,
+        help="matching total deadline for one automatic evaluator preparation attempt",
+    )
     _add_runtime_options(resume_parser)
     _add_home(resume_parser)
     _add_json(resume_parser)
@@ -811,6 +832,16 @@ def build_parser() -> argparse.ArgumentParser:
     answer_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a pending multi-file evolution handoff")
     answer_parser.add_argument("--multi-file", action="store_true", help="continue an automatically prepared multi-file solve")
     answer_parser.add_argument(
+        "--evaluator-preparation-timeout",
+        type=float,
+        help="matching automatic multi-file evaluator compiler/auditor request deadline",
+    )
+    answer_parser.add_argument(
+        "--evaluator-preparation-wall-timeout",
+        type=float,
+        help="matching total deadline for one automatic evaluator preparation attempt",
+    )
+    answer_parser.add_argument(
         "--evaluator-command",
         help="explicit local objective harness for a pending native evolution handoff",
     )
@@ -1303,11 +1334,20 @@ def _print_status(config: Config, run_id: str) -> int:
     print(f"status: {run.status.value}")
     print(f"goal: {run.goal}")
     print(f"workspace: {run.workspace}")
+    preparation_budgets = _preparation_budgets_payload(store, run.id)
+    if preparation_budgets is not None:
+        for name, budget in preparation_budgets.items():
+            value = budget["seconds"]
+            print(f"{name}: {value if value is not None else 'unbounded'} ({budget['source']})")
     preparation = _bundle_preparation_payload(store, run.id)
     if preparation is not None:
         print(f"evaluator_preparation: {preparation['status']}")
         if preparation.get("error_category"):
             print(f"preparation_error: {preparation['stage']}: {preparation['error_category']}")
+        if preparation.get("wall_failure"):
+            detail = preparation["wall_failure"]
+            print(f"preparation_wall_failure: {detail['reason']} elapsed_ms={detail['elapsed_ms']}"
+                  f" wall_timeout_ms={detail['wall_timeout_ms']}")
         if preparation.get("local_failure"):
             detail = preparation["local_failure"]
             positions = " ".join(f"{key}={detail[key]}" for key in
@@ -1472,6 +1512,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
     algorithm_outputs = [item for item in artifacts if item["kind"] == "output"]
     role_evidence = [item for item in artifacts if item["kind"] == "role_evidence"]
     preparation = _bundle_preparation_payload(store, run.id)
+    preparation_budgets = _preparation_budgets_payload(store, run.id)
     return {
         "run": {
             "id": run.id,
@@ -1538,7 +1579,9 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
             "candidates": evolution_candidates,
             "linked": linked_evolution,
             **({"preparation": preparation} if preparation is not None else {}),
-        } if evolution_configured or evolution_finished or linked_evolution or preparation else None,
+            **({"preparation_budgets": preparation_budgets} if preparation_budgets is not None else {}),
+        } if (evolution_configured or evolution_finished or linked_evolution or preparation
+              or preparation_budgets) else None,
         "decisions": store.list_decisions(run.id),
         "agents": [
             {"task_id": task_id, **payload}
@@ -1988,6 +2031,7 @@ def _validate_conversational_bundle_request(args, request) -> None:
                 or request.get("strategy") not in {None, "population"}):
             raise EvolutionError("solve_bundle_mode_invalid")
         _validate_automatic_bundle_options(args)
+        _validate_preparation_request(request)
         args.multi_file = True
         args.compile_evaluator = True
         return
@@ -2039,8 +2083,29 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         )
     ):
         raise ValueError("evolution options require --evolve")
+    if (
+        not args.evolve
+        and not args.resume
+        and _has_preparation_timeout(args)
+    ):
+        raise ValueError("evolution options require --evolve")
+    preparation_request = None
+    if args.resume:
+        if not args.run_id:
+            raise ValueError("--resume requires --run-id")
+        preparation_request = _latest_evolution_request(Store(config.database), args.run_id)
+        if preparation_request is not None and preparation_request.get("bundle_mode") == "compiled":
+            _validate_preparation_request(preparation_request)
+            _validate_evolution_override(args, preparation_request)
+        if _has_preparation_timeout(args) and not (args.evolve and preparation_request is None):
+            _validate_preparation_timeout_override(args, preparation_request)
     if args.evolve:
-        _validate_evolution_cli_bounds(args)
+        persisted_compiled = (
+            preparation_request is not None and preparation_request.get("bundle_mode") == "compiled"
+        )
+        _validate_evolution_cli_bounds(
+            _evolution_args(args, preparation_request) if persisted_compiled else args,
+        )
         if args.compile_evaluator and args.evaluator_command:
             raise ValueError("--compile-evaluator and --evaluator-command are mutually exclusive")
         if args.strategy == "openevolve" and args.compile_evaluator:
@@ -2075,7 +2140,11 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
                 event_id="event-evolution-request-" + hashlib.sha256(run.id.encode()).hexdigest(),
             )
             evolution_request = _evolution_request_payload(args)
-        if (args.evolve or args.compile_evaluator) and evolution_request is not None:
+        if (
+            args.evolve
+            or args.compile_evaluator
+            or _has_preparation_timeout(args)
+        ) and evolution_request is not None:
             _validate_evolution_override(args, evolution_request)
         _validate_conversational_bundle_request(args, evolution_request)
         if evolution_request is not None and (
@@ -2153,6 +2222,19 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
         payload["bundle_profile_sha256"] = args._bundle_profile_sha256
     if getattr(args, "multi_file", False):
         payload["bundle_mode"] = "compiled"
+        payload["timeout_source"] = "explicit" if args.timeout is not None else "default"
+        payload["evaluator_preparation_timeout"] = (
+            args.evaluator_preparation_timeout
+            if args.evaluator_preparation_timeout is not None
+            else payload["timeout"]
+        )
+        payload["evaluator_preparation_wall_timeout"] = (
+            args.evaluator_preparation_wall_timeout
+            if args.evaluator_preparation_wall_timeout is not None
+            else min(86400.0, 2 * payload["evaluator_preparation_timeout"] + 60.0)
+        )
+        for name in _PREPARATION_TIMEOUT_OPTIONS:
+            payload[name + "_source"] = "explicit" if getattr(args, name, None) is not None else "default"
     return payload
 
 
@@ -2179,6 +2261,19 @@ def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid solve evolution options: {exc}") from exc
+    _validate_preparation_cli_timeouts(args)
+    for name in _PREPARATION_TIMEOUT_OPTIONS:
+        if getattr(args, name, None) is not None and not getattr(args, "multi_file", False):
+            raise ValueError(f"--{name.replace('_', '-')} requires --multi-file")
+    wall_timeout = getattr(args, "evaluator_preparation_wall_timeout", None)
+    request_timeout = getattr(args, "evaluator_preparation_timeout", None)
+    if request_timeout is None:
+        request_timeout = args.timeout if args.timeout is not None else 900.0
+    if wall_timeout is not None and wall_timeout < request_timeout:
+        raise ValueError(
+            "--evaluator-preparation-wall-timeout must be at least the resolved "
+            "--evaluator-preparation-timeout"
+        )
     evaluator_command = _parse_command(args.evaluator_command, "--evaluator-command")
     if evaluator_command:
         executable = Path(evaluator_command[0])
@@ -2192,6 +2287,81 @@ def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
             )
 
 
+_PREPARATION_TIMEOUT_OPTIONS = (
+    "evaluator_preparation_timeout",
+    "evaluator_preparation_wall_timeout",
+)
+
+
+def _has_preparation_timeout(args: argparse.Namespace) -> bool:
+    return any(getattr(args, name, None) is not None for name in _PREPARATION_TIMEOUT_OPTIONS)
+
+
+def _validate_preparation_cli_timeouts(args: argparse.Namespace) -> None:
+    for name in _PREPARATION_TIMEOUT_OPTIONS:
+        value = getattr(args, name, None)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0 < value <= 86400
+            or not math.isfinite(float(value))
+        ):
+            raise ValueError(
+                f"invalid --{name.replace('_', '-')}: "
+                "must be finite and between 0 and 86400 seconds"
+            )
+
+
+def _validate_preparation_request(request: dict[str, object]) -> None:
+    """Validate persisted values without adding a wall deadline to legacy handoffs."""
+    for name in ("timeout", *_PREPARATION_TIMEOUT_OPTIONS):
+        source_name = name + "_source"
+        if source_name in request and (
+            name not in request or request[source_name] not in ("explicit", "default")
+        ):
+            raise EvolutionError(f"solve evolution setting {source_name} is invalid")
+    for name in ("timeout", *_PREPARATION_TIMEOUT_OPTIONS):
+        if name == "evaluator_preparation_wall_timeout" and name not in request:
+            continue
+        value = request.get(name)
+        if name == "evaluator_preparation_timeout" and name not in request:
+            value = request.get("timeout")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0 < value <= 86400
+            or not math.isfinite(float(value))
+        ):
+            raise EvolutionError(f"solve evolution setting {name} is invalid")
+    wall_timeout = request.get("evaluator_preparation_wall_timeout")
+    request_timeout = request.get("evaluator_preparation_timeout", request.get("timeout"))
+    if wall_timeout is not None and wall_timeout < request_timeout:
+        raise EvolutionError(
+            "solve evolution setting evaluator_preparation_wall_timeout "
+            "must be at least evaluator_preparation_timeout"
+        )
+
+
+def _validate_preparation_timeout_override(args, request) -> None:
+    """Keep request and total budgets fixed across explicit continuation."""
+    _validate_preparation_cli_timeouts(args)
+    if request is not None and request.get("bundle_mode") == "compiled":
+        _validate_preparation_request(request)
+    for name in _PREPARATION_TIMEOUT_OPTIONS:
+        supplied = getattr(args, name, None)
+        if supplied is None:
+            continue
+        if request is None or request.get("bundle_mode") != "compiled":
+            raise EvolutionError(f"--{name.replace('_', '-')} requires --multi-file")
+        stored = request.get(name)
+        if name == "evaluator_preparation_timeout" and stored is None:
+            stored = request.get("timeout")
+        # A legacy handoff has no total wall deadline. An explicit value would
+        # change that persisted policy, even if it matches the current default.
+        if supplied != stored:
+            raise EvolutionError(f"solve evolution setting {name} does not match the existing handoff")
+
+
 def _latest_evolution_request(store: Store, run_id: str) -> dict[str, object] | None:
     for event in reversed(store.list_events(run_id)):
         if event["type"] == "evolution_requested" and isinstance(event.get("payload"), dict):
@@ -2201,6 +2371,7 @@ def _latest_evolution_request(store: Store, run_id: str) -> dict[str, object] | 
 
 def _validate_evolution_override(args: argparse.Namespace, request: dict[str, object]) -> None:
     """Reject explicit resume settings that differ from the persisted handoff request."""
+    _validate_preparation_timeout_override(args, request)
     for name in (
         "strategy",
         "max_rounds",
@@ -2253,6 +2424,8 @@ def _evolution_args(
         "migration_rate",
         "seed",
         "timeout",
+        "evaluator_preparation_timeout",
+        "evaluator_preparation_wall_timeout",
     ):
         values.setdefault(name, None)
     for name in (
@@ -2266,9 +2439,18 @@ def _evolution_args(
         "migration_rate",
         "seed",
         "timeout",
+        "evaluator_preparation_timeout",
+        "evaluator_preparation_wall_timeout",
     ):
         if name in request and request[name] is not None:
             values[name] = request[name]
+    if request.get("bundle_mode") == "compiled":
+        values["evaluator_preparation_timeout"] = request.get(
+            "evaluator_preparation_timeout", request.get("timeout")
+        )
+        values["evaluator_preparation_wall_timeout"] = request.get(
+            "evaluator_preparation_wall_timeout"
+        )
     values["compile_evaluator"] = bool(request.get("compile_evaluator", False))
     values["multi_file"] = request.get("bundle_mode") == "compiled"
     return argparse.Namespace(**values)
@@ -2436,6 +2618,14 @@ def _solve_evolution(
             args._bundle_pipeline = prepare_automatic_solve_bundle(
                 controller, parent.id, contract,
                 timeout_seconds=args.timeout if args.timeout is not None else 900.0,
+                evaluator_preparation_timeout_seconds=(
+                    getattr(args, "evaluator_preparation_timeout", None)
+                    if getattr(args, "evaluator_preparation_timeout", None) is not None
+                    else args.timeout if args.timeout is not None else 900.0
+                ),
+                evaluator_preparation_wall_timeout_seconds=getattr(
+                    args, "evaluator_preparation_wall_timeout", None,
+                ),
             )
         except AutomaticBundlePreparationError:
             # The preparation ledger retains this failure; callers emit the ordinary parent
@@ -2713,6 +2903,43 @@ def _solve_evolution(
     return {"run": parent, "child": controller.store.get_run(child.id) or child}
 
 
+def _preparation_budgets_payload(store: Store, run_id: str) -> dict[str, object] | None:
+    """Project bounded policy only; absent legacy fields never acquire a new deadline."""
+    request = _latest_evolution_request(store, run_id)
+    if request is None or request.get("bundle_mode") != "compiled":
+        return None
+    result = {}
+    for field, name in (
+        ("timeout", "candidate_timeout"),
+        ("evaluator_preparation_timeout", "evaluator_preparation_timeout"),
+        ("evaluator_preparation_wall_timeout", "evaluator_preparation_wall_timeout"),
+    ):
+        if field not in request:
+            if field == "timeout":
+                return None
+            value = request["timeout"] if field == "evaluator_preparation_timeout" else None
+            source = "legacy"
+            if field + "_source" in request:
+                return None
+        else:
+            value = request[field]
+            source = request.get(field + "_source", "persisted")
+            if (field + "_source" in request
+                    and (not isinstance(source, str) or source not in {"explicit", "default"})):
+                return None
+            if value is None:
+                return None
+        if value is not None and (
+            type(value) not in {int, float} or not 0 < value <= 86400
+        ):
+            return None
+        result[name] = {"seconds": value, "source": source}
+    wall = result["evaluator_preparation_wall_timeout"]["seconds"]
+    if wall is not None and wall < result["evaluator_preparation_timeout"]["seconds"]:
+        return None
+    return result
+
+
 def _bundle_preparation_payload(store: Store, run_id: str) -> dict[str, object] | None:
     from .automatic_solve_bundle import automatic_bundle_preparation_status
 
@@ -2797,6 +3024,11 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
             evolution_payload = {"status": preparation["status"], "preparation": preparation}
         else:
             evolution_payload["preparation"] = preparation
+    preparation_budgets = _preparation_budgets_payload(controller.store, run.id)
+    if preparation_budgets is not None:
+        if evolution_payload is None:
+            evolution_payload = {"status": run.status.value}
+        evolution_payload["preparation_budgets"] = preparation_budgets
     effective_status = run.status.value
     if (
         isinstance(materialization, dict)
@@ -4346,6 +4578,8 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if run is None:
         raise ValueError(f"unknown run: {args.run_id}")
     evolution_request = _latest_evolution_request(store, run.id)
+    if _has_preparation_timeout(args):
+        _validate_preparation_timeout_override(args, evolution_request)
     _validate_conversational_bundle_request(args, evolution_request)
     _validate_conversational_bundle_link(args, store, run)
     _bind_conversational_bundle_inputs(args, store, run)
@@ -4857,7 +5091,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         _reject_retired_cli_strategy(args)
         if args.command in {"solve", "answer", "resume"}:
+            _validate_preparation_cli_timeouts(args)
             _prepare_conversational_bundle(args)
+            if (args.command == "solve" and not args.resume
+                    and _has_preparation_timeout(args) and not getattr(args, "multi_file", False)):
+                raise ValueError("evaluator preparation timeouts require --evolve --multi-file")
+        # Reject malformed automatic evolution budgets before creating the local state DB.
+        if (args.command == "solve" and getattr(args, "evolve", False)
+                and not getattr(args, "resume", False)):
+            _validate_evolution_cli_bounds(args)
         if args.command == "effect-trial":
             payload = _effect_host_scope(args, _effect_trial)
             _emit(payload, args.json)
@@ -5022,6 +5264,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
         if args.command == "resume":
             evolution_request = _latest_evolution_request(Store(config.database), args.run_id)
+            if _has_preparation_timeout(args):
+                _validate_preparation_timeout_override(args, evolution_request)
             if getattr(args, "bundle_profile", None) is not None or getattr(args, "multi_file", False) or (
                 evolution_request is not None and (
                     "bundle_profile_sha256" in evolution_request or "bundle_mode" in evolution_request

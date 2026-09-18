@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import math
 import os
 import re
 import secrets
@@ -10,6 +11,7 @@ import stat
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from time import monotonic
 
 from ._benchmark_files import absolute_path, read_regular_file
 from ._candidate_workspace_io import DirectoryChain
@@ -25,6 +27,7 @@ from .evaluator_bundle import (
     COMPILED_BUNDLE_EVALUATOR_ID,
     EvaluatorBundleRuntimeError,
     EvaluatorPreparationError,
+    EvaluatorPreparationWallTimeout,
     UnsupportedEvaluatorConstraintsError,
     compile_evaluator_bundle,
     load_evaluator_bundle,
@@ -52,6 +55,8 @@ _STARTED = "bundle_preparation_started"
 _FAILED = "bundle_preparation_failed"
 _STAGES = {"preparation", "capability_check", "evaluator_compile", "evaluator_audit", "profile_publish"}
 _CATEGORIES = {"runtime_error", "validation_error", "cancelled", "interrupted", "unsupported_verification"}
+_WALL_STAGES = _STAGES - {"capability_check"} | {"compiler_preflight", "auditor_preflight"}
+_MAX_WALL_MS = 86_400_000
 
 
 class AutomaticBundlePreparationError(EvolutionError):
@@ -64,7 +69,8 @@ class AutomaticBundlePreparationError(EvolutionError):
 
 
 def _observation(parent_id, attempt_id, *, status, stage, category=None, recoverable=False,
-                 unsupported_constraints=None, local_failure=None, request_failure=None):
+                 unsupported_constraints=None, local_failure=None, request_failure=None,
+                 wall_failure=None, preparation_budgets=None):
     observation = {
         "schema_version": "1", "parent_run_id": parent_id, "attempt_id": attempt_id,
         "status": status, "stage": stage, "error_category": category,
@@ -78,10 +84,81 @@ def _observation(parent_id, attempt_id, *, status, stage, category=None, recover
     if request_failure is not None:
         observation["schema_version"] = "3"
         observation["request_failure"] = request_failure
+    if wall_failure is not None:
+        observation["schema_version"] = "4"
+        observation["wall_failure"] = wall_failure
+    if preparation_budgets is not None:
+        observation["schema_version"] = "2"
+        observation["preparation_budgets"] = preparation_budgets
     return observation
 
 
-def _read_request_failure(raw, *, stage, parent, parent_id, attempt_id, relevant):
+def _valid_start(raw, parent_id, attempt_id, events):
+    expected = _observation(parent_id, attempt_id, status="started", stage="preparation")
+    if raw == expected:
+        return True
+    if type(raw) is not dict or set(raw) != set(expected) | {"preparation_budgets"}:
+        return False
+    budgets = raw.get("preparation_budgets")
+    keys = {"candidate_timeout_seconds", "request_timeout_seconds", "wall_timeout_seconds"}
+    if type(budgets) is not dict or set(budgets) != keys:
+        return False
+    if any(type(value) not in {int, float} or not 0 < value <= 86400 for value in budgets.values()):
+        return False
+    policies = [item.get("payload") for item in events if item.get("type") == "evolution_requested"]
+    if policies:
+        if len(policies) != 1 or type(policies[0]) is not dict or policies[0].get("bundle_mode") != "compiled":
+            return False
+        policy = policies[0]
+        policy_budgets = {
+            "candidate_timeout_seconds": policy.get("timeout"),
+            "request_timeout_seconds": policy.get("evaluator_preparation_timeout", policy.get("timeout")),
+            "wall_timeout_seconds": policy.get("evaluator_preparation_wall_timeout"),
+        }
+        if (any(type(value) not in {int, float} or not 0 < value <= 86400
+                for value in policy_budgets.values()) or budgets != policy_budgets):
+            return False
+    return (budgets["wall_timeout_seconds"] >= budgets["request_timeout_seconds"]
+            and raw == {**expected, "schema_version": "2", "preparation_budgets": budgets})
+
+
+def _read_wall_failure(raw, *, stage, parent, parent_id, attempt_id, relevant, events):
+    fields = {"schema_version", "parent_run_id", "attempt_id", "status", "stage",
+              "error_category", "recoverable", "wall_failure"}
+    if (type(raw) is not dict or set(raw) not in (fields, fields | {"request_failure"})
+            or raw.get("schema_version") != "4" or raw.get("status") != "failed"
+            or raw.get("error_category") != "preparation_timeout" or raw.get("recoverable") is not True
+            or raw.get("parent_run_id") != parent_id or stage not in _WALL_STAGES or attempt_id is None
+            or parent is None or parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}):
+        return None
+    starts = [item for item in relevant[:-1] if item.get("type") == _STARTED
+              and isinstance(item.get("payload"), dict)
+              and item["payload"].get("parent_run_id") == parent_id
+              and item["payload"].get("attempt_id") == attempt_id]
+    if (len(starts) != 1 or len(relevant) < 2 or relevant[-2] != starts[0]
+            or not _valid_start(starts[0]["payload"], parent_id, attempt_id, events)
+            or starts[0]["payload"].get("schema_version") != "2"):
+        return None
+    detail = raw["wall_failure"]
+    limit = math.ceil(starts[0]["payload"]["preparation_budgets"]["wall_timeout_seconds"] * 1000)
+    if (type(detail) is not dict
+            or set(detail) != {"schema_version", "reason", "elapsed_ms", "wall_timeout_ms"}
+            or detail.get("schema_version") != "1" or detail.get("reason") != "wall_timeout"
+            or type(detail.get("wall_timeout_ms")) is not int or detail["wall_timeout_ms"] != limit
+            or type(detail.get("elapsed_ms")) is not int or not limit <= detail["elapsed_ms"] <= _MAX_WALL_MS):
+        return None
+    request = None
+    if "request_failure" in raw:
+        if stage not in {"evaluator_compile", "evaluator_audit"}:
+            return None
+        try:
+            request = normalize_evaluator_request_failure(raw["request_failure"])
+        except (TypeError, ValueError):
+            return None
+    return dict(detail), request
+
+
+def _read_request_failure(raw, *, stage, parent, parent_id, attempt_id, relevant, events):
     """Request observations describe one completed attempt, never a recovery authority."""
     fields = {"schema_version", "parent_run_id", "attempt_id", "status", "stage",
               "error_category", "recoverable", "request_failure"}
@@ -95,8 +172,7 @@ def _read_request_failure(raw, *, stage, parent, parent_id, attempt_id, relevant
               and isinstance(item.get("payload"), dict)
               and item["payload"].get("parent_run_id") == parent_id
               and item["payload"].get("attempt_id") == attempt_id]
-    expected = _observation(parent_id, attempt_id, status="started", stage="preparation")
-    if (len(starts) != 1 or starts[0]["payload"] != expected
+    if (len(starts) != 1 or not _valid_start(starts[0]["payload"], parent_id, attempt_id, events)
             or len(relevant) < 2 or relevant[-2] != starts[0]):
         return None
     try:
@@ -105,7 +181,7 @@ def _read_request_failure(raw, *, stage, parent, parent_id, attempt_id, relevant
         return None
 
 
-def _read_local_failure(raw, *, stage, parent, parent_id, attempt_id, relevant):
+def _read_local_failure(raw, *, stage, parent, parent_id, attempt_id, relevant, events):
     """Optional details require stricter binding than the backward-compatible coarse projection."""
     fields = {"schema_version", "parent_run_id", "attempt_id", "status", "stage",
               "error_category", "recoverable", "local_failure"}
@@ -118,8 +194,7 @@ def _read_local_failure(raw, *, stage, parent, parent_id, attempt_id, relevant):
               and isinstance(item.get("payload"), dict)
               and item["payload"].get("parent_run_id") == parent_id
               and item["payload"].get("attempt_id") == attempt_id]
-    expected = _observation(parent_id, attempt_id, status="started", stage="preparation")
-    if len(starts) != 1 or starts[0]["payload"] != expected:
+    if len(starts) != 1 or not _valid_start(starts[0]["payload"], parent_id, attempt_id, events):
         return None
     try:
         detail = EvaluatorPreparationDiagnostic.from_dict(raw["local_failure"])
@@ -162,16 +237,24 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
     if prepared is not None:
         return _observation(parent_id, None, status="prepared", stage="profile_publish")
     if latest["type"] == _FAILED and isinstance(raw, dict):
+        if raw.get("schema_version") == "4" or "wall_failure" in raw:
+            detail = _read_wall_failure(raw, stage=stage, parent=parent, parent_id=parent_id,
+                                        attempt_id=attempt_id, relevant=relevant, events=events)
+            if detail is not None:
+                return _observation(parent_id, attempt_id, status="failed", stage=stage,
+                                    category="preparation_timeout", recoverable=True,
+                                    wall_failure=detail[0], request_failure=detail[1])
+            return {**result, "status": "failed", "error_category": "validation_error"}
         if raw.get("schema_version") == "3" or "request_failure" in raw:
             detail = _read_request_failure(raw, stage=stage, parent=parent, parent_id=parent_id,
-                                           attempt_id=attempt_id, relevant=relevant)
+                                           attempt_id=attempt_id, relevant=relevant, events=events)
             if detail is not None:
                 return _observation(parent_id, attempt_id, status="failed", stage=stage,
                                     category="runtime_error", recoverable=True, request_failure=detail)
             return {**result, "status": "failed", "error_category": "validation_error"}
         if raw.get("schema_version") == "2" or "local_failure" in raw or stage in LOCAL_FAILURE_STAGES:
             detail = _read_local_failure(raw, stage=stage, parent=parent, parent_id=parent_id,
-                                         attempt_id=attempt_id, relevant=relevant)
+                                         attempt_id=attempt_id, relevant=relevant, events=events)
             if detail is not None:
                 return _observation(parent_id, attempt_id, status="failed", stage=stage,
                                     category="validation_error", local_failure=detail)
@@ -311,7 +394,7 @@ def _materials(bundle, profile):
     return result
 
 
-def _artifact_rows(store, parent, materials, *, register=False):
+def _artifact_rows(store, parent, materials, *, register=False, publication_guard=None):
     tasks = store.list_tasks(parent.id)
     if not tasks:
         _fail("owner_missing")
@@ -322,6 +405,8 @@ def _artifact_rows(store, parent, materials, *, register=False):
         kind = "bundle_profile" if path == _PROFILE else "evaluator_bundle"
         matches = [row for row in rows if row.get("path") == path]
         if not matches and register:
+            if publication_guard is not None:
+                publication_guard()
             store.add_artifact(parent.id, owner, path, _sha(content), len(content), kind)
             matches = [row for row in store.list_artifacts(parent.id) if row.get("path") == path]
         if not matches:
@@ -473,17 +558,36 @@ def _write_profile(held, root, raw):
         _fail("profile_mismatch")
 
 
-def prepare_automatic_solve_bundle(controller, parent_id: str, contract: AlgorithmProblemContract, *, timeout_seconds: float = 900.0):
+def prepare_automatic_solve_bundle(
+    controller,
+    parent_id: str,
+    contract: AlgorithmProblemContract,
+    *,
+    timeout_seconds: float = 900.0,
+    evaluator_preparation_timeout_seconds: float | None = None,
+    evaluator_preparation_wall_timeout_seconds: float | None = None,
+):
     """Compile once, freeze and pin a regular pipeline before any child candidate is created."""
     try:
         parent, _ = _parent(controller.store, parent_id, contract)
         if not contract.outputs:
             _fail("outputs_required")
-        if type(timeout_seconds) not in {int, float}:
+        if type(timeout_seconds) not in {int, float} or not 0 < timeout_seconds <= 86400:
             _fail("settings_invalid")
         timeout = float(timeout_seconds)
         if not 0 < timeout <= 86400:
             _fail("settings_invalid")
+        request_timeout = timeout if evaluator_preparation_timeout_seconds is None else evaluator_preparation_timeout_seconds
+        if type(request_timeout) not in {int, float} or not 0 < request_timeout <= 86400:
+            _fail("settings_invalid")
+        request_timeout = float(request_timeout)
+        if not 0 < request_timeout <= 86400:
+            _fail("settings_invalid")
+        wall_timeout = evaluator_preparation_wall_timeout_seconds
+        if wall_timeout is not None:
+            if type(wall_timeout) not in {int, float} or not request_timeout <= wall_timeout <= 86400:
+                _fail("settings_invalid")
+            wall_timeout = float(wall_timeout)
         validate_automatic_solve_bundle(controller.store, parent_id)
         _, event = _event(controller.store, parent)
         if event is not None:
@@ -508,32 +612,58 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
             attempt_id = "preparation-" + secrets.token_hex(16)
             _record_observation(
                 controller.store, parent.id, _STARTED,
-                _observation(parent.id, attempt_id, status="started", stage="preparation"),
+                _observation(parent.id, attempt_id, status="started", stage="preparation",
+                             preparation_budgets=({
+                                 "candidate_timeout_seconds": timeout,
+                                 "request_timeout_seconds": request_timeout,
+                                 "wall_timeout_seconds": wall_timeout,
+                             } if wall_timeout is not None else None)),
             )
+            started_at = monotonic() if wall_timeout is not None else None
+
+            def remaining_timeout(current_stage):
+                continuation_guard()
+                remaining = wall_timeout - (monotonic() - started_at)
+                if remaining <= 0:
+                    raise EvaluatorPreparationWallTimeout(current_stage)
+                return remaining
+
+            remaining = remaining_timeout if wall_timeout is not None else None
+
+            def publication_guard():
+                continuation_guard()
+                if remaining is not None:
+                    remaining("profile_publish")
+
             stage = "preparation"
             try:
                 bundle = compile_evaluator_bundle(controller.runtime, contract, root, inputs=descriptors,
                                                   timeout=timeout, invocation="snapshot",
+                                                  preparation_request_timeout=request_timeout,
+                                                  preparation_remaining_timeout=remaining,
                                                   continuation_guard=continuation_guard)
                 stage = "profile_publish"
+                publication_guard()
                 current = _descriptors(controller.store, parent, contract)
                 if current != (descriptors, concrete, input_profile):
                     _fail("inputs_changed")
                 raw = canonical_json(_profile_payload(bundle, concrete, contract, timeout))
                 materials = _materials(bundle, raw)
                 _budget(controller.store, parent, materials)
-                continuation_guard()
+                publication_guard()
                 _write_profile(held, root, raw)
                 pipeline, bundle, raw, materials = _read_preparation(
                     controller.store, parent, contract, expected_timeout=timeout, require_event=False,
                 )
-                rows = _artifact_rows(controller.store, parent, materials, register=True)
+                publication_guard()
+                rows = _artifact_rows(controller.store, parent, materials, register=True,
+                                      publication_guard=publication_guard)
                 held.check()
-                continuation_guard()
+                publication_guard()
                 _budget(controller.store, parent, materials)
                 payload = _payload(parent, contract, bundle, pipeline, raw, rows)
                 event_id, _ = _event(controller.store, parent)
-                continuation_guard()
+                publication_guard()
                 controller.store.append_event(parent.id, _EVENT, payload, event_id=event_id)
                 return _read_preparation(controller.store, parent, contract, expected_timeout=timeout)[0]
             except Exception as exc:
@@ -541,6 +671,7 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                 unsupported_constraints = None
                 local_failure = None
                 request_failure = None
+                wall_failure = None
                 if type(exc) is EvaluatorPreparationError:
                     try:
                         if type(exc.diagnostic) is EvaluatorPreparationDiagnostic:
@@ -572,6 +703,27 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                                 request_failure = normalize_evaluator_request_failure(exc.request_failure)
                             except (AttributeError, TypeError, ValueError):
                                 pass
+                if type(exc) is EvaluatorPreparationWallTimeout:
+                    stage = exc.stage
+                    try:
+                        continuation_guard()
+                        validate_automatic_solve_bundle(controller.store, parent.id)
+                        if _descriptors(controller.store, parent, contract) != (descriptors, concrete, input_profile):
+                            _fail("inputs_changed")
+                    except (EvolutionError, OSError, TypeError, ValueError):
+                        pass
+                    else:
+                        category, recoverable = "preparation_timeout", True
+                        wall_failure = {
+                            "schema_version": "1", "reason": "wall_timeout",
+                            "elapsed_ms": min(_MAX_WALL_MS, math.ceil((monotonic() - started_at) * 1000)),
+                            "wall_timeout_ms": math.ceil(wall_timeout * 1000),
+                        }
+                        try:
+                            if exc.request_failure is not None:
+                                request_failure = normalize_evaluator_request_failure(exc.request_failure)
+                        except (AttributeError, TypeError, ValueError):
+                            pass
                 current_parent = controller.store.get_run(parent.id)
                 if current_parent is not None and current_parent.status == RunStatus.CANCELLED:
                     category, recoverable = "cancelled", False
@@ -579,11 +731,13 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                 elif current_parent is not None and current_parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
                     category, recoverable = "validation_error", False
                     local_failure = None
-                if local_failure is None and stage in LOCAL_FAILURE_STAGES:
+                if category != "preparation_timeout":
+                    wall_failure = None
+                if local_failure is None and wall_failure is None and stage in LOCAL_FAILURE_STAGES:
                     stage = "preparation"
                 if category != "unsupported_verification":
                     unsupported_constraints = None
-                if category != "runtime_error":
+                if category not in {"runtime_error", "preparation_timeout"}:
                     request_failure = None
                 observation = _observation(
                     parent.id, attempt_id, status="failed", stage=stage,
@@ -591,6 +745,7 @@ def prepare_automatic_solve_bundle(controller, parent_id: str, contract: Algorit
                     unsupported_constraints=unsupported_constraints,
                     local_failure=local_failure,
                     request_failure=request_failure,
+                    wall_failure=wall_failure,
                 )
                 _record_observation(controller.store, parent.id, _FAILED, observation)
                 raise AutomaticBundlePreparationError(

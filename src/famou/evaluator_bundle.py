@@ -200,6 +200,35 @@ class EvaluatorBundleRuntimeError(EvaluatorBundleError):
         super().__init__(f"evaluator {role} failed: runtime_error")
 
 
+class EvaluatorPreparationWallTimeout(EvaluatorBundleError):
+    """The controller's monotonic preparation deadline was reached locally."""
+
+    def __init__(self, stage: str, *, request_failure: object = None) -> None:
+        if stage not in {"preparation", "evaluator_compile", "evaluator_audit",
+                         "compiler_preflight", "auditor_preflight", "profile_publish"}:
+            raise ValueError("invalid preparation timeout stage")
+        self.stage = stage
+        self.request_failure = (
+            normalize_evaluator_request_failure(request_failure)
+            if request_failure is not None else None
+        )
+        super().__init__("evaluator preparation wall timeout")
+
+
+def _preparation_timeout(timeout, remaining, stage):
+    return timeout if remaining is None else min(timeout, _timeout(remaining(stage)))
+
+
+def _request_after_failure(remaining, stage, error):
+    if remaining is not None:
+        try:
+            remaining(stage)
+        except EvaluatorPreparationWallTimeout as exc:
+            raise EvaluatorPreparationWallTimeout(
+                stage, request_failure=project_evaluator_request_failure(error),
+            ) from exc
+
+
 class BundleRuntime(Protocol):
     name: str
 
@@ -464,6 +493,8 @@ def compile_evaluator_bundle(
     *,
     inputs: tuple[CandidateInputArtifact, ...] = (),
     timeout: float = 900.0,
+    preparation_request_timeout: float | None = None,
+    preparation_remaining_timeout: Callable[[str], float] | None = None,
     invocation: str = "candidate",
     continuation_guard: Callable[[], None] | None = None,
 ) -> FrozenEvaluatorBundle:
@@ -471,6 +502,8 @@ def compile_evaluator_bundle(
     if not isinstance(contract, AlgorithmProblemContract):
         raise TypeError("contract must be an AlgorithmProblemContract")
     timeout = _timeout(timeout)
+    request_timeout = timeout if preparation_request_timeout is None else _timeout(preparation_request_timeout)
+    _preparation_timeout(timeout, preparation_remaining_timeout, "preparation")
     _bundle_protocol(invocation)
     validate_evaluator_capabilities(contract, invocation=invocation)
     if invocation == "snapshot":
@@ -502,14 +535,17 @@ def compile_evaluator_bundle(
     prompt = _compiler_prompt(contract, profile, invocation=invocation)
     if continuation_guard is not None:
         continuation_guard()
+    request_limit = _preparation_timeout(request_timeout, preparation_remaining_timeout, "evaluator_compile")
     try:
-        result = _run_isolated(runtime, prompt, compiler_workspace, timeout)
+        result = _run_isolated(runtime, prompt, compiler_workspace, request_limit)
     except Exception as exc:
+        _request_after_failure(preparation_remaining_timeout, "evaluator_compile", exc)
         raise EvaluatorBundleRuntimeError(
             "evaluator_compile", request_failure=project_evaluator_request_failure(exc),
         ) from exc
     if continuation_guard is not None:
         continuation_guard()
+    _preparation_timeout(timeout, preparation_remaining_timeout, "evaluator_compile")
     try:
         if not isinstance(result, RuntimeResult):
             raise EvaluatorBundleError("evaluator compiler returned an invalid runtime result")
@@ -539,6 +575,7 @@ def compile_evaluator_bundle(
             timeout,
             label="compiler",
             invocation=invocation,
+            preparation_remaining_timeout=preparation_remaining_timeout,
         )
         current = tuple(staging.iterdir())
         if {path.name for path in current} != set(frozen_inputs) or any(
@@ -556,9 +593,10 @@ def compile_evaluator_bundle(
             envelope.objective,
             envelope.evaluator_source,
             root,
-            timeout,
+            request_timeout,
             invocation=invocation,
             continuation_guard=continuation_guard,
+            preparation_remaining_timeout=preparation_remaining_timeout,
         )
         audit_path.write_text(_canonical_probe_suite(audit_suite), encoding="utf-8")
         frozen_inputs[audit_path.name] = _sha256(audit_path)
@@ -570,6 +608,7 @@ def compile_evaluator_bundle(
             timeout,
             label="audit",
             invocation=invocation,
+            preparation_remaining_timeout=preparation_remaining_timeout,
         )
         current = tuple(staging.iterdir())
         if {path.name for path in current} != set(frozen_inputs) or any(
@@ -607,6 +646,7 @@ def compile_evaluator_bundle(
         load_evaluator_bundle(staging, contract, input_profile=profile, timeout=timeout, invocation=invocation)
         if continuation_guard is not None:
             continuation_guard()
+        _preparation_timeout(timeout, preparation_remaining_timeout, "preparation")
         try:
             staging.replace(destination)
         except FileExistsError:
@@ -1091,7 +1131,8 @@ def _snapshot_invocation_prompt() -> str:
     )
 
 
-def _snapshot_probe(evaluator, probe, contract, workspace, timeout):
+def _snapshot_probe(evaluator, probe, contract, workspace, timeout, *, preparation_remaining_timeout=None,
+                    stage="compiler_preflight"):
     """Run the actual 108 harness interface on synthetic data, without an execution record."""
     from .algorithm import MAX_REPORT_BYTES
     from .candidate_evaluation import (
@@ -1159,15 +1200,17 @@ def _snapshot_probe(evaluator, probe, contract, workspace, timeout):
             _tree_names(chain, copies)
             executable = _Executable(Path(spec.command[0]))
             stack.callback(executable.close)
+            process_timeout = _preparation_timeout(timeout, preparation_remaining_timeout, stage)
             try:
                 stdout, _, status, _, _ = _bounded_process_bytes(
                     [*spec.command, "evaluator.py", "request.json"], cwd=str(workspace),
-                    environment=dict(spec.environment), timeout=spec.timeout_seconds,
+                    environment=dict(spec.environment), timeout=process_timeout,
                     output_limit=MAX_REPORT_BYTES, capture_limit=MAX_REPORT_BYTES,
                 )
             except OSError as exc:
                 raise _ProbeFailure("snapshot evaluator preflight failed", "process_failed") from exc
             if status != "succeeded":
+                _preparation_timeout(timeout, preparation_remaining_timeout, stage)
                 raise _ProbeFailure("snapshot evaluator process failed or exceeded its limits", "process_failed")
             try:
                 report = parse_candidate_evaluation_report(stdout, evaluator_id=COMPILED_BUNDLE_EVALUATOR_ID)
@@ -1180,6 +1223,7 @@ def _snapshot_probe(evaluator, probe, contract, workspace, timeout):
                 _tree_names(chain, copies)
             except (OSError, ValueError, TypeError) as exc:
                 raise _ProbeFailure("snapshot evaluator preflight failed", "evidence_changed") from exc
+            _preparation_timeout(timeout, preparation_remaining_timeout, stage)
         return report
     except (OSError, KeyError, TypeError, ValueError) as exc:
         raise EvaluatorBundleError("snapshot evaluator preflight failed") from exc
@@ -1194,21 +1238,25 @@ def _preflight(
     *,
     label: str,
     invocation: str = "candidate",
+    preparation_remaining_timeout: Callable[[str], float] | None = None,
 ) -> None:
     stage = "auditor_preflight" if label == "audit" else "compiler_preflight"
     try:
         _preflight_suite(evaluator, suite, contract, staging, timeout, label=label,
-                         invocation=invocation, stage=stage)
-    except EvaluatorPreparationError:
+                         invocation=invocation, stage=stage,
+                         preparation_remaining_timeout=preparation_remaining_timeout)
+    except (EvaluatorPreparationError, EvaluatorPreparationWallTimeout):
         raise
     except (EvaluatorBundleError, OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
         raise _local_failure(str(exc), stage, "preflight_failed") from exc
 
 
-def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, invocation, stage):
+def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, invocation, stage,
+                     preparation_remaining_timeout=None):
     # Admit the whole suite before executing even its first probe. This is creation-time
     # validation only; loading an existing frozen bundle never replays its probes.
     for probe_index, probe in enumerate(suite.probes, 1):
+        _preparation_timeout(timeout, preparation_remaining_timeout, stage)
         supplied = {item.path: item.content for item in probe.files}
         for input_index, item in enumerate(contract.inputs, 1):
             try:
@@ -1221,11 +1269,14 @@ def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, inv
     reports: dict[str, EvaluationReport] = {}
     probe_root = staging / f".{label}-preflight"
     for probe_index, probe in enumerate(suite.probes, 1):
+        _preparation_timeout(timeout, preparation_remaining_timeout, stage)
         workspace = probe_root / probe.name
         workspace.mkdir(parents=True)
         if invocation == "snapshot":
             try:
-                report = _snapshot_probe(evaluator, probe, contract, workspace, timeout)
+                options = ({"preparation_remaining_timeout": preparation_remaining_timeout, "stage": stage}
+                           if preparation_remaining_timeout is not None else {})
+                report = _snapshot_probe(evaluator, probe, contract, workspace, timeout, **options)
             except _ProbeFailure as exc:
                 raise _local_failure(str(exc), stage, exc.reason, probe_index=probe_index) from exc
             reports[probe.name] = report
@@ -1273,9 +1324,13 @@ def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, inv
                     stage, "output_schema_invalid", probe_index=probe_index,
                 )
         try:
-            report = _run_evaluator(evaluator, candidate, timeout)
+            process_timeout = _preparation_timeout(timeout, preparation_remaining_timeout, stage)
+            report = _run_evaluator(evaluator, candidate, process_timeout)
         except _ProbeFailure as exc:
+            if exc.reason == "process_failed":
+                _preparation_timeout(timeout, preparation_remaining_timeout, stage)
             raise _local_failure(str(exc), stage, exc.reason, probe_index=probe_index) from exc
+        _preparation_timeout(timeout, preparation_remaining_timeout, stage)
         if report.validity != probe.expected_validity:
             raise _local_failure(
                 f"{label} constraint probe {probe.name} returned wrong validity",
@@ -1624,6 +1679,7 @@ def _compile_audit_suite(
     *,
     invocation: str = "candidate",
     continuation_guard: Callable[[], None] | None = None,
+    preparation_remaining_timeout: Callable[[str], float] | None = None,
 ) -> ProbeSuite:
     workspace = root / ".evaluator-auditor"
     if workspace.is_symlink():
@@ -1631,19 +1687,23 @@ def _compile_audit_suite(
     workspace.mkdir(parents=True, exist_ok=True)
     if continuation_guard is not None:
         continuation_guard()
+    prompt = _auditor_prompt(contract, input_profile, objective, evaluator_source, invocation=invocation)
+    request_limit = _preparation_timeout(timeout, preparation_remaining_timeout, "evaluator_audit")
     try:
         result = _run_isolated(
             runtime,
-            _auditor_prompt(contract, input_profile, objective, evaluator_source, invocation=invocation),
+            prompt,
             workspace,
-            timeout,
+            request_limit,
         )
     except Exception as exc:
+        _request_after_failure(preparation_remaining_timeout, "evaluator_audit", exc)
         raise EvaluatorBundleRuntimeError(
             "evaluator_audit", request_failure=project_evaluator_request_failure(exc),
         ) from exc
     if continuation_guard is not None:
         continuation_guard()
+    _preparation_timeout(timeout, preparation_remaining_timeout, "evaluator_audit")
     try:
         if not isinstance(result, RuntimeResult):
             raise EvaluatorBundleError("evaluator auditor returned an invalid runtime result")
@@ -1813,6 +1873,7 @@ __all__ = [
     "EvaluatorBundleError",
     "EvaluatorBundleRuntimeError",
     "EvaluatorPreparationError",
+    "EvaluatorPreparationWallTimeout",
     "FrozenEvaluatorBundle",
     "SolverScoringContract",
     "compile_evaluator_bundle",

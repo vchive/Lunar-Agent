@@ -58,13 +58,14 @@ class AutomaticBundleRuntime(MockRuntime):
         self.contract_calls = self.bundle_calls = self.audit_calls = self.generator_calls = 0
         self.isolated_calls = 0
         self.generator_workspaces = []
+        self.preparation_timeouts = []
+        self.generator_timeouts = []
 
     def run_isolated(self, prompt, workspace, timeout=None):
         self.isolated_calls += 1
         return self.run(prompt, workspace, timeout)
 
     def run(self, prompt, workspace, timeout=None):
-        del timeout
         if "contract compiler" in prompt:
             self.contract_calls += 1
             if self.clarify and self.contract_calls == 1:
@@ -74,6 +75,7 @@ class AutomaticBundleRuntime(MockRuntime):
             return RuntimeResult(json.dumps({"status": "compiled", "contract": self.contract.to_dict()}))
         if "frozen local evaluator bundle" in prompt:
             self.bundle_calls += 1
+            self.preparation_timeouts.append(("compiler", timeout))
             assert "request.json" in prompt
             return RuntimeResult(json.dumps({
                 **_suite(), "objective": "Maximize the integer value while remaining within its input bound.",
@@ -81,6 +83,7 @@ class AutomaticBundleRuntime(MockRuntime):
             }))
         if "adversarial evaluator auditor" in prompt:
             self.audit_calls += 1
+            self.preparation_timeouts.append(("auditor", timeout))
             assert "compiler-high" not in prompt
             return RuntimeResult(json.dumps(_suite(audit=True)))
         assert (workspace / "context/contract.json").is_file(), "ordinary DAG or model evaluator was invoked"
@@ -88,6 +91,7 @@ class AutomaticBundleRuntime(MockRuntime):
         assert all(marker not in prompt for marker in ("compiled-evaluator-hidden-marker", "compiler-high", "audit-high", "scoring_contract"))
         assert not list(workspace.rglob("evaluator.py")) and not (workspace / "scoring").exists()
         self.generator_workspaces.append(workspace)
+        self.generator_timeouts.append(timeout)
         draft = draft_for_score((1, 2, 999, 9)[self.generator_calls])
         self.generator_calls += 1
         return RuntimeResult(json.dumps({"files": draft.source_files, "entrypoint": draft.filename}))
@@ -141,7 +145,17 @@ def test_automatic_bundle_request_has_only_additive_mode_marker(extra):
     old = cli._evolution_request_payload(ordinary)
     new = cli._evolution_request_payload(automatic)
     assert "bundle_mode" not in old and "bundle_profile_sha256" not in old
-    assert new == {**old, "compile_evaluator": True, "bundle_mode": "compiled"}
+    assert "evaluator_preparation_timeout" not in old
+    assert new == {
+        **old,
+        "compile_evaluator": True,
+        "bundle_mode": "compiled",
+        "evaluator_preparation_timeout": 900.0,
+        "evaluator_preparation_wall_timeout": 1860.0,
+        "timeout_source": "default",
+        "evaluator_preparation_timeout_source": "default",
+        "evaluator_preparation_wall_timeout_source": "default",
+    }
     assert "bundle_profile" not in new and "harness_path" not in new
 
 
@@ -159,6 +173,50 @@ def test_automatic_mode_is_restored_without_repeating_flags(command):
     resumed = cli._evolution_args(args, request)
     assert resumed.multi_file is True and resumed.compile_evaluator is True and resumed.evolve is True
     assert getattr(resumed, "bundle_profile", None) is None
+    assert resumed.evaluator_preparation_timeout == 900.0
+
+
+def test_automatic_preparation_timeout_uses_legacy_timeout_when_request_omits_it():
+    parser = cli.build_parser()
+    request = cli._evolution_request_payload(parser.parse_args([
+        "solve", "optimize", "--evolve", "--multi-file", "--timeout", "3",
+    ]))
+    del request["evaluator_preparation_timeout"]
+
+    resumed = cli._evolution_args(parser.parse_args(["resume", "parent"]), request)
+
+    assert resumed.evaluator_preparation_timeout == 3.0
+
+
+def test_automatic_preparation_timeout_override_must_match_persisted_request():
+    parser = cli.build_parser()
+    request = cli._evolution_request_payload(parser.parse_args([
+        "solve", "optimize", "--evolve", "--multi-file",
+        "--timeout", "3", "--evaluator-preparation-timeout", "5",
+    ]))
+    supplied = parser.parse_args([
+        "resume", "parent", "--evaluator-preparation-timeout", "7",
+    ])
+
+    with pytest.raises(EvolutionError, match="evaluator_preparation_timeout"):
+        cli._validate_evolution_override(supplied, request)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "86401", "nan", "inf"])
+def test_invalid_automatic_preparation_timeout_fails_before_creating_run(
+    tmp_path, monkeypatch, capsys, value,
+):
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid preparation timeout must be rejected before runtime construction")
+
+    monkeypatch.setattr(cli, "build_runtime", forbidden)
+    assert cli.main([
+        "solve", "optimize", "--evolve", "--multi-file",
+        "--evaluator-preparation-timeout", value,
+        "--home", str(tmp_path / "home"), "--json",
+    ]) == 2
+    assert "evaluator-preparation-timeout" in json.loads(capsys.readouterr().err)["error"]
+    assert not (tmp_path / "home/state.db").exists()
 
 
 @pytest.mark.parametrize("mode", [None, "single", False, {}, "external"])
@@ -233,6 +291,30 @@ def test_automatic_solve_delivers_scored_bundle_and_resumes_without_compilation(
     assert store.list_events(first["run_id"]) == events
     assert (runtime.contract_calls, runtime.bundle_calls, runtime.audit_calls, runtime.generator_calls) == (1, 1, 1, 4)
     assert cli._status_payload(Config(tmp_path / "home"), first["run_id"])["evolution"]["linked"]["materialization"] == delivery
+
+
+def test_automatic_preparation_timeout_is_separate_from_candidate_execution(
+    tmp_path, monkeypatch, capsys,
+):
+    runtime, args = automatic_setup(tmp_path, monkeypatch)
+    args.extend(("--evaluator-preparation-timeout", "7"))
+
+    assert cli.main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    parent = Path(result["workspace"])
+    request = next(
+        event["payload"]
+        for event in Store(tmp_path / "home/state.db").list_events(result["run_id"])
+        if event["type"] == "evolution_requested"
+    )
+    profile = json.loads((parent / "bundle-profile.json").read_text())
+
+    assert request["timeout"] == 3.0
+    assert request["evaluator_preparation_timeout"] == 7.0
+    assert runtime.preparation_timeouts == [("compiler", 7.0), ("auditor", 7.0)]
+    assert runtime.generator_timeouts == [3.0] * 4
+    assert profile["timeout_seconds"] == 3.0
+    assert profile["evaluator"]["timeout_seconds"] == 3.0
 
 
 @pytest.mark.parametrize("repeat_mode", [False, True])

@@ -110,7 +110,12 @@ def test_native_local_failure_is_durable_and_visible_without_reexecution(
     }
     records = observations(store, failed["run_id"])
     assert [row["type"] for row in records] == ["bundle_preparation_started", "bundle_preparation_failed"]
-    assert records[0]["payload"]["schema_version"] == "1"
+    assert records[0]["payload"]["schema_version"] == "2"
+    assert records[0]["payload"]["preparation_budgets"] == {
+        "candidate_timeout_seconds": 3.0,
+        "request_timeout_seconds": 3.0,
+        "wall_timeout_seconds": 66.0,
+    }
     assert records[0]["payload"]["attempt_id"] == preparation["attempt_id"]
     assert records[1]["payload"] == preparation
     assert set(preparation["local_failure"]) == DETAIL_KEYS
@@ -210,7 +215,7 @@ def test_status_discards_malformed_or_unbound_local_failure_without_echo_or_call
     else:
         altered = copy.deepcopy(start["payload"])
         field, value = {
-            "start_extra": ("message", PRIVATE), "start_version": ("schema_version", "2"),
+            "start_extra": ("message", PRIVATE), "start_version": ("schema_version", "invalid"),
             "start_stage": ("stage", "compiler_preflight"), "start_parent": ("parent_run_id", "other"),
             "start_attempt": ("attempt_id", "preparation-" + "e" * 32),
         }[corruption]

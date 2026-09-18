@@ -6,23 +6,37 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
-## Feature 133：拆分 evaluator preparation 请求与总等待预算（2026-09-18，规格阶段）
+## Feature 133：独立 preparation 请求预算与总墙钟预算（2026-09-18，已完成）
 
-本轮先只写规格，未改实现、未调用模型、未执行生成代码。规格见
-`specs/133-preparation-budgets/spec.md` 和 `tasks.md`。
+已完成确认的完整范围：`--evaluator-preparation-timeout` 控制每次 compiler/auditor
+模型请求，`--evaluator-preparation-wall-timeout` 控制一次准备的总墙钟。既有 `--timeout`
+继续控制候选生成/执行与冻结 evaluator 执行；preparation 值不进入 `bundle-profile.json`，
+不改变 profile bytes 或 evaluator identity。请求缺省沿用 `timeout`，总墙钟缺省为
+`min(86400, 2 * request_timeout + 60)`；两者均须有限且在 `(0, 86400]`，总墙钟不小于请求。
 
-设计固定三类 timeout 的边界：既有 `--timeout` 继续控制候选生成/执行与冻结 evaluator
-执行；新增 `--evaluator-preparation-timeout` 控制每次 compiler/auditor 模型请求；新增
-`--evaluator-preparation-wall-timeout` 控制从 preparation 开始到本地校验、探针、artifact
-登记和 profile 发布前的单一总墙钟。新 compiled handoff 持久化两个解析后的 preparation
-值，resume/answer 只能复用；旧 Feature 112-132 handoff 缺字段时，单请求回退旧
-`timeout`、总墙钟保持 legacy-unbounded，并在状态中标明。preparation 值不进入
-`bundle-profile.json`，避免改变既有候选执行 authority、profile bytes 或 evaluator identity。
+计时紧随持久化 `bundle_preparation_started` 开始，覆盖之后的输入检查、两次请求、
+本地预检和发布检查；等待准备锁与 start 前准入不计入本次预算。请求和本地进程按剩余
+时间收紧，阶段前后与发布前检查同一 deadline。观察到期后不能发布成功 prepared event
+或创建 child；已开始的有界写入/登记可能在下一次检查前完成，留下的本地材料须在显式
+恢复时重新验证，不能直接充当准备成功的 authority。不引入回滚或任意操作的异步中断。
 
-总墙钟耗尽只能产生有界、可恢复的 preparation 预算诊断，不能发布半成品、创建 child、
-自动重试、延长 deadline 或推断 provider 端状态。Feature 132 的实际 request observation
-继续保留，取消、终态、输入漂移和完整性校验优先级不变。下一步才实现并做离线回归；本轮
-没有新的真实测量或 WebAgent 结论。
+新 compiled handoff 持久化两项预算及 explicit/default 来源，`resume`/`answer` 恢复且
+拒绝显式不匹配。旧 handoff 请求回退存储的 `timeout`，缺失总墙钟保持 legacy-unbounded，
+不能在恢复时补有限值改写历史策略；已有值但缺来源时只标 persisted。JSON/text 分开展示
+候选、请求和总墙钟。保留 Feature 132 的实际请求证据与 Feature 116 的父任务 persisted
+running/effective failed 语义，只有显式继续才按原策略开始新的准备 attempt。
+
+84 项 CLI 策略测试、41 项墙钟测试及 276 项相关集成回归通过；全量双阶段 exit0：
+工作产品 7661 passed/1 skipped/24 deselected（525.38 秒），固定历史版本 24 passed。
+全量收集后补的布尔预算严格绑定检查另经 169 项诊断回归通过，没有为该窄改动重跑全仓。
+112 离线示例仍选 7 分、交付 1 份，终态恢复调用数保持 1/1/1/4/4。Ruff、compileall、
+Specify、文档链接、diff 与独立审查通过；131 份历史证据大小和 SHA 保持一致。完整记录见
+`specs/133-preparation-budgets/validation.md`，本轮正常提交并推送 origin/main。
+
+没有调用真实模型、重放历史捕获源码、改动冻结测量或新增 WebAgent 效果结论。下一步可为
+新的小型真实多文件闭环独立登记产品、任务、provider、请求/墙钟预算及唯一运行槽，再验证
+实际准备和交付；不能重开 Feature 131。真实自动多文件端到端成功仍未验收，外部 producer
+多文件 seed、全链路预算/取消及 detached 仍在后续范围。
 
 ## Feature 132：自动准备保留模型请求失败详情（2026-09-18）
 
