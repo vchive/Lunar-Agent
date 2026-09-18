@@ -4,10 +4,11 @@
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
 evaluator/profile 准备和父任务交付/终态恢复；Feature130已补完整合同封装示例并保持
-strict parser；Feature131的合同已通过，但evaluator compiler等待响应头600.004秒后超时，
-仍无真实自动多文件交付。Feature132已补普通status的请求失败详情，保留116的显式恢复
-语义；后续明确生成预算/等待策略，再登记新的独立真实运行。外部 producer 的多文件
-接线与运行中取消编排仍未完成；
+strict parser。Feature132已补请求失败详情，133已完成独立preparation请求和总墙钟预算，
+保留116的显式恢复语义。Feature134独立真实验收已通过准备1/1和8/8留出，但没有父任务
+交付，primary/joint仍0/1。三次生成均触及登记工具预算，下一步按SDD离线验证每候选
+显式预算和完成诊断。外部producer多文件接线、全链路预算、运行中
+取消编排和detached仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
@@ -18,6 +19,46 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-18：真实准备与留出通过，完整交付未通过
+
+Feature134按SDD固定规格、方案和离线验证，登记`358f738`先推送，再在产品`15710bd`上
+运行唯一真实槽。保留131的任务、输入、provider、GLM-5.2、population和seed，普通请求及
+候选执行600秒，preparation请求900秒、总墙钟1860秒；campaign仍限2400秒、20请求和
+160000观测tokens。8项holdout只在验证准备成功且剩余时间允许时执行，不重试或补槽。
+新摘要验证原生持久预算，保留类型化请求失败并投影实际HTTP状态；报告仍区分持久父状态
+和有效对外状态。preparation 1/1、8项holdout全部执行且精确匹配，primary/joint 0/1，
+无父任务交付，官方quality/gap均null。11次请求均HTTP200，用量完整98714tokens，
+费用未知；总896.396秒、native/process exit均1、清理通过。父任务持久succeeded表示
+intake已完成；evolution child失败使CLI有效状态failed，符合现有投影规则。compiler/auditor耗时
+346.070/124.757秒，均低于旧600秒时限，不能归因于预算增加。
+
+只读诊断确认三次生成都在最终候选前触及登记的max_steps=4工具执行预算：前两次
+4+2>4、第三次3+2>4时下一批工具被拒绝，已执行11次工具全部成功。没有可准入候选，
+evaluated/valid candidates均0，child以offspring_batch_failed结束；尚未进入候选执行、
+独立评分或交付。类型化preparation请求/墙钟失败诊断只由离线fixture验证，本次真实
+准备阶段没有触发这些分支。
+
+262项测量测试通过；全量双阶段当前7924 passed/1 skipped/24 deselected、固定历史
+24 passed。见[134报告](../specs/134-budgeted-multifile-acceptance/postrun/report.md)。下一步
+按SDD设计足够且显式的每候选工具预算与完成诊断，先离线验证，再决定任何新真实测量
+的独立登记条件，不预设新预算数值。不能追加旧槽工具、修改guard语义或重试补分，
+也不能用准备成功替代真实闭环交付或一般稳定性证据。旧分母与WebAgent历史保持不变。
+
+## 2026-09-18：独立 preparation 请求与总墙钟预算完成
+
+Feature133新增`--evaluator-preparation-timeout`和`--evaluator-preparation-wall-timeout`，
+分别限制compiler/auditor单请求与一次准备；既有`--timeout`继续限制候选生成/执行和冻结
+evaluator执行，preparation字段不进入profile或执行身份。预算和来源持久化，继续运行
+必须匹配原策略，旧记录保留请求回退与legacy-unbounded总墙钟。计时紧随持久start，
+模型和本地预检按同一deadline剩余时间收紧；观察到期后不能发布成功prepared event或
+创建child。已开始的有界本地操作可能留下待显式恢复验证的材料，不增加自动重试。
+父任务persisted running/effective failed保持，取消/终态/完整性优先。
+
+84项CLI策略、41项墙钟与276项相关回归通过；双阶段全仓7661 passed/1 skipped/
+24 deselected及历史固定24 passed，最后布尔预算绑定修正另经169项诊断回归通过。
+见[133验证](../specs/133-preparation-budgets/validation.md)。本功能仅离线验证预算路由与
+恢复，不证明真实生成延迟、成功率或演化收益；全链路预算/取消和detached继续后置。
 
 ## 2026-09-18：自动准备请求失败可查询
 

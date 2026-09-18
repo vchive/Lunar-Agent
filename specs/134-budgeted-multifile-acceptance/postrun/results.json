@@ -1,0 +1,552 @@
+{
+  "campaign_id": "acceptance134-glm-5.2-budgeted-multifile-20260918",
+  "cleanup_verified": true,
+  "elapsed_seconds": 896.3957137080142,
+  "exit_code": 1,
+  "frozen": {
+    "contract_sha256": "7f16819767919802f57ef52ea330a212affee865644e0fbb3051bec54ddfb719",
+    "files": {
+      "audit.json": "5df8551ca443cc5aff4e10256901a468ad56c0970945d0d0d3e4a99dd7a1f66e",
+      "evaluator.py": "d6aa6796379f7b608a24ba4abb83344b5b694f9abc5d531e4474ea4302eb9585",
+      "input-profile.json": "35135e14ca1870bf7f2fae5f06684f0c56d0b57bedf35bc4d0fbdcc41fdd3994",
+      "manifest.json": "dc61c2d84ac6baca508d4ffdda3b7ed98eaa99ddffba8b1757c106ad2e7a1e1e",
+      "objective.md": "fe7ae5dea23b58854ce6e689e2cdec2b802ab74445ff345a1d728aefefcf0c8a",
+      "probes.json": "4516b9dda2800e5cbcea95ce33884ef63476d1c008e4870025efef5cec034525"
+    },
+    "fingerprint": "b04e6f7c459d0e816db4d618cf917c963486b1bae4b0e7b6a0bca7321fae0af9",
+    "input_profile_sha256": "35135e14ca1870bf7f2fae5f06684f0c56d0b57bedf35bc4d0fbdcc41fdd3994"
+  },
+  "gap": null,
+  "holdouts": {
+    "executed": 8,
+    "execution_count_scope": "retained_snapshot_started_rows",
+    "matched": 8,
+    "planned": 8,
+    "recorded": 8,
+    "rows": [
+      {
+        "matched": true,
+        "name": "limit-1-value-minus-1",
+        "observed": {
+          "combined_score": 0,
+          "constraint_code_present": true,
+          "quality": null,
+          "validity": 0
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      },
+      {
+        "matched": true,
+        "name": "limit-1-value-0",
+        "observed": {
+          "combined_score": 0,
+          "constraint_code_present": false,
+          "quality": 0,
+          "validity": 1
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      },
+      {
+        "matched": true,
+        "name": "limit-1-value-1",
+        "observed": {
+          "combined_score": 1,
+          "constraint_code_present": false,
+          "quality": 1,
+          "validity": 1
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      },
+      {
+        "matched": true,
+        "name": "limit-1-value-2",
+        "observed": {
+          "combined_score": 0,
+          "constraint_code_present": true,
+          "quality": null,
+          "validity": 0
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      },
+      {
+        "matched": true,
+        "name": "limit-3-value-0",
+        "observed": {
+          "combined_score": 0,
+          "constraint_code_present": false,
+          "quality": 0,
+          "validity": 1
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      },
+      {
+        "matched": true,
+        "name": "limit-3-value-2",
+        "observed": {
+          "combined_score": 2,
+          "constraint_code_present": false,
+          "quality": 2,
+          "validity": 1
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      },
+      {
+        "matched": true,
+        "name": "limit-3-value-3",
+        "observed": {
+          "combined_score": 3,
+          "constraint_code_present": false,
+          "quality": 3,
+          "validity": 1
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      },
+      {
+        "matched": true,
+        "name": "limit-3-value-4",
+        "observed": {
+          "combined_score": 0,
+          "constraint_code_present": true,
+          "quality": null,
+          "validity": 0
+        },
+        "snapshot_started": true,
+        "status": "completed"
+      }
+    ]
+  },
+  "joint_success": 0,
+  "known_optimum": 3,
+  "local_failure": null,
+  "manifest_sha256": "20eb007b2d37b3b4a47d86795b8909213a64dffe36ad57055829c9deb9166ebf",
+  "native_exit_code": 1,
+  "optimal": false,
+  "planned_attempts": 1,
+  "preparation_success": 1,
+  "primary_success": 0,
+  "process_status": "exited",
+  "product": {
+    "contract_verified": true,
+    "delivery_verified": false,
+    "errors": [
+      "output_unavailable"
+    ],
+    "optimal": false,
+    "optimum": 3,
+    "output_check": {
+      "quality": null,
+      "validity": false
+    },
+    "persisted_parent_status": "succeeded",
+    "preparation": {
+      "error_category": null,
+      "recoverable": false,
+      "schema_version": "1",
+      "stage": "profile_publish",
+      "status": "prepared"
+    },
+    "preparation_budgets": {
+      "candidate_timeout": {
+        "seconds": 600.0,
+        "source": "explicit"
+      },
+      "evaluator_preparation_timeout": {
+        "seconds": 900.0,
+        "source": "explicit"
+      },
+      "evaluator_preparation_wall_timeout": {
+        "seconds": 1860.0,
+        "source": "explicit"
+      }
+    },
+    "preparation_verified": true,
+    "primary_valid_completion": false,
+    "product_status": "failed",
+    "product_success": false,
+    "quality": null,
+    "quality_gap": null,
+    "source_check_protocol": null,
+    "source_check_validity": null,
+    "source_checks": [],
+    "source_delivery_protocol": null,
+    "source_evidence_verified": false,
+    "source_python_count": 0
+  },
+  "product_commit": "15710bd420d70aa07a06ee9dd4329dfbf1912b2b",
+  "quality": null,
+  "registration_commit": "358f7383e61aec9e702310774b0d5d906978c2f8",
+  "request_failure": null,
+  "schema_version": "1",
+  "transport": [
+    {
+      "elapsed_ms": 48362,
+      "exchange_count": 1,
+      "index": 1,
+      "outcome": "response",
+      "request_body_bytes": 8740,
+      "response_body_bytes": 16524,
+      "stage": "contract_compiler",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 48318,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 346069,
+      "exchange_count": 1,
+      "index": 2,
+      "outcome": "response",
+      "request_body_bytes": 19171,
+      "response_body_bytes": 116926,
+      "stage": "evaluator_compiler",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 345965,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 124756,
+      "exchange_count": 1,
+      "index": 3,
+      "outcome": "response",
+      "request_body_bytes": 21826,
+      "response_body_bytes": 36519,
+      "stage": "evaluator_auditor",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 124715,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 1413,
+      "exchange_count": 1,
+      "index": 4,
+      "outcome": "response",
+      "request_body_bytes": 8814,
+      "response_body_bytes": 849,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 1405,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 56502,
+      "exchange_count": 1,
+      "index": 5,
+      "outcome": "response",
+      "request_body_bytes": 13598,
+      "response_body_bytes": 22884,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 56452,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 83280,
+      "exchange_count": 1,
+      "index": 6,
+      "outcome": "response",
+      "request_body_bytes": 19630,
+      "response_body_bytes": 22171,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 83231,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 2487,
+      "exchange_count": 1,
+      "index": 7,
+      "outcome": "response",
+      "request_body_bytes": 8814,
+      "response_body_bytes": 852,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 2471,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 92123,
+      "exchange_count": 1,
+      "index": 8,
+      "outcome": "response",
+      "request_body_bytes": 13598,
+      "response_body_bytes": 28068,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 92072,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 49389,
+      "exchange_count": 1,
+      "index": 9,
+      "outcome": "response",
+      "request_body_bytes": 20465,
+      "response_body_bytes": 13462,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 49354,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 2092,
+      "exchange_count": 1,
+      "index": 10,
+      "outcome": "response",
+      "request_body_bytes": 8814,
+      "response_body_bytes": 1071,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 2084,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    },
+    {
+      "elapsed_ms": 87178,
+      "exchange_count": 1,
+      "index": 11,
+      "outcome": "response",
+      "request_body_bytes": 13942,
+      "response_body_bytes": 25439,
+      "stage": "candidate",
+      "status": 200,
+      "transport_observation": {
+        "elapsed_ms": 87136,
+        "http_exchange_index": 1,
+        "last_milestone": "response_headers_received"
+      }
+    }
+  ],
+  "usage": {
+    "cost_micros": null,
+    "finished_requests": 11,
+    "known_usage": {
+      "input_tokens": 34088,
+      "output_tokens": 64626,
+      "total_tokens": 98714
+    },
+    "pending_requests": [],
+    "provider_requests": 11,
+    "requests": [
+      {
+        "elapsed_seconds": 48.36267762503121,
+        "failure_reason": null,
+        "index": 1,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "ad96fc9ffb5fe939aef9f995a054790ebd794d26ca4734f58c6c4d9799d88d82",
+        "request_timeout_seconds": 600.0,
+        "response_status": null,
+        "stage": "contract_compiler",
+        "usage": {
+          "input_tokens": 1754,
+          "output_tokens": 3377,
+          "total_tokens": 5131
+        }
+      },
+      {
+        "elapsed_seconds": 346.06992254196666,
+        "failure_reason": null,
+        "index": 2,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "58caf1a927f351b7e1250ddd70796241642beb032ebe7eb54e728ebdc2787ae1",
+        "request_timeout_seconds": 900.0,
+        "response_status": null,
+        "stage": "evaluator_compiler",
+        "usage": {
+          "input_tokens": 4213,
+          "output_tokens": 27272,
+          "total_tokens": 31485
+        }
+      },
+      {
+        "elapsed_seconds": 124.75699849997181,
+        "failure_reason": null,
+        "index": 3,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "1e54471edb11e2fe7d60a7a0bb5893d2d1486f19bdd8250dee669fbe0d5aa94c",
+        "request_timeout_seconds": 900.0,
+        "response_status": null,
+        "stage": "evaluator_auditor",
+        "usage": {
+          "input_tokens": 4793,
+          "output_tokens": 8924,
+          "total_tokens": 13717
+        }
+      },
+      {
+        "elapsed_seconds": 1.4133625419344753,
+        "failure_reason": null,
+        "index": 4,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "8c00b113fd202511147bc6fb6df8127d535c313a508ecd89a4007172da639194",
+        "request_timeout_seconds": 599.9999995409744,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 2021,
+          "output_tokens": 44,
+          "total_tokens": 2065
+        }
+      },
+      {
+        "elapsed_seconds": 56.50292691704817,
+        "failure_reason": null,
+        "index": 5,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "1edb3eb4d9bf8808eb6836f013062aaf749a447e0fc9b75b4a9aad30af02ead0",
+        "request_timeout_seconds": 598.5845591248944,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 2948,
+          "output_tokens": 4961,
+          "total_tokens": 7909
+        }
+      },
+      {
+        "elapsed_seconds": 83.28082833299413,
+        "failure_reason": null,
+        "index": 6,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "6e2e80e04bdaeefe811b390830b630f812508a464ed367e95d9fd9318f957efb",
+        "request_timeout_seconds": 542.0763430829393,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 4070,
+          "output_tokens": 4719,
+          "total_tokens": 8789
+        }
+      },
+      {
+        "elapsed_seconds": 2.4884872500551865,
+        "failure_reason": null,
+        "index": 7,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "8c00b113fd202511147bc6fb6df8127d535c313a508ecd89a4007172da639194",
+        "request_timeout_seconds": 599.999999333988,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 2021,
+          "output_tokens": 44,
+          "total_tokens": 2065
+        }
+      },
+      {
+        "elapsed_seconds": 92.12425624998286,
+        "failure_reason": null,
+        "index": 8,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "d2facf5adea0fae1731ac401be804e774ee257a87db5b7ec67a873f223740179",
+        "request_timeout_seconds": 597.5079164589988,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 2948,
+          "output_tokens": 6300,
+          "total_tokens": 9248
+        }
+      },
+      {
+        "elapsed_seconds": 49.389827667037025,
+        "failure_reason": null,
+        "index": 9,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "6eb9fc1526ce9668586b6d0826d637951cbfbab998b8c5af56e7f0684b7feae5",
+        "request_timeout_seconds": 505.3801577920094,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 4308,
+          "output_tokens": 3152,
+          "total_tokens": 7460
+        }
+      },
+      {
+        "elapsed_seconds": 2.0927648750366643,
+        "failure_reason": null,
+        "index": 10,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "3f71818cb2d870c1735c0a2b04b996ba82e47c836d6d57e5f43b006ab4b96474",
+        "request_timeout_seconds": 599.9999995410908,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 2021,
+          "output_tokens": 71,
+          "total_tokens": 2092
+        }
+      },
+      {
+        "elapsed_seconds": 87.17923695791978,
+        "failure_reason": null,
+        "index": 11,
+        "outcome": "succeeded",
+        "request_observation": null,
+        "request_sha256": "b7246b161a8994c6cc2ccbff8543316ffd78c274008658aa48179ab7a31f7c1f",
+        "request_timeout_seconds": 597.900701833074,
+        "response_status": null,
+        "stage": "candidate",
+        "usage": {
+          "input_tokens": 2991,
+          "output_tokens": 5762,
+          "total_tokens": 8753
+        }
+      }
+    ],
+    "total_usage": {
+      "input_tokens": 34088,
+      "output_tokens": 64626,
+      "total_tokens": 98714
+    },
+    "usage_complete": true
+  },
+  "wall_failure": null,
+  "worker_stage": "solve",
+  "worker_status": "failed"
+}

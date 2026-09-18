@@ -1,6 +1,8 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-18 更新至 Feature 132。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-18 更新至 Feature 134：准备与留出通过，完整交付未通过。
+以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
+最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -122,6 +124,34 @@ Feature132补齐自动准备模型请求的安全诊断链路：精确类型的�
 本轮不改变请求时限、模型参数或提示，不证明远端生成速度或成功率提高；验证见
 [132 validation](../specs/132-preparation-request-diagnostics/validation.md)。
 
+Feature133已完成独立 preparation 请求与总墙钟预算。新 compiled solve 持久化两项预算及
+来源，resume/answer必须匹配原策略；旧 handoff 保留请求回退及 legacy-unbounded 总墙钟。
+一次准备在持久化 start 后使用同一单调时钟 deadline，模型请求和本地预检按剩余时间收紧；
+观察到期后不能发布成功准备事件或创建 child。已有有界本地操作可能留下材料，但材料须
+经显式恢复验证。候选生成/执行和冻结 evaluator 仍由既有 `--timeout` 控制，preparation
+值不进入冻结 profile。取消、终态和完整性检查优先，父任务 persisted running/effective
+failed 恢复语义保持；这还不是全链路总预算或运行中取消编排。
+84项CLI、41项deadline及276项相关集成回归通过；双阶段全仓为7661 passed/1 skipped/
+24 deselected与固定历史24 passed，最后的布尔预算绑定修正另经169项诊断回归通过。
+见[133 validation](../specs/133-preparation-budgets/validation.md)。这些离线验证不证明模型
+生成更快或真实闭环已经成功。
+
+Feature134已在推送登记`358f738`后，以固定产品`15710bd`完成一个新的真实多文件槽。
+任务、provider、GLM-5.2和population seed沿用131，普通请求/候选600秒，preparation请求
+900秒、总墙钟1860秒，campaign仍为2400秒/20请求/160000观测tokens。测量增加持久策略
+校验、类型化请求失败与安全HTTP状态投影。结果为preparation 1/1、holdout 8/8，primary/
+joint 0/1；没有父任务交付，官方quality/gap均null。11次请求均HTTP200，完整用量98714
+tokens（34088input/64626output），费用未知；896.396秒，native/process exit均1，清理
+通过。父任务持久succeeded表示intake完成；失败的evolution child使CLI对外状态failed，
+符合现有投影规则。三次生成都在最终候选前受限于登记的max_steps=4工具预算：前两次在
+4+2>4、第三次在3+2>4时拒绝下一批工具，已有11次工具执行均成功。没有可准入候选，
+evaluated/valid candidates均0，child以offspring_batch_failed结束；尚未进入候选执行、
+独立评分或交付。HTTP成功不代表候选生成完成。
+compiler/auditor分别346.070/124.757秒，均低于旧600秒时限，因此不构成增加预算的因果
+收益。262项测量测试和全量双阶段7924 passed/1 skipped/24 deselected、固定历史24 passed
+通过。见[134 report](../specs/134-budgeted-multifile-acceptance/postrun/report.md)。
+本次真实请求都成功；类型化preparation请求失败与墙钟失败分支仅由离线fixture验证。
+
 Lunar 已有可运行的本地 Agent 和完整的单文件 population 演化链路。多文件链路也已接通
 生成、独立执行与评分、Candidate/receipt/archive、下一代选择、terminal resume 和完整
 源码/已评分输出交付。用户可通过 `evolve-bundle` 或普通 `solve --evolve --bundle-profile`
@@ -147,7 +177,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 本地 Agent / Controller | 工具循环、任务调度、预算、SQLite、恢复、验收和交付已有实现与接线 | 自动化测试；较早普通流程有真实有效解 |
 | 单文件 population | 生成、独立评估、receipt、archive/选择/迁移、checkpoint/resume 与交付已集成 | 代码和离线 fixture；当前版本收益仍待实测 |
 | 多文件候选 | command/Agent/native runtime 生成 → bundle → 执行/独立评测 → receipt/archive/population → 父任务交付/terminal resume 已完成 | 普通 intake、完整父代上下文、helper-only 改进、有效性选优、迁移、失败保留、完整交付与不重跑 fixture |
-| 自动 evaluator/profile | 多文件 solve 复用 compiler、独立 auditor、输出探针和冻结恢复；硬源码文件数另做确定性检查；其余 source/execution 提前报不支持 | 本地 fixture；检查只证明声明文件数，真实任务仍需验收 |
+| 自动 evaluator/profile | 自动 compiler/auditor、输出探针、独立 preparation 请求/墙钟预算与冻结恢复已接通；源码文件数另做确定性检查；其他 source/execution 提前报不支持 | 128及134真实准备通过，各自8/8留出；134完整交付仍为0/1 |
 | OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现 | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证 |
 | ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现 | 本地 fixture；尚无 Shinka launcher/调度实现 |
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |
@@ -163,7 +193,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | --- | --- | --- |
 | 1 | 多文件 exact evaluator 与输出契约：已完成本地实现与验证 | evaluator 实现与契约固定，成功 execution record 关联评测时输出快照；坏输出直接无效，失败进程拒绝；评测不重跑候选 |
 | 2 | 多文件进入演化与最终交付：原生本地闭环已完成，外部 producer 接线待补 | Candidate/receipt/archive/lineage 已表达 bundle；command generator 和 controller 已接通；helper 模块任务完成生成、评分、下一代选择与可复核交付；OpenEvolve/Shinka 通用 material 仍为单文件 |
-| 3 | 统一用户入口与恢复：已有普通 solve 自动 evaluator/profile 准备、父任务交付及 terminal resume | parent 输入/profile 绑定与 publication journal 已接通；支持范围内无需手写 profile/harness；运行中取消编排与更大输入格式/探针容量后续按需求处理 |
+| 3 | 统一用户入口与恢复：已有普通 solve 自动准备、独立 preparation 预算、父任务交付及 terminal resume | parent 输入/profile 绑定与 publication journal 已接通；支持范围内无需手写 profile/harness；全链路预算、运行中取消编排与更大输入格式/探针容量继续待补 |
 | 4 | 当前版本真实验收 | 使用明确模型、输入、预算和 evaluator，分别验证 normal、原生 population、多文件与至少一个真实外部 producer 路径；保留失败分母，报告有效解率、分数、耗时和已知用量 |
 
 第 4 项应先用小规模端到端样例贯穿开发，再在实现冻结后形成正式测量。不能等到所有
@@ -173,7 +203,9 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 ## 下一项实现需要解决的具体问题
 
 自动准备 → 双文件生成 → 执行 → 独立评测 → 选优 → 交付现已通过本地进程样例。
-首批真实验收停在合同编译，已确认的入口接线问题由 114 修复，应以新登记继续验证。
+Feature134已通过真实准备和8项留出，但三次生成均触及登记的每候选工具预算，没有完成
+候选或父任务交付。下一项按SDD设计足够且显式的工具预算与候选完成诊断，先离线验证，
+再决定新的独立真实测量条件；准备成功不能替代完整交付验收。
 
 1. 113/115/117/120 各自为0/2。118/119已修复合同兼容和支持范围内的源码检查，
    121/122补齐生成协议和传输观测；123小型准备诊断收到响应后本地失败，为独立0/1。
@@ -182,9 +214,11 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
    准备实测达到冻结1/1、留出8/8。129新闭环尝试因contract响应缺status成为0/1；130已
    离线补完整封装示例。131的合同通过，但evaluator compiler等待响应头600.004秒后超时，
    仍为0/1且未进入候选或交付。132已保留请求失败详情和明确超时边界，父run的running
-   经复核是116恢复契约。下一步明确受支持的生成预算/等待策略，并在新测量中补HTTP状态
-   投影，再独立登记下一次真实运行。具体远端耗时原因
-   仍未知，尚无真实多文件有效交付；
+   经复核是116恢复契约。133已完成独立preparation请求/总墙钟策略，134已增加HTTP状态
+   投影并完成新的唯一真实槽：准备1/1、8/8holdout，但primary/joint仍0/1。只读证据确认
+   三次生成都被max_steps=4工具预算阻断，下一步离线设计和验证显式每候选预算及完成
+   诊断，再为任何新真实运行独立登记；不预设新预算数值，不改变旧guard语义。
+   历史远端耗时原因仍未知；
    不补旧槽、不改失败分母，也不把本地协议验证当成模型成功率或质量已提高。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
@@ -218,6 +252,11 @@ Feature 108 的快照明确是评测时观察：107 completion 仍不包含执�
   完成0/1；合同在25.237秒HTTP200返回并通过验证，evaluator compiler在等待响应头时于
   600.004秒超时。仅首请求3656tokens已知，总用量null；没有evaluator、候选、交付或
   holdout。封装失败未复现不构成130的因果证据，也没有当前版本真实多文件闭环成功。
+- [134 新预算验收](../specs/134-budgeted-multifile-acceptance/postrun/report.md)：固定产品
+  `15710bd`，登记`358f738`先推送。准备1/1、8/8holdout，完整交付/联合仍0/1，quality/gap
+  null。11次请求均HTTP200，完整98714tokens，费用未知；896.396秒、native/process exit1、
+  清理通过。三次生成均触及登记工具预算，evaluated/valid candidates为0，尚无候选执行或
+  交付。两项准备请求均低于旧600秒时限，不证明预算增加造成了准备成功。
 - Feature 084–112 的融合与证据工作主要由本地 fixture 验证。尚无当前多文件链路或真实
   OpenEvolve/Shinka 搜索带来的增益结论。
 

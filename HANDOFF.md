@@ -5,6 +5,43 @@
 用户已明确允许“该 push 就 push，不用存太多”。后续完成且通过验证的工作应正常 commit
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
+下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
+
+## Feature 134：真实准备与 8 项留出通过，未完成交付（2026-09-18）
+
+按 SDD 完成规格、方案、测量实现和离线验证后，登记提交 `358f738` 已先推送再启动
+唯一 `attempt-001`。固定产品为 `15710bd`，沿用 131 的任务、输入、provider、GLM-5.2、
+population 和 seed；普通请求及候选执行仍为 600 秒，preparation 请求为 900 秒、
+preparation 总墙钟为 1860 秒，整次 campaign 仍限 2400 秒、20 请求和 160000 观测 tokens。
+8 项预声明 holdout 只在准备通过且仍有 campaign 时间时执行，不重试、恢复或补槽。
+
+新测量保留原生类型化请求失败、验证持久化预算，并安全投影实际 HTTP 状态；父任务的
+持久状态与对外状态分开展示。唯一槽已经结束：preparation 1/1，8 项 holdout 全部执行且
+精确匹配，primary/joint 均 0/1；没有父任务交付，官方 quality/gap 均 null。合同、evaluator
+compiler 和 auditor 请求分别耗时 48.363、346.070、124.757 秒，两项准备请求都低于旧的
+600 秒时限，不能将这次准备成功归因于预算增加。
+
+11 次请求均 HTTP200，用量完整 98714 tokens（34088 input + 64626 output），费用未知，
+无 pending request；总耗时 896.396 秒，native/process exit 均为 1，清理通过。持久父状态
+为 succeeded 表示 intake 已完成；evolution child 失败使 CLI 对外状态为 failed，符合现有
+投影规则，不能据此认定父任务持久状态缺陷。
+
+只读诊断确认三次候选生成均在给出最终候选前触及登记的 `--max-steps 4` 工具执行预算。
+前两次各执行 2 次 read_file 和 2 次 write_file，随后 2 工具批次在 4+2>4 时被拒绝；
+第三次执行 2 次 read_file 和 1 次 list_dir，随后批次在 3+2>4 时被拒绝。已执行的 11 个
+工具全部成功，但没有形成可准入候选，evaluated/valid candidates 均为 0，child 以
+`offspring_batch_failed` 结束；尚未进入候选执行、独立评分或交付。这是本次登记工具
+预算不足，HTTP200 和文件写入成功不等于候选完成。
+
+下一步按 SDD 设计足够且显式的每候选工具预算及候选完成诊断，先用离线 fixture 验证，
+再决定新真实测量的预算并独立登记。不能在旧槽追加工具、改变 guard 语义或重试补分。
+见[134 报告](specs/134-budgeted-multifile-acceptance/postrun/report.md)。真实完整交付仍未
+通过验收；外部 producer 多文件 seed、全链路预算/取消及 detached 仍未完成。
+
+262 项测量测试通过；全量双阶段为当前 7924 passed/1 skipped/24 deselected 和固定历史
+24 passed。本次真实运行使用了独立 preparation 预算、HTTP 投影和结果摘要；类型化
+preparation 请求/墙钟失败诊断仅经离线验证，真实准备阶段没有触发这些失败分支。不能
+据单一样本声称通用稳定性、演化收益或 WebAgent parity。
 
 ## Feature 133：独立 preparation 请求预算与总墙钟预算（2026-09-18，已完成）
 

@@ -1,0 +1,167 @@
+{
+  "attempts": {
+    "planned": 1,
+    "retries_or_replacements": 0,
+    "slot_directories": 1,
+    "started_slots": 1
+  },
+  "audit_method": {
+    "generated_code_executions": 0,
+    "provider_requests": 0,
+    "retained_bytes_unchanged_after_inspection": true,
+    "retained_sqlite_opened": false,
+    "sqlite_private_copy_read_only": true,
+    "summarize_invocations": 0
+  },
+  "audited_utc": "2026-09-18T08:12:36.095136+00:00",
+  "blocking_findings": [],
+  "campaign_id": "acceptance134-glm-5.2-budgeted-multifile-20260918",
+  "chronology": {
+    "committed_utc": "2026-09-18T07:49:44+00:00",
+    "current_remote_main_matches_registration": true,
+    "finished_utc": "2026-09-18T08:05:00.746867+00:00",
+    "push_before_run": true,
+    "push_evidence": "local_origin_main_reflog_update_by_push",
+    "push_ref_utc": "2026-09-18T07:49:48+00:00",
+    "registered_utc": "2026-09-18T07:49:28.451893+00:00",
+    "started_utc": "2026-09-18T07:50:04.326030+00:00"
+  },
+  "evidence_inventory_sha256": "f5735d7d8b019c9f6eaa0cb8d5f14dee14ef0d7a63a6ca24a3c66da36b61af5f",
+  "execution": {
+    "cleanup_verified": true,
+    "current_matching_process_pids": [],
+    "database_runner_ids_cleared": true,
+    "elapsed_seconds": 896.3957137080142,
+    "native_exit_code": 1,
+    "process_exit_code": 1,
+    "process_status": "exited",
+    "retained_remaining_observed_pids": []
+  },
+  "historical_evidence": [
+    {
+      "bytes": 155485,
+      "exact_set_size_sha256_match": true,
+      "feature": 131,
+      "files": 21
+    },
+    {
+      "bytes": 122657,
+      "exact_set_size_sha256_match": true,
+      "feature": 129,
+      "files": 16
+    },
+    {
+      "bytes": 74305,
+      "exact_set_size_sha256_match": true,
+      "feature": 128,
+      "files": 63
+    },
+    {
+      "bytes": 13017,
+      "exact_set_size_sha256_match": true,
+      "feature": 125,
+      "files": 16
+    },
+    {
+      "bytes": 11871,
+      "exact_set_size_sha256_match": true,
+      "feature": 123,
+      "files": 15
+    }
+  ],
+  "historical_totals": {
+    "bytes": 377335,
+    "files": 131,
+    "unchanged": true
+  },
+  "limitations": [
+    "push chronology uses local Git ref-log and local recorded timestamps",
+    "process check covers retained supervisor observations and current command matches; not an OS sandbox guarantee",
+    "holdout execution count is bound to retained snapshot_started rows; no evaluator was rerun",
+    "one independent synthetic attempt does not establish general acceptance or causal improvement",
+    "parent persisted succeeded does not establish evolutionary delivery success"
+  ],
+  "manifest_sha256": "20eb007b2d37b3b4a47d86795b8909213a64dffe36ad57055829c9deb9166ebf",
+  "outcomes": {
+    "child_status": "failed",
+    "delivery_event_count": 0,
+    "effective_product_status": "failed",
+    "evaluated_candidates": 0,
+    "gap": null,
+    "holdouts_executed": 8,
+    "holdouts_matched": 8,
+    "holdouts_planned": 8,
+    "joint_success": 0,
+    "persisted_parent_status": "succeeded",
+    "planned_attempts": 1,
+    "preparation_success": 1,
+    "primary_success": 0,
+    "quality": null,
+    "required_parent_output_present": false,
+    "valid_candidates": 0
+  },
+  "preparation": {
+    "candidate_profile_budget_unchanged": true,
+    "candidate_seconds": 600,
+    "frozen_files_and_aggregate_digest_verified": true,
+    "native_prepared_events": 1,
+    "native_start_events": 1,
+    "observed_event_elapsed_seconds": 471.113996,
+    "policy_matches_registration": true,
+    "request_seconds": 900,
+    "success": 1,
+    "wall_seconds": 1860
+  },
+  "product_commit": "15710bd420d70aa07a06ee9dd4329dfbf1912b2b",
+  "registered_pins": {
+    "historical_files": {
+      "bytes": 1368389,
+      "files": 178,
+      "sha256_and_registration_commit_match": true
+    },
+    "measurement_files": {
+      "bytes": 232319,
+      "files": 20,
+      "sha256_and_registration_commit_match": true
+    },
+    "product_files": {
+      "bytes": 2500447,
+      "files": 79,
+      "sha256_and_registration_commit_match": true
+    }
+  },
+  "registration_commit": "358f7383e61aec9e702310774b0d5d906978c2f8",
+  "requests": {
+    "cost_micros": null,
+    "effective_limits_respect_registration": true,
+    "finished": 11,
+    "known_usage": {
+      "input_tokens": 34088,
+      "output_tokens": 64626,
+      "total_tokens": 98714
+    },
+    "pending": 0,
+    "single_observed_http_200_exchanges": 11,
+    "stages": {
+      "candidate": 8,
+      "contract_compiler": 1,
+      "evaluator_auditor": 1,
+      "evaluator_compiler": 1
+    },
+    "started": 11,
+    "total_usage": {
+      "input_tokens": 34088,
+      "output_tokens": 64626,
+      "total_tokens": 98714
+    },
+    "usage_complete": true
+  },
+  "results_sha256": "2a7398a16657d987cfbbe26ffbb5646c3a721f715980b8b7138936637c8d32d0",
+  "retained_evidence": {
+    "bytes": 327394,
+    "exact_set_size_sha256_match": true,
+    "files": 97
+  },
+  "schema_version": "1",
+  "status": "passed"
+}
