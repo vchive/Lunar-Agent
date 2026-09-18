@@ -7,6 +7,21 @@
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## Feature 138：公开状态投影与 preparation 恢复契约（2026-09-19，规格完成）
+
+已完成 specification-first 文档，尚未改运行代码或启动测试实现。范围锁定两项小而独立的
+治理工作：公开结果安全投影已观察的 HTTP status，以及明确 persisted parent status、
+effective/public status、preparation status 和 recoverable flag 的关系。Feature 116/132
+确认 preparation 失败后父 run 保持 `running` 是为了允许显式恢复的持久契约；138 不会把它
+直接改写为 `failed`，也不会增加隐式 retry。
+
+下一步实现必须只使用离线 Store/transport fixture，验证取消、终态、失败/unknown、已准备和
+可恢复恢复分支，以及 200、4xx/5xx、无响应头 timeout 和坏台账的安全投影。不能恢复或追加
+Feature 131/134，不能调用 provider、执行生成源码或改写历史 evidence。完成实现后再另立
+新 SDD 登记真实多文件闭环：candidate generation → execution → independent scoring →
+selection → parent delivery；至少一个 completed candidate 才能算 primary/joint 成功。
+规格与验证边界见 `specs/138-status-projection-recovery/`。
+
 ## Feature 137：run 墙钟预算传播到 Agent 请求（2026-09-18，离线完成）
 
 `BudgetSpec.max_runtime_seconds` 现在会收紧实际执行请求：显式 `run_agent()` delegation 和
