@@ -7,7 +7,7 @@ import os
 
 from . import _benchmark_files as files
 from ._candidate_workspace_io import DirectoryChain, PrivateTree
-from .agents import MAX_TEXT_BYTES, AgentRequest, AgentResult
+from .agents import MAX_TEXT_BYTES, AgentInvocationError, AgentRequest, AgentResult
 from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract
 from .bundle_evolution import read_candidate_source_files, validate_candidate_bundle_evidence
 from .candidate_bundle import MAX_CANDIDATE_TOTAL_SOURCE_BYTES
@@ -342,19 +342,36 @@ def generate_bundle_candidate(generator, request):
                 task_id=f"generation-{request.iteration:08d}-{generator._calls:04d}", role=generator.role,
                 prompt=prompt, required_capabilities=generator.required_capabilities,
                 workspace=destination, timeout=generator.timeout,
+                candidate_budget=generator._request_budget(request),
             )
             try:
                 result = generator.adapter.run(agent_request)
+            except AgentInvocationError as exc:
+                if not getattr(exc, "candidate_diagnostic", None):
+                    generator._emit_generation_diagnostic(agent_request, reason="worker_failed")
+                _fail("worker_failed")
             except Exception:  # noqa: BLE001 - an external Agent failure has one fixed boundary
+                generator._emit_generation_diagnostic(agent_request, reason="worker_failed")
                 _fail("worker_failed")
             if (not isinstance(result, AgentResult) or result.status != "succeeded"
                     or result.adapter_name != generator.adapter.name or result.role != generator.role):
+                generator._emit_generation_diagnostic(
+                    agent_request,
+                    reason=("cancelled" if isinstance(result, AgentResult) and result.status == "cancelled"
+                            else "worker_failed"),
+                    result=result if isinstance(result, AgentResult) else None,
+                )
                 _fail("worker_failed")
             for snapshot in [*observed, *staged]:
                 snapshot.check()
             tree.check_root()
             _verify_request(generator, request, workspace)
-            draft = generator._draft(result.text)
+            try:
+                draft = generator._draft(result.text)
+            except EvolutionError:
+                generator._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
+                raise
+            generator._emit_generation_diagnostic(agent_request, reason="completed", result=result)
             generator._observe_artifacts(result, destination, workspace, agent_request.task_id)
             return draft
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RecursionError):

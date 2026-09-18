@@ -15,6 +15,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .agents import CandidateGenerationDiagnostic, candidate_failure_reason
 from .memory import MemoryStore
 from .model_profile import BudgetFailureEvidence, ProfileBudgetExceeded, UsageLedger
 from .profiles import ModelProfile
@@ -60,6 +61,10 @@ class AgentInputRequired(RuntimeExecutionError):
         super().__init__(question)
         self.question = question
         self.options = options
+
+
+class AgentLoopTimeout(RuntimeExecutionError, TimeoutError):
+    """A local monotonic deadline expired before the next loop boundary."""
 
 
 class ProfileBudgetFailure(RuntimeExecutionError):
@@ -149,6 +154,7 @@ class AgentLoopRuntime:
         self._task_id: str | None = None
         self._last_tool_steps = 0
         self._last_invocation = InvocationDiagnostics()
+        self._last_candidate_diagnostic: dict[str, object] | None = None
 
     def set_context(self, run_id: str, task_id: str, goal: str | None = None) -> None:
         """Attach durable identity for memory scoping and observability."""
@@ -193,6 +199,11 @@ class AgentLoopRuntime:
     def last_invocation(self) -> InvocationDiagnostics:
         return self._last_invocation
 
+    @property
+    def last_candidate_diagnostic(self) -> dict[str, object] | None:
+        """Return the bounded diagnostic for the most recent candidate budget, if any."""
+        return self._last_candidate_diagnostic
+
     def run(
         self,
         prompt: str,
@@ -202,8 +213,39 @@ class AgentLoopRuntime:
         usage_ledger: UsageLedger | None = None,
         tool_steps_offset: int = 0,
         stage_boundary: Callable[[InvocationDiagnostics], bool] | None = None,
+        max_tool_steps: int | None = None,
+        budget_id: str | None = None,
     ) -> RuntimeResult:
         effective_timeout = self._profile_timeout(timeout)
+        if max_tool_steps is not None:
+            if isinstance(max_tool_steps, bool) or not isinstance(max_tool_steps, int) or max_tool_steps < 1:
+                raise ValueError("max_tool_steps must be a positive integer")
+            # A candidate invocation carries its own fixed authority.  The runtime's
+            # ordinary default is intentionally not allowed to silently shrink it, while
+            # an explicitly configured model profile remains a hard safety ceiling.
+            effective_max_steps = (
+                max_tool_steps
+                if self.profile is None
+                else min(max_tool_steps, self.profile.max_steps)
+            )
+            if budget_id is None or not isinstance(budget_id, str) or not budget_id.strip():
+                raise ValueError("budget_id is required with max_tool_steps")
+        else:
+            effective_max_steps = self.max_steps
+            if budget_id is not None:
+                raise ValueError("budget_id requires max_tool_steps")
+        self._last_candidate_diagnostic = None
+        if max_tool_steps is not None:
+            self._last_candidate_diagnostic = CandidateGenerationDiagnostic(
+                budget_id=budget_id,
+                max_tool_steps=effective_max_steps,
+                tool_steps_used=tool_steps_offset,
+                tool_steps_remaining=max(0, effective_max_steps - tool_steps_offset),
+                attempted_tool_calls=0,
+                completion=False,
+                reason="running",
+                phase="model_turn",
+            ).to_dict()
         workspace.mkdir(parents=True, exist_ok=True)
         ledger = self._resolve_usage_ledger(usage_ledger)
         if isinstance(tool_steps_offset, bool) or not isinstance(tool_steps_offset, int) or tool_steps_offset < 0:
@@ -238,7 +280,9 @@ class AgentLoopRuntime:
                         raise RuntimeExecutionError("stage boundary requires complete usage and paired transcript")
                     self._update_invocation(started, boundary=True)
                     raise StageBoundary(self.last_invocation)
-            request_messages = self._budget_messages(messages, remaining, tool_steps, ledger)
+            request_messages = self._budget_messages(
+                messages, remaining, tool_steps, ledger, max_steps=effective_max_steps,
+            )
             self._update_invocation(
                 started,
                 provider_requests=self.last_invocation.provider_requests + 1,
@@ -254,6 +298,11 @@ class AgentLoopRuntime:
             except Exception as exc:
                 if ledger is not None:
                     ledger.mark_usage_unavailable()
+                if max_tool_steps is not None:
+                    self._set_candidate_diagnostic(
+                        budget_id, effective_max_steps, tool_steps, 0, False,
+                        candidate_failure_reason(exc), "model_turn",
+                    )
                 self._emit(
                     "agent_runtime_failure",
                     {"phase": "model_turn", "error": _bounded_runtime_error(exc)},
@@ -283,6 +332,9 @@ class AgentLoopRuntime:
                 self._remaining_timeout(started, effective_timeout)
             if not turn.tool_calls:
                 if not turn.text:
+                    self._set_candidate_diagnostic(
+                        budget_id, effective_max_steps, tool_steps, 0, False, "empty_response", "response",
+                    )
                     raise RuntimeExecutionError("agent loop ended without a final text result")
                 final_message = {"role": "assistant", "content": turn.text}
                 self._append_transcript(final_message)
@@ -301,17 +353,23 @@ class AgentLoopRuntime:
                     metadata["invocation_turns"] = str(model_turns)
                     metadata["tool_steps"] = str(tool_steps)
                     metadata["usage_scope"] = "aggregate"
+                self._set_candidate_diagnostic(
+                    budget_id, effective_max_steps, tool_steps, 0, True, "completed", "response",
+                )
+                if self._last_candidate_diagnostic is not None:
+                    for key, value in self._last_candidate_diagnostic.items():
+                        metadata[f"candidate_{key}"] = str(value).lower() if isinstance(value, bool) else str(value)
                 return RuntimeResult(
                     text=turn.text,
                     artifacts=tuple(dict.fromkeys(artifacts)),
                     metadata=metadata,
                 )
-            if tool_steps + len(turn.tool_calls) > self.max_steps:
+            if tool_steps + len(turn.tool_calls) > effective_max_steps:
                 evidence = AgentStepLimitEvidence(
-                    max_steps=self.max_steps,
+                    max_steps=effective_max_steps,
                     tool_steps=tool_steps,
                     attempted_tool_calls=len(turn.tool_calls),
-                    tool_steps_remaining=max(0, self.max_steps - tool_steps),
+                    tool_steps_remaining=max(0, effective_max_steps - tool_steps),
                 )
                 self._emit(
                     "agent_step_limit_reached",
@@ -321,6 +379,10 @@ class AgentLoopRuntime:
                         "attempted_tool_calls": evidence.attempted_tool_calls,
                         "tool_steps_remaining": evidence.tool_steps_remaining,
                     },
+                )
+                self._set_candidate_diagnostic(
+                    budget_id, effective_max_steps, tool_steps, len(turn.tool_calls),
+                    False, "tool_step_limit_reached", "tool_batch",
                 )
                 raise AgentStepLimitReached(evidence)
             messages.append(self._assistant_message(turn))
@@ -341,12 +403,22 @@ class AgentLoopRuntime:
                     with deadline_scope:
                         result = self.tools.execute(call.name, call.arguments, workspace)
                 except Exception as exc:
+                    self._set_candidate_diagnostic(
+                        budget_id, effective_max_steps, tool_steps, 1, False,
+                        candidate_failure_reason(exc), "tool",
+                    )
                     self._emit(
                         "agent_runtime_failure",
                         {"phase": "tool", "tool": call.name, "error": _bounded_runtime_error(exc)},
                     )
                     raise
                 artifacts.extend(result.artifacts)
+                if max_tool_steps is not None and not result.success:
+                    self._set_candidate_diagnostic(
+                        budget_id, effective_max_steps, tool_steps, 1, False,
+                        "tool_failed", "tool",
+                    )
+                    raise RuntimeExecutionError("candidate tool execution failed")
                 self._emit(
                     "agent_tool_result",
                     {
@@ -378,7 +450,7 @@ class AgentLoopRuntime:
 
     def _budget_messages(
         self, messages: list[dict[str, object]], remaining: float | None,
-        tool_steps: int, ledger: UsageLedger | None,
+        tool_steps: int, ledger: UsageLedger | None, *, max_steps: int | None = None,
     ) -> list[dict[str, object]]:
         """Refresh advisory budget facts on a request copy, never on replayable history."""
         profile = ledger.profile if ledger is not None else None
@@ -390,7 +462,7 @@ class AgentLoopRuntime:
         snapshot = {
             "schema_version": "1",
             "remaining_seconds": math.floor(remaining * 1000) / 1000 if remaining is not None else None,
-            "tool_steps_remaining": max(0, self.max_steps - tool_steps),
+            "tool_steps_remaining": max(0, (self.max_steps if max_steps is None else max_steps) - tool_steps),
             "command_timeout_seconds": (
                 math.floor(command_timeout * 1000) / 1000 if command_timeout is not None else None
             ),
@@ -424,6 +496,23 @@ class AgentLoopRuntime:
                 copied[index] = {**message, "content": str(message.get("content") or "") + guidance}
                 break
         return copied
+
+    def _set_candidate_diagnostic(
+        self, budget_id: str | None, max_steps: int, tool_steps: int,
+        attempted_tool_calls: int, completion: bool, reason: str, phase: str,
+    ) -> None:
+        if budget_id is None:
+            return
+        self._last_candidate_diagnostic = CandidateGenerationDiagnostic(
+            budget_id=budget_id,
+            max_tool_steps=max_steps,
+            tool_steps_used=tool_steps,
+            tool_steps_remaining=max(0, max_steps - tool_steps),
+            attempted_tool_calls=attempted_tool_calls,
+            completion=completion,
+            reason=reason,
+            phase=phase,
+        ).to_dict()
 
     def run_isolated(
         self, prompt: str, workspace: Path, timeout: float | None = None
@@ -607,7 +696,7 @@ class AgentLoopRuntime:
             return None
         remaining = timeout - (time.monotonic() - started)
         if remaining <= 0:
-            raise RuntimeExecutionError("agent loop timed out before the next model turn")
+            raise AgentLoopTimeout("agent loop timed out before the next model turn")
         return remaining
 
     @staticmethod

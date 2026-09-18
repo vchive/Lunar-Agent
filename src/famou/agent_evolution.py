@@ -11,7 +11,14 @@ from pathlib import Path
 from statistics import median
 from typing import TYPE_CHECKING
 
-from .agents import AgentAdapter, AgentError, AgentRegistry, AgentRequest, AgentResult
+from .agents import (
+    AgentAdapter,
+    AgentError,
+    AgentRegistry,
+    AgentRequest,
+    AgentResult,
+    CandidateGenerationBudget,
+)
 from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract, EvaluationReport
 from .evaluator_bundle import SolverScoringContract
 from .evolution import (
@@ -221,6 +228,8 @@ class AgentCandidateGenerator:
         role: str = "solver",
         required_capabilities: Sequence[str] = (),
         timeout: float | None = None,
+        max_tool_steps: int | None = None,
+        candidate_budget: CandidateGenerationBudget | None = None,
         inputs: Sequence[CandidateInputArtifact] = (),
         scoring: SolverScoringContract | None = None,
         bundle_pipeline: MultiFileCandidatePipeline | None = None,
@@ -230,6 +239,17 @@ class AgentCandidateGenerator:
         self.role = role
         self.required_capabilities = tuple(required_capabilities)
         self.timeout = timeout
+        if max_tool_steps is not None and candidate_budget is not None:
+            raise ValueError("max_tool_steps and candidate_budget are mutually exclusive")
+        if max_tool_steps is not None:
+            candidate_budget = CandidateGenerationBudget(
+                budget_id="candidate-generation",
+                max_tool_steps=max_tool_steps,
+                timeout_seconds=timeout,
+            )
+        elif candidate_budget is not None and not isinstance(candidate_budget, CandidateGenerationBudget):
+            raise TypeError("candidate_budget must be a CandidateGenerationBudget or None")
+        self.candidate_budget = candidate_budget
         self.inputs = tuple(inputs)
         if scoring is not None and not isinstance(scoring, SolverScoringContract):
             raise TypeError("scoring must be a SolverScoringContract or None")
@@ -285,22 +305,84 @@ class AgentCandidateGenerator:
             required_capabilities=self.required_capabilities,
             workspace=generation_workspace,
             timeout=self.timeout,
+            candidate_budget=self._request_budget(request),
         )
         try:
             result = self.adapter.run(agent_request)
         except AgentError as exc:
+            if not getattr(exc, "candidate_diagnostic", None):
+                self._emit_generation_diagnostic(agent_request, reason="worker_failed")
             raise EvolutionError(f"agent candidate generation failed: {_bounded_error(exc)}") from exc
         except Exception as exc:
+            self._emit_generation_diagnostic(agent_request, reason="worker_failed")
             raise EvolutionError(f"agent candidate generation failed: {_bounded_error(exc)}") from exc
         if not isinstance(result, AgentResult):
+            self._emit_generation_diagnostic(agent_request, reason="worker_failed")
             raise EvolutionError("agent candidate generation returned an invalid result")
         if result.status != "succeeded":
+            self._emit_generation_diagnostic(
+                agent_request,
+                reason="cancelled" if result.status == "cancelled" else "worker_failed",
+                result=result,
+            )
             raise EvolutionError(
                 f"agent candidate generation returned {result.status}: "
                 f"{_bounded_error(result.error or 'no error detail')}"
             )
         self._observe_artifacts(result, generation_workspace, request.workspace, agent_request.task_id)
-        return self._draft(result.text)
+        try:
+            draft = self._draft(result.text)
+        except EvolutionError:
+            self._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
+            raise
+        self._emit_generation_diagnostic(agent_request, reason="completed", result=result)
+        return draft
+
+    def _request_budget(self, request: GenerationRequest) -> CandidateGenerationBudget | None:
+        if self.candidate_budget is None:
+            return None
+        if self.candidate_budget.budget_id != "candidate-generation":
+            return self.candidate_budget
+        return CandidateGenerationBudget(
+            budget_id=f"candidate-{request.iteration:08d}-{self._calls:04d}",
+            max_tool_steps=self.candidate_budget.max_tool_steps,
+            timeout_seconds=self.candidate_budget.timeout_seconds,
+        )
+
+    def _emit_generation_diagnostic(
+        self, request: AgentRequest, *, reason: str, result: AgentResult | None = None,
+    ) -> None:
+        if self._observer is None or request.candidate_budget is None:
+            return
+        metadata = result.metadata if result is not None else {}
+        def _int(name: str, fallback: int | None) -> int | None:
+            value = metadata.get(f"candidate_{name}")
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return fallback
+        self._observer(
+            "agent_candidate_generation",
+            {
+                "schema_version": "1",
+                "budget_id": request.candidate_budget.budget_id,
+                "stage": "candidate_generation",
+                "outcome": {
+                    "tool_failed": "tool_execution_failed",
+                    "timeout": "timed_out",
+                    "empty_response": "empty_final_response",
+                }.get(reason, reason),
+                "max_tool_steps": request.candidate_budget.max_tool_steps,
+                "tool_steps_used": _int("tool_steps_used", None),
+                "tool_steps_remaining": _int(
+                    "tool_steps_remaining", None,
+                ),
+                "attempted_tool_calls": _int("attempted_tool_calls", None),
+                "completion": reason == "completed",
+                "reason": reason,
+                "phase": "response",
+            },
+        )
 
     def _observe_artifacts(
         self, result: AgentResult, agent_workspace: Path, run_workspace: Path, task_id: str
@@ -590,6 +672,8 @@ class AgentPortfolioGenerator:
         role: str = "solver",
         required_capabilities: Sequence[str] = (),
         timeout: float | None = None,
+        max_tool_steps: int | None = None,
+        candidate_budget: CandidateGenerationBudget | None = None,
         inputs: Sequence[CandidateInputArtifact] = (),
     ) -> None:
         if isinstance(adapters, (str, bytes)):
@@ -604,6 +688,8 @@ class AgentPortfolioGenerator:
                 role=role,
                 required_capabilities=required_capabilities,
                 timeout=timeout,
+                max_tool_steps=max_tool_steps,
+                candidate_budget=candidate_budget,
                 inputs=inputs,
             )
             for adapter in normalized

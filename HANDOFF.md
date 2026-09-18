@@ -7,6 +7,22 @@
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## Feature 136：候选阶段显式工具预算与完成诊断（2026-09-18，离线完成）
+
+已实现并通过离线验证。`CandidateGenerationBudget` 在每次单文件或 bundle 候选请求前固定
+候选级 tool-step ceiling，并把带迭代与调用序号的 `budget_id` 传入 `AgentRequest`、runtime
+和 observer。整批超预算继续原子拒绝；没有 fitting-prefix 执行、retry、repair、隐式扩容或
+候选发布。`CandidateGenerationDiagnostic` 现在同时提供兼容的 `reason/phase/completion`
+和稳定的 `schema_version/stage/outcome` 投影，区分步数耗尽、tool failure、timeout、取消、
+空最终响应、malformed candidate 与 completed。`completed` 只在非空、无工具响应通过原生
+CandidateDraft/bundle parser 后发出。
+
+Feature 136 只运行本地 fixture，没有 provider 请求、真实 campaign、evaluator 或候选执行；
+Feature 134 的登记、证据、分母和历史结果未修改。专项 Agent-loop/adapter/evolution/bundle/
+controller 回归、Ruff、compileall、diff 检查均通过。详见
+`specs/136-candidate-generation-budget/validation.md`。后续真实运行仍需另立 SDD、登记并
+在产品提交 push 后使用新的唯一槽。
+
 ## Feature 135：未配置 profile 的 Agent-loop 预算可见性与步数诊断（2026-09-18，已完成）
 
 AgentLoopRuntime 的普通 `run` 请求现在始终使用请求副本附加既有

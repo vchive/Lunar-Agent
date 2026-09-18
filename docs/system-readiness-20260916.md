@@ -1,7 +1,12 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-18 更新至 Feature 135：预算可见性与步数诊断完成，完整交付仍未通过。
+评估创建于 2026-09-16，2026-09-18 更新至 Feature 136：候选级预算与完成诊断完成，完整交付仍未通过。
 以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
+
+Feature 136 已为单文件和 bundle 候选生成加入显式、不可变的每候选 tool-step budget 与
+authority-bound identity，并将 runtime failure、空响应和 parser failure 投影为有界诊断。
+完整候选只在 parser 接受后计为 completed；整批超预算仍原子拒绝。该功能仅通过本地 fixture
+验证，没有重跑 Feature 134，也没有真实 provider 或 campaign 结果。
 最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。

@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime, AgentStepLimitEvidence, AgentStepLimitReached
+from famou.agent_loop import (
+    AgentLoopRuntime,
+    AgentLoopTimeout,
+    AgentStepLimitEvidence,
+    AgentStepLimitReached,
+)
+from famou.agents import candidate_failure_reason
 from famou.memory import MemoryStore
 from famou.profiles import ModelProfile
 from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
@@ -177,6 +183,75 @@ def test_agent_loop_empty_tool_free_final_remains_a_failure(tmp_path: Path) -> N
 
     with pytest.raises(RuntimeExecutionError, match="without a final text result"):
         AgentLoopRuntime(model).run("finish", tmp_path)
+
+
+def test_candidate_local_timeout_is_typed_as_timed_out(tmp_path: Path) -> None:
+    model = FixtureModel([ModelTurn("complete candidate")])
+    runtime = AgentLoopRuntime(model)
+
+    with pytest.raises(AgentLoopTimeout):
+        runtime._remaining_timeout(0.0, 0.0)
+
+    assert candidate_failure_reason(AgentLoopTimeout("deadline")) == "timeout"
+
+
+def test_agent_loop_reports_candidate_budget_completion(tmp_path: Path) -> None:
+    model = FixtureModel([ModelTurn("complete candidate")])
+    runtime = AgentLoopRuntime(model, max_steps=40)
+
+    result = runtime.run(
+        "finish", tmp_path, max_tool_steps=4, budget_id="candidate-00000000-0001",
+    )
+
+    assert result.metadata["candidate_budget_id"] == "candidate-00000000-0001"
+    assert result.metadata["candidate_completion"] == "true"
+    assert result.metadata["candidate_reason"] == "completed"
+    assert result.metadata["candidate_tool_steps_remaining"] == "4"
+
+
+def test_agent_loop_reports_candidate_budget_limit(tmp_path: Path) -> None:
+    model = FixtureModel([
+        ModelTurn("", (
+            ToolCall("1", "list_dir", {"path": "."}),
+            ToolCall("2", "list_dir", {"path": "."}),
+        )),
+    ])
+    runtime = AgentLoopRuntime(model, max_steps=40)
+
+    with pytest.raises(AgentStepLimitReached):
+        runtime.run("finish", tmp_path, max_tool_steps=1, budget_id="candidate-1")
+
+    diagnostic = runtime.last_candidate_diagnostic
+    assert diagnostic is not None
+    assert diagnostic["budget_id"] == "candidate-1"
+    assert diagnostic["max_tool_steps"] == 1
+    assert diagnostic["tool_steps_used"] == 0
+    assert diagnostic["tool_steps_remaining"] == 1
+    assert diagnostic["attempted_tool_calls"] == 2
+    assert diagnostic["completion"] is False
+    assert diagnostic["reason"] == "tool_step_limit_reached"
+    assert diagnostic["phase"] == "tool_batch"
+    assert diagnostic["schema_version"] == "1"
+    assert diagnostic["stage"] == "candidate_generation"
+    assert diagnostic["outcome"] == "tool_step_limit_reached"
+
+
+def test_candidate_budget_is_independent_of_runtime_default_max_steps(tmp_path: Path) -> None:
+    model = FixtureModel([
+        ModelTurn("", (ToolCall("1", "list_dir", {"path": "."}),)),
+        ModelTurn("", (ToolCall("2", "list_dir", {"path": "."}),)),
+        ModelTurn("complete candidate"),
+    ])
+    runtime = AgentLoopRuntime(model, max_steps=1)
+
+    result = runtime.run(
+        "finish", tmp_path, max_tool_steps=2, budget_id="candidate-independent",
+    )
+
+    assert result.text == "complete candidate"
+    assert runtime.last_tool_steps == 2
+    assert runtime.last_candidate_diagnostic is not None
+    assert runtime.last_candidate_diagnostic["max_tool_steps"] == 2
 
 
 def test_agent_loop_aggregates_complete_provider_telemetry(tmp_path: Path) -> None:

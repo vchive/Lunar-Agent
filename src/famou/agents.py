@@ -6,6 +6,7 @@ invoked.  Nothing here searches PATH, a user's home directory, or a remote servi
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import os
@@ -27,6 +28,7 @@ MAX_METADATA_ITEMS = 64
 MAX_ARTIFACTS = 64
 MAX_ARTIFACT_PATH_BYTES = 512
 MAX_TIMEOUT_SECONDS = 24 * 60 * 60
+MAX_CANDIDATE_TOOL_STEPS = 200
 DEFAULT_RUNTIME_CAPABILITIES = (
     "read_files",
     "write_files",
@@ -52,6 +54,139 @@ class AgentSelectionError(AgentError):
 
 class AgentInvocationError(AgentError):
     """An adapter could not start, complete, or normalize a worker invocation."""
+
+    def __init__(self, message: str, *, candidate_diagnostic: Mapping[str, object] | None = None) -> None:
+        super().__init__(message)
+        self.candidate_diagnostic = dict(candidate_diagnostic) if isinstance(candidate_diagnostic, Mapping) else None
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateGenerationBudget:
+    """Authority-bound budget for one candidate-generation request."""
+
+    budget_id: str
+    max_tool_steps: int
+    timeout_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "budget_id", _bounded_text(self.budget_id, "budget_id", 256, allow_empty=False))
+        if isinstance(self.max_tool_steps, bool) or not isinstance(self.max_tool_steps, int):
+            raise TypeError("max_tool_steps must be an integer")
+        if not 1 <= self.max_tool_steps <= MAX_CANDIDATE_TOOL_STEPS:
+            raise ValueError(
+                f"max_tool_steps must be between 1 and {MAX_CANDIDATE_TOOL_STEPS}"
+            )
+        if self.timeout_seconds is not None:
+            if (isinstance(self.timeout_seconds, bool)
+                    or not isinstance(self.timeout_seconds, (int, float))
+                    or not math.isfinite(float(self.timeout_seconds))
+                    or self.timeout_seconds <= 0
+                    or self.timeout_seconds > MAX_TIMEOUT_SECONDS):
+                raise ValueError(
+                    f"timeout_seconds must be between 0 and {MAX_TIMEOUT_SECONDS} seconds"
+                )
+            object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "budget_id": self.budget_id,
+            "max_tool_steps": self.max_tool_steps,
+            "timeout_seconds": self.timeout_seconds,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateGenerationDiagnostic:
+    """Safe completion projection for a candidate-generation budget."""
+
+    budget_id: str
+    max_tool_steps: int
+    tool_steps_used: int
+    tool_steps_remaining: int
+    attempted_tool_calls: int | None
+    completion: bool
+    reason: str
+    phase: str
+    schema_version: str = "1"
+    stage: str = "candidate_generation"
+    outcome: str | None = None
+    elapsed_ms: int | None = None
+    timeout_ms: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "budget_id", _bounded_text(self.budget_id, "budget_id", 256, allow_empty=False))
+        if isinstance(self.max_tool_steps, bool) or not isinstance(self.max_tool_steps, int) or not 1 <= self.max_tool_steps <= MAX_CANDIDATE_TOOL_STEPS:
+            raise ValueError("invalid candidate diagnostic max_tool_steps")
+        for value, label in ((self.tool_steps_used, "tool_steps_used"),
+                             (self.tool_steps_remaining, "tool_steps_remaining")):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"invalid candidate diagnostic {label}")
+        if self.attempted_tool_calls is not None and (
+            isinstance(self.attempted_tool_calls, bool)
+            or not isinstance(self.attempted_tool_calls, int)
+            or self.attempted_tool_calls < 0
+        ):
+            raise ValueError("invalid candidate diagnostic attempted_tool_calls")
+        if not isinstance(self.completion, bool):
+            raise TypeError("invalid candidate diagnostic completion")
+        if self.schema_version != "1":
+            raise ValueError("invalid candidate diagnostic schema_version")
+        if self.stage != "candidate_generation":
+            raise ValueError("invalid candidate diagnostic stage")
+        outcome = self.outcome or _candidate_outcome(self.reason)
+        if outcome not in {
+            "running", "completed", "tool_step_limit_reached", "tool_execution_failed",
+            "timed_out", "cancelled", "empty_final_response", "malformed_candidate", "worker_failed",
+        }:
+            raise ValueError("invalid candidate diagnostic reason")
+        object.__setattr__(self, "outcome", outcome)
+        if self.elapsed_ms is not None and (
+            isinstance(self.elapsed_ms, bool) or not isinstance(self.elapsed_ms, int) or self.elapsed_ms < 0
+        ):
+            raise ValueError("invalid candidate diagnostic elapsed_ms")
+        if self.timeout_ms is not None and (
+            isinstance(self.timeout_ms, bool) or not isinstance(self.timeout_ms, int) or self.timeout_ms <= 0
+        ):
+            raise ValueError("invalid candidate diagnostic timeout_ms")
+        if not isinstance(self.phase, str) or not self.phase or len(self.phase) > 64:
+            raise ValueError("invalid candidate diagnostic phase")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "budget_id": self.budget_id,
+            "stage": self.stage,
+            "outcome": self.outcome,
+            "max_tool_steps": self.max_tool_steps,
+            "tool_steps_used": self.tool_steps_used,
+            "tool_steps_remaining": self.tool_steps_remaining,
+            "attempted_tool_calls": self.attempted_tool_calls,
+            "completion": self.completion,
+            "reason": self.reason,
+            "phase": self.phase,
+            "elapsed_ms": self.elapsed_ms,
+            "timeout_ms": self.timeout_ms,
+        }
+
+
+def _candidate_outcome(reason: str) -> str:
+    return {
+        "tool_failed": "tool_execution_failed",
+        "timeout": "timed_out",
+        "empty_response": "empty_final_response",
+    }.get(reason, reason)
+
+
+def candidate_failure_reason(error: BaseException) -> str:
+    """Classify only typed/local failure boundaries; never inspect arbitrary prose."""
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    if type(error).__name__ in {"CancelledError", "CancellationError"}:
+        return "cancelled"
+    evidence = getattr(error, "evidence", None)
+    if getattr(evidence, "reason", None) == "transport_timeout":
+        return "timeout"
+    return "worker_failed"
 
 
 def _bounded_text(value: object, label: str, maximum: int, *, allow_empty: bool = True) -> str:
@@ -150,6 +285,7 @@ class AgentRequest:
     required_capabilities: tuple[str, ...] = ()
     workspace: Path = field(default_factory=Path.cwd)
     timeout: float | None = None
+    candidate_budget: CandidateGenerationBudget | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _bounded_text(self.run_id, "run_id", 256, allow_empty=False))
@@ -170,9 +306,13 @@ class AgentRequest:
             if self.timeout <= 0 or self.timeout > MAX_TIMEOUT_SECONDS:
                 raise ValueError(f"timeout must be between 0 and {MAX_TIMEOUT_SECONDS} seconds")
             object.__setattr__(self, "timeout", float(self.timeout))
+        if self.candidate_budget is not None and not isinstance(
+            self.candidate_budget, CandidateGenerationBudget
+        ):
+            raise TypeError("candidate_budget must be a CandidateGenerationBudget or None")
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        value = {
             "run_id": self.run_id,
             "task_id": self.task_id,
             "role": self.role,
@@ -181,6 +321,9 @@ class AgentRequest:
             "workspace": str(self.workspace),
             "timeout": self.timeout,
         }
+        if self.candidate_budget is not None:
+            value["candidate_budget"] = self.candidate_budget.to_dict()
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,8 +445,38 @@ class RuntimeAgentAdapter:
             set_session_path = getattr(self.runtime, "set_session_path", None)
             if callable(set_session_path):
                 set_session_path(request.workspace / "session-transcript.jsonl")
-            result = self.runtime.run(request.prompt, request.workspace, request.timeout)
+            runtime_timeout = request.timeout
+            budget = request.candidate_budget
+            if budget is not None and budget.timeout_seconds is not None:
+                runtime_timeout = (
+                    budget.timeout_seconds
+                    if runtime_timeout is None
+                    else min(runtime_timeout, budget.timeout_seconds)
+                )
+            runtime_run = self.runtime.run
+            kwargs: dict[str, object] = {}
+            if budget is not None:
+                try:
+                    parameters = inspect.signature(runtime_run).parameters
+                except (TypeError, ValueError):
+                    parameters = {}
+                accepts_kwargs = any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in parameters.values()
+                )
+                if "max_tool_steps" not in parameters and not accepts_kwargs:
+                    raise AgentInvocationError(
+                        "runtime does not support candidate tool-step budgets"
+                    )
+                kwargs["max_tool_steps"] = budget.max_tool_steps
+                kwargs["budget_id"] = budget.budget_id
+            result = runtime_run(request.prompt, request.workspace, runtime_timeout, **kwargs)
         except Exception as exc:
+            diagnostic = getattr(self.runtime, "last_candidate_diagnostic", None)
+            if callable(diagnostic):
+                diagnostic = diagnostic()
+            if isinstance(diagnostic, Mapping):
+                self._forward_event(request, "agent_candidate_generation", diagnostic)
             if not runtime_event_emitted:
                 self._forward_event(
                     request,
@@ -312,7 +485,10 @@ class RuntimeAgentAdapter:
                 )
             if isinstance(exc, AgentError):
                 raise
-            raise AgentInvocationError(_bounded_error(str(exc))) from exc
+            candidate_diagnostic = diagnostic if isinstance(diagnostic, Mapping) else None
+            raise AgentInvocationError(
+                _bounded_error(str(exc)), candidate_diagnostic=candidate_diagnostic,
+            ) from exc
         finally:
             if runtime_event_sink is not None:
                 # A Runtime instance may be reused by a caller; never leave an old evolution
@@ -336,12 +512,20 @@ class RuntimeAgentAdapter:
                         raise AgentInvocationError("runtime session artifact escapes workspace") from exc
                     if relative.as_posix() not in declared_artifacts:
                         declared_artifacts.append(relative.as_posix())
+            metadata = {**result.metadata, "runtime": self.name}
+            diagnostic = getattr(self.runtime, "last_candidate_diagnostic", None)
+            if callable(diagnostic):
+                diagnostic = diagnostic()
+            if isinstance(diagnostic, Mapping):
+                for key, value in diagnostic.items():
+                    if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
+                        metadata[f"candidate_{key}"] = str(value).lower() if isinstance(value, bool) else str(value)
             return AgentResult(
                 adapter_name=self.name,
                 role=request.role,
                 text=result.text,
                 artifacts=tuple(declared_artifacts),
-                metadata={**result.metadata, "runtime": self.name},
+                metadata=metadata,
             )
         except (TypeError, ValueError) as exc:
             raise AgentInvocationError(_bounded_error(str(exc))) from exc
@@ -357,6 +541,9 @@ class RuntimeAgentAdapter:
             "run_id": request.run_id,
             "task_id": request.task_id,
         }
+        if request.candidate_budget is not None:
+            bounded["budget_id"] = request.candidate_budget.budget_id
+            bounded["max_tool_steps"] = request.candidate_budget.max_tool_steps
         if isinstance(payload, Mapping):
             for key, value in list(payload.items())[:16]:
                 if not isinstance(key, str) or not _TOKEN.fullmatch(key):
@@ -657,6 +844,8 @@ __all__ = [
     "AgentRequest",
     "AgentResult",
     "AgentSelectionError",
+    "CandidateGenerationBudget",
+    "CandidateGenerationDiagnostic",
     "CommandAgentAdapter",
     "RuntimeAgentAdapter",
 ]

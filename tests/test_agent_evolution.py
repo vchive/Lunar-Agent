@@ -12,7 +12,7 @@ from famou.agent_evolution import (
     AgentPortfolioGenerator,
 )
 from famou.agent_loop import AgentLoopRuntime
-from famou.agents import AgentResult, RuntimeAgentAdapter
+from famou.agents import AgentResult, CandidateGenerationBudget, RuntimeAgentAdapter
 from famou.algorithm import (
     LOOP_STRATEGY_RETIRED_MESSAGE,
     AlgorithmProblemContract,
@@ -217,6 +217,54 @@ def test_agent_generator_injects_bounded_context_and_returns_draft(tmp_path: Pat
     assert "Improve a route" in agent.requests[0].prompt
     assert agent.requests[0].workspace.is_dir()
     assert (root / "evolution" / "candidates" / "candidate-0001" / "candidate.py").is_file()
+
+
+def test_agent_generator_binds_candidate_budget_and_emits_completion_after_parse(tmp_path: Path) -> None:
+    contract = _contract()
+    root = tmp_path / "run"
+    (root / "evolution").mkdir(parents=True)
+    (root / "evolution" / "contract.json").write_text(json.dumps(contract.to_dict()), encoding="utf-8")
+    agent = FixtureAgent()
+    generator = AgentCandidateGenerator(
+        agent, contract=contract,
+        candidate_budget=CandidateGenerationBudget("candidate-generation", 4),
+    )
+    observed: list[tuple[str, dict[str, object]]] = []
+    generator.set_observer(lambda event, payload: observed.append((event, payload)))
+    request = type(
+        "Request", (),
+        {"iteration": 3, "parent": None, "inspirations": (), "archive": (), "workspace": root},
+    )()
+    draft = generator(request)
+    assert draft.source.startswith("def solve")
+    assert agent.requests[0].candidate_budget is not None
+    assert agent.requests[0].candidate_budget.budget_id == "candidate-00000003-0001"
+    event = next(payload for kind, payload in observed if kind == "agent_candidate_generation")
+    assert event["outcome"] == "completed"
+    assert event["completion"] is True
+    assert event["schema_version"] == "1"
+
+
+def test_agent_generator_malformed_candidate_never_emits_completed(tmp_path: Path) -> None:
+    class MalformedAgent(FixtureAgent):
+        def run(self, request):
+            self.requests.append(request)
+            return AgentResult(self.name, request.role, "{")
+
+    generator = AgentCandidateGenerator(
+        MalformedAgent(), contract=_contract(),
+        candidate_budget=CandidateGenerationBudget("candidate-generation", 4),
+    )
+    observed: list[tuple[str, dict[str, object]]] = []
+    generator.set_observer(lambda event, payload: observed.append((event, payload)))
+    with pytest.raises(EvolutionError):
+        generator(type(
+            "Request", (),
+            {"iteration": 1, "parent": None, "inspirations": (), "archive": (), "workspace": tmp_path},
+        )())
+    event = next(payload for kind, payload in observed if kind == "agent_candidate_generation")
+    assert event["outcome"] == "malformed_candidate"
+    assert event["completion"] is False
 
 
 def test_agent_evolution_indexes_declared_transcript_through_observer(tmp_path: Path) -> None:

@@ -8,7 +8,10 @@ strict parser。Feature132已补请求失败详情，133已完成独立preparati
 保留116的显式恢复语义。Feature134独立真实验收已通过准备1/1和8/8留出，但没有父任务
 交付，primary/joint仍0/1。三次生成均触及登记工具预算，135已补请求内剩余步数与墙钟提示，下一步按SDD离线验证每候选
 显式预算和完成诊断。外部producer多文件接线、全链路预算、运行中
-取消编排和detached仍未完成；
+取消编排和detached仍未完成。Feature 136 已完成上述离线工作：候选生成现在有独立 budget
+identity、整批原子步数准入和 parser-gated completion diagnostic，覆盖 native 与 bundle
+路径。没有新的真实测量，Feature 134 证据与分母保持不变；下一次真实运行仍需新的 SDD、
+登记和唯一槽；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目

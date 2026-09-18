@@ -3,16 +3,19 @@ from pathlib import Path
 
 import pytest
 
+from famou.agent_loop import AgentLoopRuntime
 from famou.agents import (
     AgentInvocationError,
     AgentRegistry,
     AgentRequest,
     AgentResult,
     AgentSelectionError,
+    CandidateGenerationBudget,
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
-from famou.runtime import MockRuntime, RuntimeResult
+from famou.runtime import MockRuntime, ModelTurn, RuntimeResult, ToolCall
+from famou.tools import LocalToolRegistry
 
 
 class FixtureAdapter:
@@ -153,3 +156,60 @@ def test_runtime_adapter_attaches_context_and_transcript_artifact(tmp_path: Path
     result = RuntimeAgentAdapter(runtime).run(request(tmp_path))
     assert runtime.context == ("run-1", "task-1", "solve this")
     assert result.artifacts == ("session-transcript.jsonl",)
+
+
+def test_runtime_adapter_forwards_candidate_budget(tmp_path: Path) -> None:
+    class BudgetRuntime:
+        name = "budget-runtime"
+
+        def __init__(self) -> None:
+            self.received = None
+
+        def run(self, prompt, workspace, timeout=None, *, max_tool_steps=None, budget_id=None):
+            del prompt, workspace, timeout
+            self.received = (max_tool_steps, budget_id)
+            return RuntimeResult("complete")
+
+        def cancel(self):
+            return None
+
+        def process_info(self):
+            return (None, None)
+
+        def set_process_observer(self, observer):
+            del observer
+
+    runtime = BudgetRuntime()
+    budget = CandidateGenerationBudget("budget-1", 4, timeout_seconds=3)
+    request_with_budget = AgentRequest(
+        "run-1", "task-1", "solver", "solve this", workspace=tmp_path,
+        candidate_budget=budget,
+    )
+    result = RuntimeAgentAdapter(runtime).run(request_with_budget)
+    assert result.text == "complete"
+    assert runtime.received == (4, "budget-1")
+    assert request_with_budget.to_dict()["candidate_budget"] == budget.to_dict()
+
+
+def test_runtime_adapter_preserves_one_typed_candidate_failure_diagnostic(tmp_path: Path) -> None:
+    class Model:
+        def complete(self, messages, tools=(), timeout=None):
+            del messages, tools, timeout
+            return ModelTurn("", (ToolCall("1", "list_dir", {"path": "."}),
+                                  ToolCall("2", "list_dir", {"path": "."})))
+
+    runtime = AgentLoopRuntime(Model(), tools=LocalToolRegistry(), max_steps=8)
+    adapter = RuntimeAgentAdapter(runtime)
+    events: list[tuple[str, dict[str, object]]] = []
+    adapter.set_event_sink(lambda event, payload: events.append((event, payload)))
+    budget = CandidateGenerationBudget("candidate-1", 1)
+    request_with_budget = AgentRequest(
+        "run-1", "task-1", "solver", "solve this", workspace=tmp_path,
+        candidate_budget=budget,
+    )
+    with pytest.raises(AgentInvocationError) as failure:
+        adapter.run(request_with_budget)
+    assert failure.value.candidate_diagnostic is not None
+    candidate_events = [payload for kind, payload in events if kind == "agent_candidate_generation"]
+    assert len(candidate_events) == 1
+    assert candidate_events[0]["outcome"] == "tool_step_limit_reached"

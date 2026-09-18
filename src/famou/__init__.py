@@ -14,6 +14,8 @@ from .agents import (
     AgentRequest,
     AgentResult,
     AgentSelectionError,
+    CandidateGenerationBudget,
+    CandidateGenerationDiagnostic,
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
@@ -378,6 +380,8 @@ __all__ = [
     "CandidateExecutionRun",
     "CandidateExecutionRunner",
     "CandidateExecutionRunnerError",
+    "CandidateGenerationBudget",
+    "CandidateGenerationDiagnostic",
     "CandidateInputArtifact",
     "CandidateInputStagingError",
     "CandidateIntegrityAuthority",
