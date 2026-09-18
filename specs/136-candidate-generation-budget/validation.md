@@ -46,7 +46,7 @@ advisory or that any selected budget is sufficient for a real multi-file deliver
 ## Completed validation
 
 - Focused Agent-loop, adapter, single-file generation, bundle generation, controller, and
-  budget-aware tooling tests: `105 passed`.
+  budget-aware tooling tests: `120 passed`.
 - Ruff passed for all changed source and test files.
 - `python -m compileall -q src tests` passed.
 - `git diff --check` passed.
