@@ -161,18 +161,22 @@ def usage_summary(path):
 
 
 def transport_summary(path, requests):
-    result, seen = [], set()
+    # Keep the public array aligned with the accepted request ledger.  A missing
+    # optional sidecar row is an unknown transport observation, never evidence
+    # of a successful exchange.
+    result, seen = {}, set()
+    request_by_index = {request["index"]: request for request in requests}
     for row in read_rows(path):
         if type(row) is not dict:
             raise ValueError("invalid_transport_row")
         index = row.get("request_index")
-        if type(index) is not int or index not in {r["index"] for r in requests} or index in seen:
+        if type(index) is not int or index not in request_by_index or index in seen:
             raise ValueError("invalid_transport_index")
         seen.add(index)
         detail = row.get("transport_observation")
         if detail is not None:
             detail = normalize_transport_observation(detail)
-        request = next(r for r in requests if r["index"] == index)
+        request = request_by_index[index]
         exchanges = row.get("exchange_count")
         if type(exchanges) is not int or not 0 <= exchanges <= LIMITS["max_requests"]:
             raise ValueError("invalid_transport_exchange_count")
@@ -196,8 +200,26 @@ def transport_summary(path, requests):
             if value is not None and (type(value) is not int or not 0 <= value <= 10**12):
                 raise ValueError("invalid_transport_counter")
             projected[key] = value
-        result.append(projected)
-    return result
+        result[index] = projected
+
+    # Diagnostics are optional, so an absent row remains a bounded, explicit
+    # unknown.  This also prevents callers from treating a shorter array as a
+    # successful prefix of the request ledger.
+    for request in requests:
+        index = request["index"]
+        if index not in result:
+            result[index] = {
+                "index": index,
+                "stage": request["stage"],
+                "outcome": "unavailable",
+                "transport_observation": None,
+                "status": None,
+                "exchange_count": 0,
+                "elapsed_ms": None,
+                "request_body_bytes": None,
+                "response_body_bytes": None,
+            }
+    return [result[request["index"]] for request in requests]
 
 
 def preparation_policy(store, parent, *, require_start=False):

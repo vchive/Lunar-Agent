@@ -521,6 +521,45 @@ def test_transport_status_is_observed_without_inventing_success(modules, tmp_pat
     assert modules.analysis.transport_summary(transport, usage["requests"])[0]["status"] == status
 
 
+def test_transport_summary_aligns_missing_optional_rows_as_unknown(modules, tmp_path):
+    calls = tmp_path / "calls.jsonl"
+    journal(calls, 2)
+    requests = modules.analysis.usage_summary(calls)["requests"]
+    row = {"request_index": 1, "request_sha256": requests[0]["request_sha256"],
+           "stage": "contract_compiler", "outcome": "response", "exchange_count": 1,
+           "status": 200}
+    transport = tmp_path / "transport.jsonl"
+    transport.write_bytes(canonical_json(row) + b"\n")
+
+    projected = modules.analysis.transport_summary(transport, requests)
+
+    assert [item["index"] for item in projected] == [1, 2]
+    assert projected[0]["status"] == 200
+    assert projected[1] == {
+        "index": 2, "stage": "evaluator_compiler", "outcome": "unavailable",
+        "transport_observation": None, "status": None, "exchange_count": 0,
+        "elapsed_ms": None, "request_body_bytes": None, "response_body_bytes": None,
+    }
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "unbound"])
+def test_transport_summary_rejects_duplicate_or_unbound_exchange(modules, tmp_path, mutation):
+    calls = tmp_path / "calls.jsonl"
+    journal(calls, 1)
+    requests = modules.analysis.usage_summary(calls)["requests"]
+    row = {"request_index": 1, "request_sha256": requests[0]["request_sha256"],
+           "stage": "contract_compiler", "outcome": "response", "exchange_count": 1,
+           "status": 200}
+    rows = [row, dict(row)] if mutation == "duplicate" else [
+        {**row, "request_index": 2, "request_sha256": "b" * 64},
+    ]
+    transport = tmp_path / "transport.jsonl"
+    transport.write_bytes(b"".join(canonical_json(item) + b"\n" for item in rows))
+
+    with pytest.raises(ValueError, match="index"):
+        modules.analysis.transport_summary(transport, requests)
+
+
 @pytest.mark.parametrize("field,value", [("status", True), ("status", 99), ("status", 600),
                                          ("status", "private"), ("exchange_count", 2),
                                          ("request_sha256", None), ("request_sha256", "a" * 64),
