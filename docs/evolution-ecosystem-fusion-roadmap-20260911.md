@@ -19,7 +19,8 @@ effective 状态恢复契约的离线 SDD，完成前不启动新的真实槽。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、模型、provider、远端服务、候选评测或真实
-campaign。当前 Feature 084/085 建立 verified seed、population-first 和协议边界，Feature
+campaign。普通流程效果只参考已有 Lunar 历史分数，不再安排 WebAgent 重跑或深度演化对比。
+当前 Feature 084/085 建立 verified seed、population-first 和协议边界，Feature
 086 又把已完成的远端 material observation 接到同一 exact-harness admission；仓库同时具备
 OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读离线结果 exporter，以及
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
