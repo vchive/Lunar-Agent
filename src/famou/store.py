@@ -1290,6 +1290,8 @@ class Store:
                     RunStatus.CANCELLED.value,
                 ),
             ).rowcount
+            if not changed:
+                return False
             task_rows = connection.execute(
                 "SELECT id FROM tasks WHERE run_id = ? AND state NOT IN (?, ?, ?, ?)",
                 (
@@ -1317,18 +1319,17 @@ class Store:
                 "(SELECT id FROM tasks WHERE run_id = ?) AND status = ?",
                 ("cancelled", timestamp, run_id, "running"),
             )
-            if changed:
-                self._append_event(connection, run_id, None, "run_cancelled", {})
-                if changed_tasks:
-                    for row in task_rows:
-                        self._append_event(
-                            connection,
-                            run_id,
-                            row["id"],
-                            "task_cancelled",
-                            {"reason": "run_cancelled"},
-                        )
-        return bool(changed)
+            self._append_event(connection, run_id, None, "run_cancelled", {})
+            if changed_tasks:
+                for row in task_rows:
+                    self._append_event(
+                        connection,
+                        run_id,
+                        row["id"],
+                        "task_cancelled",
+                        {"reason": "run_cancelled"},
+                    )
+        return True
 
     def add_artifact(
         self,

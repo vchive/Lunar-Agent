@@ -14,7 +14,9 @@
 单调时钟预算，并传入 `min(原请求超时, 剩余 run 时间)`。同步多任务与并发 worker 共享同一
 起始时刻，后续任务不会重新获得完整 `Config.runtime_timeout`。剩余时间耗尽继续走既有
 `BudgetExceeded("max_runtime_seconds", ...)` 与幂等 `budget_exceeded` 台账；取消、活动 runtime
-fan-out、进程组清理和迟到结果丢弃语义保持。
+fan-out、进程组清理和迟到结果丢弃语义保持。新增 cancellation-first / budget-first 离线
+竞态 fixture，固定 durable winner 不会被后来的结果或取消改写；同时修正
+`Store.cancel_run()` 在 run 已经 `failed` 后仍会改写 blocked task 的状态机缺陷。
 
 专项 fixture/controller/adapter/runtime/budget 回归为 116 passed；完整当前回归为
 7941 passed、1 skipped、24 deselected，冻结 Feature 123 阶段为 24 passed。Ruff、compileall、

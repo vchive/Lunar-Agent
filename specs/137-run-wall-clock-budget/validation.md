@@ -21,6 +21,9 @@ feature.
   written into replayable messages, transcripts, `Config`, `BudgetSpec`, or a frozen profile.
 - Late runtime results retain current bounded local artifact behavior but cannot promote success,
   create a retry, or deliver outputs after the post-request budget guard observes exhaustion.
+- The cancellation-race fixtures cover both durable winners: cancellation first discards a result
+  returned after the clipped request timeout, while a budget failure first rejects a later cancel
+  and leaves the run failed, its task blocked, and its single `budget_exceeded` event intact.
 - Cancellation races preserve whichever Store transition is durable first. Late results are
   discarded, cancellation callbacks all run, process groups are cleaned, and no second budget
   event or terminal-state rewrite appears.
@@ -51,6 +54,8 @@ completion, usage, quality, or WebAgent parity.
 ## Completed validation
 
 - Feature 137 focused fixture/controller/adapter/runtime/budget tests: `116 passed`.
+- The Feature 137 focused suite now includes the cancellation-first and budget-first race fixtures;
+  the local focused controller/plan/store regression passes with `39 passed`.
 - Ruff, `python -m compileall -q src tests`, Specify prerequisites, and `git diff --check`
   passed.
 - Full current regression: `7941 passed, 1 skipped, 24 deselected`; frozen Feature 123 stage:

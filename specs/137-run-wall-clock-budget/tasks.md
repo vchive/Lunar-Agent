@@ -16,6 +16,6 @@
       admission, explicit delegation timeout, adapter/runtime forwarding, retries, and races.
 - [x] T008 Run focused/shared regressions, Ruff, compileall, Specify checks, diff/link checks, and
       an independent Feature 134 byte/SHA inventory. Do not start a provider or campaign.
-- [ ] T009 Complete independent review, update `HANDOFF.md` and readiness/roadmap notes, mark this
+- [x] T009 Complete independent review, update `HANDOFF.md` and readiness/roadmap notes, mark this
       SDD complete, commit and push the verified implementation. A future real run requires a
       separate registration and unique slot.

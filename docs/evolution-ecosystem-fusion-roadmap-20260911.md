@@ -11,7 +11,9 @@ strict parser。Feature132已补请求失败详情，133已完成独立preparati
 取消编排和detached仍未完成。Feature 136 已完成上述离线工作：候选生成现在有独立 budget
 identity、整批原子步数准入和 parser-gated completion diagnostic，覆盖 native 与 bundle
 路径。没有新的真实测量，Feature 134 证据与分母保持不变；下一次真实运行仍需新的 SDD、
-登记和唯一槽；
+登记和唯一槽；Feature 137 已把共享 run 墙钟传播到 active Agent/runtime 请求，并以离线
+竞态 fixture 固定取消先赢与预算先赢的终态优先级；其余真实闭环和外部 producer 接线仍未
+获得效果证据。
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目

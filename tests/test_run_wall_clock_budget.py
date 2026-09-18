@@ -1,6 +1,7 @@
 import time
 from dataclasses import replace
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
@@ -29,6 +30,33 @@ class CapturingRuntime:
 
     def cancel(self) -> None:
         return None
+
+    def process_info(self) -> tuple[int | None, int | None]:
+        return (None, None)
+
+    def set_process_observer(self, observer) -> None:
+        del observer
+
+
+class BlockingRuntime:
+    name = "blocking-runtime"
+
+    def __init__(self) -> None:
+        self.started = Event()
+        self.release = Event()
+        self.timeouts: list[float | None] = []
+        self.cancel_calls = 0
+
+    def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
+        del prompt, workspace
+        self.timeouts.append(timeout)
+        self.started.set()
+        if not self.release.wait(timeout=2):
+            raise TimeoutError("fixture runtime was not released")
+        return RuntimeResult("late result")
+
+    def cancel(self) -> None:
+        self.cancel_calls += 1
 
     def process_info(self) -> tuple[int | None, int | None]:
         return (None, None)
@@ -167,3 +195,80 @@ def test_exhausted_run_records_budget_before_claiming_next_task(tmp_path: Path) 
     events = controller.store.list_events(settled.id)
     assert sum(event["type"] == "budget_exceeded" for event in events) == 1
     assert any(event["payload"]["limit"] == "max_runtime_seconds" for event in events if event["type"] == "budget_exceeded")
+
+
+def test_cancellation_first_discards_result_returned_after_wall_budget(tmp_path: Path) -> None:
+    runtime = BlockingRuntime()
+    controller = LocalController(Config(tmp_path / ".famou", runtime_timeout=10), runtime)
+    run = controller.store.create_run(
+        "cancel before the wall budget",
+        route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=0.05)),
+    )
+    settled: list[object] = []
+    worker = Thread(target=lambda: settled.append(controller.resume(run.id)))
+
+    worker.start()
+    assert runtime.started.wait(timeout=2)
+    assert controller.cancel(run.id)
+    assert runtime.cancel_calls == 1
+    assert runtime.timeouts[0] is not None
+    time.sleep(float(runtime.timeouts[0]) + 0.02)
+    runtime.release.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert settled[0].status.value == "cancelled"
+    task = controller.store.list_tasks(run.id)[0]
+    assert task.state.value == "cancelled"
+    assert task.result_path is None
+    events = controller.store.list_events(run.id)
+    assert sum(event["type"] == "task_result_discarded" for event in events) == 1
+    assert not any(event["type"] == "budget_exceeded" for event in events)
+    assert not any(event["type"] in {"task_succeeded", "task_evaluated"} for event in events)
+    assert not any(item["kind"] == "result" for item in controller.store.list_artifacts(run.id))
+
+
+def test_budget_first_rejects_later_cancellation_without_rewriting_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = BlockingRuntime()
+    controller = LocalController(Config(tmp_path / ".famou", runtime_timeout=10), runtime)
+    run = controller.store.create_run(
+        "exhaust the wall budget before cancellation",
+        route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=0.05)),
+    )
+    budget_recorded = Event()
+    finish_budget_failure = Event()
+    original_fail_budget = controller.store.fail_budget
+
+    def pause_after_budget_is_recorded(
+        run_id: str, limit: str, actual: float, maximum: float, reason: str
+    ) -> bool:
+        changed = original_fail_budget(run_id, limit, actual, maximum, reason)
+        budget_recorded.set()
+        assert finish_budget_failure.wait(timeout=2)
+        return changed
+
+    monkeypatch.setattr(controller.store, "fail_budget", pause_after_budget_is_recorded)
+    settled: list[object] = []
+    worker = Thread(target=lambda: settled.append(controller.resume(run.id)))
+
+    worker.start()
+    assert runtime.started.wait(timeout=2)
+    assert runtime.timeouts[0] is not None
+    time.sleep(float(runtime.timeouts[0]) + 0.02)
+    runtime.release.set()
+    assert budget_recorded.wait(timeout=2)
+    assert not controller.cancel(run.id)
+    finish_budget_failure.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert settled[0].status.value == "failed"
+    task = controller.store.list_tasks(run.id)[0]
+    assert task.state.value == "blocked"
+    assert task.result_path is None
+    events = controller.store.list_events(run.id)
+    assert sum(event["type"] == "budget_exceeded" for event in events) == 1
+    assert not any(event["type"] in {"run_cancelled", "task_cancelled"} for event in events)
+    assert not any(event["type"] in {"task_succeeded", "task_evaluated"} for event in events)
