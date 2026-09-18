@@ -1,7 +1,7 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-19 更新至 Feature 138 规格：候选级预算、run 墙钟传播和取消
-竞态收尾完成，状态投影/恢复治理待实现，完整多文件交付仍未通过。
+评估创建于 2026-09-16，2026-09-19 更新至 Feature 138：候选级预算、run 墙钟传播和取消
+竞态、公开状态投影与 preparation 恢复治理均已离线收尾，完整多文件交付仍未通过。
 以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
 
 Feature 136 已为单文件和 bundle 候选生成加入显式、不可变的每候选 tool-step budget 与
@@ -221,9 +221,12 @@ Feature134已通过真实准备和8项留出，但三次生成均触及登记的
 候选或父任务交付。Feature136 已离线完成显式候选预算与完成诊断，Feature137 已离线
 完成 run 墙钟传播和取消竞态收口；准备成功不能替代完整交付验收。
 
-Feature 138 已冻结下一项离线实现范围：公开 transport status 投影，以及 preparation
-失败时 persisted/effective/preparation 状态和显式恢复准入的稳定契约。它不会改变父任务
-的恢复语义，不会回写 Feature 131/134，也不产生新的真实效果证据。
+Feature 138 已完成公开 transport status 投影，以及 preparation 失败时
+persisted/effective/preparation 状态和显式恢复准入的稳定契约。它没有改变父任务的恢复
+语义，没有回写 Feature 131/134，也没有产生新的真实效果证据；聚焦 recovery/request/
+wall/capability/local-diagnostics 套件全部通过（含 malformed-stage 回归），状态投影 4 项
+通过；完整当前回归为 7963 passed、1 skipped、24 deselected，冻结 Feature 123 阶段 24
+passed。
 
 1. 113/115/117/120 各自为0/2。118/119已修复合同兼容和支持范围内的源码检查，
    121/122补齐生成协议和传输观测；123小型准备诊断收到响应后本地失败，为独立0/1。
@@ -235,14 +238,15 @@ Feature 138 已冻结下一项离线实现范围：公开 transport status 投�
    经复核是116恢复契约。133已完成独立preparation请求/总墙钟策略，134已增加HTTP状态
    投影并完成新的唯一真实槽：准备1/1、8/8holdout，但primary/joint仍0/1。只读证据确认
    三次生成都被max_steps=4工具预算阻断；136/137 已离线完成候选预算、完成诊断、run
-   墙钟传播和取消竞态，不改变旧guard语义。138 先处理状态投影/恢复契约，再为任何新
-   真实运行独立登记；不预设新预算数值。
+   墙钟传播和取消竞态，不改变旧guard语义。138 已完成状态投影/恢复契约和离线验证，
+   下一次真实运行仍须独立登记；不预设新预算数值。
    历史远端耗时原因仍未知；
    不补旧槽、不改失败分母，也不把本地协议验证当成模型成功率或质量已提高。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
    和全链路总时长编排继续待补，未知现场不自动重跑，终态恢复不增加候选或交付副本。
-3. 完成 Feature 138 的状态投影/恢复实现和离线验证后，再独立登记一次新的真实多文件闭环，
+3. 在 Feature 138 的状态投影/恢复实现和离线验证完成后，Feature 139 已建立规格草案；在
+   独立登记前仍需完成其离线注册/阶段链/审计 fixtures，再登记一次新的真实多文件闭环，
    至少保留一个 completed candidate、execution、independent score、selection 和 parent
    delivery；失败分母保持为1，不重开旧槽。
 4. 扩展通用 producer material/SeedManifest 的多文件接线，使 OpenEvolve/Shinka 输出也

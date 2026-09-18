@@ -8,20 +8,39 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
-## Feature 138：公开状态投影与 preparation 恢复契约（2026-09-19，规格完成）
+## Feature 138：公开状态投影与 preparation 恢复契约（2026-09-19，离线完成）
 
-已完成 specification-first 文档，尚未改运行代码或启动测试实现。范围锁定两项小而独立的
-治理工作：公开结果安全投影已观察的 HTTP status，以及明确 persisted parent status、
-effective/public status、preparation status 和 recoverable flag 的关系。Feature 116/132
-确认 preparation 失败后父 run 保持 `running` 是为了允许显式恢复的持久契约；138 不会把它
-直接改写为 `failed`，也不会增加隐式 retry。
+已完成状态投影与显式 preparation 恢复准入。CLI/JSON 现在同时公开 effective `status`、
+持久 parent `run_status`、`preparation_status`、`preparation_recoverable` 和受限
+`reason_code`；读取不修改 Store，parent 的终态、evolution/materialization 失败和
+preparation 失败按固定优先级投影。损坏 parent/attempt、重复 start、未绑定失败记录、
+取消/终态/已准备 parent 均在模型调用和新 attempt 之前拒绝；合法 runtime/wall/local/
+capability 失败保持兼容恢复，预算修正后允许显式 `budget_exceeded` 重试。
 
-下一步实现必须只使用离线 Store/transport fixture，验证取消、终态、失败/unknown、已准备和
-可恢复恢复分支，以及 200、4xx/5xx、无响应头 timeout 和坏台账的安全投影。不能恢复或追加
-Feature 131/134，不能调用 provider、执行生成源码或改写历史 evidence。完成实现后再另立
-新 SDD 登记真实多文件闭环：candidate generation → execution → independent scoring →
-selection → parent delivery；至少一个 completed candidate 才能算 primary/joint 成功。
+离线 recovery/request/wall/capability/local diagnostics 聚焦套件全部通过，包含新增的
+malformed-stage 回归；状态投影测试 4 项通过。Ruff、compileall、Specify 前置和 diff 检查
+通过。双阶段全量回归 exit0：当前 `7963 passed, 1 skipped, 24 deselected`，固定 Feature
+123 阶段 `24 passed`。Feature 131
+保留 21 文件/155485 bytes，Feature 134 保留 97 文件/327394 bytes，文件集合、大小和
+SHA 均与 evidence 一致；没有 provider 请求、campaign 恢复、evaluator 调用或生成源码执行。
 规格与验证边界见 `specs/138-status-projection-recovery/`。
+
+下一步是 Feature 139 的 specification-first 新立项，随后才可冻结新的 registration 并贯通
+preparation → parser-gated completed candidate → execution → independent scoring → selection
+→ parent delivery；至少一个 completed candidate 才能算 primary/joint 成功。Feature 139 当前
+没有 registration、provider 请求或真实运行；不能追加 Feature 131/134，也不安排 WebAgent 对比。
+
+## Feature 139：真实自动多文件闭环验收（2026-09-19，规格优先）
+
+已新建 `specs/139-real-multifile-closure/` 的 spec/plan/tasks/validation。它只定义下一次
+新的 registration、campaign、`attempt-001` 和未使用 root，要求推送后 `HEAD == origin/main`、
+唯一运行槽和一次性分母。阶段证据必须按 preparation、候选 parser-gated completed、隔离执行、
+独立评分、有效性优先选择、父任务交付严格串联；缺失或冲突的前置 receipt 不能由后续结果补齐。
+
+建议固定普通请求 600 秒、preparation 请求 900 秒与 wall 1860 秒、全程 wall 2400 秒、最多
+20 次请求、160000 observed tokens、每候选 12 tool steps 和 8 个 holdout。失败保留 `0/1`，
+不允许 retry/resume/repair/replacement；Feature 131/134、WebAgent 和外部 producer 均不重开或
+比较。先完成离线 registration/阶段链/审计 fixture 与全量回归，再决定是否登记并运行唯一真实槽。
 
 ## Feature 137：run 墙钟预算传播到 Agent 请求（2026-09-18，离线完成）
 

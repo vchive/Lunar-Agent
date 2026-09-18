@@ -1330,8 +1330,17 @@ def _print_status(config: Config, run_id: str) -> int:
     if run is None:
         print(f"unknown run: {run_id}", file=sys.stderr)
         return 2
+    projection = _status_payload(config, run.id)
+    if projection is None:
+        print(f"unknown run: {run_id}", file=sys.stderr)
+        return 2
+    preparation = _bundle_preparation_payload(store, run.id)
     print(f"run_id: {run.id}")
-    print(f"status: {run.status.value}")
+    print(f"status: {projection['status']}")
+    print(f"run_status: {projection['run_status']}")
+    print(f"preparation_status: {projection['preparation_status']}")
+    print(f"preparation_recoverable: {projection['preparation_recoverable']}")
+    print(f"status_reason: {projection['reason_code']}")
     print(f"goal: {run.goal}")
     print(f"workspace: {run.workspace}")
     preparation_budgets = _preparation_budgets_payload(store, run.id)
@@ -1339,7 +1348,6 @@ def _print_status(config: Config, run_id: str) -> int:
         for name, budget in preparation_budgets.items():
             value = budget["seconds"]
             print(f"{name}: {value if value is not None else 'unbounded'} ({budget['source']})")
-    preparation = _bundle_preparation_payload(store, run.id)
     if preparation is not None:
         print(f"evaluator_preparation: {preparation['status']}")
         if preparation.get("error_category"):
@@ -1395,6 +1403,55 @@ def _print_status(config: Config, run_id: str) -> int:
             f"artifact: {artifact['path']} kind={artifact['kind']} size={artifact['size']} sha256={artifact['sha256']}"
         )
     return 0
+
+
+def _status_projection(
+    run: Run,
+    *,
+    preparation: dict[str, object] | None = None,
+    evolution_status: str | None = None,
+    materialization_status: str | None = None,
+) -> dict[str, object]:
+    """Project stable public status without changing the persisted parent state."""
+    persisted = run.status.value
+    preparation_status = preparation.get("status") if isinstance(preparation, dict) else None
+    recoverable = bool(
+        isinstance(preparation, dict) and preparation.get("recoverable") is True
+    )
+
+    # Cancellation wins.  Composite delivery failures may override a succeeded intake;
+    # preparation alone cannot rewrite a terminal parent's effective or persisted state.
+    if persisted == "cancelled":
+        effective, reason = "cancelled", "cancelled"
+    elif materialization_status == "failed":
+        effective, reason = "failed", "materialization_failed"
+    elif evolution_status == "failed":
+        effective, reason = "failed", "evolution_failed"
+    elif persisted in {"failed", "succeeded"}:
+        effective, reason = persisted, f"terminal_{persisted}"
+    elif preparation_status in {"failed", "unknown"}:
+        category = preparation.get("error_category") if isinstance(preparation, dict) else None
+        reason_by_category = {
+            "cancelled": "cancelled",
+            "preparation_timeout": "preparation_timeout",
+            "runtime_error": "preparation_runtime_error",
+            "validation_error": "preparation_validation_error",
+            "unsupported_verification": "preparation_unsupported",
+            "interrupted": "preparation_unknown",
+        }
+        effective = "failed"
+        reason = reason_by_category.get(category, "preparation_failed" if preparation_status == "failed"
+                                        else "preparation_unknown")
+    else:
+        effective, reason = persisted, f"run_{persisted}"
+
+    return {
+        "status": effective,
+        "run_status": persisted,
+        "preparation_status": preparation_status,
+        "preparation_recoverable": recoverable,
+        "reason_code": reason,
+    }
 
 
 def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
@@ -1513,7 +1570,17 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
     role_evidence = [item for item in artifacts if item["kind"] == "role_evidence"]
     preparation = _bundle_preparation_payload(store, run.id)
     preparation_budgets = _preparation_budgets_payload(store, run.id)
+    projection = _status_projection(
+        run,
+        preparation=preparation,
+        evolution_status=(linked_evolution.get("status") if linked_evolution else None),
+        materialization_status=(
+            evolution_materialization.get("status")
+            if isinstance(evolution_materialization, dict) else None
+        ),
+    )
     return {
+        **projection,
         "run": {
             "id": run.id,
             "goal": run.goal,
@@ -3029,23 +3096,23 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
         if evolution_payload is None:
             evolution_payload = {"status": run.status.value}
         evolution_payload["preparation_budgets"] = preparation_budgets
-    effective_status = run.status.value
-    if (
-        isinstance(materialization, dict)
-        and materialization.get("status") == "failed"
-    ) or (
-        isinstance(evolution_payload, dict)
-        and evolution_payload.get("status") == "failed"
-    ):
-        effective_status = "failed"
-    if preparation is not None and preparation["status"] in {"failed", "unknown"}:
-        effective_status = "failed"
-    if run.status.value == "cancelled":
-        effective_status = "cancelled"
+    evolution_status = None
+    if (isinstance(evolution_payload, dict) and "run_id" in evolution_payload
+            and evolution_payload.get("status") in {
+        "pending", "running", "awaiting_input", "succeeded", "failed", "cancelled",
+    }):
+        evolution_status = evolution_payload["status"]
+    projection = _status_projection(
+        run,
+        preparation=preparation,
+        evolution_status=evolution_status,
+        materialization_status=(
+            materialization.get("status") if isinstance(materialization, dict) else None
+        ),
+    )
     payload = {
         "run_id": run.id,
-        "status": effective_status,
-        "run_status": run.status.value,
+        **projection,
         "workspace": str(run.workspace),
         "input_request": controller.store.pending_input(run.id),
         "input_data": input_data,

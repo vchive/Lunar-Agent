@@ -114,6 +114,46 @@ def test_interrupted_start_is_unknown_and_frozen_recovery_avoids_model_work(
     assert automatic_bundle_preparation_status(controller.store, parent.id)["status"] == "prepared"
 
 
+@pytest.mark.parametrize("corruption", ["parent", "duplicate_start", "attempt"])
+def test_corrupt_interrupted_start_cannot_open_another_attempt(tmp_path, monkeypatch, corruption):
+    fixture = _fixture(tmp_path)
+    controller, parent, _, runtime = fixture
+    calls = []
+
+    class Interrupted(BaseException):
+        pass
+
+    def stop(*args, **kwargs):
+        calls.append("provider")
+        raise Interrupted()
+
+    monkeypatch.setattr(runtime, "run", stop)
+    with pytest.raises(Interrupted):
+        _prepare(fixture)
+    assert calls == ["provider"]
+    assert not _observations(controller, parent, "bundle_preparation_failed")
+    start, = _observations(controller, parent, "bundle_preparation_started")
+    payload = dict(start["payload"])
+    if corruption == "parent":
+        payload["parent_run_id"] = "different-parent"
+    elif corruption == "attempt":
+        payload["attempt_id"] = "invalid-attempt"
+    else:
+        assert controller.store.append_event(parent.id, "bundle_preparation_started", payload)
+    with controller.store._connect() as connection:
+        connection.execute("UPDATE events SET payload = ? WHERE id = ?", (json.dumps(payload), start["id"]))
+
+    before = _snapshot(controller, parent)
+    with pytest.raises(EvolutionError):
+        _prepare(fixture)
+
+    assert calls == ["provider"]
+    expected_starts = 2 if corruption == "duplicate_start" else 1
+    assert len(_observations(controller, parent, "bundle_preparation_started")) == expected_starts
+    assert not _observations(controller, parent, "bundle_preparation_failed")
+    assert _snapshot(controller, parent) == before
+
+
 def test_malformed_response_is_recorded_without_becoming_runtime_retry(tmp_path, monkeypatch):
     fixture = _fixture(tmp_path)
     controller, parent, _, runtime = fixture
@@ -125,6 +165,39 @@ def test_malformed_response_is_recorded_without_becoming_runtime_retry(tmp_path,
     assert caught.value.preparation["recoverable"] is False
     assert caught.value.preparation["error_category"] == "validation_error"
     assert "provider private prose" not in json.dumps(_observations(controller, parent))
+
+
+@pytest.mark.parametrize("stage", [[], {}])
+def test_malformed_schema_one_stage_is_validation_error_without_crash(tmp_path, stage):
+    fixture = _fixture(tmp_path)
+    controller, parent, _, runtime = fixture
+    attempt_id = "attempt-malformed-stage"
+    controller.store.append_event(parent.id, "bundle_preparation_started", {
+        "parent_run_id": parent.id,
+        "attempt_id": attempt_id,
+        "status": "started",
+        "stage": "preparation",
+    })
+    controller.store.append_event(parent.id, "bundle_preparation_failed", {
+        "schema_version": "1",
+        "parent_run_id": parent.id,
+        "attempt_id": attempt_id,
+        "status": "failed",
+        "stage": stage,
+        "error_category": "runtime_error",
+        "recoverable": True,
+    })
+
+    status = automatic_bundle_preparation_status(controller.store, parent.id)
+
+    assert status["status"] == "failed"
+    assert status["error_category"] == "validation_error"
+    assert status["recoverable"] is False
+    before = len(_observations(controller, parent, "bundle_preparation_started"))
+    with pytest.raises(EvolutionError):
+        _prepare(fixture)
+    assert len(_observations(controller, parent, "bundle_preparation_started")) == before
+    assert (runtime.bundle_calls, runtime.audit_calls) == (0, 0)
 
 
 def test_arbitrary_failure_prose_cannot_claim_runtime_retry(tmp_path, monkeypatch):

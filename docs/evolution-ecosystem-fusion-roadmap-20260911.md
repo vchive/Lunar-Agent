@@ -13,8 +13,9 @@ identity、整批原子步数准入和 parser-gated completion diagnostic，覆�
 路径。没有新的真实测量，Feature 134 证据与分母保持不变；下一次真实运行仍需新的 SDD、
 登记和唯一槽；Feature 137 已把共享 run 墙钟传播到 active Agent/runtime 请求，并以离线
 竞态 fixture 固定取消先赢与预算先赢的终态优先级；其余真实闭环和外部 producer 接线仍未
-获得效果证据。Feature 138 已冻结公开 transport status 投影与 preparation persisted/
-effective 状态恢复契约的离线 SDD，完成前不启动新的真实槽。
+获得效果证据。Feature 138 已完成公开 transport status 投影与 preparation persisted/
+effective 状态恢复契约的离线 SDD 和实现验证；Feature 139 已建立下一次真实多文件闭环的
+规格草案，仍需离线 fixtures、registration 和唯一槽。
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目

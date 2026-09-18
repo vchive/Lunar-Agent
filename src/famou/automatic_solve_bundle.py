@@ -70,7 +70,7 @@ class AutomaticBundlePreparationError(EvolutionError):
 
 def _observation(parent_id, attempt_id, *, status, stage, category=None, recoverable=False,
                  unsupported_constraints=None, local_failure=None, request_failure=None,
-                 wall_failure=None, preparation_budgets=None):
+                 wall_failure=None, preparation_budgets=None, failure_reason=None):
     observation = {
         "schema_version": "1", "parent_run_id": parent_id, "attempt_id": attempt_id,
         "status": status, "stage": stage, "error_category": category,
@@ -90,6 +90,8 @@ def _observation(parent_id, attempt_id, *, status, stage, category=None, recover
     if preparation_budgets is not None:
         observation["schema_version"] = "2"
         observation["preparation_budgets"] = preparation_budgets
+    if failure_reason is not None:
+        observation["failure_reason"] = failure_reason
     return observation
 
 
@@ -260,12 +262,37 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
                                     category="validation_error", local_failure=detail)
             return {**result, "status": "failed", "error_category": "validation_error"}
         category = raw.get("error_category")
-        matched_start = any(
-            item.get("type") == _STARTED and isinstance(item.get("payload"), dict)
+        base_fields = {
+            "schema_version", "parent_run_id", "attempt_id", "status", "stage",
+            "error_category", "recoverable",
+        }
+        # The coarse schema-1 observation is also a recovery authority.  Keep its
+        # shape closed so an edited status, schema, or private extension cannot
+        # accidentally authorize another model request.
+        if (raw.get("schema_version") != "1" or raw.get("status") != "failed"
+                or type(raw.get("recoverable")) is not bool
+                or not base_fields.issubset(raw)
+                or not isinstance(raw.get("stage"), str) or raw.get("stage") not in _STAGES
+                or not isinstance(category, str) or category not in _CATEGORIES
+                or set(raw) - (base_fields | {"unsupported_constraints", "failure_reason"})):
+            return {**result, "status": "failed", "error_category": "validation_error"}
+        if ("failure_reason" in raw and (
+                raw.get("failure_reason") != "budget_exceeded" or category != "validation_error"
+                or raw.get("stage") != "profile_publish" or raw.get("recoverable") is not False)):
+            return {**result, "status": "failed", "error_category": "validation_error"}
+        if category != "unsupported_verification" and "unsupported_constraints" in raw:
+            return {**result, "status": "failed", "error_category": "validation_error"}
+        starts = [
+            item for item in relevant[:-1]
+            if item.get("type") == _STARTED and isinstance(item.get("payload"), dict)
             and item["payload"].get("parent_run_id") == parent_id
             and item["payload"].get("attempt_id") == attempt_id
-            for item in relevant[:-1]
-        )
+        ]
+        matched_start = (
+            len(starts) == 1
+            and relevant[-2] == starts[0]
+            and _valid_start(starts[0]["payload"], parent_id, attempt_id, events)
+        ) if len(relevant) >= 2 else False
         if (attempt_id is not None and raw.get("parent_run_id") == parent_id
                 and matched_start and isinstance(category, str) and category in _CATEGORIES):
             if category == "unsupported_verification":
@@ -285,7 +312,7 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
                     **result, "status": "failed", "error_category": category,
                     "unsupported_constraints": details,
                 }
-            return {
+            result = {
                 **result, "status": "failed", "error_category": category,
                 "recoverable": (
                     category == "runtime_error" and stage in {"evaluator_compile", "evaluator_audit"}
@@ -293,6 +320,9 @@ def automatic_bundle_preparation_status(store, parent_id: str) -> dict[str, obje
                     and parent.status not in {RunStatus.SUCCEEDED, RunStatus.FAILED}
                 ),
             }
+            if raw.get("failure_reason") == "budget_exceeded":
+                result["failure_reason"] = "budget_exceeded"
+            return result
     return result
 
 
@@ -602,6 +632,46 @@ def prepare_automatic_solve_bundle(
             if parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
                 _fail("terminal")
 
+            # A new attempt is an explicit recovery operation.  Do not let a
+            # malformed or non-recoverable failure observation become an
+            # implicit retry merely because the profile event is absent.
+            previous = automatic_bundle_preparation_status(controller.store, parent.id)
+            preparation_events = controller.store.list_events(parent.id)
+            has_prior_failure = any(item.get("type") == _FAILED for item in preparation_events)
+            valid_interrupted_start = False
+            if (previous is not None and previous.get("status") == "unknown"
+                    and not has_prior_failure):
+                starts = [item for item in preparation_events
+                          if item.get("type") == _STARTED]
+                raw_start = starts[0].get("payload") if len(starts) == 1 else None
+                relevant = [item for item in preparation_events
+                            if item.get("type") in {_STARTED, _FAILED, _EVENT}]
+                valid_interrupted_start = (
+                    len(starts) == 1 and relevant[-1] == starts[0]
+                    and isinstance(raw_start, dict)
+                    and previous.get("attempt_id") is not None
+                    and raw_start.get("attempt_id") == previous["attempt_id"]
+                    and raw_start.get("parent_run_id") == parent.id
+                    and _valid_start(raw_start, parent.id, raw_start["attempt_id"], preparation_events)
+                )
+                if not valid_interrupted_start:
+                    _fail("recovery_not_admitted")
+            if (previous is not None
+                    and (previous.get("status") == "failed"
+                         or (previous.get("status") == "unknown" and has_prior_failure))
+                    and previous.get("recoverable") is not True
+                    and not (
+                        previous.get("error_category") == "unsupported_verification"
+                        and "unsupported_constraints" in previous
+                    )
+                    and not (
+                        previous.get("error_category") == "validation_error"
+                        and "local_failure" in previous
+                    )
+                    and not valid_interrupted_start
+                    and previous.get("failure_reason") != "budget_exceeded"):
+                _fail("recovery_not_admitted")
+
             def continuation_guard():
                 current, _ = _parent(controller.store, parent.id, contract)
                 if current.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
@@ -739,6 +809,10 @@ def prepare_automatic_solve_bundle(
                     unsupported_constraints = None
                 if category not in {"runtime_error", "preparation_timeout"}:
                     request_failure = None
+                budget_exceeded = (
+                    type(exc) is EvolutionError
+                    and str(exc) == "automatic_bundle_budget_exceeded"
+                )
                 observation = _observation(
                     parent.id, attempt_id, status="failed", stage=stage,
                     category=category, recoverable=recoverable,
@@ -746,13 +820,12 @@ def prepare_automatic_solve_bundle(
                     local_failure=local_failure,
                     request_failure=request_failure,
                     wall_failure=wall_failure,
+                    failure_reason="budget_exceeded" if budget_exceeded else None,
                 )
                 _record_observation(controller.store, parent.id, _FAILED, observation)
                 raise AutomaticBundlePreparationError(
                     observation,
-                    budget_exceeded=(
-                        type(exc) is EvolutionError and str(exc) == "automatic_bundle_budget_exceeded"
-                    ),
+                    budget_exceeded=budget_exceeded,
                 ) from exc
     except (AttributeError, KeyError, OSError, TypeError, ValueError, RecursionError):
         _fail()

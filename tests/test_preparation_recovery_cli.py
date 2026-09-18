@@ -1,6 +1,7 @@
 """Public CLI retains failed evaluator preparation and explicitly resumes the same contract."""
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -87,10 +88,12 @@ def test_failed_preparation_returns_safe_parent_json_status_and_rejects_stray_an
     code, status, stderr = run_cli(capsys, ["status", failed["run_id"], "--home", str(tmp_path / "home"), "--json"])
     assert code == 0 and stderr == ""
     assert status["evolution"]["preparation"] == preparation
+    assert status["reason_code"] == failed["reason_code"] == "preparation_runtime_error"
     assert status["input_request"] is None
     assert cli.main(["status", failed["run_id"], "--home", str(tmp_path / "home")]) == 0
     text = capsys.readouterr().out
     assert "evaluator_preparation: failed" in text and f"{stage}: runtime_error" in text
+    assert "status_reason: preparation_runtime_error" in text
     assert "resume" in text and PRIVATE_ERROR not in text
     code, answer, stderr = run_cli(capsys, ["answer", failed["run_id"], "please continue",
                                           "--runtime", "mock", "--home", str(tmp_path / "home"), "--json"])
@@ -211,3 +214,56 @@ def test_cancelled_parent_never_offers_resume_or_calls_models_again(tmp_path, mo
     assert "resume_hint" not in preparation
     code, _, _ = run_cli(capsys, followup(tmp_path, failed["run_id"]))
     assert code != 0 and runtime_calls(runtime) == calls
+
+
+@pytest.mark.parametrize("corruption", [
+    "parent", "attempt", "duplicate_start", "schema", "status", "extra_field",
+])
+def test_corrupt_failed_attempt_is_rejected_before_explicit_resume(
+    tmp_path, monkeypatch, capsys, corruption,
+):
+    """Recovery admission must bind the failed observation before opening another attempt."""
+    runtime, args = automatic_setup(tmp_path, monkeypatch)
+    _, attempts = fail_stage(monkeypatch, runtime, "evaluator_compile")
+    code, failed, stderr = run_cli(capsys, args)
+    assert code == 1 and stderr == "" and attempts == ["evaluator_compile"]
+
+    store, workspace = Store(tmp_path / "home/state.db"), Path(failed["workspace"])
+    records = observations(store, failed["run_id"])
+    start, failure = records
+    payload = copy.deepcopy(failure["payload"])
+    if corruption == "parent":
+        payload["parent_run_id"] = "different-parent"
+    elif corruption == "attempt":
+        payload["attempt_id"] = "preparation-" + "f" * 32
+    elif corruption == "schema":
+        payload["schema_version"] = "999"
+    elif corruption == "status":
+        payload["status"] = "started"
+    elif corruption == "extra_field":
+        payload["unexpected_detail"] = "unvalidated private provider detail"
+    elif corruption == "duplicate_start":
+        with store._connect() as connection:
+            connection.execute(
+                "INSERT INTO events (id,run_id,task_id,type,payload,created_at) VALUES (?,?,?,?,?,?)",
+                (
+                    "duplicate-preparation-start", failed["run_id"], None,
+                    "bundle_preparation_started", json.dumps(start["payload"]),
+                    "2100-01-01T00:00:01",
+                ),
+            )
+            connection.execute("UPDATE events SET created_at = ? WHERE id = ?",
+                               ("2100-01-01T00:00:00", start["id"]))
+            connection.execute("UPDATE events SET created_at = ? WHERE id = ?",
+                               ("2100-01-01T00:00:02", failure["id"]))
+    with store._connect() as connection:
+        connection.execute("UPDATE events SET payload = ? WHERE id = ?", (json.dumps(payload), failure["id"]))
+
+    before, calls = snapshot(store, failed["run_id"], workspace), runtime_calls(runtime)
+    code, resumed, stderr = run_cli(capsys, followup(tmp_path, failed["run_id"]))
+    assert code == 2 and resumed is None
+    assert json.loads(stderr)["error"]
+    assert runtime_calls(runtime) == calls and attempts == ["evaluator_compile"]
+    expected_starts = 2 if corruption == "duplicate_start" else 1
+    assert len(observations(store, failed["run_id"], "bundle_preparation_started")) == expected_starts
+    assert snapshot(store, failed["run_id"], workspace) == before
