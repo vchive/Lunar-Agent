@@ -5,8 +5,8 @@
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
 evaluator/profile 准备和父任务交付/终态恢复；Feature130已补完整合同封装示例并保持
 strict parser；Feature131的合同已通过，但evaluator compiler等待响应头600.004秒后超时，
-仍无真实自动多文件交付；后续先处理evaluator生成延迟与超时语义，再基于修复产品登记
-新的独立真实运行。外部 producer 的多文件
+仍无真实自动多文件交付。Feature132已补普通status的请求失败详情，保留116的显式恢复
+语义；后续明确生成预算/等待策略，再登记新的独立真实运行。外部 producer 的多文件
 接线与运行中取消编排仍未完成；
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
@@ -18,6 +18,18 @@ OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读�
 可供这些 producer 复用的 transport-free `ProducerResultEnvelope` → `SeedManifest` adapter。
 这些接线只由离线 fixture 验证，不能据此声称真实框架已运行或任何项目的公开效果已由 Lunar
 复现。
+
+## 2026-09-18：自动准备请求失败可查询
+
+Feature132把runtime已有的类型化模型失败证据传过compiler/auditor包装边界，保留安全
+reason、HTTP状态、请求阶段/耗时/时限和最后本地传输里程碑。新schema3准备记录绑定
+parent/attempt及唯一紧邻start，坏详情降级，取消/终态/输入漂移/已完成优先；旧schema1/2
+不变。普通JSON/text status显示验证后详情，明确超时后远端完成与用量未知，显式resume
+可能重新请求。代码复核确认父run保留running是116刻意的恢复契约，不能因准备请求失败
+而永久失败父任务；131报告中的后续建议在此澄清，原报告和证据保持不变。见
+[132验证](../specs/132-preparation-request-diagnostics/validation.md)。本轮没有真实模型
+调用，不调整提示/参数/时限，不声称生成延迟改善。下一步明确生成预算/等待策略，真实
+验证仍须新登记；HTTP状态的成功请求投影放在新测量摘要中完成。
 
 ## 2026-09-17：同任务合同通过，evaluator compiler 超时
 
@@ -32,8 +44,9 @@ delivery；quality/gap为null，清理和21份证据复验通过。见
 [131报告](../specs/131-small-multifile-recheck/postrun/report.md)。原始transport台账保留
 首请求HTTP200，公开`results.json`未投影该字段；CLI/worker失败且runner pid/pgid为空后，
 SQLite父run仍为`running`、任务为1 ready/3 waiting/1 succeeded。它们未导致成功误判或
-残留进程，后续补安全HTTP状态投影与持久终态一致性。下一步先处理evaluator生成延迟和
-超时语义，再在产品修复后登记新运行；不重开131。外部producer多文件接线继续后置。
+残留进程；当时列出安全HTTP状态投影与持久终态一致性。Feature132复核后确认后者是116的
+恢复契约，不能改写父run为终态failed。下一步明确生成预算/等待策略，再独立登记新运行；
+不重开131。外部producer多文件接线继续后置。
 
 ## 2026-09-17：合同响应完整封装示例
 

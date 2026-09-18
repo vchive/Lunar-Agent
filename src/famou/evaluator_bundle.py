@@ -42,6 +42,10 @@ from .data_profile import (
 )
 from .evaluator import acceptance_evaluator
 from .evaluator_diagnostics import EvaluatorPreparationDiagnostic
+from .evaluator_request_diagnostics import (
+    normalize_evaluator_request_failure,
+    project_evaluator_request_failure,
+)
 from .evolution import CandidateExecution, CandidateInputArtifact, EvolutionError
 from .runtime import Runtime, RuntimeResult
 
@@ -184,10 +188,14 @@ def validate_evaluator_capabilities(contract: AlgorithmProblemContract, *, invoc
 class EvaluatorBundleRuntimeError(EvaluatorBundleError):
     """A runtime invocation failed before its compiler/auditor response was accepted."""
 
-    def __init__(self, stage: str) -> None:
+    def __init__(self, stage: str, *, request_failure: object = None) -> None:
         if stage not in {"evaluator_compile", "evaluator_audit"}:
             raise ValueError("invalid evaluator runtime failure stage")
         self.stage = stage
+        self.request_failure = (
+            normalize_evaluator_request_failure(request_failure)
+            if request_failure is not None else None
+        )
         role = "compiler" if stage == "evaluator_compile" else "auditor"
         super().__init__(f"evaluator {role} failed: runtime_error")
 
@@ -497,7 +505,9 @@ def compile_evaluator_bundle(
     try:
         result = _run_isolated(runtime, prompt, compiler_workspace, timeout)
     except Exception as exc:
-        raise EvaluatorBundleRuntimeError("evaluator_compile") from exc
+        raise EvaluatorBundleRuntimeError(
+            "evaluator_compile", request_failure=project_evaluator_request_failure(exc),
+        ) from exc
     if continuation_guard is not None:
         continuation_guard()
     try:
@@ -1629,7 +1639,9 @@ def _compile_audit_suite(
             timeout,
         )
     except Exception as exc:
-        raise EvaluatorBundleRuntimeError("evaluator_audit") from exc
+        raise EvaluatorBundleRuntimeError(
+            "evaluator_audit", request_failure=project_evaluator_request_failure(exc),
+        ) from exc
     if continuation_guard is not None:
         continuation_guard()
     try:

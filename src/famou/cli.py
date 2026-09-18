@@ -1313,6 +1313,22 @@ def _print_status(config: Config, run_id: str) -> int:
             positions = " ".join(f"{key}={detail[key]}" for key in
                                  ("probe_index", "input_index", "order_index") if detail[key] is not None)
             print(f"preparation_local_failure: {detail['reason']}" + (f" {positions}" if positions else ""))
+        if preparation.get("request_failure"):
+            detail = preparation["request_failure"]
+            status = detail["response_status"]
+            print(f"preparation_request_failure: {detail['reason']}"
+                  + (f" response_status={status}" if status is not None else ""))
+            request = detail["request_observation"]
+            if request is not None:
+                print(f"preparation_request_observation: {request['phase']} elapsed_ms={request['elapsed_ms']}"
+                      + (f" request_timeout_ms={request['request_timeout_ms']}"
+                         if request["request_timeout_ms"] is not None else ""))
+            transport = detail["transport_observation"]
+            if transport is not None:
+                print(f"preparation_transport_observation: {transport['last_milestone']}"
+                      f" http_exchange_index={transport['http_exchange_index']} elapsed_ms={transport['elapsed_ms']}")
+        if preparation.get("request_failure_hint"):
+            print(preparation["request_failure_hint"])
         if preparation.get("resume_hint"):
             print(preparation["resume_hint"])
         if preparation.get("capability_hint"):
@@ -2701,6 +2717,16 @@ def _bundle_preparation_payload(store: Store, run_id: str) -> dict[str, object] 
     from .automatic_solve_bundle import automatic_bundle_preparation_status
 
     preparation = automatic_bundle_preparation_status(store, run_id)
+    if (preparation is not None and preparation.get("request_failure", {}).get("reason")
+            == "transport_timeout"):
+        preparation = {
+            **preparation,
+            "request_failure_hint": (
+                "Evaluator generation model request timed out; remote completion and usage are unknown. "
+                "The last transport milestone is a local observation, not a provider activity report. "
+                "Explicit resume may issue new model requests."
+            ),
+        }
     if preparation is not None and preparation.get("recoverable"):
         preparation = {
             **preparation,

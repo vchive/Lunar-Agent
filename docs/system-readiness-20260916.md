@@ -1,6 +1,6 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-17 更新至 Feature 131。最初盘点基于 `af4f8d8`（Feature 107）；
+评估创建于 2026-09-16，2026-09-18 更新至 Feature 132。最初盘点基于 `af4f8d8`（Feature 107）；
 随后已完成多文件独立评测、原生 population、Agent 生成、普通 solve 自动准备和父任务交付。
 首批 `c977eb4` 真实验收已完成：两例均在合同编译失败，尚未形成有效多文件交付。
 随后 114 隔离合同编译并补齐 schema，115 新验收仍为 0/2：一例合同通过后 evaluator
@@ -110,7 +110,17 @@ quality/gap为null；清理和21份证据库存复验通过。见
 [131 report](../specs/131-small-multifile-recheck/postrun/report.md)。原始transport台账中的
 首请求HTTP200未进入公开`results.json`投影；CLI/worker已失败且runner pid/pgid为空，但
 SQLite父run仍为`running`、任务为1 ready/3 waiting/1 succeeded。两项均未造成成功误判或
-残留进程，后续分别补安全HTTP状态投影和持久终态一致性。
+残留进程；当时分别列为安全HTTP状态投影和持久终态一致性后续项。Feature132复核后确认
+后者是116的恢复契约，不能把父run改成终态failed。
+
+Feature132补齐自动准备模型请求的安全诊断链路：精确类型的请求失败通过compiler/auditor
+边界进入schema3事件，普通JSON/text status能查看reason、已观察HTTP状态、阶段/耗时/
+时限及最后传输里程碑。详情严格绑定唯一紧邻start和parent/attempt，坏详情降级，取消、
+终态、输入漂移与已完成准备优先；旧schema1/2和显式恢复保持。进一步复核116设计确认
+父run的running是为保留合同恢复而刻意保留的durable状态，effective status已为failed；
+上段131提出的“持久终态一致性”应据此澄清，不能直接把父任务永久失败。历史报告未改。
+本轮不改变请求时限、模型参数或提示，不证明远端生成速度或成功率提高；验证见
+[132 validation](../specs/132-preparation-request-diagnostics/validation.md)。
 
 Lunar 已有可运行的本地 Agent 和完整的单文件 population 演化链路。多文件链路也已接通
 生成、独立执行与评分、Candidate/receipt/archive、下一代选择、terminal resume 和完整
@@ -171,8 +181,9 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
    同时误读输入根结构，最终0/1。126/127已统一格式准入并补本地失败诊断，128独立小型
    准备实测达到冻结1/1、留出8/8。129新闭环尝试因contract响应缺status成为0/1；130已
    离线补完整封装示例。131的合同通过，但evaluator compiler等待响应头600.004秒后超时，
-   仍为0/1且未进入候选或交付。下一步先处理evaluator生成延迟与超时语义，并清理父run
-   持久终态和安全HTTP状态投影；产品修复后才新登记下一次真实运行。具体远端耗时原因
+   仍为0/1且未进入候选或交付。132已保留请求失败详情和明确超时边界，父run的running
+   经复核是116恢复契约。下一步明确受支持的生成预算/等待策略，并在新测量中补HTTP状态
+   投影，再独立登记下一次真实运行。具体远端耗时原因
    仍未知，尚无真实多文件有效交付；
    不补旧槽、不改失败分母，也不把本地协议验证当成模型成功率或质量已提高。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务

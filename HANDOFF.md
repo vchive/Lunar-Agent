@@ -6,6 +6,24 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 132：自动准备保留模型请求失败详情（2026-09-18）
+
+本轮补普通solve/status的可观察性：evaluator compiler/auditor边界保留直接、精确类型的
+ModelRequestFailure，持久化固定reason、可选HTTP状态、请求阶段/耗时/时限和最后本地传输
+里程碑。新准备schema3严格绑定parent/attempt与唯一紧邻start；坏持久详情降级，取消、
+终态、输入漂移和已完成准备优先。没有可信模型详情的普通runtime异常继续schema1，
+本地格式/探针失败继续schema2。JSON/text status展示已验证详情，超时提示明确远端完成/
+用量未知，显式resume可能发新请求。提示、时限、模型参数和重试策略均未改。
+
+代码复核纠正131收尾中的一个建议：父run保留running是116明确规定的恢复语义，不是
+本轮新发现的终态缺陷；effective status=failed及准备失败记录已经表达失败。直接把父任务
+改failed会阻断合同复用和显式恢复，因此保留原状态，历史131报告与证据不改写。
+
+验证记录见`specs/132-preparation-request-diagnostics/validation.md`。本轮只做离线验证，
+尚不能证明evaluator生成更快或超时减少。下一步应明确受支持的生成预算/等待策略，再为
+新的真实测量登记固定条件；在新测量摘要中补HTTP状态投影，不能回写131。自动真实多文件
+端到端成功仍未验收；外部producer多文件seed、全链路预算/取消与detached继续后置。
+
 ## Feature 131：合同通过，evaluator compiler 等待响应头超时（2026-09-17）
 
 固定产品`c730483`，登记提交`1993f11`先push后运行新的唯一槽；manifest SHA
@@ -24,7 +42,8 @@ contract compiler在25.237秒返回HTTP200，已知用量3656tokens（1754input+
 evaluator、candidate、delivery或额外请求。总626.814秒、exit1，清理通过、剩余观察PID[]。
 21份证据共155485bytes，文件集合、大小和SHA复验匹配；独立审计无阻断项。原始transport
 台账保留首请求HTTP200，但公开`results.json`未投影该状态；CLI失败后父run持久状态仍为
-`running`，没有造成成功误判或残留进程，后续作为产品终态一致性清理。
+`running`，没有造成成功误判或残留进程。当时列为后续终态一致性项；Feature132复核确认
+这正是116保留合同、允许显式恢复的持久状态，不能把父run改成终态failed。
 
 完整记录见`specs/131-small-multifile-recheck/postrun/report.md`及`validation.md`。下一步
 先处理evaluator生成延迟与超时语义，再在产品修复后新登记真实运行；不重开131。当前仍无
