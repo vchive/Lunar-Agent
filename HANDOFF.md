@@ -6,6 +6,24 @@
 并 push 到 origin/main；历史段落中的“只在本地提交、不 push”已被这一新指示取代。
 不改写冻结测量，不重跑 WebAgent；新真实模型/框架效果测量仍须独立登记与固定条件。
 
+## Feature 133：拆分 evaluator preparation 请求与总等待预算（2026-09-18，规格阶段）
+
+本轮先只写规格，未改实现、未调用模型、未执行生成代码。规格见
+`specs/133-preparation-budgets/spec.md` 和 `tasks.md`。
+
+设计固定三类 timeout 的边界：既有 `--timeout` 继续控制候选生成/执行与冻结 evaluator
+执行；新增 `--evaluator-preparation-timeout` 控制每次 compiler/auditor 模型请求；新增
+`--evaluator-preparation-wall-timeout` 控制从 preparation 开始到本地校验、探针、artifact
+登记和 profile 发布前的单一总墙钟。新 compiled handoff 持久化两个解析后的 preparation
+值，resume/answer 只能复用；旧 Feature 112-132 handoff 缺字段时，单请求回退旧
+`timeout`、总墙钟保持 legacy-unbounded，并在状态中标明。preparation 值不进入
+`bundle-profile.json`，避免改变既有候选执行 authority、profile bytes 或 evaluator identity。
+
+总墙钟耗尽只能产生有界、可恢复的 preparation 预算诊断，不能发布半成品、创建 child、
+自动重试、延长 deadline 或推断 provider 端状态。Feature 132 的实际 request observation
+继续保留，取消、终态、输入漂移和完整性校验优先级不变。下一步才实现并做离线回归；本轮
+没有新的真实测量或 WebAgent 结论。
+
 ## Feature 132：自动准备保留模型请求失败详情（2026-09-18）
 
 本轮补普通solve/status的可观察性：evaluator compiler/auditor边界保留直接、精确类型的
