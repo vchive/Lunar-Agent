@@ -6,6 +6,13 @@ Specification-first as of 2026-09-19. No registration, provider request, campaig
 evaluator call, or generated-source execution has occurred. The files in this directory define the
 next real acceptance only; they do not authorize reopening Feature 131/134 or comparing WebAgent.
 
+The native mapping has one explicit pre-registration blocker: the controller observes an
+`agent_candidate_generation` diagnostic but does not persist it with a source-bundle digest and
+candidate identity. The campaign-local projection therefore returns `unknown` when that durable,
+bound diagnostic is absent; it must not infer parser completion from an archive, execution, or
+evaluation receipt. Closing this gap in shared product persistence requires a separate product SDD
+and is outside Feature 139's measurement-only scope.
+
 ## Offline exit criteria before registration
 
 - Registration fixtures reject dirty or unpushed pins, changed product/provider/task/input/policy,
@@ -23,6 +30,9 @@ next real acceptance only; they do not authorize reopening Feature 131/134 or co
   credential, URL, generated source, or arbitrary exception string crosses the projection.
 - Feature 131/134 manifests, results, reports, audits, evidence, registrations, and retained
   files have identical byte sets and SHA-256 inventories before and after offline validation.
+- Native receipt projections distinguish a bound, parser-complete generation diagnostic from the
+  current unpersisted/unbound native diagnostic and never synthesize `completed` from downstream
+  artifacts.
 
 ## Planned commands
 

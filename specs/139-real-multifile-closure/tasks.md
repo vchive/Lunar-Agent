@@ -5,13 +5,13 @@
 - [ ] T002 Trace the current native automatic preparation, candidate generation, execution,
       independent evaluator, selection, and parent-delivery receipts; identify every shared identity
       and budget field needed by the campaign-local harness.
-- [ ] T003 [P] Build offline registration and launch-preflight fixtures for clean pushed pins,
+- [x] T003 [P] Build offline registration and launch-preflight fixtures for clean pushed pins,
       unique roots/IDs, provider identity, request/wall/token limits, and rejection of drift,
       duplicate attempts, retries, and post-slot requests.
-- [ ] T004 [P] Build offline stage-chain fixtures for preparation, parser-gated completed candidate,
+- [x] T004 [P] Build offline stage-chain fixtures for preparation, parser-gated completed candidate,
       execution, independent score, selection, delivery, holdouts, cleanup, and all first-failure or
       unknown branches. Assert no later stage fabricates a missing earlier receipt.
-- [ ] T005 [P] Build public-result and audit fixtures for candidate/execution/evaluation identity,
+- [x] T005 [P] Build public-result and audit fixtures for candidate/execution/evaluation identity,
       digest binding, source/input/output integrity, redaction, safe transport status, and historical
       Feature 131/134 byte/SHA preservation.
 - [ ] T006 Implement the campaign-local manifest, worker/observer, bounded ledger, read-only
