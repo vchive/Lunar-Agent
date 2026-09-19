@@ -10,6 +10,7 @@ from test_conversational_bundle import counts
 
 from famou import cli
 from famou.algorithm import AlgorithmProblemContract
+from famou.candidate_generation_receipt import generation_event_id
 from famou.config import Config
 from famou.evolution import EvolutionError
 from famou.runtime import MockRuntime, RuntimeResult
@@ -60,12 +61,13 @@ class AutomaticBundleRuntime(MockRuntime):
         self.generator_workspaces = []
         self.preparation_timeouts = []
         self.generator_timeouts = []
+        self.generator_budgets = []
 
     def run_isolated(self, prompt, workspace, timeout=None):
         self.isolated_calls += 1
         return self.run(prompt, workspace, timeout)
 
-    def run(self, prompt, workspace, timeout=None):
+    def run(self, prompt, workspace, timeout=None, **kwargs):
         if "contract compiler" in prompt:
             self.contract_calls += 1
             if self.clarify and self.contract_calls == 1:
@@ -92,9 +94,16 @@ class AutomaticBundleRuntime(MockRuntime):
         assert not list(workspace.rglob("evaluator.py")) and not (workspace / "scoring").exists()
         self.generator_workspaces.append(workspace)
         self.generator_timeouts.append(timeout)
+        if kwargs:
+            self.generator_budgets.append(kwargs)
         draft = draft_for_score((1, 2, 999, 9)[self.generator_calls])
         self.generator_calls += 1
-        return RuntimeResult(json.dumps({"files": draft.source_files, "entrypoint": draft.filename}))
+        metadata = {} if not kwargs else {
+            "candidate_tool_steps_used": "0",
+            "candidate_tool_steps_remaining": str(kwargs["max_tool_steps"]),
+            "candidate_attempted_tool_calls": "0",
+        }
+        return RuntimeResult(json.dumps({"files": draft.source_files, "entrypoint": draft.filename}), metadata=metadata)
 
 
 def automatic_setup(tmp_path, monkeypatch, *, clarify=False):
@@ -157,6 +166,278 @@ def test_automatic_bundle_request_has_only_additive_mode_marker(extra):
         "evaluator_preparation_wall_timeout_source": "default",
     }
     assert "bundle_profile" not in new and "harness_path" not in new
+
+
+def test_candidate_generation_budget_is_persisted_only_when_explicit():
+    parser = cli.build_parser()
+    explicit = parser.parse_args([
+        "solve", "optimize", "--evolve", "--multi-file",
+        "--candidate-generation-max-steps", "12",
+    ])
+    payload = cli._evolution_request_payload(explicit)
+    assert payload["candidate_generation_max_steps"] == 12
+    assert payload["candidate_generation_max_steps_source"] == "explicit"
+    assert str(Path.cwd()) not in json.dumps(payload)
+
+    omitted = cli._evolution_request_payload(parser.parse_args([
+        "solve", "optimize", "--evolve", "--multi-file",
+    ]))
+    assert "candidate_generation_max_steps" not in omitted
+    assert "candidate_generation_max_steps_source" not in omitted
+
+
+@pytest.mark.parametrize("value", [0, -1, 201])
+def test_invalid_candidate_generation_budget_fails_before_run_creation(
+    tmp_path, monkeypatch, capsys, value,
+):
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid candidate budget must be rejected before runtime construction")
+
+    monkeypatch.setattr(cli, "build_runtime", forbidden)
+    assert cli.main([
+        "solve", "optimize", "--evolve", "--multi-file",
+        "--candidate-generation-max-steps", str(value),
+        "--home", str(tmp_path / "home"), "--json",
+    ]) == 2
+    assert "candidate-generation-max-steps" in json.loads(capsys.readouterr().err)["error"]
+    assert not (tmp_path / "home/state.db").exists()
+
+
+@pytest.mark.parametrize("value", ["1.5", "nan", "inf", "true"])
+def test_noninteger_candidate_budget_is_rejected_by_parser(tmp_path, value):
+    with pytest.raises(SystemExit) as error:
+        cli.main([
+            "solve", "optimize", "--evolve", "--multi-file",
+            "--candidate-generation-max-steps", value,
+            "--home", str(tmp_path / "home"),
+        ])
+    assert error.value.code == 2
+    assert not (tmp_path / "home/state.db").exists()
+
+
+@pytest.mark.parametrize("arguments", [
+    [],
+    ["--evolve"],
+    ["--evolve", "--bundle-profile", "missing.json"],
+    ["--evolve", "--evaluator-command", "/not-used"],
+    ["--evolve", "--strategy", "openevolve"],
+])
+def test_candidate_generation_budget_rejects_unsupported_modes(
+    tmp_path, monkeypatch, capsys, arguments,
+):
+    monkeypatch.setattr(cli, "build_runtime", lambda *args, **kwargs: pytest.fail("runtime must not be built"))
+    assert cli.main([
+        "solve", "optimize", *arguments,
+        "--candidate-generation-max-steps", "12",
+        "--home", str(tmp_path / "home"), "--json",
+    ]) == 2
+    assert "candidate-generation-max-steps" in json.loads(capsys.readouterr().err)["error"]
+    assert not (tmp_path / "home/state.db").exists()
+
+
+def test_candidate_generation_budget_continuation_requires_exact_match():
+    parser = cli.build_parser()
+    request = cli._evolution_request_payload(parser.parse_args([
+        "solve", "optimize", "--evolve", "--multi-file",
+        "--candidate-generation-max-steps", "12",
+    ]))
+    cli._validate_evolution_override(
+        parser.parse_args(["resume", "parent", "--candidate-generation-max-steps", "12"]),
+        request,
+    )
+    cli._validate_evolution_override(parser.parse_args(["resume", "parent"]), request)
+    with pytest.raises(EvolutionError, match="candidate generation setting"):
+        cli._validate_evolution_override(
+            parser.parse_args(["resume", "parent", "--candidate-generation-max-steps", "13"]),
+            request,
+        )
+
+    legacy = dict(request)
+    legacy.pop("candidate_generation_max_steps")
+    legacy.pop("candidate_generation_max_steps_source")
+    with pytest.raises(EvolutionError, match="candidate generation setting"):
+        cli._validate_evolution_override(
+            parser.parse_args(["resume", "parent", "--candidate-generation-max-steps", "12"]),
+            legacy,
+        )
+
+
+@pytest.mark.parametrize("command", [
+    ["solve", "--resume", "--run-id", "parent"],
+    ["resume", "parent"], ["answer", "parent", "continue"],
+])
+@pytest.mark.parametrize("steps", [None, 1, 12, 200])
+def test_candidate_budget_continuation_restores_stored_authority(command, steps):
+    parser = cli.build_parser()
+    supplied = [] if steps is None else ["--candidate-generation-max-steps", str(steps)]
+    request = cli._evolution_request_payload(parser.parse_args([
+        "solve", "optimize", "--evolve", "--multi-file", "--timeout", "600", *supplied,
+    ]))
+    for repeat in ([], supplied):
+        args = parser.parse_args([*command, *repeat])
+        cli._validate_evolution_override(args, request)
+        restored = cli._evolution_args(args, request)
+        assert restored.candidate_generation_max_steps == steps
+        assert restored.timeout == 600
+        assert restored.max_steps == args.max_steps
+
+
+@pytest.mark.parametrize("patch", [
+    {"candidate_generation_max_steps": True, "candidate_generation_max_steps_source": "explicit"},
+    {"candidate_generation_max_steps": None},
+    {"candidate_generation_max_steps_source": None},
+    {"candidate_generation_max_steps": 12},
+    {"candidate_generation_max_steps": 201, "candidate_generation_max_steps_source": "explicit"},
+    {"candidate_generation_max_steps": "12", "candidate_generation_max_steps_source": "explicit"},
+    {"candidate_generation_max_steps": 12, "candidate_generation_max_steps_source": "default"},
+    {"candidate_generation_max_steps": 12, "candidate_generation_max_steps_source": "explicit", "bundle_mode": "single"},
+])
+def test_malformed_candidate_budget_authority_is_rejected(patch):
+    parser = cli.build_parser()
+    request = cli._evolution_request_payload(parser.parse_args([
+        "solve", "optimize", "--evolve", "--multi-file",
+    ]))
+    request.update(patch)
+    with pytest.raises(EvolutionError, match="candidate generation"):
+        cli._validate_evolution_override(parser.parse_args(["resume", "parent"]), request)
+
+
+@pytest.mark.parametrize("command", ["solve", "resume", "answer"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_candidate_budget_mismatch_has_no_continuation_side_effects(
+    tmp_path, monkeypatch, capsys, command, legacy,
+):
+    from test_preparation_recovery_cli import snapshot
+
+    runtime, args = automatic_setup(tmp_path, monkeypatch, clarify=True)
+    if not legacy:
+        args.extend(["--candidate-generation-max-steps", "12"])
+    assert cli.main(args) == 0
+    initial = json.loads(capsys.readouterr().out)
+    store = Store(tmp_path / "home/state.db")
+    parent, workspace = initial["run_id"], Path(initial["workspace"])
+    before, pending = snapshot(store, parent, workspace), store.pending_input(parent)
+    monkeypatch.setattr(cli, "build_runtime", lambda *a, **kw: pytest.fail("runtime must not be built"))
+    followup = {
+        "solve": ["solve", "--resume", "--run-id", parent],
+        "resume": ["resume", parent], "answer": ["answer", parent, "maximize value"],
+    }[command]
+    assert cli.main([
+        *followup, "--candidate-generation-max-steps", "13",
+        "--runtime", "mock", "--home", str(tmp_path / "home"), "--json",
+    ]) == 2
+    assert "candidate generation" in json.loads(capsys.readouterr().err)["error"]
+    assert snapshot(store, parent, workspace) == before
+    assert store.pending_input(parent) == pending
+    assert not (workspace / "evolution-run").exists()
+    assert (runtime.contract_calls, runtime.bundle_calls, runtime.audit_calls, runtime.generator_calls) == (1, 0, 0, 0)
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--strategy", "openevolve"], ["--evaluator-command", "/not-used"],
+    ["--openevolve-command", "/not-used"],
+])
+def test_candidate_budget_continuation_mode_switch_fails_before_runtime(
+    tmp_path, monkeypatch, capsys, arguments,
+):
+    _, args = automatic_setup(tmp_path, monkeypatch, clarify=True)
+    args.extend(["--candidate-generation-max-steps", "12"])
+    assert cli.main(args) == 0
+    parent = json.loads(capsys.readouterr().out)["run_id"]
+    monkeypatch.setattr(cli, "build_runtime", lambda *a, **kw: pytest.fail("runtime must not be built"))
+    assert cli.main([
+        "solve", "--resume", "--evolve", "--run-id", parent, *arguments,
+        "--home", str(tmp_path / "home"), "--json",
+    ]) == 2
+    assert "--multi-file" in json.loads(capsys.readouterr().err)["error"]
+
+
+def test_candidate_budget_requires_multifile_when_adding_evolution_on_resume(tmp_path, monkeypatch):
+    args = cli.build_parser().parse_args([
+        "solve", "--resume", "--evolve", "--run-id", "parent", "--candidate-generation-max-steps", "12",
+    ])
+    monkeypatch.setattr(cli, "_latest_evolution_request", lambda *a: None)
+    monkeypatch.setattr(cli, "_controller", lambda *a: pytest.fail("controller must not be built"))
+    with pytest.raises(ValueError, match="requires --evolve --multi-file"):
+        cli._solve(Config(tmp_path / "home"), args)
+
+
+@pytest.mark.parametrize("arguments", [
+    ["evolve", "contract.json"],
+    ["evolve-bundle", "contract.json", "--profile", "profile.json", "--workspace", "workspace", "--agent-runtime", "mock"],
+])
+def test_standalone_parsers_do_not_accept_candidate_budget(arguments, capsys):
+    with pytest.raises(SystemExit) as error:
+        cli.build_parser().parse_args([*arguments, "--candidate-generation-max-steps", "12"])
+    assert error.value.code == 2
+    assert "unrecognized arguments: --candidate-generation-max-steps" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("clarify", [False, True])
+def test_candidate_generation_budget_is_forwarded_and_receipt_bound(
+    tmp_path, monkeypatch, capsys, clarify,
+):
+    runtime, args = automatic_setup(tmp_path, monkeypatch, clarify=clarify)
+    args.extend([
+        "--candidate-generation-max-steps", "12", "--evaluator-preparation-timeout", "7",
+        "--max-steps", "4",
+    ])
+    captured = []
+    original = cli.AgentCandidateGenerator
+
+    def wrapped(*generator_args, **generator_kwargs):
+        captured.append(generator_kwargs.get("candidate_budget"))
+        return original(*generator_args, **generator_kwargs)
+
+    monkeypatch.setattr(cli, "AgentCandidateGenerator", wrapped)
+    assert cli.main(args) == 0
+    first = json.loads(capsys.readouterr().out)
+    if clarify:
+        assert captured == []
+        assert cli.main([
+            "answer", first["run_id"], "maximize value",
+            "--runtime", "mock", "--home", str(tmp_path / "home"), "--json",
+        ]) == 0
+        first = json.loads(capsys.readouterr().out)
+    assert len(captured) == 1
+    assert captured[0].budget_id == "candidate-generation"
+    assert captured[0].max_tool_steps == 12
+    assert captured[0].timeout_seconds == 3.0
+    assert runtime.generator_budgets == [
+        {"max_tool_steps": 12, "budget_id": f"candidate-{iteration:08d}-{call:04d}"}
+        for iteration, call in [(0, 1), (0, 2), (1, 3), (1, 4)]
+    ]
+    assert runtime.generator_timeouts == [3.0] * 4
+    assert runtime.preparation_timeouts == [("compiler", 7.0), ("auditor", 7.0)]
+    store = Store(tmp_path / "home/state.db")
+    request = next(event["payload"] for event in store.list_events(first["run_id"])
+                   if event["type"] == "evolution_requested")
+    assert request["candidate_generation_max_steps"] == 12
+    assert request["candidate_generation_max_steps_source"] == "explicit"
+    child_id = first["evolution"]["run_id"]
+    receipts = [event for event in store.list_events(child_id)
+                if event["type"] == "agent_candidate_generation"]
+    assert len(receipts) == 4
+    for event, authority in zip(receipts, runtime.generator_budgets, strict=True):
+        payload = event["payload"]
+        assert event["id"] == generation_event_id(payload)
+        assert payload["run_id"] == child_id
+        assert payload["task_id"] == event["task_id"]
+        assert payload["budget_id"] == authority["budget_id"]
+        assert payload["max_tool_steps"] == authority["max_tool_steps"]
+        assert payload["outcome"] == "completed"
+        assert payload["completion"] is True
+        assert payload["candidate_id"]
+        assert len(payload["source_bundle_sha256"]) == 64
+    assert cli.main([
+        "resume", first["run_id"], "--runtime", "mock",
+        "--home", str(tmp_path / "home"), "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert captured == [captured[0], captured[0]]
+    assert runtime.generator_calls == 4
+    assert receipts == [event for event in store.list_events(child_id)
+                        if event["type"] == "agent_candidate_generation"]
 
 
 @pytest.mark.parametrize("command", [
@@ -274,6 +555,10 @@ def test_automatic_solve_delivers_scored_bundle_and_resumes_without_compilation(
     request = next(event["payload"] for event in events if event["type"] == "evolution_requested")
     assert request["bundle_mode"] == "compiled" and request["compile_evaluator"] is True
     assert "bundle_profile_sha256" not in request and "harness_path" not in request
+    assert "candidate_generation_max_steps" not in request
+    assert runtime.generator_budgets == []
+    assert not any(event["type"] == "agent_candidate_generation"
+                   for event in store.list_events(first["evolution"]["run_id"]))
     assert str(tmp_path) not in json.dumps(request)
     assert len([event for event in events if event["type"] == "bundle_profile_prepared"]) == 1
     assert (parent / "bundle-profile.json").is_file()

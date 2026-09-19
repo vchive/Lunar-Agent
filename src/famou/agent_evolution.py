@@ -382,6 +382,32 @@ class AgentCandidateGenerator:
                 return int(value)
             except (TypeError, ValueError):
                 return fallback
+        maximum = request.candidate_budget.max_tool_steps
+        used = _int("tool_steps_used", None)
+        remaining = _int("tool_steps_remaining", None)
+        attempted = _int("attempted_tool_calls", None)
+        if "candidate_max_tool_steps" in metadata:
+            def _runtime_count(name: str) -> int:
+                value = metadata.get(f"candidate_{name}")
+                if type(value) is int and value >= 0:
+                    return value
+                if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+                    return int(value)
+                raise EvolutionError("candidate-generation runtime tool budget is invalid")
+
+            effective_maximum = _runtime_count("max_tool_steps")
+            used = _runtime_count("tool_steps_used")
+            remaining = _runtime_count("tool_steps_remaining")
+            if (
+                not 1 <= effective_maximum <= maximum
+                or used + remaining != effective_maximum
+            ):
+                raise EvolutionError("candidate-generation runtime tool budget is invalid")
+            if "candidate_attempted_tool_calls" in metadata:
+                attempted = _runtime_count("attempted_tool_calls")
+            # A profile may narrow runtime admission, while the receipt retains the
+            # immutable candidate authority. Normalize only a complete, valid ledger.
+            remaining = maximum - used
         payload = {
             "schema_version": "1",
             "budget_id": request.candidate_budget.budget_id,
@@ -391,12 +417,10 @@ class AgentCandidateGenerator:
                 "timeout": "timed_out",
                 "empty_response": "empty_final_response",
             }.get(reason, reason),
-            "max_tool_steps": request.candidate_budget.max_tool_steps,
-            "tool_steps_used": _int("tool_steps_used", None),
-            "tool_steps_remaining": _int(
-                "tool_steps_remaining", None,
-            ),
-            "attempted_tool_calls": _int("attempted_tool_calls", None),
+            "max_tool_steps": maximum,
+            "tool_steps_used": used,
+            "tool_steps_remaining": remaining,
+            "attempted_tool_calls": attempted,
             "completion": reason == "completed",
             "reason": reason,
             "phase": "response",

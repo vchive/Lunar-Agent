@@ -21,3 +21,15 @@ snapshot must be tested from its pinned checkout before T005 can close.
 
 Feature 139 remains blocked from real registration until this pushed change is available to its
 native controller path and a separately authorized measurement is prepared.
+
+## Follow-up validation closure (2026-09-19)
+
+Feature 141 ran the repository split regression, resolving the historical-checkout requirement
+above: current product 8166 passed, 1 skipped, 24 deselected; immutable Feature 123 product
+24 passed, no skips; overall exit 0. Historical file pins and Feature 131/134 retained inventories
+matched. The combined Feature 141/139/140 focused suite passed 409 tests. No real provider request
+or historical campaign was replayed; repository-owned synthetic fixtures ran locally.
+
+Feature 141 also connects the explicit budget to the native automatic multi-file CLI and corrects
+completion receipt arithmetic under a lower runtime profile. Feature 139 still requires its own
+sealed manifest, observer/supervisor, budget/request bindings, and preregistration audit closure.

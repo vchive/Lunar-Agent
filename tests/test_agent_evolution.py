@@ -26,10 +26,13 @@ from famou.evolution import (
     EvolutionConfig,
     EvolutionContext,
     EvolutionError,
+    GenerationRequest,
     OffspringOutcome,
     PopulationStrategy,
 )
+from famou.profiles import ModelProfile
 from famou.runtime import MockRuntime, ModelTurn, ToolCall
+from famou.store import Store
 from famou.tools import LocalToolRegistry
 
 
@@ -252,6 +255,154 @@ def test_agent_generator_binds_candidate_budget_and_emits_completion_after_parse
     assert event["schema_version"] == "1"
     assert event["candidate_id"] == "candidate-0007"
     assert len(event["source_bundle_sha256"]) == 64
+
+
+@pytest.mark.parametrize("used", [0, 1, 2])
+def test_profile_limited_generation_retains_authority_in_durable_receipt(
+    tmp_path: Path, used: int,
+) -> None:
+    contract = _contract()
+    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
+    turns = []
+    for candidate in range(2):
+        if used:
+            turns.append(ModelTurn("", tuple(
+                ToolCall(str(index), "list_dir", {"path": "."}) for index in range(used)
+            )))
+        turns.append(ModelTurn(json.dumps({"source": f"def solve():\n    return {candidate}\n"})))
+    runtime = AgentLoopRuntime(
+        EventModel(turns), profile=ModelProfile("bounded", "fixture", max_steps=2),
+    )
+    generator = AgentCandidateGenerator(
+        RuntimeAgentAdapter(runtime), contract=contract,
+        candidate_budget=CandidateGenerationBudget("candidate-generation", 12),
+    )
+
+    settled, result = controller.run_evolution(
+        run.id, contract, generator, _report,
+        EvolutionConfig(max_rounds=1, population_size=1),
+    )
+
+    assert settled.status.value == "succeeded"
+    assert result.best_candidate_id is not None
+    receipts = [event["payload"] for event in controller.store.list_events(run.id)
+                if event["type"] == "agent_candidate_generation"]
+    assert len(receipts) == 2
+    assert all(receipt["outcome"] == "completed" for receipt in receipts)
+    assert all(receipt["max_tool_steps"] == 12 for receipt in receipts)
+    assert all(receipt["tool_steps_used"] == used for receipt in receipts)
+    assert all(receipt["tool_steps_remaining"] == 12 - used for receipt in receipts)
+    assert runtime.last_candidate_diagnostic["max_tool_steps"] == 2
+    assert runtime.last_candidate_diagnostic["tool_steps_remaining"] == 2 - used
+    assert generator.candidate_budget.max_tool_steps == 12
+
+
+def test_candidate_authority_does_not_raise_profile_tool_batch_ceiling(tmp_path: Path) -> None:
+    calls = tuple(ToolCall(str(index), "write_file", {
+        "path": f"forbidden-{index}.txt", "content": "must not run",
+    }) for index in range(3))
+    final = ModelTurn(json.dumps({"source": "def solve():\n    return 1\n"}))
+    model = EventModel([ModelTurn("", calls), final])
+    runtime = AgentLoopRuntime(
+        model, profile=ModelProfile("bounded", "fixture", max_steps=2),
+    )
+    generator = AgentCandidateGenerator(
+        RuntimeAgentAdapter(runtime), contract=_contract(),
+        candidate_budget=CandidateGenerationBudget("candidate-generation", 12),
+    )
+    observed = []
+    generator.set_observer(lambda event, payload: observed.append((event, payload)))
+
+    with pytest.raises(EvolutionError, match="max steps"):
+        generator(GenerationRequest(1, None, (), (), tmp_path, "candidate-0001"))
+
+    assert model.turns == [final]
+    assert not list(tmp_path.rglob("forbidden-*.txt"))
+    receipts = [payload for event, payload in observed if event == "agent_candidate_generation"]
+    assert len(receipts) == 1
+    assert receipts[0]["reason"] == "tool_step_limit_reached"
+    assert receipts[0]["completion"] is False
+    assert receipts[0]["max_tool_steps"] == 2
+    assert receipts[0]["tool_steps_used"] == 0
+    assert receipts[0]["attempted_tool_calls"] == 3
+    assert "candidate_id" not in receipts[0]
+    assert "source_bundle_sha256" not in receipts[0]
+
+
+@pytest.mark.parametrize("counts", [
+    {"max_tool_steps": "2", "tool_steps_used": "0", "tool_steps_remaining": "1"},
+    {"max_tool_steps": "2", "tool_steps_used": "0", "tool_steps_remaining": "12"},
+    {"max_tool_steps": "13", "tool_steps_used": "0", "tool_steps_remaining": "13"},
+    {"max_tool_steps": "13", "tool_steps_used": "0", "tool_steps_remaining": "12"},
+    {"max_tool_steps": "0", "tool_steps_used": "0", "tool_steps_remaining": "0"},
+    {"max_tool_steps": True, "tool_steps_used": "0", "tool_steps_remaining": "1"},
+    {"max_tool_steps": 2.0, "tool_steps_used": "0", "tool_steps_remaining": "2"},
+    {"max_tool_steps": "2", "tool_steps_used": "-1", "tool_steps_remaining": "3"},
+    {"max_tool_steps": "2", "tool_steps_used": "3", "tool_steps_remaining": "-1"},
+    {"max_tool_steps": "2", "tool_steps_used": False, "tool_steps_remaining": "2"},
+    {"max_tool_steps": "2", "tool_steps_used": "0.5", "tool_steps_remaining": "2"},
+    {"max_tool_steps": "2", "tool_steps_remaining": "2"},
+    {"max_tool_steps": "2", "tool_steps_used": "0"},
+    {"max_tool_steps": None, "tool_steps_used": "0", "tool_steps_remaining": "12"},
+    {"max_tool_steps": "2", "tool_steps_used": "0", "tool_steps_remaining": "2",
+     "attempted_tool_calls": "-1"},
+])
+def test_generator_rejects_invalid_effective_counts_before_receipt(tmp_path: Path, counts) -> None:
+    class DiagnosticAgent(FixtureAgent):
+        def run(self, request):
+            return AgentResult(
+                self.name, request.role, json.dumps({"source": "def solve():\n    return 1\n"}),
+                metadata={f"candidate_{key}": value for key, value in counts.items()},
+            )
+
+    generator = AgentCandidateGenerator(
+        DiagnosticAgent(), contract=_contract(),
+        candidate_budget=CandidateGenerationBudget("candidate-generation", 12),
+    )
+    observed = []
+    generator.set_observer(lambda event, payload: observed.append((event, payload)))
+
+    with pytest.raises(EvolutionError, match="runtime tool budget is invalid"):
+        generator(GenerationRequest(1, None, (), (), tmp_path, "candidate-0001"))
+
+    assert not [event for event, _ in observed if event == "agent_candidate_generation"]
+    assert generator.candidate_budget.max_tool_steps == 12
+
+
+@pytest.mark.parametrize("remaining", [2, 12])
+def test_legacy_generation_counts_still_require_authority_arithmetic(
+    tmp_path: Path, remaining: int,
+) -> None:
+    class LegacyAgent(FixtureAgent):
+        def run(self, request):
+            return AgentResult(
+                self.name, request.role, json.dumps({"source": "def solve():\n    return 1\n"}),
+                metadata={"candidate_tool_steps_used": "0",
+                          "candidate_tool_steps_remaining": str(remaining)},
+            )
+
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+    run = store.create_run("generation receipt", tmp_path / "run")
+    task = store.next_task(run.id)
+    generator = AgentCandidateGenerator(
+        LegacyAgent(), contract=_contract(),
+        candidate_budget=CandidateGenerationBudget("candidate-generation", 12),
+    )
+    generator.set_observer(
+        lambda event, payload: store.append_candidate_generation_event(run.id, task.id, payload)
+        if event == "agent_candidate_generation" else None
+    )
+    request = GenerationRequest(1, None, (), (), run.workspace, "candidate-0001")
+    if remaining == 12:
+        assert generator(request).source.startswith("def solve")
+    else:
+        with pytest.raises(ValueError, match="invalid_tool_budget"):
+            generator(request)
+    receipts = [event for event in store.list_events(run.id)
+                if event["type"] == "agent_candidate_generation"]
+    assert len(receipts) == int(remaining == 12)
 
 
 def test_agent_generator_malformed_candidate_never_emits_completed(tmp_path: Path) -> None:

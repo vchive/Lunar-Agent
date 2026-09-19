@@ -25,9 +25,11 @@ from .agent_evolution import (
 from .agent_loop import AgentLoopRuntime, HermesSessionRuntime
 from .agents import (
     DEFAULT_RUNTIME_CAPABILITIES,
+    MAX_CANDIDATE_TOOL_STEPS,
     AgentError,
     AgentRegistry,
     AgentRequest,
+    CandidateGenerationBudget,
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
@@ -261,6 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="total deadline for one automatic multi-file evaluator preparation attempt",
     )
+    solve_parser.add_argument(
+        "--candidate-generation-max-steps",
+        type=int,
+        help="candidate-generation tool-step ceiling for native automatic multi-file evolution",
+    )
     _add_runtime_options(solve_parser)
     _add_input_options(solve_parser)
     _add_home(solve_parser)
@@ -311,6 +318,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--evaluator-preparation-wall-timeout",
         type=float,
         help="matching total deadline for one automatic evaluator preparation attempt",
+    )
+    resume_parser.add_argument(
+        "--candidate-generation-max-steps",
+        type=int,
+        help="matching candidate-generation tool-step ceiling for an automatic multi-file handoff",
     )
     _add_runtime_options(resume_parser)
     _add_home(resume_parser)
@@ -840,6 +852,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--evaluator-preparation-wall-timeout",
         type=float,
         help="matching total deadline for one automatic evaluator preparation attempt",
+    )
+    answer_parser.add_argument(
+        "--candidate-generation-max-steps",
+        type=int,
+        help="matching candidate-generation tool-step ceiling for an automatic multi-file handoff",
     )
     answer_parser.add_argument(
         "--evaluator-command",
@@ -2088,6 +2105,83 @@ def _validate_automatic_bundle_options(args) -> None:
         raise ValueError("--multi-file requires native population and its automatically compiled evaluator")
 
 
+def _validate_candidate_generation_value(value: object, *, error_type=ValueError) -> None:
+    """Validate the explicit native automatic candidate-generation ceiling."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= MAX_CANDIDATE_TOOL_STEPS
+    ):
+        raise error_type(
+            "--candidate-generation-max-steps must be an integer between "
+            f"1 and {MAX_CANDIDATE_TOOL_STEPS}"
+        )
+
+
+def _validate_candidate_generation_option(
+    args: argparse.Namespace,
+    request: dict[str, object] | None = None,
+    *,
+    allow_unresolved_handoff: bool = True,
+) -> None:
+    """Validate candidate-generation policy before preparation or continuation side effects."""
+    supplied = getattr(args, "candidate_generation_max_steps", None)
+    if supplied is not None:
+        _validate_candidate_generation_value(supplied)
+
+    if request is not None:
+        stored = request.get("candidate_generation_max_steps")
+        source = request.get("candidate_generation_max_steps_source")
+        if (stored is not None or source is not None) and request.get("bundle_mode") != "compiled":
+            raise EvolutionError("solve evolution candidate generation setting is invalid")
+        if stored is None:
+            if (
+                "candidate_generation_max_steps" in request
+                or "candidate_generation_max_steps_source" in request
+            ):
+                raise EvolutionError("solve evolution candidate generation setting is invalid")
+            if supplied is not None:
+                raise EvolutionError(
+                    "solve evolution candidate generation setting does not match the existing handoff"
+                )
+            return
+        try:
+            _validate_candidate_generation_value(stored, error_type=EvolutionError)
+        except EvolutionError:
+            raise EvolutionError("solve evolution candidate generation setting is invalid") from None
+        if source != "explicit":
+            raise EvolutionError("solve evolution candidate generation source is invalid")
+        if supplied is not None and supplied != stored:
+            raise EvolutionError(
+                "solve evolution candidate generation setting does not match the existing handoff"
+            )
+        _validate_automatic_bundle_options(args)
+        return
+
+    if supplied is None:
+        return
+    command = getattr(args, "command", None)
+    if allow_unresolved_handoff and command == "solve" and getattr(args, "resume", False):
+        # A resumed solve may discover its persisted automatic handoff below.
+        return
+    if allow_unresolved_handoff and command in {"resume", "answer"}:
+        # These commands resolve the persisted handoff after local state is opened.
+        return
+    if command != "solve" or not getattr(args, "evolve", False) or not getattr(args, "multi_file", False):
+        raise ValueError(
+            "--candidate-generation-max-steps requires --evolve --multi-file"
+        )
+    if (
+        getattr(args, "bundle_profile", None) is not None
+        or getattr(args, "evaluator_command", None)
+        or getattr(args, "openevolve_command", None)
+        or getattr(args, "strategy", None) not in {None, "population"}
+    ):
+        raise ValueError(
+            "--candidate-generation-max-steps requires native automatic multi-file evolution"
+        )
+
+
 def _validate_conversational_bundle_request(args, request) -> None:
     mode = request.get("bundle_mode") if request is not None else None
     if request is not None and "bundle_mode" in request:
@@ -2161,12 +2255,21 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         if not args.run_id:
             raise ValueError("--resume requires --run-id")
         preparation_request = _latest_evolution_request(Store(config.database), args.run_id)
+        if preparation_request is None and getattr(args, "candidate_generation_max_steps", None) is not None and not args.evolve:
+            raise ValueError(
+                "--candidate-generation-max-steps requires an automatic multi-file evolution handoff"
+            )
+        if preparation_request is not None:
+            _validate_candidate_generation_option(args, preparation_request)
         if preparation_request is not None and preparation_request.get("bundle_mode") == "compiled":
             _validate_preparation_request(preparation_request)
             _validate_evolution_override(args, preparation_request)
         if _has_preparation_timeout(args) and not (args.evolve and preparation_request is None):
             _validate_preparation_timeout_override(args, preparation_request)
     if args.evolve:
+        _validate_candidate_generation_option(
+            args, preparation_request, allow_unresolved_handoff=False,
+        )
         persisted_compiled = (
             preparation_request is not None and preparation_request.get("bundle_mode") == "compiled"
         )
@@ -2266,6 +2369,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
 
 def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
     """Return only bounded, non-secret settings needed to continue a solve handoff."""
+    _validate_candidate_generation_option(args, allow_unresolved_handoff=False)
     payload = {
         "strategy": args.strategy,
         "max_rounds": args.max_rounds,
@@ -2288,7 +2392,13 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
     if getattr(args, "_bundle_profile_sha256", None) is not None:
         payload["bundle_profile_sha256"] = args._bundle_profile_sha256
     if getattr(args, "multi_file", False):
+        candidate_steps = getattr(args, "candidate_generation_max_steps", None)
+        if candidate_steps is not None:
+            _validate_candidate_generation_value(candidate_steps)
         payload["bundle_mode"] = "compiled"
+        if candidate_steps is not None:
+            payload["candidate_generation_max_steps"] = candidate_steps
+            payload["candidate_generation_max_steps_source"] = "explicit"
         payload["timeout_source"] = "explicit" if args.timeout is not None else "default"
         payload["evaluator_preparation_timeout"] = (
             args.evaluator_preparation_timeout
@@ -2307,6 +2417,7 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
 
 def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
     """Validate option bounds before a handoff request is persisted in the intake ledger."""
+    _validate_candidate_generation_option(args)
     try:
         EvolutionConfig(
             strategy="population",
@@ -2438,6 +2549,7 @@ def _latest_evolution_request(store: Store, run_id: str) -> dict[str, object] | 
 
 def _validate_evolution_override(args: argparse.Namespace, request: dict[str, object]) -> None:
     """Reject explicit resume settings that differ from the persisted handoff request."""
+    _validate_candidate_generation_option(args, request)
     _validate_preparation_timeout_override(args, request)
     for name in (
         "strategy",
@@ -2493,6 +2605,7 @@ def _evolution_args(
         "timeout",
         "evaluator_preparation_timeout",
         "evaluator_preparation_wall_timeout",
+        "candidate_generation_max_steps",
     ):
         values.setdefault(name, None)
     for name in (
@@ -2508,10 +2621,15 @@ def _evolution_args(
         "timeout",
         "evaluator_preparation_timeout",
         "evaluator_preparation_wall_timeout",
+        "candidate_generation_max_steps",
     ):
         if name in request and request[name] is not None:
             values[name] = request[name]
     if request.get("bundle_mode") == "compiled":
+        # Preserve legacy automatic handoffs that never recorded a candidate budget.
+        values["candidate_generation_max_steps"] = request.get(
+            "candidate_generation_max_steps"
+        )
         values["evaluator_preparation_timeout"] = request.get(
             "evaluator_preparation_timeout", request.get("timeout")
         )
@@ -2820,6 +2938,14 @@ def _solve_evolution(
             evaluator_fingerprint = hashlib.sha256(
                 f"{runtime_fingerprint}:evaluator".encode()
             ).hexdigest()
+        candidate_budget = None
+        candidate_steps = getattr(args, "candidate_generation_max_steps", None)
+        if getattr(args, "multi_file", False) and candidate_steps is not None:
+            candidate_budget = CandidateGenerationBudget(
+                budget_id="candidate-generation",
+                max_tool_steps=candidate_steps,
+                timeout_seconds=args.timeout if args.timeout is not None else 900.0,
+            )
         generator = AgentCandidateGenerator(
             solver_adapter,
             contract=contract,
@@ -2828,6 +2954,7 @@ def _solve_evolution(
             inputs=() if bundle_pipeline is not None else candidate_inputs,
             scoring=scoring,
             bundle_pipeline=bundle_pipeline,
+            candidate_budget=candidate_budget,
         )
     runner_fingerprint = (
         None
@@ -4645,6 +4772,12 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if run is None:
         raise ValueError(f"unknown run: {args.run_id}")
     evolution_request = _latest_evolution_request(store, run.id)
+    if evolution_request is None and getattr(args, "candidate_generation_max_steps", None) is not None:
+        raise ValueError(
+            "--candidate-generation-max-steps requires an automatic multi-file evolution handoff"
+        )
+    if evolution_request is not None:
+        _validate_candidate_generation_option(args, evolution_request)
     if _has_preparation_timeout(args):
         _validate_preparation_timeout_override(args, evolution_request)
     _validate_conversational_bundle_request(args, evolution_request)
@@ -5159,6 +5292,7 @@ def main(argv: list[str] | None = None) -> int:
         _reject_retired_cli_strategy(args)
         if args.command in {"solve", "answer", "resume"}:
             _validate_preparation_cli_timeouts(args)
+            _validate_candidate_generation_option(args)
             _prepare_conversational_bundle(args)
             if (args.command == "solve" and not args.resume
                     and _has_preparation_timeout(args) and not getattr(args, "multi_file", False)):
@@ -5331,9 +5465,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
         if args.command == "resume":
             evolution_request = _latest_evolution_request(Store(config.database), args.run_id)
+            if evolution_request is not None:
+                _validate_candidate_generation_option(args, evolution_request)
             if _has_preparation_timeout(args):
                 _validate_preparation_timeout_override(args, evolution_request)
-            if getattr(args, "bundle_profile", None) is not None or getattr(args, "multi_file", False) or (
+            if getattr(args, "bundle_profile", None) is not None or getattr(args, "multi_file", False) or getattr(args, "candidate_generation_max_steps", None) is not None or (
                 evolution_request is not None and (
                     "bundle_profile_sha256" in evolution_request or "bundle_mode" in evolution_request
                 )

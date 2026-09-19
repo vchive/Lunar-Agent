@@ -8,6 +8,29 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## Feature 141：原生自动多文件 CLI 显式候选预算（2026-09-19，离线完成）
+
+按 SDD 实现 `solve/resume/answer --candidate-generation-max-steps`，仅适用于原生自动
+多文件演化。范围为 1–200；显式值与来源写入 handoff，继续时恢复并拒绝改值、旧 handoff
+注入和模式切换。未传选项保留旧行为，不给单文件、显式 profile、standalone bundle 或
+外部 producer 隐式增加预算。生成器取得不可变预算，timeout 使用持久的候选请求 timeout，
+每次调用派生独立 budget ID，完成记录绑定对应 candidate/source identity。
+
+同时修复较低 ModelProfile 上限与完成 receipt 的计数不一致：实际执行仍遵守较低上限，
+只有完整、非负、算术一致且不超过候选 authority 的 runtime 计数才能投影为 authority
+剩余步数。失败诊断保留原 effective ceiling；整批超预算继续在任何工具执行之前拒绝。
+Feature 140 的持久生成 receipt 已由 `741900a` 推送，本次将它接入普通多文件 CLI。
+
+409 项 focused 回归通过；全量当前 8166 passed、1 skipped、24 deselected，固定历史
+24 passed，双阶段 exit0。静态检查、Specify、独立审查和 Feature 131/134 历史 inventory
+通过。Feature 140 遗留的历史固定版本验证也已收尾。具体验证记录见 `specs/141-native-multifile-cli-budget/validation.md`。
+没有 provider 请求、真实 campaign、历史生成源码执行或 WebAgent 重跑。
+
+下一步是完成 Feature 139 的登记前证据链。原生 receipt 映射与离线 harness 已有，但仍须
+修复请求和阶段绑定、ledger 与登记预算绑定、首次关闭的原因/时间、preparation/total wall、
+manifest 封存和 unknown holdout 成功判断，并完成真实 worker/observer/supervision、文件
+清单和保留产物审计。离线测试通过不代表可登记；当前没有 Feature 139 manifest 或真实运行。
+
 ## Feature 138：公开状态投影与 preparation 恢复契约（2026-09-19，离线完成）
 
 已完成状态投影与显式 preparation 恢复准入。CLI/JSON 现在同时公开 effective `status`、
