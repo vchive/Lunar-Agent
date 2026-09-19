@@ -371,7 +371,13 @@ def generate_bundle_candidate(generator, request):
             except EvolutionError:
                 generator._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
                 raise
-            generator._emit_generation_diagnostic(agent_request, reason="completed", result=result)
+            generator._emit_generation_diagnostic(
+                agent_request,
+                reason="completed",
+                result=result,
+                candidate_id=getattr(request, "candidate_id", None),
+                source_bundle_sha256=generator._source_bundle_sha256(draft),
+            )
             generator._observe_artifacts(result, destination, workspace, agent_request.task_id)
             return draft
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RecursionError):

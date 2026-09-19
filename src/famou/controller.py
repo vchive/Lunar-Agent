@@ -2738,6 +2738,13 @@ class LocalController:
             self.store.append_event(run_id, "evolution_iteration", payload, task_id=task_id)
         elif event == "agent_artifact":
             self._record_evolution_agent_artifact(run_id, task_id, payload)
+        elif event == "agent_candidate_generation":
+            try:
+                self.store.append_candidate_generation_event(run_id, task_id, payload)
+            except (TypeError, ValueError) as exc:
+                # A malformed or conflicting receipt must stop the native run.  Retaining a
+                # best-effort diagnostic here would make downstream completion unverifiable.
+                raise EvolutionError("candidate-generation receipt admission failed") from exc
         elif event in {
             "agent_model_turn",
             "agent_tool_result",

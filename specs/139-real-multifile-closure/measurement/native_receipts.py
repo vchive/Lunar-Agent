@@ -94,7 +94,7 @@ def candidate_generation_receipt(
         "max_tool_steps", "tool_steps_used", "tool_steps_remaining", "attempted_tool_calls",
         "source_bundle_sha256", "candidate_id",
     }
-    if set(payload) != required:
+    if set(payload) not in (required, required | {"run_id", "task_id"}):
         return _unknown(
             budget_id=budget_id,
             bundle_sha256=bundle_sha256,

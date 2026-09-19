@@ -233,7 +233,14 @@ def test_agent_generator_binds_candidate_budget_and_emits_completion_after_parse
     generator.set_observer(lambda event, payload: observed.append((event, payload)))
     request = type(
         "Request", (),
-        {"iteration": 3, "parent": None, "inspirations": (), "archive": (), "workspace": root},
+        {
+            "iteration": 3,
+            "parent": None,
+            "inspirations": (),
+            "archive": (),
+            "workspace": root,
+            "candidate_id": "candidate-0007",
+        },
     )()
     draft = generator(request)
     assert draft.source.startswith("def solve")
@@ -243,6 +250,8 @@ def test_agent_generator_binds_candidate_budget_and_emits_completion_after_parse
     assert event["outcome"] == "completed"
     assert event["completion"] is True
     assert event["schema_version"] == "1"
+    assert event["candidate_id"] == "candidate-0007"
+    assert len(event["source_bundle_sha256"]) == 64
 
 
 def test_agent_generator_malformed_candidate_never_emits_completed(tmp_path: Path) -> None:

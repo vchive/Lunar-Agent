@@ -335,8 +335,23 @@ class AgentCandidateGenerator:
         except EvolutionError:
             self._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
             raise
-        self._emit_generation_diagnostic(agent_request, reason="completed", result=result)
+        self._emit_generation_diagnostic(
+            agent_request,
+            reason="completed",
+            result=result,
+            candidate_id=getattr(request, "candidate_id", None),
+            source_bundle_sha256=self._source_bundle_sha256(draft),
+        )
         return draft
+
+    def _source_bundle_sha256(self, draft: CandidateDraft) -> str:
+        """Return the parser-accepted source identity before archive or execution writes."""
+        if draft.source_files is None:
+            return hashlib.sha256(draft.source.encode("utf-8")).hexdigest()
+        from .bundle_evolution import validate_bundle_draft
+
+        contract_sha256 = self.contract.digest() if self.contract is not None else "0" * 64
+        return validate_bundle_draft(draft, contract_sha256).digest()
 
     def _request_budget(self, request: GenerationRequest) -> CandidateGenerationBudget | None:
         if self.candidate_budget is None:
@@ -350,7 +365,13 @@ class AgentCandidateGenerator:
         )
 
     def _emit_generation_diagnostic(
-        self, request: AgentRequest, *, reason: str, result: AgentResult | None = None,
+        self,
+        request: AgentRequest,
+        *,
+        reason: str,
+        result: AgentResult | None = None,
+        candidate_id: str | None = None,
+        source_bundle_sha256: str | None = None,
     ) -> None:
         if self._observer is None or request.candidate_budget is None:
             return
@@ -361,27 +382,31 @@ class AgentCandidateGenerator:
                 return int(value)
             except (TypeError, ValueError):
                 return fallback
+        payload = {
+            "schema_version": "1",
+            "budget_id": request.candidate_budget.budget_id,
+            "stage": "candidate_generation",
+            "outcome": {
+                "tool_failed": "tool_execution_failed",
+                "timeout": "timed_out",
+                "empty_response": "empty_final_response",
+            }.get(reason, reason),
+            "max_tool_steps": request.candidate_budget.max_tool_steps,
+            "tool_steps_used": _int("tool_steps_used", None),
+            "tool_steps_remaining": _int(
+                "tool_steps_remaining", None,
+            ),
+            "attempted_tool_calls": _int("attempted_tool_calls", None),
+            "completion": reason == "completed",
+            "reason": reason,
+            "phase": "response",
+        }
+        if reason == "completed" and candidate_id is not None and source_bundle_sha256 is not None:
+            payload["candidate_id"] = candidate_id
+            payload["source_bundle_sha256"] = source_bundle_sha256
         self._observer(
             "agent_candidate_generation",
-            {
-                "schema_version": "1",
-                "budget_id": request.candidate_budget.budget_id,
-                "stage": "candidate_generation",
-                "outcome": {
-                    "tool_failed": "tool_execution_failed",
-                    "timeout": "timed_out",
-                    "empty_response": "empty_final_response",
-                }.get(reason, reason),
-                "max_tool_steps": request.candidate_budget.max_tool_steps,
-                "tool_steps_used": _int("tool_steps_used", None),
-                "tool_steps_remaining": _int(
-                    "tool_steps_remaining", None,
-                ),
-                "attempted_tool_calls": _int("attempted_tool_calls", None),
-                "completion": reason == "completed",
-                "reason": reason,
-                "phase": "response",
-            },
+            payload,
         )
 
     def _observe_artifacts(

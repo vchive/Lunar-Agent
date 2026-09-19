@@ -12,6 +12,7 @@ import math
 import re
 import sqlite3
 import uuid
+from collections.abc import Mapping
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2794,6 +2795,74 @@ class Store:
     ) -> bool:
         with self._connect() as connection:
             return self._append_event(connection, run_id, task_id, event_type, payload, event_id)
+
+    def append_candidate_generation_event(
+        self,
+        run_id: str,
+        task_id: str,
+        payload: Mapping[str, Any],
+    ) -> bool:
+        """Atomically append one validated candidate-generation receipt.
+
+        The event id is derived from the controller-owned run/task/budget identity.  A replay
+        with the same canonical payload is idempotent; a second payload for the same budget is
+        rejected so a later audit cannot silently choose between competing generation outcomes.
+        """
+        from .candidate_generation_receipt import (
+            CandidateGenerationReceiptError,
+            build_candidate_generation_receipt,
+            generation_event_id,
+        )
+
+        try:
+            receipt = build_candidate_generation_receipt(payload, run_id=run_id, task_id=task_id)
+            event_id = generation_event_id(receipt)
+        except CandidateGenerationReceiptError as exc:
+            raise ValueError(f"invalid candidate-generation receipt: {exc}") from exc
+        with self._connect() as connection:
+            task = connection.execute(
+                "SELECT run_id FROM tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+            if task is None or task["run_id"] != run_id:
+                raise ValueError("candidate-generation task is not bound to run")
+            existing = connection.execute(
+                "SELECT run_id, task_id, type, payload FROM events WHERE id = ?",
+                (event_id,),
+            ).fetchone()
+            if existing is not None:
+                try:
+                    existing_payload = json.loads(existing["payload"])
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise ValueError("candidate-generation event payload is corrupt") from exc
+                if (
+                    existing["run_id"] == run_id
+                    and existing["task_id"] == task_id
+                    and existing["type"] == "agent_candidate_generation"
+                    and existing_payload == receipt
+                ):
+                    return False
+                raise ValueError("candidate-generation event identity conflict")
+            rows = connection.execute(
+                "SELECT id, payload FROM events WHERE run_id = ? AND task_id = ? "
+                "AND type = ?",
+                (run_id, task_id, "agent_candidate_generation"),
+            ).fetchall()
+            for row in rows:
+                try:
+                    prior = json.loads(row["payload"])
+                except (TypeError, json.JSONDecodeError) as exc:
+                    raise ValueError("candidate-generation event payload is corrupt") from exc
+                if isinstance(prior, dict) and prior.get("budget_id") == receipt["budget_id"]:
+                    raise ValueError("candidate-generation budget already has a different receipt")
+            return self._append_event(
+                connection,
+                run_id,
+                task_id,
+                "agent_candidate_generation",
+                receipt,
+                event_id,
+            )
 
     def fail_budget(self, run_id: str, limit: str, actual: float, maximum: float, reason: str) -> bool:
         """Record a fail-closed budget violation and transition unfinished work to failed."""

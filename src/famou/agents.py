@@ -535,12 +535,18 @@ class RuntimeAgentAdapter:
     ) -> None:
         if self._event_sink is None:
             return
-        bounded: dict[str, object] = {
-            "adapter": self.name,
-            "role": request.role,
-            "run_id": request.run_id,
-            "task_id": request.task_id,
-        }
+        bounded: dict[str, object] = {}
+        if event_type == "agent_candidate_generation":
+            # The controller supplies the authoritative run/task binding.  Adapter-local
+            # request IDs are workspace-derived and must not cross that boundary.
+            pass
+        else:
+            bounded.update({
+                "adapter": self.name,
+                "role": request.role,
+                "run_id": request.run_id,
+                "task_id": request.task_id,
+            })
         if request.candidate_budget is not None:
             bounded["budget_id"] = request.candidate_budget.budget_id
             bounded["max_tool_steps"] = request.candidate_budget.max_tool_steps

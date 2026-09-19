@@ -3242,3 +3242,18 @@ started marker，不能再执行。未来代码变化不应导致改写本批 ma
 0.999999；邮政案例约 90 分钟仍未提交有效回执，最终按预注册超时失败保留。该结果
 说明“WebAgent 高分 case”在 Lunar 充足预算下可以做出至少一个有效解，但不保证每个
 case 都在一次 bounded run 内完成。旧 GLM-5.1 失败 campaign 未改写、不补跑。
+
+## 26. Feature 140：持久化候选生成回执（2026-09-19）
+
+已完成并待提交推送。原生候选生成在 parser 接受 draft 后发出一个有界
+`agent_candidate_generation` 事件，成功事件绑定 candidate ID、source bundle SHA-256 和
+`tool_steps_used + tool_steps_remaining == max_tool_steps`；失败或 unknown 事件不携带候选
+身份或源码摘要。controller 使用真实 run/task 身份，Store 以 run/task/budget 生成确定性
+事件 ID，在同一事务内幂等写入，并拒绝同一预算的不同 payload、跨 run task、schema/stage
+篡改和私有诊断字段。
+
+Feature 140 定向测试、Feature 139 离线套件、Ruff、compileall 和 diff 检查已通过。带
+`PYTHONPATH=.` 的全量回归收集后有 24 个旧 `measurement123` setup 失败，均因其固定的
+历史 product commit 与当前工作树不同（`ValueError: product_changed`）；历史证据没有被修改，
+需要从固定 checkout 单独复验。当前没有 provider/evaluator 调用、生成源码执行或 Feature 139
+真实登记。完成推送后才能重新评估 Feature 139 的 registration gate。

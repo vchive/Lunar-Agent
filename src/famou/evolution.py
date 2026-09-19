@@ -1946,6 +1946,9 @@ class GenerationRequest:
     inspirations: tuple[Candidate, ...]
     archive: tuple[Candidate, ...]
     workspace: Path
+    # Reserved by the native strategy before generation starts.  External callers may omit it;
+    # durable controller runs provide it so completion receipts can bind the parser result.
+    candidate_id: str | None = None
 
 
 class CandidateGenerator(Protocol):
@@ -6599,6 +6602,7 @@ class PopulationStrategy(_BaseStrategy):
                 ),
                 archive=self._generation_records(),
                 workspace=self.context.workspace,
+                candidate_id=self.archive.next_id(),
             )
         except Exception:  # noqa: BLE001 - no narrower attempt result exists yet
             return OffspringOutcome(iteration, attempt, island, "run_failed")
@@ -6936,6 +6940,7 @@ class PopulationStrategy(_BaseStrategy):
                         inspirations=(),
                         archive=self._generation_records(),
                         workspace=self.context.workspace,
+                        candidate_id=self.archive.next_id(),
                     )
                     try:
                         drafts = _drafts(self.context.generate(request))
