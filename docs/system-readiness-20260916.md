@@ -1,7 +1,10 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-19 更新至 Feature 138：候选级预算、run 墙钟传播和取消
-竞态、公开状态投影与 preparation 恢复治理均已离线收尾，完整多文件交付仍未通过。
+评估创建于 2026-09-16，2026-09-19 更新至 Feature 140/141：Feature 140 的持久候选生成回执
+已推送；Feature 141 的原生多文件 CLI 显式候选预算已由 `87d86d9` 推送，409 项聚焦测试、
+全量当前 8166 项和历史固定 24 项通过（当前 1 skipped）。Feature 139 已有 native receipt
+映射和离线 harness，仍有
+预登记阻断，尚未登记或运行。当前仍没有通过真实自动多文件完整交付验收。
 以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
 
 Feature 136 已为单文件和 bundle 候选生成加入显式、不可变的每候选 tool-step budget 与
@@ -228,6 +231,21 @@ wall/capability/local-diagnostics 套件全部通过（含 malformed-stage 回�
 通过；完整当前回归为 7963 passed、1 skipped、24 deselected，冻结 Feature 123 阶段 24
 passed。
 
+Feature 140 的 durable candidate generation receipt 已推送，完成声明须绑定原生 Store
+event、run/task/budget/candidate identity 和源码 bundle digest；瞬态 diagnostic 不再代替
+持久生成证据。Feature 141 已把显式 `--candidate-generation-max-steps` 接到原生自动
+多文件 solve 的预算持久化、继续运行匹配和生成请求；409 项聚焦测试通过，完整双阶段
+当前 8166 passed / 1 skipped / 24 deselected、固定历史 24 passed，产品 `87d86d9` 已推送。
+12 步是 Feature 139 拟登记的显式值，不是产品默认值。见
+[140 validation](../specs/140-candidate-generation-receipt/validation.md) 和
+[141 validation](../specs/141-native-multifile-cli-budget/validation.md)。这些均不是新真实测量。
+
+Feature 139 已有原生回执映射与离线 harness，但尚不具备登记条件。下一步按[预登记审计](../specs/139-real-multifile-closure/preregistration-audit.md)
+修复并复验六类 gate 缺口：请求与原生阶段双向绑定、ledger 与 manifest 预算绑定、首次关闭
+原因/时间不可变及全阶段墙钟、manifest seal、unknown holdout 不得成功，以及真实 worker/
+supervision 与保留文件 inventory。只有这些条件落实，才能固定并推送新的真实登记、使用
+唯一新槽；当前不登记、不运行，不改写历史分母。
+
 1. 113/115/117/120 各自为0/2。118/119已修复合同兼容和支持范围内的源码检查，
    121/122补齐生成协议和传输观测；123小型准备诊断收到响应后本地失败，为独立0/1。
    124修复request字段说明缺口，125新独立诊断通过自测但被audit挡住：生成代码和自测
@@ -245,10 +263,10 @@ passed。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
    和全链路总时长编排继续待补，未知现场不自动重跑，终态恢复不增加候选或交付副本。
-3. 在 Feature 138 的状态投影/恢复实现和离线验证完成后，Feature 139 已建立规格草案；在
-   独立登记前仍需完成其离线注册/阶段链/审计 fixtures，再登记一次新的真实多文件闭环，
-   至少保留一个 completed candidate、execution、independent score、selection 和 parent
-   delivery；失败分母保持为1，不重开旧槽。
+3. Feature 140/141 已补持久生成回执、CLI 预算并完成验证推送；Feature
+   139 的 native mapping/harness 不等于登记完成。先通过上述六类 gate 和具体 manifest/
+   启动 preflight，再独立登记一次真实多文件闭环，至少保留一个 completed candidate、
+   execution、independent score、selection 和 parent delivery；失败分母保持为1，不重开旧槽。
 4. 扩展通用 producer material/SeedManifest 的多文件接线，使 OpenEvolve/Shinka 输出也
    进入同一完整源码路径，再用独立登记的小规模任务验证当前模型和真实 producer 效果。
 

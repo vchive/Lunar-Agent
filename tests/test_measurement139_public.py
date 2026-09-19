@@ -96,6 +96,13 @@ def test_unknown_request_usage_stays_explicit_in_the_public_projection():
     assert result["joint_success"] == "1/1"
 
 
+def test_public_result_rejects_a_tampered_successful_ledger():
+    c = complete_campaign()
+    c.ledger.usage_complete = False
+    with pytest.raises(campaign.CampaignError, match="request_ledger_invalid"):
+        c.public_result()
+
+
 def test_audit_rejects_rehashed_out_of_order_holdout_receipt():
     c = complete_campaign()
     holdout = c.receipts.pop(6)

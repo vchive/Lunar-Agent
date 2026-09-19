@@ -3,19 +3,23 @@
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
-evaluator/profile 准备和父任务交付/终态恢复；Feature130已补完整合同封装示例并保持
-strict parser。Feature132已补请求失败详情，133已完成独立preparation请求和总墙钟预算，135已补无profile预算可见性和整批步数拒绝诊断，
-保留116的显式恢复语义。Feature134独立真实验收已通过准备1/1和8/8留出，但没有父任务
-交付，primary/joint仍0/1。三次生成均触及登记工具预算，135已补请求内剩余步数与墙钟提示，下一步按SDD离线验证每候选
-显式预算和完成诊断。外部producer多文件接线、全链路预算、运行中
-取消编排和detached仍未完成。Feature 136 已完成上述离线工作：候选生成现在有独立 budget
-identity、整批原子步数准入和 parser-gated completion diagnostic，覆盖 native 与 bundle
-路径。没有新的真实测量，Feature 134 证据与分母保持不变；下一次真实运行仍需新的 SDD、
-登记和唯一槽；Feature 137 已把共享 run 墙钟传播到 active Agent/runtime 请求，并以离线
-竞态 fixture 固定取消先赢与预算先赢的终态优先级；其余真实闭环和外部 producer 接线仍未
-获得效果证据。Feature 138 已完成公开 transport status 投影与 preparation persisted/
-effective 状态恢复契约的离线 SDD 和实现验证；Feature 139 已建立下一次真实多文件闭环的
-规格草案，仍需离线 fixtures、registration 和唯一槽。
+evaluator/profile 准备和父任务交付/终态恢复。Feature 130/132/133 已补合同封装示例、请求
+失败诊断和独立 preparation 预算，保留 strict parser 与116显式恢复语义。Feature 134 的
+真实准备1/1、留出8/8保持；三次生成触及登记工具预算，没有父任务交付，primary/joint仍0/1。
+Feature 135–138 已离线补齐预算可见性、每候选 budget identity、整批原子准入、完成诊断、
+run 墙钟传播和取消竞态，以及公开 transport status 和 persisted/effective 恢复契约。
+
+截至2026-09-19，Feature 140 的持久候选生成回执已推送；Feature 141 已实现原生自动
+多文件 CLI 显式 `--candidate-generation-max-steps` 并以 `87d86d9` 推送。409项聚焦测试、
+全量当前8166项和历史固定24项通过（当前1 skipped）。见[140验证](../specs/140-candidate-generation-receipt/validation.md)
+和[141验证](../specs/141-native-multifile-cli-budget/validation.md)。12步是Feature 139拟登记的
+显式值，不是产品默认值；本轮没有新的真实效果证据。
+
+Feature 139 已有 native receipt mapping 和离线 harness，仍不具备登记条件。下一步依[预登记审计](../specs/139-real-multifile-closure/preregistration-audit.md)
+修复六类 gate：请求阶段绑定、ledger与manifest预算绑定、首次关闭原因/时间不可变及全阶段
+墙钟、manifest seal、unknown holdout不得成功，以及真实worker/supervision/文件inventory。
+这些门槛通过后才能固定并推送新登记、使用唯一新槽；不能把native映射或聚焦测试通过当作
+139完成。外部producer多文件接线、全链路预算、运行中取消编排和detached仍未完成。
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目

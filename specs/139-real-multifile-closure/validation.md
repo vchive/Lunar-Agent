@@ -2,16 +2,32 @@
 
 ## Status
 
-Specification-first as of 2026-09-19. No registration, provider request, campaign launch,
-evaluator call, or generated-source execution has occurred. The files in this directory define the
-next real acceptance only; they do not authorize reopening Feature 131/134 or comparing WebAgent.
+Offline harness and native mapping are implemented as of 2026-09-19, but preregistration remains
+incomplete. No registration, provider request, campaign launch, real evaluator call, or historical
+generated-source execution has occurred. Feature 131/134 and WebAgent are not reopened.
 
-The native mapping has one explicit pre-registration blocker: the controller observes an
-`agent_candidate_generation` diagnostic but does not persist it with a source-bundle digest and
-candidate identity. The campaign-local projection therefore returns `unknown` when that durable,
-bound diagnostic is absent; it must not infer parser completion from an archive, execution, or
-evaluation receipt. Closing this gap in shared product persistence requires a separate product SDD
-and is outside Feature 139's measurement-only scope.
+Feature 140 now persists canonical `agent_candidate_generation` receipts. Feature 141 adds the
+explicit CLI candidate budget required by the proposed native run. The campaign mapping validates
+the Store envelope, deterministic event ID, run/task/budget/candidate identity, registered step
+ceiling, and parser-accepted bundle digest. Missing, failed, conflicting, or unbound evidence
+remains unknown; downstream artifacts do not establish parser completion.
+
+The independent [preregistration audit](preregistration-audit.md) found six remaining blockers:
+request-to-stage identity binding, ledger-policy binding to the manifest, total/preparation wall
+and closure-reason evidence, immutable first closure, immutable registration, and the unknown
+holdout joint-success gate. The real worker/observer/supervision, sealed manifest/file inventory,
+and retained-artifact analysis are also unfinished. Passing current fixtures is not launch proof.
+
+The native receipt and Feature 140 focused suite passed 134 tests; the independent Feature 139
+audit suite passed 120 tests while reproducing the six gaps. The combined Feature 141/139 budget,
+CLI, Agent, and receipt suite passed 409 tests. Static checks passed. These are offline checks of
+the current implementation, not proof that all preregistration criteria below have been met.
+
+The combined full regression passed: current 8166 passed / 1 skipped / 24 deselected, immutable
+Feature 123 stage 24 passed, overall exit 0. The product change was committed and pushed as
+`87d86d9bc78171e7ce772dd9069e133249b81312`; `case.py` now uses that revision as its offline reference.
+This replaces the earlier placeholder and does not create a sealed registration. Audit B001–B006
+and the worker/supervision/inventory requirements remain open.
 
 ## Offline exit criteria before registration
 
@@ -30,9 +46,8 @@ and is outside Feature 139's measurement-only scope.
   credential, URL, generated source, or arbitrary exception string crosses the projection.
 - Feature 131/134 manifests, results, reports, audits, evidence, registrations, and retained
   files have identical byte sets and SHA-256 inventories before and after offline validation.
-- Native receipt projections distinguish a bound, parser-complete generation diagnostic from the
-  current unpersisted/unbound native diagnostic and never synthesize `completed` from downstream
-  artifacts.
+- Native receipt projections distinguish canonical, bound parser-complete Store receipts from
+  transient/unbound diagnostics and never synthesize `completed` from downstream artifacts.
 
 ## Planned commands
 

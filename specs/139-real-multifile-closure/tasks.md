@@ -1,17 +1,25 @@
 # Tasks
 
+Current preregistration gaps are tracked in [preregistration-audit.md](preregistration-audit.md).
+Existing T003–T005 fixtures are implemented; these tasks were reopened because independent
+audit found incomplete exit criteria. T005a records the required follow-up.
+
+- [ ] T005a Resolve audit B001–B006 with request-stage bindings, sealed registration/ledger policy,
+      immutable closure reasons and timing, and holdout outcome gates; add the documented negative
+      regressions and independently re-audit before T008.
+
 - [ ] T001 Freeze the six-stage closure contract, primary/joint gates, privacy boundary, one-slot
       denominator, and non-goals; review Feature 134's failure evidence without modifying it.
 - [ ] T002 Trace the current native automatic preparation, candidate generation, execution,
       independent evaluator, selection, and parent-delivery receipts; identify every shared identity
       and budget field needed by the campaign-local harness.
-- [x] T003 [P] Build offline registration and launch-preflight fixtures for clean pushed pins,
+- [ ] T003 [P] Build offline registration and launch-preflight fixtures for clean pushed pins,
       unique roots/IDs, provider identity, request/wall/token limits, and rejection of drift,
       duplicate attempts, retries, and post-slot requests.
-- [x] T004 [P] Build offline stage-chain fixtures for preparation, parser-gated completed candidate,
+- [ ] T004 [P] Build offline stage-chain fixtures for preparation, parser-gated completed candidate,
       execution, independent score, selection, delivery, holdouts, cleanup, and all first-failure or
       unknown branches. Assert no later stage fabricates a missing earlier receipt.
-- [x] T005 [P] Build public-result and audit fixtures for candidate/execution/evaluation identity,
+- [ ] T005 [P] Build public-result and audit fixtures for candidate/execution/evaluation identity,
       digest binding, source/input/output integrity, redaction, safe transport status, and historical
       Feature 131/134 byte/SHA preservation.
 - [ ] T006 Implement the campaign-local manifest, worker/observer, bounded ledger, read-only

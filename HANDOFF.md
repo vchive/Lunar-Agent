@@ -19,7 +19,8 @@
 同时修复较低 ModelProfile 上限与完成 receipt 的计数不一致：实际执行仍遵守较低上限，
 只有完整、非负、算术一致且不超过候选 authority 的 runtime 计数才能投影为 authority
 剩余步数。失败诊断保留原 effective ceiling；整批超预算继续在任何工具执行之前拒绝。
-Feature 140 的持久生成 receipt 已由 `741900a` 推送，本次将它接入普通多文件 CLI。
+Feature 140 的持久生成 receipt 已由 `741900a` 推送，Feature 141 产品提交 `87d86d9`
+也已推送，将它接入普通多文件 CLI。
 
 409 项 focused 回归通过；全量当前 8166 passed、1 skipped、24 deselected，固定历史
 24 passed，双阶段 exit0。静态检查、Specify、独立审查和 Feature 131/134 历史 inventory
@@ -29,7 +30,9 @@ Feature 140 的持久生成 receipt 已由 `741900a` 推送，本次将它接入
 下一步是完成 Feature 139 的登记前证据链。原生 receipt 映射与离线 harness 已有，但仍须
 修复请求和阶段绑定、ledger 与登记预算绑定、首次关闭的原因/时间、preparation/total wall、
 manifest 封存和 unknown holdout 成功判断，并完成真实 worker/observer/supervision、文件
-清单和保留产物审计。离线测试通过不代表可登记；当前没有 Feature 139 manifest 或真实运行。
+清单和保留产物审计。审查复现见 [139 预登记审计](specs/139-real-multifile-closure/preregistration-audit.md)。
+离线测试通过不代表可登记；当前没有 Feature 139 manifest 或真实运行。139 离线产品引用
+已改为 `87d86d9`，还须在 T008 封存完整 inventory；不能把该引用当作正式登记。
 
 ## Feature 138：公开状态投影与 preparation 恢复契约（2026-09-19，离线完成）
 

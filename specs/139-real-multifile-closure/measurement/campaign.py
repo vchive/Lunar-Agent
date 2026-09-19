@@ -74,6 +74,7 @@ _STAGE_PAYLOAD_KEYS = {
     "holdouts": {"delivery_receipt_sha256", "matched_count", "total", "results"},
     "cleanup": {"verified"},
 }
+_REQUEST_TIMEOUTS = {"ordinary": 600, "preparation": 900}
 
 
 class RegistrationError(ValueError):
@@ -204,31 +205,51 @@ class RequestLedger:
     token_stop_threshold: int = 160000
     requests: list[dict[str, Any]] = field(default_factory=list)
     closed: bool = False
+    closed_at_index: int | None = None
     known_observed_tokens: int = 0
     usage_complete: bool = True
 
-    def begin(self, *, index: int | None = None, now: float = 0.0, timeout_seconds: float | None = None) -> dict[str, Any]:
+    def _close(self, index: int) -> None:
+        self.closed = True
+        self.closed_at_index = index
+
+    def begin(
+        self,
+        *,
+        index: int | None = None,
+        now: float = 0.0,
+        timeout_seconds: float | None = None,
+        request_kind: str = "ordinary",
+    ) -> dict[str, Any]:
         if self.closed:
             raise CampaignError("request_slot_closed")
-        if not isinstance(now, (int, float)) or not math.isfinite(now) or now >= self.wall_seconds:
-            self.closed = True
+        if type(now) not in (int, float) or not math.isfinite(now) or now < 0:
+            raise CampaignError("attempt_time_invalid")
+        if now >= self.wall_seconds:
+            self._close(len(self.requests))
             raise CampaignError("attempt_deadline_reached")
         expected = len(self.requests) + 1
-        if index is not None and index != expected:
+        if index is not None and (type(index) is not int or index != expected):
             raise CampaignError("request_index_not_sequential")
         if any(not row["finished"] for row in self.requests):
             raise CampaignError("pending_request")
+        if self.requests and now < self.requests[-1]["finished_at"]:
+            raise CampaignError("request_time_invalid")
         if expected > self.max_requests:
-            self.closed = True
+            self._close(len(self.requests))
             raise CampaignError("request_limit_reached")
+        timeout_cap = _REQUEST_TIMEOUTS.get(request_kind) if type(request_kind) is str else None
+        if timeout_cap is None:
+            raise CampaignError("invalid_request_kind")
         if timeout_seconds is None:
-            timeout_seconds = min(600, self.wall_seconds - now)
-        if (not isinstance(timeout_seconds, (int, float)) or not math.isfinite(timeout_seconds)
-                or timeout_seconds <= 0):
+            timeout_seconds = min(timeout_cap, self.wall_seconds - now)
+        if (type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds)
+                or timeout_seconds <= 0 or timeout_seconds > timeout_cap):
             raise CampaignError("invalid_request_timeout")
         if timeout_seconds > self.wall_seconds - now:
             raise CampaignError("request_timeout_exceeds_attempt_wall")
         row = {"index": expected, "started_at": now, "timeout_seconds": timeout_seconds,
+               "request_kind": request_kind,
                "finished": False, "finished_at": None, "outcome": None,
                "observed_tokens": None, "transport_status": None}
         self.requests.append(row)
@@ -243,24 +264,24 @@ class RequestLedger:
         observed_tokens: int | None = None,
         transport_status: int | None = None,
     ) -> dict[str, Any]:
-        if not self.requests or index != len(self.requests):
+        if not self.requests or type(index) is not int or index != len(self.requests):
             raise CampaignError("request_finish_order")
         row = self.requests[index - 1]
         if row["finished"]:
             raise CampaignError("duplicate_request_finish")
         if outcome not in {"completed", "failed", "unknown"}:
             raise CampaignError("invalid_request_outcome")
-        if not isinstance(now, (int, float)) or not math.isfinite(now) or now < row["started_at"]:
+        if type(now) not in (int, float) or not math.isfinite(now) or now < row["started_at"]:
             raise CampaignError("request_time_invalid")
         if observed_tokens is not None and (type(observed_tokens) is not int or observed_tokens < 0):
             raise CampaignError("invalid_observed_tokens")
         if transport_status is not None and (type(transport_status) is not int or not 100 <= transport_status <= 599):
             raise CampaignError("invalid_transport_status")
         if now > row["started_at"] + row["timeout_seconds"] or now > self.wall_seconds:
-            row.update({"finished": True, "finished_at": min(now, self.wall_seconds), "outcome": "unknown",
+            row.update({"finished": True, "finished_at": min(now, row["started_at"] + row["timeout_seconds"], self.wall_seconds), "outcome": "unknown",
                         "observed_tokens": None, "transport_status": None})
             self.usage_complete = False
-            self.closed = True
+            self._close(index)
             raise CampaignError("request_deadline_exceeded")
         row.update({"finished": True, "finished_at": now, "outcome": outcome,
                     "observed_tokens": observed_tokens, "transport_status": transport_status})
@@ -268,59 +289,116 @@ class RequestLedger:
             self.usage_complete = False
         else:
             self.known_observed_tokens += observed_tokens
-        if outcome != "completed" or self.known_observed_tokens >= self.token_stop_threshold or now >= self.wall_seconds:
-            self.closed = True
+        if (outcome != "completed" or self.known_observed_tokens >= self.token_stop_threshold
+                or now >= self.wall_seconds or index == self.max_requests):
+            self._close(index)
         return copy.deepcopy(row)
 
     def close(self) -> None:
         if any(not row["finished"] for row in self.requests):
             raise CampaignError("pending_request")
-        self.closed = True
+        self._close(len(self.requests))
 
     def snapshot(self) -> dict[str, Any]:
-        pending = [row["index"] for row in self.requests if not row["finished"]]
+        audit = self.audit()
+        return {key: audit[key] for key in (
+            "provider_requests", "finished_requests", "pending_requests", "observed_tokens",
+            "usage_complete", "transport_statuses", "closed",
+        )}
+
+    def successful_finalization(self) -> bool:
+        return self.audit()["ledger_finalized"]
+
+    def audit(self) -> dict[str, Any]:
+        """Validate append-only request accounting without inferring unknown usage."""
+        if (type(self.max_requests) is not int or self.max_requests < 1
+                or type(self.wall_seconds) not in (int, float) or not math.isfinite(self.wall_seconds)
+                or self.wall_seconds <= 0 or type(self.token_stop_threshold) is not int
+                or self.token_stop_threshold < 0 or type(self.closed) is not bool
+                or (self.closed_at_index is not None
+                    and (type(self.closed_at_index) is not int or self.closed_at_index < 0))
+                or type(self.known_observed_tokens) is not int or self.known_observed_tokens < 0
+                or type(self.usage_complete) is not bool or type(self.requests) is not list
+                or len(self.requests) > self.max_requests):
+            raise CampaignError("request_ledger_invalid")
+        known_observed_tokens = 0
+        usage_complete = True
+        pending: list[int] = []
+        transport_statuses: list[int | None] = []
+        previous_finished_at: float | int | None = None
+        terminal_index: int | None = None
+        for expected, row in enumerate(self.requests, start=1):
+            if terminal_index is not None:
+                raise CampaignError("request_ledger_invalid")
+            if (type(row) is not dict or set(row) != {
+                    "index", "started_at", "timeout_seconds", "request_kind", "finished", "finished_at",
+                    "outcome", "observed_tokens", "transport_status",
+                } or type(row["index"]) is not int or row["index"] != expected
+                    or type(row["finished"]) is not bool):
+                raise CampaignError("request_ledger_invalid")
+            timeout_cap = (_REQUEST_TIMEOUTS.get(row["request_kind"])
+                           if type(row["request_kind"]) is str else None)
+            if (type(row["started_at"]) not in (int, float) or not math.isfinite(row["started_at"])
+                    or row["started_at"] < 0 or row["started_at"] >= self.wall_seconds
+                    or previous_finished_at is None and expected > 1
+                    or previous_finished_at is not None and row["started_at"] < previous_finished_at
+                    or type(row["timeout_seconds"]) not in (int, float)
+                    or not math.isfinite(row["timeout_seconds"]) or row["timeout_seconds"] <= 0
+                    or timeout_cap is None or row["timeout_seconds"] > timeout_cap
+                    or row["timeout_seconds"] > self.wall_seconds - row["started_at"]):
+                raise CampaignError("request_ledger_invalid")
+            if row["finished"]:
+                if (type(row["outcome"]) is not str or row["outcome"] not in {"completed", "failed", "unknown"}
+                        or type(row["finished_at"]) not in (int, float)
+                        or not math.isfinite(row["finished_at"])
+                        or row["finished_at"] < row["started_at"]
+                        or row["finished_at"] > row["started_at"] + row["timeout_seconds"]
+                        or row["finished_at"] > self.wall_seconds
+                        or (row["observed_tokens"] is not None
+                            and (type(row["observed_tokens"]) is not int or row["observed_tokens"] < 0))
+                        or (row["transport_status"] is not None
+                            and (type(row["transport_status"]) is not int
+                                 or not 100 <= row["transport_status"] <= 599))):
+                    raise CampaignError("request_ledger_invalid")
+                previous_finished_at = row["finished_at"]
+                if row["observed_tokens"] is None:
+                    usage_complete = False
+                else:
+                    known_observed_tokens += row["observed_tokens"]
+                transport_statuses.append(row["transport_status"])
+                if (row["outcome"] != "completed" or known_observed_tokens >= self.token_stop_threshold
+                        or row["finished_at"] >= self.wall_seconds or expected == self.max_requests):
+                    terminal_index = expected
+            else:
+                if any(row[key] is not None for key in ("finished_at", "outcome", "observed_tokens", "transport_status")):
+                    raise CampaignError("request_ledger_invalid")
+                pending.append(expected)
+                previous_finished_at = None
+        if self.known_observed_tokens != known_observed_tokens or self.usage_complete is not usage_complete:
+            raise CampaignError("request_ledger_invalid")
+        if self.closed:
+            if self.closed_at_index is None or self.closed_at_index > len(self.requests) or pending:
+                raise CampaignError("request_ledger_invalid")
+            if terminal_index is not None:
+                if self.closed_at_index != terminal_index:
+                    raise CampaignError("request_ledger_invalid")
+            elif self.closed_at_index != len(self.requests):
+                raise CampaignError("request_ledger_invalid")
+        elif self.closed_at_index is not None or terminal_index is not None:
+            raise CampaignError("request_ledger_invalid")
         return {
             "provider_requests": len(self.requests),
             "finished_requests": len(self.requests) - len(pending),
             "pending_requests": pending,
-            "observed_tokens": self.known_observed_tokens if self.usage_complete else None,
-            "usage_complete": self.usage_complete,
-            "transport_statuses": [row.get("transport_status") for row in self.requests if row["finished"]],
+            "observed_tokens": known_observed_tokens if usage_complete else None,
+            "usage_complete": usage_complete,
+            "transport_statuses": transport_statuses,
             "closed": self.closed,
+            "ledger_finalized": bool(
+                self.closed and self.requests
+                and all(row["finished"] and row["outcome"] == "completed" for row in self.requests)
+            ),
         }
-
-    def successful_finalization(self) -> bool:
-        return bool(
-            self.closed
-            and self.requests
-            and all(row["finished"] and row.get("outcome") == "completed" for row in self.requests)
-        )
-
-    def audit(self) -> dict[str, Any]:
-        """Validate append-only request accounting without inferring unknown usage."""
-        for expected, row in enumerate(self.requests, start=1):
-            if (set(row) != {"index", "started_at", "timeout_seconds", "finished", "finished_at",
-                            "outcome", "observed_tokens", "transport_status"}
-                    or row["index"] != expected or type(row["finished"]) is not bool):
-                raise CampaignError("request_ledger_invalid")
-            if (not isinstance(row["started_at"], (int, float)) or not math.isfinite(row["started_at"])
-                    or not isinstance(row["timeout_seconds"], (int, float))
-                    or not math.isfinite(row["timeout_seconds"]) or row["timeout_seconds"] <= 0
-                    or row["timeout_seconds"] > self.wall_seconds - row["started_at"]):
-                raise CampaignError("request_ledger_invalid")
-            if row["finished"]:
-                if (row["outcome"] not in {"completed", "failed", "unknown"}
-                        or not isinstance(row["finished_at"], (int, float))
-                        or row["finished_at"] < row["started_at"]
-                        or row["finished_at"] > row["started_at"] + row["timeout_seconds"]
-                        or row["finished_at"] > self.wall_seconds):
-                    raise CampaignError("request_ledger_invalid")
-            elif any(item["finished"] for item in self.requests[expected:]):
-                raise CampaignError("request_ledger_invalid")
-        snapshot = self.snapshot()
-        if snapshot["pending_requests"] and self.closed:
-            raise CampaignError("request_ledger_invalid")
-        return snapshot
 
 
 def _identity(manifest: Mapping[str, Any]) -> dict[str, str]:
@@ -593,8 +671,7 @@ class ClosureCampaign:
         ledger = self.ledger.audit()
         return {"receipt_count": len(self.receipts), "stages": [row["stage"] for row in self.receipts],
                 "one_attempt": self.manifest["planned_attempts"] == 1,
-                "ledger_finalized": self.ledger.successful_finalization(),
-                "usage_complete": ledger["usage_complete"]}
+                "ledger_finalized": ledger["ledger_finalized"], "usage_complete": ledger["usage_complete"]}
 
     def _audit_stage_payload(self, stage: str, row: Mapping[str, Any], rows: Mapping[str, Mapping[str, Any]]) -> None:
         """Recheck semantic bindings from retained safe receipt metadata."""
@@ -665,7 +742,7 @@ class ClosureCampaign:
     def public_result(self) -> dict[str, Any]:
         """Project only allow-listed metadata; private evidence never crosses this boundary."""
         audit = self.audit()
-        ledger = self.ledger.snapshot()
+        ledger = self.ledger.audit()
         statuses = {stage: "absent" for stage in _ALL_STAGES}
         for row in self.receipts:
             statuses[row["stage"]] = row["outcome"]

@@ -1,7 +1,7 @@
 # Feature Specification: Real automatic multi-file closure acceptance
 
 **Created**: 2026-09-19
-**Status**: Specification-first; no registration or provider request has been made
+**Status**: Offline harness in progress; preregistration audit has unresolved blockers
 **Input**: Feature 134's preparation-only outcome, Feature 136/137 budget contracts, and
 Feature 138's status/recovery projection
 
@@ -57,7 +57,7 @@ or arbitrary exception text. Feature 131/134 files and WebAgent history remain u
 - A new opaque `registration_id`, `campaign_id`, and `attempt_id=attempt-001` are created for this
   feature. Their concrete values are recorded in a manifest before launch; no value from Feature
   131 or 134 may be reused.
-- The manifest pins the product commit after Feature 138 is complete, all measurement/spec files,
+- The manifest pins the product commit including Features 140 and 141, all measurement/spec files,
   task and input bytes, provider/model identity, runtime options, evaluator profile, budgets, and
   the unique campaign root. Secrets, prompts, response bodies, and endpoint URLs are excluded.
 - Launch requires a clean worktree, `HEAD == origin/main`, a fresh unused root, preflight identity

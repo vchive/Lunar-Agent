@@ -5,8 +5,9 @@
 
 ## Scope
 
-This is a measurement and preregistration feature, not a product feature. Product code is frozen
-after Feature 138. The implementation work is limited to a campaign-local measurement harness,
+This is a measurement and preregistration feature, not a product feature. The final product pin
+must include the separately implemented Features 140 and 141 and is frozen before registration.
+The implementation work is limited to a campaign-local measurement harness,
 offline tests, manifest/report tooling, and postrun audit documentation. No provider call is
 allowed until the manifest is pushed and the unique slot passes preflight.
 

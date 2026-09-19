@@ -122,6 +122,63 @@ def test_request_ledger_rejects_attempt_deadline_overrun_on_finish():
         ledger.begin(now=8, timeout_seconds=5)
 
 
+def _closed_completed_ledger():
+    ledger = campaign.RequestLedger(max_requests=1, wall_seconds=30, token_stop_threshold=20)
+    ledger.begin(now=0, timeout_seconds=3)
+    ledger.finish(1, outcome="completed", now=1, observed_tokens=4, transport_status=200)
+    ledger.close()
+    return ledger
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda ledger: ledger.requests.append({
+            "index": 2, "started_at": 2, "timeout_seconds": 1, "request_kind": "ordinary",
+            "finished": True, "finished_at": 3, "outcome": "completed", "observed_tokens": 1,
+            "transport_status": 200,
+        }),
+        lambda ledger: ledger.requests[0].update({"started_at": -1}),
+        lambda ledger: ledger.requests[0].update({"timeout_seconds": 601}),
+        lambda ledger: ledger.requests[0].update({"observed_tokens": True}),
+        lambda ledger: ledger.requests[0].update({"transport_status": 99}),
+        lambda ledger: setattr(ledger, "known_observed_tokens", 99),
+        lambda ledger: setattr(ledger, "usage_complete", False),
+    ],
+)
+def test_request_ledger_audit_rejects_tampered_bounds_and_derived_values(mutate):
+    ledger = _closed_completed_ledger()
+    mutate(ledger)
+    with pytest.raises(campaign.CampaignError, match="request_ledger_invalid"):
+        ledger.audit()
+
+
+def test_request_ledger_audit_rejects_time_overlap():
+    ledger = campaign.RequestLedger(max_requests=2, wall_seconds=30)
+    ledger.begin(now=0, timeout_seconds=3)
+    ledger.finish(1, outcome="completed", now=2, observed_tokens=1, transport_status=200)
+    ledger.requests.append({
+        "index": 2, "started_at": 1, "timeout_seconds": 1, "request_kind": "ordinary",
+        "finished": True, "finished_at": 2, "outcome": "completed", "observed_tokens": 1,
+        "transport_status": 200,
+    })
+    with pytest.raises(campaign.CampaignError, match="request_ledger_invalid"):
+        ledger.audit()
+
+
+def test_request_ledger_audit_rejects_rows_after_terminal_state():
+    ledger = campaign.RequestLedger(max_requests=2, wall_seconds=30)
+    ledger.begin(now=0, timeout_seconds=3)
+    ledger.finish(1, outcome="failed", now=1, observed_tokens=1, transport_status=503)
+    ledger.requests.append({
+        "index": 2, "started_at": 1, "timeout_seconds": 1, "request_kind": "ordinary",
+        "finished": True, "finished_at": 2, "outcome": "completed", "observed_tokens": 1,
+        "transport_status": 200,
+    })
+    with pytest.raises(campaign.CampaignError, match="request_ledger_invalid"):
+        ledger.audit()
+
+
 @pytest.mark.parametrize("outcome", ("failed", "unknown"))
 def test_request_ledger_never_admits_a_request_after_terminal_exchange(outcome):
     ledger = campaign.RequestLedger(max_requests=2, wall_seconds=20)

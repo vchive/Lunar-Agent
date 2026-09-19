@@ -8,9 +8,9 @@ REGISTRATION_ID = "registration-139-real-multifile-closure"
 CAMPAIGN_ID = "campaign-139-real-multifile-closure-20260919"
 ATTEMPT_ID = "attempt-001"
 CAMPAIGN_ROOT = ".lunar/real-automatic-multifile-closure-20260919"
-# This is the product revision immediately after Feature 138.  The eventual
-# registration remains a separate later commit that pins this product tree.
-PRODUCT_COMMIT = "640e14a0e31074998f11e3b0e6421301ec5c61f3"
+# Pushed Feature 141 product revision used by the offline harness. A later sealed
+# registration must also pin the complete product and measurement file inventories.
+PRODUCT_COMMIT = "87d86d9bc78171e7ce772dd9069e133249b81312"
 MODEL = "glm-5.2"
 TASK_BYTES = b"feature-139-offline-task-v1\n"
 INPUT_BYTES = b'{"limit":3}\n'
