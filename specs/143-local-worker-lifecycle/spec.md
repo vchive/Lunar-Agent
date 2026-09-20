@@ -1,7 +1,7 @@
 # Feature Specification: Local multi-agent worker lifecycle
 
 **Created**: 2026-09-20
-**Status**: Specification only; implementation has not started
+**Status**: Implemented locally; explicit delegation migration remains deferred
 **Input**: WebAgent famou-v2.5 multiagent review and Lunar capability comparison
 
 ## Problem

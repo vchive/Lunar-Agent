@@ -9,6 +9,22 @@ Feature 139 的唯一真实 `attempt-001` 已完成，但未通过自动多文�
 preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或父任务交付。
 以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
 
+## 2026-09-20 发布判断更新
+
+Feature 143 的本地 worker 控制面已经达到可合入的离线质量：稳定 worker identity、直接 owner
+校验、深度限制、`dispatch/send/list/wait/resume/cancel`、父子取消传播、超时分类、结果单出口、
+重启 `lost` reconcile，以及带 SHA-256 校验的大结果引用均已实现。8 项 worker focused 测试、
+共享回归、Ruff、compileall 和 diff 检查通过。全量回归中除冻结 Feature 123 登记套件因工作树
+不再等于历史产品提交而预期得到的 24 个 `product_changed` setup guard 外，其余测试通过；冻结
+Feature 131/134/139 证据未修改。
+
+这还不是“整个 Lunar Agent 对外发布”的充分条件。发布候选可以包含当前普通本地 Agent、任务
+DAG、单文件演化、离线多文件 pipeline、外部候选准入协议和显式本地 worker API；自动多文件真实
+模型闭环仍只有 Feature 139 的 `0/1` 证据，不能宣称端到端成功或与 WebAgent 持平。正式发布前
+仍需完成 Feature 142 的自动求解总墙钟、父子取消/后台生命周期编排，并对至少一个真实模型任务
+重新独立登记验收；OpenEvolve/Shinka 多文件自动接线和真实效果验证属于后续能力，不应由离线协议
+测试替代。
+
 Feature 136 已为单文件和 bundle 候选生成加入显式、不可变的每候选 tool-step budget 与
 authority-bound identity，并将 runtime failure、空响应和 parser failure 投影为有界诊断。
 完整候选只在 parser 接受后计为 completed；整批超预算仍原子拒绝。该功能仅通过本地 fixture

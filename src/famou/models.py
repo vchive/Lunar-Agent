@@ -31,6 +31,62 @@ class TaskStatus(StrEnum):
     UNCERTAIN = "uncertain"
 
 
+class WorkerPhase(StrEnum):
+    """Activity state of a delegated worker, independent from its last outcome."""
+
+    RUNNING = "running"
+    IDLE = "idle"
+
+
+class WorkerOutcome(StrEnum):
+    """Durable outcome of the most recent worker attempt."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    STOPPED = "stopped"
+    LOST = "lost"
+
+
+class WorkerStopReason(StrEnum):
+    CANCELLED = "cancelled"
+    PARENT_CANCELLED = "parent_cancelled"
+    TIMEOUT = "timeout"
+    RUNTIME_ERROR = "runtime_error"
+    RESTART = "restart"
+
+
+@dataclass(frozen=True)
+class Worker:
+    id: str
+    owner_id: str
+    parent_worker_id: str | None
+    role: str
+    agent_type: str
+    description: str
+    depth: int
+    phase: WorkerPhase
+    outcome: WorkerOutcome | None
+    stop_reason: WorkerStopReason | None
+    result: str | None
+    result_ref: str | None
+    last_error: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class WorkerAttempt:
+    id: str
+    worker_id: str
+    prompt: str
+    status: str
+    started_at: str
+    finished_at: str | None
+    outcome: WorkerOutcome | None
+    result: str | None
+    error: str | None
+
+
 @dataclass(frozen=True)
 class Run:
     id: str

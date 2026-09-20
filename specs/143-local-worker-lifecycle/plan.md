@@ -1,7 +1,7 @@
 # Implementation Plan: Local multi-agent worker lifecycle
 
 **Date**: 2026-09-20
-**Status**: Specification only
+**Status**: Implemented locally; explicit delegation migration remains deferred
 
 ## Phase A: Durable model and pure lifecycle rules
 

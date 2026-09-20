@@ -8,19 +8,27 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
-## Feature 143：本地多 Agent worker 生命周期规格（2026-09-20，规格完成）
+## Feature 143：本地多 Agent worker 生命周期（2026-09-20，控制面实现完成）
 
-已根据 WebAgent `famou-v2.5` 的 multiagent 实现完成 SDD 规格、方案、任务和验证边界，
-但尚未开始产品实现。WebAgent 的 subagent 是独立 worker session，具有
+已根据 WebAgent `famou-v2.5` 的 multiagent 实现完成 SDD 规格、方案、任务和验证边界，并完成
+本地 provider-neutral worker 控制面实现。WebAgent 的 subagent 是独立 worker session，具有
 `agent/send/list/wait/cancel`、父子 ownership、深度限制、双维 phase/outcome、结算复查、
 结果单出口、级联取消和重启 reconcile/lost；Lunar 现有 `AgentRegistry`、task DAG 和
 Controller 只覆盖角色路由、一次性同步委派、任务持久化和基础取消，不能宣称生命周期等价。
 
-Feature 143 的本地路线是新增独立 Worker/WorkerAttempt 层，复用现有 AgentRegistry、runtime
+Feature 143 的本地实现新增独立 Worker/WorkerAttempt 层，复用现有 AgentRegistry、runtime
 和 process observer，但不把 `tasks.parent_id` 冒充 worker 树，也不复制 OpenCode plugin 或
-远程 FamouClient。先完成持久模型、纯结算规则和 Controller API，再接一个显式 delegation
-消费者；自动多文件和 detached 入口另由 Feature 142 控制。没有 provider 请求、WebAgent
-重跑或真实 campaign。详见 `specs/143-local-worker-lifecycle/`。
+远程 FamouClient。现在已提供 `dispatch/send/list/wait/resume/cancel`、直接 owner 校验、
+深度限制、父子级联取消、单次结果投递、重启 `lost` reconcile、超时分类及带 SHA-256
+校验的大结果引用。显式 delegation consumer 尚未迁移；自动多文件和 detached 入口另由
+Feature 142 控制。没有 provider 请求、WebAgent 重跑或真实 campaign。详见
+`specs/143-local-worker-lifecycle/`。
+
+Feature 143 离线验证已完成：worker focused 8 passed，shared regression 通过，Ruff、
+compileall 和 diff 检查通过。全量回归除冻结 Feature 123 的 24 个 setup guard 因当前产品
+已不等于其历史提交而预期报 `product_changed` 外，其余测试通过；冻结历史证据未改写。
+当前 worker 层仍是显式本地 API，不代表自动多文件已有统一 wall-clock、后台、取消编排，
+也不代表真实模型端到端闭环已成功。
 
 ## Feature 141：原生自动多文件 CLI 显式候选预算（2026-09-19，离线完成）
 

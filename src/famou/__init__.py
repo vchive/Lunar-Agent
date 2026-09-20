@@ -225,6 +225,7 @@ from .evolution import (
     stage_candidate_inputs,
 )
 from .model_profile import UsageLedger, UsageSnapshot
+from .models import Worker, WorkerAttempt, WorkerOutcome, WorkerPhase, WorkerStopReason
 from .openevolve_handoff import (
     OpenEvolveHandoffError,
     admit_openevolve_result,
@@ -305,6 +306,7 @@ from .staged_workflow import (
     StagedWorkflowRunner,
     StagePolicy,
 )
+from .workers import WorkerService
 from .workflow_checkpoint import (
     AggregateUsage,
     Checkpoint,
@@ -481,6 +483,12 @@ __all__ = [
     "VerifiedCandidateExecutionAdmission",
     "VerifiedCandidateSourceBundle",
     "VerifiedCandidateWorkspace",
+    "Worker",
+    "WorkerAttempt",
+    "WorkerOutcome",
+    "WorkerPhase",
+    "WorkerService",
+    "WorkerStopReason",
     "WorkflowCheckpoint",
     "WorkflowCheckpointError",
     "WorkflowController",

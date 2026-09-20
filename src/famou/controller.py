@@ -113,6 +113,7 @@ from .routing import DomainRouter, RouteDecision
 from .runtime import Runtime, RuntimeExecutionError
 from .seed_handoff import SeedAdmissionError, SeedManifest, admit_seed_manifest
 from .store import Store
+from .workers import WorkerService
 
 if TYPE_CHECKING:
     from .bundle_delivery import BundleDeliveryResult
@@ -175,6 +176,30 @@ class LocalController:
         self.policy = MasterPolicy()
         self.recovery_policy = RecoveryPolicy()
         self.agent_registry = agent_registry or AgentRegistry([RuntimeAgentAdapter(runtime)])
+        self.workers = WorkerService(self.store, self.agent_registry, config.home / "worker-sessions")
+
+    # Explicit worker-session control plane. These methods intentionally do not alter the
+    # existing task scheduler or run status semantics.
+    def dispatch_worker(self, owner_id: str, **kwargs: Any):
+        return self.workers.dispatch(owner_id, **kwargs)
+
+    def send_worker(self, owner_id: str, worker_id: str, content: str):
+        return self.workers.send(owner_id, worker_id, content)
+
+    def list_workers(self, owner_id: str, *, running_only: bool = False):
+        return self.workers.list(owner_id, running_only=running_only)
+
+    def wait_worker(self, owner_id: str, worker_id: str, timeout: float | None = None):
+        return self.workers.wait(owner_id, worker_id, timeout)
+
+    def cancel_worker(self, owner_id: str, worker_id: str):
+        return self.workers.cancel(owner_id, worker_id)
+
+    def resume_worker(self, owner_id: str, worker_id: str, **kwargs: Any):
+        return self.workers.resume(owner_id, worker_id, **kwargs)
+
+    def read_worker_result(self, owner_id: str, worker_id: str):
+        return self.workers.read_result(owner_id, worker_id)
 
     @staticmethod
     def _active_algorithm_contract(

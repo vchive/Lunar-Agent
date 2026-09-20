@@ -21,7 +21,18 @@ from typing import Any
 from .algorithm import MAX_OUTPUTS, OutputSpec
 from .budget import BudgetSpec
 from .evaluator import validate_acceptance
-from .models import Attempt, Run, RunStatus, Task, TaskStatus
+from .models import (
+    Attempt,
+    Run,
+    RunStatus,
+    Task,
+    TaskStatus,
+    Worker,
+    WorkerAttempt,
+    WorkerOutcome,
+    WorkerPhase,
+    WorkerStopReason,
+)
 from .policy import (
     PlanDocument,
     PlanPatch,
@@ -108,6 +119,51 @@ CREATE TABLE IF NOT EXISTS artifacts (
     kind TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS workers (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    parent_worker_id TEXT REFERENCES workers(id),
+    role TEXT NOT NULL,
+    agent_type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    depth INTEGER NOT NULL,
+    phase TEXT NOT NULL,
+    outcome TEXT,
+    stop_reason TEXT,
+    result TEXT,
+    result_ref TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workers_owner_idx ON workers(owner_id, created_at);
+CREATE INDEX IF NOT EXISTS workers_parent_idx ON workers(parent_worker_id, created_at);
+CREATE TABLE IF NOT EXISTS worker_attempts (
+    id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL REFERENCES workers(id),
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    outcome TEXT,
+    result TEXT,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS worker_attempts_worker_idx ON worker_attempts(worker_id, started_at);
+CREATE TABLE IF NOT EXISTS worker_inputs (
+    id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL REFERENCES workers(id),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS worker_events (
+    id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL REFERENCES workers(id),
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS worker_events_idx ON worker_events(worker_id, created_at);
 CREATE TABLE IF NOT EXISTS plan_revisions (
     plan_id TEXT NOT NULL,
     run_id TEXT NOT NULL REFERENCES runs(id),
@@ -191,6 +247,7 @@ class Store:
             self._ensure_column(connection, "tasks", "plan_task_id", "TEXT")
             self._ensure_column(connection, "attempts", "pid", "INTEGER")
             self._ensure_column(connection, "attempts", "pgid", "INTEGER")
+            self._ensure_column(connection, "workers", "result_ref", "TEXT")
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                 (1, utc_now()),
@@ -210,6 +267,14 @@ class Store:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                 (5, utc_now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (6, utc_now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (7, utc_now()),
             )
 
     @staticmethod
@@ -2888,6 +2953,307 @@ class Store:
                 {"limit": limit, "actual": actual, "maximum": maximum, "reason": reason},
                 event_id=f"event-budget-{limit}-{run_id}",
             )
+
+    # Worker records are deliberately separate from task rows. A task is a scheduler unit; a
+    # worker is an owned, resumable conversation. These methods keep the ownership checks inside
+    # the store so callers cannot accidentally perform a side effect before authorization.
+    def create_worker(
+        self,
+        owner_id: str,
+        role: str,
+        description: str,
+        *,
+        parent_worker_id: str | None = None,
+        agent_type: str = "runtime",
+        max_depth: int = 1,
+    ) -> Worker:
+        if not owner_id.strip() or not role.strip() or not description.strip():
+            raise ValueError("worker owner, role, and description must be non-empty")
+        if len(description.encode("utf-8")) > 8_000:
+            raise ValueError("worker description exceeds 8 KiB")
+        if isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 0:
+            raise ValueError("max_depth must be a non-negative integer")
+        worker_id = f"worker-{uuid.uuid4().hex}"
+        timestamp = utc_now()
+        with self._connect() as connection:
+            depth = 0
+            if parent_worker_id is not None:
+                parent = connection.execute(
+                    "SELECT owner_id, depth FROM workers WHERE id = ?", (parent_worker_id,)
+                ).fetchone()
+                if parent is None:
+                    raise ValueError("unknown parent worker")
+                if parent["owner_id"] != owner_id:
+                    raise PermissionError("parent worker is owned by another caller")
+                depth = int(parent["depth"]) + 1
+            if depth > max_depth:
+                raise ValueError("worker maximum depth exceeded")
+            connection.execute(
+                "INSERT INTO workers(id, owner_id, parent_worker_id, role, agent_type, description, depth, phase, created_at, updated_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (worker_id, owner_id, parent_worker_id, role, agent_type, description, depth,
+                 WorkerPhase.IDLE.value, timestamp, timestamp),
+            )
+            self._append_worker_event(
+                connection, worker_id, "worker_created",
+                {"phase": WorkerPhase.IDLE.value, "depth": depth},
+            )
+        return self.get_worker(worker_id)  # type: ignore[return-value]
+
+    def get_worker(self, worker_id: str) -> Worker | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM workers WHERE id = ?", (worker_id,)).fetchone()
+        return self._worker_from_row(row) if row else None
+
+    def list_workers(self, owner_id: str, *, phase: WorkerPhase | None = None) -> list[Worker]:
+        query = "SELECT * FROM workers WHERE owner_id = ?"
+        args: list[object] = [owner_id]
+        if phase is not None:
+            query += " AND phase = ?"
+            args.append(phase.value)
+        query += " ORDER BY created_at, id"
+        with self._connect() as connection:
+            rows = connection.execute(query, args).fetchall()
+        return [self._worker_from_row(row) for row in rows]
+
+    def list_worker_children(self, worker_id: str) -> list[Worker]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM workers WHERE parent_worker_id = ? ORDER BY created_at, id",
+                (worker_id,),
+            ).fetchall()
+        return [self._worker_from_row(row) for row in rows]
+
+    def start_worker_attempt(self, worker_id: str, owner_id: str, prompt: str) -> WorkerAttempt:
+        if not prompt.strip() or len(prompt.encode("utf-8")) > 64 * 1024:
+            raise ValueError("worker prompt must be non-empty and at most 64 KiB")
+        attempt_id = f"worker-attempt-{uuid.uuid4().hex}"
+        timestamp = utc_now()
+        with self._connect() as connection:
+            worker = connection.execute(
+                "SELECT * FROM workers WHERE id = ? AND owner_id = ?", (worker_id, owner_id)
+            ).fetchone()
+            if worker is None:
+                raise PermissionError("worker is not owned by caller")
+            if worker["phase"] == WorkerPhase.RUNNING.value:
+                raise ValueError("worker is already running")
+            connection.execute(
+                "INSERT INTO worker_attempts(id, worker_id, prompt, status, started_at) VALUES(?, ?, ?, ?, ?)",
+                (attempt_id, worker_id, prompt, "running", timestamp),
+            )
+            connection.execute(
+                "UPDATE workers SET phase = ?, stop_reason = NULL, last_error = NULL, updated_at = ? WHERE id = ?",
+                (WorkerPhase.RUNNING.value, timestamp, worker_id),
+            )
+            self._append_worker_event(connection, worker_id, "worker_started", {"phase": "running"}, attempt_id)
+            row = connection.execute("SELECT * FROM worker_attempts WHERE id = ?", (attempt_id,)).fetchone()
+        return self._worker_attempt_from_row(row)  # type: ignore[arg-type]
+
+    def append_worker_input(self, worker_id: str, owner_id: str, content: str) -> bool:
+        if not content.strip() or len(content.encode("utf-8")) > 16 * 1024:
+            raise ValueError("worker input must be non-empty and at most 16 KiB")
+        timestamp = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, phase FROM workers WHERE id = ? AND owner_id = ?", (worker_id, owner_id)
+            ).fetchone()
+            if row is None:
+                raise PermissionError("worker is not owned by caller")
+            if row["phase"] != WorkerPhase.RUNNING.value:
+                raise ValueError("worker is not running")
+            input_id = f"worker-input-{uuid.uuid4().hex}"
+            connection.execute(
+                "INSERT INTO worker_inputs(id, worker_id, content, created_at) VALUES(?, ?, ?, ?)",
+                (input_id, worker_id, content, timestamp),
+            )
+            self._append_worker_event(connection, worker_id, "worker_input", {"input_id": input_id})
+        return True
+
+    def list_worker_attempts(self, worker_id: str, owner_id: str | None = None) -> list[WorkerAttempt]:
+        with self._connect() as connection:
+            if owner_id is None:
+                rows = connection.execute(
+                    "SELECT a.* FROM worker_attempts a WHERE a.worker_id = ? ORDER BY a.started_at, a.id",
+                    (worker_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT a.* FROM worker_attempts a JOIN workers w ON w.id = a.worker_id WHERE a.worker_id = ? AND w.owner_id = ? ORDER BY a.started_at, a.id",
+                    (worker_id, owner_id),
+                ).fetchall()
+        return [self._worker_attempt_from_row(row) for row in rows]
+
+    def list_worker_inputs(self, worker_id: str, *, consume: bool = False) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, content FROM worker_inputs WHERE worker_id = ? ORDER BY created_at, id",
+                (worker_id,),
+            ).fetchall()
+            values = [row["content"] for row in rows]
+            if consume and rows:
+                connection.executemany("DELETE FROM worker_inputs WHERE id = ?", [(row["id"],) for row in rows])
+        return values
+
+    def settle_worker(
+        self,
+        worker_id: str,
+        attempt_id: str,
+        outcome: WorkerOutcome,
+        *,
+        result: str | None = None,
+        result_ref: str | None = None,
+        reason: WorkerStopReason | None = None,
+        delivery: str | None = None,
+    ) -> Worker | None:
+        if result is not None and len(result.encode("utf-8")) > 64 * 1024:
+            result = result.encode("utf-8")[-(64 * 1024):].decode("utf-8", errors="ignore")
+        if result_ref is not None and (
+            not isinstance(result_ref, str)
+            or re.fullmatch(r"worker-result-worker-attempt-[0-9a-f]{32}-[0-9a-f]{64}", result_ref) is None
+        ):
+            raise ValueError("result_ref must be a bounded worker result reference")
+        if delivery not in {None, "waiter", "notification"}:
+            raise ValueError("delivery must be waiter, notification, or None")
+        timestamp = utc_now()
+        with self._connect() as connection:
+            attempt = connection.execute(
+                "SELECT worker_id, status FROM worker_attempts WHERE id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt is None or attempt["worker_id"] != worker_id:
+                return None
+            if attempt["status"] != "running":
+                return self._worker_from_row(
+                    connection.execute("SELECT * FROM workers WHERE id = ?", (worker_id,)).fetchone()
+                )
+            error = reason.value if reason is not None else None
+            connection.execute(
+                "UPDATE worker_attempts SET status = ?, finished_at = ?, outcome = ?, result = ?, error = ? WHERE id = ? AND status = ?",
+                ("finished", timestamp, outcome.value, result, error, attempt_id, "running"),
+            )
+            connection.execute(
+                "UPDATE workers SET phase = ?, outcome = ?, stop_reason = ?, result = ?, result_ref = ?, last_error = ?, updated_at = ? WHERE id = ?",
+                (WorkerPhase.IDLE.value, outcome.value, reason.value if reason else None, result, result_ref, error, timestamp, worker_id),
+            )
+            self._append_worker_event(
+                connection, worker_id, "worker_settled",
+                {"phase": "idle", "outcome": outcome.value, **({"reason": reason.value} if reason else {})},
+                attempt_id,
+            )
+            if delivery is not None:
+                self._append_worker_event(
+                    connection,
+                    worker_id,
+                    "worker_result_delivered" if delivery == "waiter" else "worker_notification",
+                    {"delivery": delivery, "outcome": outcome.value},
+                    attempt_id,
+                )
+            row = connection.execute("SELECT * FROM workers WHERE id = ?", (worker_id,)).fetchone()
+        return self._worker_from_row(row) if row else None
+
+    def cancel_worker_tree(self, worker_id: str, owner_id: str) -> list[str]:
+        timestamp = utc_now()
+        with self._connect() as connection:
+            root = connection.execute(
+                "SELECT id FROM workers WHERE id = ? AND owner_id = ?", (worker_id, owner_id)
+            ).fetchone()
+            if root is None:
+                raise PermissionError("worker is not owned by caller")
+            ids: list[str] = []
+            frontier = [worker_id]
+            while frontier:
+                current = frontier.pop()
+                ids.append(current)
+                children = connection.execute(
+                    "SELECT id FROM workers WHERE parent_worker_id = ? AND owner_id = ?", (current, owner_id)
+                ).fetchall()
+                frontier.extend(row["id"] for row in children)
+            for index, current in enumerate(ids):
+                connection.execute(
+                    "UPDATE worker_attempts SET status = ?, finished_at = ?, outcome = ?, error = ? WHERE worker_id = ? AND status = ?",
+                    (
+                        "finished",
+                        timestamp,
+                        WorkerOutcome.STOPPED.value,
+                        (WorkerStopReason.CANCELLED if index == 0 else WorkerStopReason.PARENT_CANCELLED).value,
+                        current,
+                        "running",
+                    ),
+                )
+                connection.execute(
+                    "UPDATE workers SET phase = ?, outcome = ?, stop_reason = ?, updated_at = ? WHERE id = ? AND phase = ?",
+                    (
+                        WorkerPhase.IDLE.value,
+                        WorkerOutcome.STOPPED.value,
+                        (WorkerStopReason.CANCELLED if index == 0 else WorkerStopReason.PARENT_CANCELLED).value,
+                        timestamp,
+                        current,
+                        WorkerPhase.RUNNING.value,
+                    ),
+                )
+                if connection.execute(
+                    "SELECT changes()"
+                ).fetchone()[0]:
+                    reason = WorkerStopReason.CANCELLED if index == 0 else WorkerStopReason.PARENT_CANCELLED
+                    self._append_worker_event(
+                        connection,
+                        current,
+                        "worker_cancelled",
+                        {"outcome": "stopped", "reason": reason.value},
+                    )
+        return ids
+
+    def reconcile_workers(self) -> int:
+        timestamp = utc_now()
+        with self._connect() as connection:
+            rows = connection.execute("SELECT id FROM workers WHERE phase = ?", (WorkerPhase.RUNNING.value,)).fetchall()
+            for row in rows:
+                worker_id = row["id"]
+                connection.execute(
+                    "UPDATE worker_attempts SET status = ?, finished_at = ?, outcome = ?, error = ? WHERE worker_id = ? AND status = ?",
+                    ("finished", timestamp, WorkerOutcome.LOST.value, WorkerStopReason.RESTART.value, worker_id, "running"),
+                )
+                connection.execute(
+                    "UPDATE workers SET phase = ?, outcome = ?, stop_reason = ?, last_error = ?, updated_at = ? WHERE id = ?",
+                    (WorkerPhase.IDLE.value, WorkerOutcome.LOST.value, WorkerStopReason.RESTART.value, "controller restarted before worker completed", timestamp, worker_id),
+                )
+                self._append_worker_event(connection, worker_id, "worker_lost", {"outcome": "lost", "reason": "restart"})
+        return len(rows)
+
+    def list_worker_events(self, worker_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT id, type, payload, created_at FROM worker_events WHERE worker_id = ? ORDER BY created_at, id", (worker_id,)).fetchall()
+        return [{"id": row["id"], "type": row["type"], "payload": json.loads(row["payload"]), "created_at": row["created_at"]} for row in rows]
+
+    @staticmethod
+    def _append_worker_event(connection: sqlite3.Connection, worker_id: str, event_type: str, payload: dict[str, Any], identity: str | None = None) -> bool:
+        event_id = f"worker-event-{event_type}-{identity or uuid.uuid4().hex}"
+        return connection.execute(
+            "INSERT OR IGNORE INTO worker_events(id, worker_id, type, payload, created_at) VALUES(?, ?, ?, ?, ?)",
+            (event_id, worker_id, event_type, json.dumps(payload, sort_keys=True), utc_now()),
+        ).rowcount == 1
+
+    @staticmethod
+    def _worker_from_row(row: sqlite3.Row | None) -> Worker | None:
+        if row is None:
+            return None
+        return Worker(
+            id=row["id"], owner_id=row["owner_id"], parent_worker_id=row["parent_worker_id"],
+            role=row["role"], agent_type=row["agent_type"], description=row["description"],
+            depth=row["depth"], phase=WorkerPhase(row["phase"]),
+            outcome=WorkerOutcome(row["outcome"]) if row["outcome"] else None,
+            stop_reason=WorkerStopReason(row["stop_reason"]) if row["stop_reason"] else None,
+            result=row["result"], last_error=row["last_error"], created_at=row["created_at"], updated_at=row["updated_at"],
+            result_ref=row["result_ref"],
+        )
+
+    @staticmethod
+    def _worker_attempt_from_row(row: sqlite3.Row) -> WorkerAttempt:
+        return WorkerAttempt(
+            id=row["id"], worker_id=row["worker_id"], prompt=row["prompt"], status=row["status"],
+            started_at=row["started_at"], finished_at=row["finished_at"],
+            outcome=WorkerOutcome(row["outcome"]) if row["outcome"] else None,
+            result=row["result"], error=row["error"],
+        )
 
     @staticmethod
     def _append_event(

@@ -48,6 +48,7 @@ flowchart TD
 | --- | --- | --- |
 | 入口与编排 | 命令、模式校验、输入导入、继续运行、普通/演化分流 | `cli.py` |
 | 控制层 | 创建/领取任务、并发、预算检查、结果登记、取消、父子交付 | `controller.py` |
+| 显式 worker 控制面 | 有 owner 的可恢复 worker session，等待、消息、取消、级联和重启 reconcile | `workers.py`、`store.py` |
 | 状态层 | run/task/attempt、事件、产物索引、计划版本、进程归属 | `store.py`、`models.py` |
 | 计划与角色 | 任务合同、依赖图、领域与能力选择、恢复建议 | `conversational.py`、`algorithm.py`、`policy.py`、`routing.py`、`profiles.py`、`recovery.py` |
 | 模型与工具 | Mock、显式进程、兼容接口；工具循环、请求预算、会话 | `runtime.py`、`agents.py`、`agent_loop.py`、`tools.py`、`model_profile.py` |
@@ -55,6 +56,14 @@ flowchart TD
 | 多文件程序 | 源码包、执行计划、输入、执行记录、评分快照、交付 | `candidate_*.py`、`bundle_*.py`、`automatic_solve_bundle.py` |
 | 外部生产者 | 将外部候选转换成可由 Lunar 重新核验的输入 | `openevolve_handoff.py`、`shinka_handoff.py`、`producer_handoff.py`、`seed_handoff.py` |
 | 验收工具 | 固定任务和预算、监控真实请求、只读检查与报告 | `specs/*/measurement/`，不属于日常产品运行的必经层 |
+
+Feature 143 增加了一条与普通 task DAG 分开的显式 worker 链路：Controller 通过
+`dispatch_worker/send_worker/list_workers/wait_worker/cancel_worker/resume_worker` 操作稳定的
+worker identity，Store 保存 worker、attempt 和受限事件。worker 的 activity phase 与最近一次
+outcome 分开记录；直接 owner 才能操作，父取消会传播到已验证的子树，进程重启时未完成运行
+标记为 `lost`。结果默认内联截断，大结果写入 worker attempt 目录并由带 SHA-256 的引用读取。
+这条链路复用现有 AgentAdapter，但尚未迁移普通 delegation，也没有改变 task DAG 或自动多文件
+入口的生命周期。
 
 ## 3. 普通任务怎样执行
 
