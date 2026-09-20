@@ -14,9 +14,13 @@ import re
 import shlex
 import signal
 import subprocess
+import threading
+import time
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import monotonic
 from typing import Protocol, runtime_checkable
 
 from .runtime import Runtime, RuntimeResult
@@ -409,12 +413,38 @@ class RuntimeAgentAdapter:
         name: str | None = None,
         roles: Sequence[str] = ("worker", "solver", "general"),
         capabilities: Sequence[str] = DEFAULT_RUNTIME_CAPABILITIES,
+        runtime_factory: Callable[[], Runtime] | None = None,
     ) -> None:
+        if runtime_factory is not None and not callable(runtime_factory):
+            raise TypeError("runtime_factory must be callable or None")
         self.runtime = runtime
+        self.runtime_factory = runtime_factory
         self.name = _token(name or getattr(runtime, "name", "runtime"), "adapter name")
         self.roles = _tokens(roles, "roles")
         self.capabilities = _tokens(capabilities, "capabilities")
         self._event_sink: Callable[[str, dict[str, object]], None] | None = None
+        self._continuation_guard: Callable[[], None] | None = None
+
+    def set_continuation_guard(self, guard: Callable[[], None] | None) -> None:
+        """Check attempt authority locally and inside runtimes supporting tool continuations."""
+        if guard is not None and not callable(guard):
+            raise TypeError("continuation guard must be callable or None")
+        self._continuation_guard = guard
+        setter = getattr(self.runtime, "set_continuation_guard", None)
+        if callable(setter):
+            setter(guard)
+
+    def set_process_released(self, released: ProcessObserver | None) -> None:
+        """Forward verified process-release observations when the runtime supports them."""
+        if released is not None and not callable(released):
+            raise TypeError("process release observer must be callable or None")
+        setter = getattr(self.runtime, "set_process_released", None)
+        if callable(setter):
+            setter(released)
+
+    def _check_continuation(self) -> None:
+        if self._continuation_guard is not None:
+            self._continuation_guard()
 
     def set_event_sink(
         self, sink: Callable[[str, dict[str, object]], None] | None
@@ -427,6 +457,7 @@ class RuntimeAgentAdapter:
     def run(self, request: AgentRequest) -> AgentResult:
         if not isinstance(request, AgentRequest):
             raise TypeError("request must be an AgentRequest")
+        self._check_continuation()
         set_runtime_event_sink = getattr(self.runtime, "set_event_sink", None)
         runtime_event_sink: Callable[[str, dict[str, object]], None] | None = None
         runtime_event_emitted = False
@@ -470,7 +501,9 @@ class RuntimeAgentAdapter:
                     )
                 kwargs["max_tool_steps"] = budget.max_tool_steps
                 kwargs["budget_id"] = budget.budget_id
+            self._check_continuation()
             result = runtime_run(request.prompt, request.workspace, runtime_timeout, **kwargs)
+            self._check_continuation()
         except Exception as exc:
             diagnostic = getattr(self.runtime, "last_candidate_diagnostic", None)
             if callable(diagnostic):
@@ -603,6 +636,19 @@ class CommandAgentAdapter:
         self.max_output_bytes = max_output_bytes
         self._process: subprocess.Popen[bytes] | None = None
         self._observer: ProcessObserver | None = None
+        self._process_released: ProcessObserver | None = None
+        self._active_process_released: ProcessObserver | None = None
+        self._continuation_guard: Callable[[], None] | None = None
+        self._run_lock = threading.Lock()
+
+    def set_continuation_guard(self, guard: Callable[[], None] | None) -> None:
+        if guard is not None and not callable(guard):
+            raise TypeError("continuation guard must be callable or None")
+        self._continuation_guard = guard
+
+    def _check_continuation(self) -> None:
+        if self._continuation_guard is not None:
+            self._continuation_guard()
 
     @classmethod
     def from_shell_like(
@@ -623,21 +669,120 @@ class CommandAgentAdapter:
     def set_process_observer(self, observer: ProcessObserver | None) -> None:
         self._observer = observer
 
+    def set_process_released(self, released: ProcessObserver | None) -> None:
+        if released is not None and not callable(released):
+            raise TypeError("process release observer must be callable or None")
+        self._process_released = released
+
     def process_info(self) -> tuple[int | None, int | None]:
         process = self._process
-        if process is None or process.poll() is not None:
+        if process is None:
             return (None, None)
+        # Retain the original session identity until cleanup confirms the whole group has
+        # exited. A reaped leader alone is not evidence that its descendants have exited.
+        return (process.pid, process.pid)
+
+    @staticmethod
+    def _cleanup_owned_process(process: subprocess.Popen[bytes]) -> bool:
+        """Bound cleanup to the private group created by this exact Popen invocation."""
+        pgid = process.pid
+        if pgid <= 1 or pgid == os.getpgrp():
+            return False
+
+        def alive() -> bool:
+            try:
+                os.killpg(pgid, 0)
+                return True
+            except ProcessLookupError:
+                return False
+            except PermissionError:
+                # Some systems briefly report EPERM between SIGTERM and reaping. It does
+                # not prove absence; keep checking within the same bounded grace period.
+                return True
+
         try:
-            return (process.pid, os.getpgid(process.pid))
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                if not alive():
+                    process.poll()
+                    return True
+                try:
+                    if os.getpgid(process.pid) != pgid:
+                        return False
+                except ProcessLookupError:
+                    # The group may retain descendants after this Popen leader was reaped.
+                    if process.poll() is None:
+                        return False
+                try:
+                    os.killpg(pgid, sig)
+                except ProcessLookupError:
+                    process.poll()
+                    return True
+                deadline = monotonic() + 0.25
+                while monotonic() < deadline:
+                    process.poll()
+                    if not alive():
+                        return True
+                    time.sleep(0.01)
+            process.poll()
+            return not alive()
         except OSError:
-            return (process.pid, None)
+            return False
+
+    def _communicate_owned(
+        self, process: subprocess.Popen[bytes], payload: bytes, timeout: float | None,
+    ) -> tuple[bytes, bytes]:
+        deadline = None if timeout is None else monotonic() + timeout
+        first = True
+        while True:
+            self._check_continuation()
+            remaining = None if deadline is None else deadline - monotonic()
+            if remaining is not None and remaining <= 0:
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            try:
+                return process.communicate(
+                    input=payload if first else None,
+                    timeout=0.05 if remaining is None else min(0.05, remaining),
+                )
+            except subprocess.TimeoutExpired:
+                first = False
+                if process.poll() is not None:
+                    # An exited leader can leave descendants holding stdout/stderr open.
+                    # Close their private group before waiting for the remaining pipe bytes.
+                    if not self._cleanup_owned_process(process):
+                        raise AgentInvocationError("agent process cleanup could not be confirmed")
+                    return process.communicate(timeout=0.25)
+
+    def _release_owned_process(self, process: subprocess.Popen[bytes]) -> None:
+        # The callback belongs to the original invocation even if a legacy caller configures
+        # a different observer before retrying cleanup. A failed callback retains the handle.
+        if self._active_process_released is not None:
+            self._active_process_released(process.pid, process.pid)
+        if self._process is process:
+            self._process = None
+            self._active_process_released = None
 
     def run(self, request: AgentRequest) -> AgentResult:
+        if not self._run_lock.acquire(blocking=False):
+            raise AgentInvocationError("command adapter already has an active invocation")
+        try:
+            return self._run(request)
+        finally:
+            self._run_lock.release()
+
+    def _run(self, request: AgentRequest) -> AgentResult:
         if not isinstance(request, AgentRequest):
             raise TypeError("request must be an AgentRequest")
+        self._check_continuation()
+        retained = self._process
+        if retained is not None:
+            if not self._cleanup_owned_process(retained):
+                raise AgentInvocationError("agent process cleanup could not be confirmed")
+            self._release_owned_process(retained)
         request.workspace.mkdir(parents=True, exist_ok=True)
         process: subprocess.Popen[bytes] | None = None
+        released = self._process_released
         try:
+            self._check_continuation()
             process = subprocess.Popen(
                 self.command,
                 cwd=request.workspace,
@@ -647,27 +792,36 @@ class CommandAgentAdapter:
                 start_new_session=True,
             )
             self._process = process
+            self._active_process_released = released
             if self._observer is not None:
-                try:
-                    self._observer(process.pid, os.getpgid(process.pid))
-                except OSError:
-                    self._observer(process.pid, None)
+                # start_new_session assigns a dedicated group with the child's PID even if
+                # the short-lived group leader exits before its observer runs.
+                self._observer(process.pid, process.pid)
+            self._check_continuation()
             payload = json.dumps(request.to_dict(), ensure_ascii=False, sort_keys=True).encode("utf-8")
-            stdout, stderr = process.communicate(input=payload, timeout=request.timeout)
+            stdout, stderr = self._communicate_owned(process, payload, request.timeout)
         except subprocess.TimeoutExpired as exc:
-            if process is not None:
-                self._terminate(process)
-                stdout, stderr = process.communicate()
-            else:
-                stdout, stderr = b"", b""
-            del stdout, stderr
             raise AgentInvocationError(
                 f"agent {self.name} timed out after {request.timeout}s"
             ) from exc
         except OSError as exc:
             raise AgentInvocationError(_bounded_error(f"could not start agent: {exc}")) from exc
         finally:
-            self._process = None
+            if process is not None:
+                cleaned = self._cleanup_owned_process(process)
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+                if cleaned:
+                    self._release_owned_process(process)
+                else:
+                    # Keep the handle available for a later cleanup retry. The owner must
+                    # retain its durable registration instead of accepting a successful result.
+                    raise AgentInvocationError("agent process cleanup could not be confirmed")
+        self._check_continuation()
         if len(stdout) > self.max_output_bytes:
             raise AgentInvocationError(f"agent stdout exceeds {self.max_output_bytes} bytes")
         if len(stderr) > 16_000:
@@ -688,18 +842,8 @@ class CommandAgentAdapter:
 
     def cancel(self) -> None:
         process = self._process
-        if process is not None and process.poll() is None:
-            self._terminate(process)
-
-    @staticmethod
-    def _terminate(process: subprocess.Popen[bytes]) -> None:
-        try:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        except (OSError, ProcessLookupError):
-            try:
-                process.terminate()
-            except OSError:
-                return
+        if process is not None and not self._cleanup_owned_process(process):
+            raise AgentInvocationError("agent process cleanup could not be confirmed")
 
     def _normalize_output(self, output: str, request: AgentRequest) -> AgentResult:
         payload: object
@@ -766,14 +910,37 @@ class CommandAgentAdapter:
 
 
 class AgentRegistry:
-    """Explicit deterministic registry of local Agent adapters."""
+    """Explicit deterministic registry of local Agent adapter configurations.
+
+    ``select`` retains the existing direct-invocation contract. Concurrent worker attempts
+    instead use ``create_execution_adapter``: registered instances are configuration prototypes,
+    and each attempt owns its adapter, runtime, cancellation state, and observers.
+    """
 
     def __init__(self, adapters: Sequence[AgentAdapter] = ()) -> None:
         self._adapters: dict[str, AgentAdapter] = {}
+        self._execution_factories: dict[str, Callable[[], AgentAdapter]] = {}
+        self._execution_lock = threading.RLock()
+        self._issued_objects: weakref.WeakValueDictionary[int, object] = weakref.WeakValueDictionary()
+        # Some third-party adapters use slots without weak-reference support. Retaining them
+        # is necessary to reject a factory that returns the same execution object again.
+        self._retained_objects: dict[int, object] = {}
         for adapter in adapters:
             self.register(adapter)
 
-    def register(self, adapter: AgentAdapter) -> AgentAdapter:
+    def register(
+        self,
+        adapter: AgentAdapter,
+        *,
+        execution_factory: Callable[[], AgentAdapter] | None = None,
+    ) -> AgentAdapter:
+        """Register a prototype and, for custom adapters, an explicit fresh-instance factory.
+
+        Factories must construct all mutable execution state independently; a shallow copy or
+        a new wrapper around shared cancellation, process, or session state is not sufficient.
+        """
+        if execution_factory is not None and not callable(execution_factory):
+            raise TypeError("execution_factory must be callable or None")
         name = _token(getattr(adapter, "name", None), "adapter name")
         roles = _tokens(getattr(adapter, "roles", ()), "roles")
         capabilities = _tokens(getattr(adapter, "capabilities", ()), "capabilities")
@@ -788,7 +955,12 @@ class AgentRegistry:
             adapter.capabilities = capabilities
         except (AttributeError, TypeError):
             pass
-        self._adapters[name] = adapter
+        with self._execution_lock:
+            if name in self._adapters:
+                raise ValueError(f"duplicate adapter name: {name}")
+            self._adapters[name] = adapter
+            if execution_factory is not None:
+                self._execution_factories[name] = execution_factory
         return adapter
 
     def get(self, name: str) -> AgentAdapter | None:
@@ -835,6 +1007,98 @@ class AgentRegistry:
                 f"no registered adapter supports role {role!r} and capabilities {requested}"
             )
         return min(candidates, key=lambda item: (item.name, item.__class__.__name__))
+
+    def create_execution_adapter(
+        self,
+        role: str,
+        required_capabilities: Sequence[str] = (),
+        preferred: str | None = None,
+    ) -> AgentAdapter:
+        """Select an adapter and allocate a fresh, exclusively owned execution instance.
+
+        Built-in commands are reconstructed from immutable configuration. Runtime adapters
+        require an explicit runtime factory, because runtimes can contain locks, sessions,
+        model clients, and cancellation events that cannot safely be copied. Custom adapter
+        types, including subclasses of built-ins, require ``register(execution_factory=...)``.
+        """
+        with self._execution_lock:
+            selected = self.select(role, required_capabilities, preferred)
+            factory = self._execution_factories.get(selected.name)
+            if factory is not None:
+                try:
+                    execution = factory()
+                except Exception as exc:
+                    raise AgentInvocationError("execution adapter factory failed") from exc
+            elif type(selected) is CommandAgentAdapter:
+                execution = CommandAgentAdapter(
+                    selected.command,
+                    roles=tuple(selected.roles),
+                    capabilities=tuple(selected.capabilities),
+                    name=selected.name,
+                    max_output_bytes=selected.max_output_bytes,
+                )
+            elif type(selected) is RuntimeAgentAdapter:
+                if selected.runtime_factory is None:
+                    raise AgentInvocationError(
+                        f"adapter {selected.name} requires an independent runtime_factory"
+                    )
+                try:
+                    runtime = selected.runtime_factory()
+                except Exception as exc:
+                    raise AgentInvocationError("execution runtime factory failed") from exc
+                execution = RuntimeAgentAdapter(
+                    runtime,
+                    name=selected.name,
+                    roles=tuple(selected.roles),
+                    capabilities=tuple(selected.capabilities),
+                    runtime_factory=selected.runtime_factory,
+                )
+            else:
+                raise AgentInvocationError(
+                    f"adapter {selected.name} requires an independent execution_factory"
+                )
+            self._validate_execution_adapter(selected, execution)
+            return execution
+
+    def _validate_execution_adapter(
+        self, prototype: AgentAdapter, execution: AgentAdapter,
+    ) -> None:
+        required_methods = ("run", "cancel", "process_info", "set_process_observer")
+        if any(not callable(getattr(execution, method, None)) for method in required_methods):
+            raise AgentInvocationError("execution factory returned an invalid adapter")
+        try:
+            declarations_match = (
+                execution.name == prototype.name
+                and _tokens(execution.roles, "roles") == frozenset(prototype.roles)
+                and _tokens(execution.capabilities, "capabilities") == frozenset(prototype.capabilities)
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise AgentInvocationError("execution factory returned invalid adapter declarations") from exc
+        if not declarations_match:
+            raise AgentInvocationError("execution factory changed adapter declarations")
+
+        objects: list[object] = [execution]
+        registered_objects: list[object] = list(self._adapters.values())
+        registered_objects.extend(
+            adapter.runtime for adapter in self._adapters.values()
+            if isinstance(adapter, RuntimeAgentAdapter)
+        )
+        if isinstance(execution, RuntimeAgentAdapter):
+            runtime = execution.runtime
+            if any(not callable(getattr(runtime, method, None)) for method in required_methods):
+                raise AgentInvocationError("execution runtime factory returned an invalid runtime")
+            objects.append(runtime)
+        for item in objects:
+            if any(item is registered for registered in registered_objects):
+                raise AgentInvocationError("execution factory reused a registered adapter or runtime")
+            if (self._issued_objects.get(id(item)) is item
+                    or self._retained_objects.get(id(item)) is item):
+                raise AgentInvocationError("execution factory reused a prior adapter or runtime")
+        for item in objects:
+            try:
+                self._issued_objects[id(item)] = item
+            except TypeError:
+                self._retained_objects[id(item)] = item
 
 
 def _bounded_error(value: object) -> str:

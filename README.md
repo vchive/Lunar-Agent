@@ -707,6 +707,13 @@ by Codex/Hermes/OpenClaw, or as the controller that delegates a role to one of t
 library equivalents are `AgentRequest`, `AgentResult`, `AgentRegistry`, `RuntimeAgentAdapter`, and
 `CommandAgentAdapter` from `famou.agents`.
 
+The separate typed `WorkerService` API provides persistent worker sessions with
+`dispatch/send/list/wait/resume/cancel`, independent execution instances, owned process cleanup
+and explicit recovery. See the [local worker quickstart](specs/143-local-worker-lifecycle/quickstart.md).
+Runtime and custom adapters require fresh-instance factories for these concurrent sessions.
+`send` queues input for explicit `resume`. CLI delegation and model-facing worker tools have not
+yet migrated to this API.
+
 ## Continuous Hermes-inspired model session
 
 Lunar-Agent includes a dependency-free OpenAI-compatible HTTP adapter and a bounded continuous

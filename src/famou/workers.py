@@ -11,17 +11,38 @@ import hashlib
 import re
 import threading
 import time
+import uuid
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 from .agents import AgentAdapter, AgentRegistry, AgentRequest, AgentResult
 from .models import Worker, WorkerOutcome, WorkerPhase, WorkerStopReason
+from .process_ownership import ProcessCleanupStatus, RegisteredProcess, cleanup_registered_processes
 from .store import Store
+from .worker_ownership import WorkerOwnerLock
 
 _MAX_INLINE_RESULT_BYTES = 64 * 1024
 _MAX_ARTIFACT_READ_BYTES = 8 * 1024 * 1024
 _RESULT_REF_PATTERN = re.compile(r"^worker-result-(worker-attempt-[0-9a-f]{32})-([0-9a-f]{64})$")
+
+
+class _WorkerStopped(RuntimeError):
+    pass
+
+
+class _WorkerCleanupFailed(RuntimeError):
+    pass
+
+
+@dataclass
+class _Execution:
+    worker: Worker
+    attempt_id: str
+    adapter: AgentAdapter
+    started: bool = False
+    cleanup_failed: bool = False
 
 
 def _is_timeout_error(error: BaseException) -> bool:
@@ -39,6 +60,19 @@ def _is_timeout_error(error: BaseException) -> bool:
             return True
         current = current.__cause__ or current.__context__
     return False
+
+
+def _failure_reason(error: BaseException) -> WorkerStopReason:
+    current = error
+    for _ in range(8):
+        if isinstance(current, _WorkerStopped):
+            return WorkerStopReason.CANCELLED
+        if isinstance(current, _WorkerCleanupFailed):
+            return WorkerStopReason.PROCESS_CLEANUP
+        current = current.__cause__ or current.__context__
+        if current is None:
+            break
+    return WorkerStopReason.TIMEOUT if _is_timeout_error(error) else WorkerStopReason.RUNTIME_ERROR
 
 
 class WorkerService:
@@ -64,9 +98,11 @@ class WorkerService:
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._waiters: dict[str, int] = {}
-        self._active: dict[str, tuple[AgentAdapter, str]] = {}
+        self._active: dict[str, _Execution] = {}
         self._futures: dict[str, Future[None]] = {}
-        self.store.reconcile_workers()
+        self.service_owner_id = "worker-owner-" + uuid.uuid4().hex
+        self._owner_lock: WorkerOwnerLock | None = None
+        self._closed = False
 
     def dispatch(
         self,
@@ -80,16 +116,14 @@ class WorkerService:
         preferred_adapter: str | None = None,
         timeout: float | None = None,
     ) -> Worker:
-        selected = self.registry.select(role, required_capabilities, preferred_adapter)
-        worker = self.store.create_worker(
-            owner_id,
-            role,
-            description or prompt[:512],
-            parent_worker_id=parent_worker_id,
-            agent_type=selected.name,
-            max_depth=self.max_depth,
-        )
-        return self._start(worker, owner_id, prompt, required_capabilities, preferred_adapter, timeout)
+        with self._lock:
+            self._ensure_open()
+            adapter = self.registry.create_execution_adapter(role, required_capabilities, preferred_adapter)
+            worker = self.store.create_worker(
+                owner_id, role, description or prompt[:512], parent_worker_id=parent_worker_id,
+                agent_type=adapter.name, max_depth=self.max_depth,
+            )
+            return self._start(worker, owner_id, prompt, required_capabilities, adapter, timeout)
 
     def send(self, owner_id: str, worker_id: str, content: str) -> Worker:
         worker = self._owned(owner_id, worker_id)
@@ -114,7 +148,9 @@ class WorkerService:
                     remaining = None if deadline is None else deadline - time.monotonic()
                     if remaining is not None and remaining <= 0:
                         return worker
-                    self._condition.wait(remaining)
+                    # Other services can settle/cancel through the same Store without our
+                    # in-process condition. Periodically re-read the durable authority.
+                    self._condition.wait(min(remaining, 0.1) if remaining is not None else 0.1)
             finally:
                 count = self._waiters.get(worker_id, 1) - 1
                 if count:
@@ -124,18 +160,23 @@ class WorkerService:
 
     def cancel(self, owner_id: str, worker_id: str) -> Worker:
         self._owned(owner_id, worker_id)
-        ids = self.store.cancel_worker_tree(worker_id, owner_id)
         with self._lock:
-            adapters = [self._active.get(item, (None, ""))[0] for item in ids]
-        seen: set[int] = set()
-        for adapter in adapters:
-            if adapter is None or id(adapter) in seen:
+            ids = self.store.cancel_worker_tree(worker_id, owner_id)
+            active = [item for item in self._active.values() if item.worker.id in ids
+                      and not self._is_running(item)]
+            attempts = [item for item in self.store.list_worker_owned_attempts(owner_id)
+                        if item.worker_id in ids and item.status != "running"]
+        for attempt in attempts:
+            self._cleanup_attempt(attempt.worker_id, attempt.id, attempt.service_owner_id)
+        for execution in active:
+            if not execution.started:
                 continue
-            seen.add(id(adapter))
             try:
-                adapter.cancel()
+                execution.adapter.cancel()
             except Exception:  # noqa: BLE001, S112 - cleanup continues for every owned adapter
                 continue
+        for attempt in attempts:
+            self._cleanup_attempt(attempt.worker_id, attempt.id, attempt.service_owner_id)
         with self._condition:
             self._condition.notify_all()
         return self.store.get_worker(worker_id)  # type: ignore[return-value]
@@ -150,22 +191,43 @@ class WorkerService:
         preferred_adapter: str | None = None,
         timeout: float | None = None,
     ) -> Worker:
-        worker = self._owned(owner_id, worker_id)
-        if worker.phase.value == "running":
-            raise ValueError("worker is already running")
-        self.registry.select(worker.role, required_capabilities, preferred_adapter)
-        queued = self.store.list_worker_inputs(worker_id)
-        prior = self.store.list_worker_attempts(worker_id, owner_id)
-        effective = prompt or (prior[-1].prompt if prior else worker.description)
-        if queued:
-            effective = effective + "\n\nFollow-up input:\n" + "\n\n".join(queued)
-        resumed = self._start(worker, owner_id, effective, required_capabilities, preferred_adapter, timeout)
-        if queued:
-            self.store.list_worker_inputs(worker_id, consume=True)
-        return resumed
+        with self._lock:
+            self._ensure_open()
+            worker = self._owned(owner_id, worker_id)
+            if worker.phase is WorkerPhase.RUNNING:
+                raise ValueError("worker is already running")
+            adapter = self.registry.create_execution_adapter(worker.role, required_capabilities, preferred_adapter)
+            queued = self.store.list_worker_input_records(worker_id)
+            prior = self.store.list_worker_attempts(worker_id, owner_id)
+            effective = prompt or (prior[-1].prompt if prior else worker.description)
+            if queued:
+                effective = effective + "\n\nFollow-up input:\n" + "\n\n".join(content for _, content in queued)
+            return self._start(
+                worker, owner_id, effective, required_capabilities, adapter, timeout,
+                input_ids=[identity for identity, _ in queued],
+            )
 
-    def reconcile(self) -> int:
-        return self.store.reconcile_workers()
+    def reconcile(self, owner_id: str) -> int:
+        """Reconcile this caller's abandoned service attempts, never a live/unknown owner."""
+        changed = 0
+        for attempt in self.store.list_worker_owned_attempts(owner_id):
+            try:
+                lock = WorkerOwnerLock.acquire(self.store.database, attempt.service_owner_id)
+            except (OSError, ValueError):
+                continue  # Missing/unsafe ownership evidence does not prove interruption.
+            if lock is None:
+                continue
+            try:
+                if self._cleanup_attempt(attempt.worker_id, attempt.id, attempt.service_owner_id):
+                    changed += self.store.reconcile_workers(
+                        owner_id=owner_id, service_owner_id=attempt.service_owner_id,
+                        worker_id=attempt.worker_id, attempt_id=attempt.id,
+                    )
+            finally:
+                lock.close()
+        with self._condition:
+            self._condition.notify_all()
+        return changed
 
     def read_result(self, owner_id: str, worker_id: str) -> str | None:
         """Read and verify a large result artifact owned by the caller."""
@@ -195,7 +257,27 @@ class WorkerService:
         return raw.decode("utf-8")
 
     def close(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        with self._lock:
+            self._closed = True
+            active = list(self._active.values())
+        for execution in active:
+            # An old cancelled attempt may coexist with an explicit continuation owned by
+            # another service. Closing this service must never cancel that new attempt.
+            try:
+                self.store.settle_worker(
+                    execution.worker.id, execution.attempt_id, WorkerOutcome.STOPPED,
+                    reason=WorkerStopReason.CANCELLED,
+                )
+            except Exception:  # noqa: BLE001, S110 - a Store failure must not skip local cleanup
+                pass
+            if execution.started:
+                try:
+                    execution.adapter.cancel()
+                except Exception:  # noqa: BLE001, S110 - finish cleanup of every owned attempt
+                    pass
+            self._cleanup_attempt(execution.worker.id, execution.attempt_id, self.service_owner_id)
+        # Queued attempts drain through the stop guard, so their exact ownership is released.
+        self._executor.shutdown(wait=False)
 
     def _start(
         self,
@@ -203,71 +285,181 @@ class WorkerService:
         owner_id: str,
         prompt: str,
         required_capabilities: Sequence[str],
-        preferred_adapter: str | None,
+        adapter: AgentAdapter,
         timeout: float | None,
+        *,
+        input_ids: Sequence[str] = (),
     ) -> Worker:
-        adapter = self.registry.select(worker.role, required_capabilities, preferred_adapter)
-        attempt = self.store.start_worker_attempt(worker.id, owner_id, prompt)
         with self._lock:
-            self._active[worker.id] = (adapter, attempt.id)
+            self._ensure_open()
+            if self._owner_lock is None:
+                self._owner_lock = WorkerOwnerLock.acquire(
+                    self.store.database, self.service_owner_id, create=True,
+                )
+                if self._owner_lock is None:
+                    raise ValueError("worker execution owner is busy")
+            attempt = None
             try:
-                self._futures[worker.id] = self._executor.submit(
-                    self._execute, worker, attempt.id, adapter, prompt, required_capabilities, timeout
+                attempt = self.store.start_worker_attempt(
+                    worker.id, owner_id, prompt, service_owner_id=self.service_owner_id,
+                    input_ids=input_ids,
+                )
+                execution = _Execution(worker, attempt.id, adapter)
+                self._active[attempt.id] = execution
+                self._futures[attempt.id] = self._executor.submit(
+                    self._execute, execution, prompt, required_capabilities, timeout
                 )
             except Exception:
-                self._active.pop(worker.id, None)
-                self.store.settle_worker(
-                    worker.id,
-                    attempt.id,
-                    WorkerOutcome.FAILURE,
-                    reason=WorkerStopReason.RUNTIME_ERROR,
-                )
+                if attempt is not None:
+                    self._active.pop(attempt.id, None)
+                try:
+                    if attempt is not None:
+                        self.store.settle_worker(worker.id, attempt.id, WorkerOutcome.FAILURE,
+                                                 reason=WorkerStopReason.RUNTIME_ERROR)
+                finally:
+                    self._release_idle_owner()
                 raise
         return self.store.get_worker(worker.id)  # type: ignore[return-value]
 
     def _execute(
         self,
-        worker: Worker,
-        attempt_id: str,
-        adapter: AgentAdapter,
+        execution: _Execution,
         prompt: str,
         required_capabilities: Sequence[str],
         timeout: float | None,
     ) -> None:
-        root = self.workspace / "workers" / worker.id / attempt_id
-        root.mkdir(parents=True, exist_ok=True)
-        request = AgentRequest(
-            run_id=f"worker-run-{worker.id}", task_id=attempt_id, role=worker.role,
-            prompt=prompt, required_capabilities=tuple(required_capabilities), workspace=root, timeout=timeout,
-        )
+        worker, attempt_id, adapter = execution.worker, execution.attempt_id, execution.adapter
+
+        def guard() -> None:
+            if self._closed or not self._is_running(execution):
+                raise _WorkerStopped("worker attempt stopped")
+            if execution.cleanup_failed:
+                raise _WorkerCleanupFailed("worker process cleanup failed")
+
+        def observe(pid: int, pgid: int | None) -> None:
+            try:
+                if pgid is None or not self.store.register_worker_process(
+                    worker.id, attempt_id, self.service_owner_id, pid, pgid,
+                ):
+                    raise _WorkerCleanupFailed("worker process registration failed")
+                if self._closed or not self._is_running(execution):
+                    self._cleanup_attempt(worker.id, attempt_id, self.service_owner_id)
+                    raise _WorkerStopped("worker launch cancelled")
+            except Exception as exc:
+                # Some legacy runtimes treat observer failures as optional metadata.
+                # Stop this exact adapter before returning, and retain a failure flag so
+                # swallowing the callback exception cannot turn the attempt into success.
+                if not isinstance(exc, _WorkerStopped):
+                    execution.cleanup_failed = True
+                try:
+                    adapter.cancel()
+                except Exception:  # noqa: BLE001, S110 - preserve the ownership failure
+                    pass
+                raise
+
+        def released(pid: int, pgid: int | None) -> None:
+            if pgid is not None and not self._cleanup_attempt(
+                worker.id, attempt_id, self.service_owner_id, identity=(pid, pgid),
+            ):
+                execution.cleanup_failed = True
+
         try:
+            with self._lock:
+                guard()
+                execution.started = True
+            root = self.workspace / "workers" / worker.id / attempt_id
+            root.mkdir(parents=True, exist_ok=True)
+            adapter.set_process_observer(observe)
+            for name, callback in (("set_continuation_guard", guard), ("set_process_released", released)):
+                setter = getattr(adapter, name, None)
+                if callable(setter):
+                    setter(callback)
+            request = AgentRequest(
+                run_id=f"worker-run-{worker.id}", task_id=attempt_id, role=worker.role,
+                prompt=prompt, required_capabilities=tuple(required_capabilities), workspace=root, timeout=timeout,
+            )
+            guard()
             result: AgentResult = adapter.run(request)
+            guard()
+            if not self._cleanup_attempt(worker.id, attempt_id, self.service_owner_id):
+                raise _WorkerCleanupFailed("worker process cleanup failed")
             outcome = WorkerOutcome.SUCCESS if result.status == "succeeded" else WorkerOutcome.STOPPED if result.status == "cancelled" else WorkerOutcome.FAILURE
             reason = WorkerStopReason.CANCELLED if result.status == "cancelled" else WorkerStopReason.RUNTIME_ERROR if result.status == "failed" else None
-            with self._condition:
-                delivery = "waiter" if self._waiters.get(worker.id, 0) else "notification"
             result_ref = None
             encoded_result = result.text.encode("utf-8")
             if len(encoded_result) > _MAX_INLINE_RESULT_BYTES:
                 (root / "result.txt").write_bytes(encoded_result)
                 result_ref = f"worker-result-{attempt_id}-{hashlib.sha256(encoded_result).hexdigest()}"
-            self.store.settle_worker(
-                worker.id,
-                attempt_id,
-                outcome,
-                result=result.text,
-                result_ref=result_ref,
-                reason=reason,
-                delivery=delivery,
-            )
-        except Exception as exc:  # noqa: BLE001 - persist a safe typed failure for every adapter error
-            reason = WorkerStopReason.TIMEOUT if _is_timeout_error(exc) else WorkerStopReason.RUNTIME_ERROR
-            self.store.settle_worker(worker.id, attempt_id, WorkerOutcome.FAILURE, reason=reason)
-        finally:
             with self._condition:
-                self._active.pop(worker.id, None)
-                self._futures.pop(worker.id, None)
-                self._condition.notify_all()
+                delivery = "waiter" if self._waiters.get(worker.id, 0) else "notification"
+                self.store.settle_worker(
+                    worker.id, attempt_id, outcome, result=result.text,
+                    result_ref=result_ref, reason=reason, delivery=delivery,
+                )
+        except Exception as exc:  # noqa: BLE001 - persist a safe typed failure for every adapter error
+            reason = (
+                WorkerStopReason.CANCELLED if self._closed else
+                WorkerStopReason.PROCESS_CLEANUP if execution.cleanup_failed else _failure_reason(exc)
+            )
+            outcome = WorkerOutcome.STOPPED if reason is WorkerStopReason.CANCELLED else WorkerOutcome.FAILURE
+            self.store.settle_worker(worker.id, attempt_id, outcome, reason=reason)
+        finally:
+            try:
+                self._cleanup_attempt(worker.id, attempt_id, self.service_owner_id)
+            finally:
+                for name in ("set_process_observer", "set_continuation_guard", "set_process_released"):
+                    setter = getattr(adapter, name, None)
+                    if callable(setter):
+                        try:
+                            setter(None)
+                        except Exception:  # noqa: BLE001, S110 - cleanup must reach every owned handle
+                            pass
+                with self._condition:
+                    self._active.pop(attempt_id, None)
+                    self._futures.pop(attempt_id, None)
+                    self._release_idle_owner()
+                    self._condition.notify_all()
+
+    def _is_running(self, execution: _Execution) -> bool:
+        attempt = self.store.get_worker_attempt(
+            execution.worker.id, execution.attempt_id, service_owner_id=self.service_owner_id,
+        )
+        return attempt is not None and attempt.status == "running"
+
+    def _cleanup_attempt(self, worker_id, attempt_id, service_owner_id, *, identity=None) -> bool:
+        try:
+            registrations = self.store.list_worker_processes(worker_id, attempt_id, service_owner_id)
+        except Exception:  # noqa: BLE001 - inability to inspect ownership is not release evidence
+            return False
+        if identity is not None:
+            registrations = [reg for reg in registrations if (reg.pid, reg.pgid) == identity]
+        targets = [RegisteredProcess(
+            reg.pid, reg.pgid,
+            owner_check=lambda reg=reg: reg in self.store.list_worker_processes(
+                worker_id, attempt_id, service_owner_id,
+            ),
+            label=attempt_id,
+        ) for reg in registrations]
+        for reg, result in zip(registrations, cleanup_registered_processes(targets), strict=True):
+            if result.status in {ProcessCleanupStatus.CLEANED, ProcessCleanupStatus.ALREADY_EXITED}:
+                try:
+                    self.store.clear_worker_process(worker_id, attempt_id, service_owner_id, reg.pid, reg.pgid)
+                except Exception:  # noqa: BLE001, S110 - retain failed registration and continue fan-out
+                    pass
+        try:
+            remaining = self.store.list_worker_processes(worker_id, attempt_id, service_owner_id)
+        except Exception:  # noqa: BLE001 - a later inspection cannot fabricate confirmed cleanup
+            return False
+        return not any(identity is None or (reg.pid, reg.pgid) == identity for reg in remaining)
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise ValueError("worker service is closed")
+
+    def _release_idle_owner(self) -> None:
+        if not self._active and self._owner_lock is not None:
+            self._owner_lock.close()
+            self._owner_lock = None
 
     def _owned(self, owner_id: str, worker_id: str) -> Worker:
         worker = self.store.get_worker(worker_id)

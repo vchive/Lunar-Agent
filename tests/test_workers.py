@@ -41,6 +41,12 @@ class TimeoutAdapter(FixtureAdapter):
         raise TimeoutError("provider details must not be persisted")
 
 
+def registry(adapter):
+    result = AgentRegistry()
+    result.register(adapter, execution_factory=lambda: type(adapter)(adapter.delay, adapter.text))
+    return result
+
+
 def test_worker_store_enforces_owner_depth_and_idempotent_settlement(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()
@@ -63,7 +69,7 @@ def test_worker_service_dispatch_send_wait_resume_and_cancel(tmp_path: Path) -> 
     store = Store(tmp_path / "state.db")
     store.initialize()
     adapter = FixtureAdapter(delay=0.05)
-    service = WorkerService(store, AgentRegistry([adapter]), tmp_path / "sessions")
+    service = WorkerService(store, registry(adapter), tmp_path / "sessions")
     worker = service.dispatch("owner", prompt="first", role="worker")
     service.send("owner", worker.id, "follow up")
     assert service.wait("owner", worker.id, timeout=2).outcome is WorkerOutcome.SUCCESS
@@ -78,7 +84,7 @@ def test_worker_service_dispatch_send_wait_resume_and_cancel(tmp_path: Path) -> 
 def test_worker_send_requires_running_and_timeout_is_not_failure(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()
-    service = WorkerService(store, AgentRegistry([FixtureAdapter(delay=0.2)]), tmp_path / "sessions")
+    service = WorkerService(store, registry(FixtureAdapter(delay=0.2)), tmp_path / "sessions")
     worker = store.create_worker("owner", "worker", "idle")
     with pytest.raises(ValueError, match="not running"):
         service.send("owner", worker.id, "late")
@@ -95,7 +101,7 @@ def test_parent_cancel_cascades_without_touching_unrelated_worker(tmp_path: Path
     store.initialize()
     service = WorkerService(
         store,
-        AgentRegistry([FixtureAdapter(delay=0.15)]),
+        registry(FixtureAdapter(delay=0.15)),
         tmp_path / "sessions",
         max_depth=1,
     )
@@ -112,17 +118,18 @@ def test_parent_cancel_cascades_without_touching_unrelated_worker(tmp_path: Path
     service.close()
 
 
-def test_worker_reconcile_marks_interrupted_attempt_lost(tmp_path: Path) -> None:
+def test_worker_reconcile_preserves_legacy_unknown_owner(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()
     worker = store.create_worker("owner", "worker", "restart")
     attempt = store.start_worker_attempt(worker.id, "owner", "work")
-    service = WorkerService(store, AgentRegistry([FixtureAdapter()]), tmp_path / "sessions")
+    service = WorkerService(store, registry(FixtureAdapter()), tmp_path / "sessions")
     recovered = store.get_worker(worker.id)
     assert recovered is not None
-    assert recovered.phase is WorkerPhase.IDLE
-    assert recovered.outcome is WorkerOutcome.LOST
-    assert recovered.stop_reason.value == "restart"
+    assert service.reconcile("owner") == 0
+    assert recovered.phase is WorkerPhase.RUNNING
+    assert recovered.outcome is None
+    assert recovered.stop_reason is None
     assert store.list_worker_attempts(worker.id)[0].id == attempt.id
     service.close()
 
@@ -131,7 +138,7 @@ def test_large_worker_result_is_bounded_and_referenced(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()
     text = "x" * (64 * 1024 + 100)
-    service = WorkerService(store, AgentRegistry([FixtureAdapter(text=text)]), tmp_path / "sessions")
+    service = WorkerService(store, registry(FixtureAdapter(text=text)), tmp_path / "sessions")
     worker = service.dispatch("owner", prompt="large")
     result = service.wait("owner", worker.id, timeout=2)
     assert result.result_ref is not None
@@ -149,7 +156,7 @@ def test_worker_cancel_preserves_stopped_against_late_result(tmp_path: Path) -> 
     store = Store(tmp_path / "state.db")
     store.initialize()
     adapter = FixtureAdapter(delay=0.2)
-    service = WorkerService(store, AgentRegistry([adapter]), tmp_path / "sessions")
+    service = WorkerService(store, registry(adapter), tmp_path / "sessions")
     worker = service.dispatch("owner", prompt="slow", role="worker")
     stopped = service.cancel("owner", worker.id)
     assert stopped.outcome is WorkerOutcome.STOPPED
@@ -161,7 +168,7 @@ def test_worker_cancel_preserves_stopped_against_late_result(tmp_path: Path) -> 
 def test_cancel_wakes_a_waiter_without_waiting_for_timeout(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()
-    service = WorkerService(store, AgentRegistry([FixtureAdapter(delay=1)]), tmp_path / "sessions")
+    service = WorkerService(store, registry(FixtureAdapter(delay=1)), tmp_path / "sessions")
     worker = service.dispatch("owner", prompt="slow")
     observed: list[WorkerOutcome | None] = []
 
@@ -181,7 +188,7 @@ def test_cancel_wakes_a_waiter_without_waiting_for_timeout(tmp_path: Path) -> No
 def test_worker_timeout_is_typed_and_events_are_redacted(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()
-    service = WorkerService(store, AgentRegistry([TimeoutAdapter()]), tmp_path / "sessions")
+    service = WorkerService(store, registry(TimeoutAdapter()), tmp_path / "sessions")
     worker = service.dispatch("owner", prompt="secret prompt")
     settled = service.wait("owner", worker.id, timeout=2)
     assert settled.outcome is WorkerOutcome.FAILURE

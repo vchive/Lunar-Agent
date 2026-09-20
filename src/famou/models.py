@@ -52,6 +52,7 @@ class WorkerStopReason(StrEnum):
     PARENT_CANCELLED = "parent_cancelled"
     TIMEOUT = "timeout"
     RUNTIME_ERROR = "runtime_error"
+    PROCESS_CLEANUP = "process_cleanup"
     RESTART = "restart"
 
 
@@ -85,6 +86,18 @@ class WorkerAttempt:
     outcome: WorkerOutcome | None
     result: str | None
     error: str | None
+    service_owner_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkerProcess:
+    """One process group registered to an exact worker execution owner."""
+
+    worker_id: str
+    attempt_id: str
+    service_owner_id: str
+    pid: int
+    pgid: int
 
 
 @dataclass(frozen=True)

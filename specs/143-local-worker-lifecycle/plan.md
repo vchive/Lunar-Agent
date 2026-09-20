@@ -1,7 +1,7 @@
 # Implementation Plan: Local multi-agent worker lifecycle
 
 **Date**: 2026-09-20
-**Status**: Local APIs implemented; lifecycle hardening reopened on 2026-09-21;
+**Status**: Local lifecycle hardening validated on 2026-09-21;
 explicit delegation migration remains deferred
 
 ## Phase A: Durable model and pure lifecycle rules
@@ -64,6 +64,31 @@ JUnit reports in CI, publishes bounded failure annotations, and runs all support
 without matrix fail-fast. This addresses the inaccessible Linux failure diagnostics observed during
 the audit; it does not classify the root cause or relax any product/frozen-history check.
 
-No database migration is assumed until the record shape and compatibility fixtures are accepted.
+Migration 8 adds nullable `worker_attempts.service_owner_id` and a separate process registration
+table. Migration fixtures preserve old rows with unknown ownership and exercise repeated
+initialization. No missing owner or lock is treated as proof of interruption.
+
+## Accepted implementation decisions
+
+- Worker execution uses a fresh adapter/runtime factory per attempt. Ordinary synchronous adapter
+  selection remains compatible. Missing factories or reused live objects fail before invocation.
+- A Store-scoped file lock establishes service liveness; explicit caller-scoped reconciliation
+  acquires existing owner evidence before process cleanup and exact-attempt settlement.
+- Active handles, callbacks, close and process registrations use attempt identity. A cancelled
+  queued attempt never enters its adapter; an older finalizer cannot release a new attempt.
+- Resume validates and consumes exactly its snapshotted input IDs in the same transaction as the
+  attempt claim. A stale snapshot cannot invoke an adapter, and later arrivals remain queued.
+- Registration failures stop the exact adapter even if a legacy runtime swallows observer errors.
+  Unconfirmed cleanup retains process ownership and blocks continuation until verified cleanup.
+- The runnable provider-free example is [quickstart.md](quickstart.md). T009 is separate from this
+  local API acceptance and remains deferred.
+
+## Complexity tracking
+
+The extra process table and local advisory owner locks are necessary to distinguish a live peer,
+an abandoned attempt and an uncertain retained process. Reusing a global recovery sweep or a
+single process field cannot safely represent those states. No new dependency or service is added.
+
+
 Do not use `tasks.parent_id` as a substitute for `parent_worker_id`; do not copy OpenCode HTTP or
 plugin code into Lunar; do not run a provider campaign as implementation validation.

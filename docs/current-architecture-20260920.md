@@ -1,8 +1,9 @@
 # Lunar Agent：当前架构与执行链路
 
-创建日期：2026-09-20；2026-09-21 核对产品 `65d9ae2`。Feature 142 Phase A 前台生命周期和
+创建日期：2026-09-20；2026-09-21 更新包含已完成本地验收的 143 修复。142 的已推送历史基线为
+`65d9ae2`。Feature 142 Phase A 前台生命周期和
 Phase B 进程登记/取消清理已经完成离线验收，Phase C 自动多文件后台入口尚未开放。Feature
-143 已有本地 worker API，但本次审计复现并发隔离与恢复缺陷，尚需修复后再接实际 consumer。
+143 已补本地 worker 的并发隔离、精确进程清理与 owner 活性恢复；实际 consumer 仍待接入。
 下文分别说明已经实现的路径和仍待验收的边界。
 
 ## 1. 系统定位
@@ -52,7 +53,7 @@ flowchart TD
 | 入口与编排 | 命令、模式校验、输入导入、继续运行、普通/演化分流 | `cli.py` |
 | 控制层 | 创建/领取任务、并发、预算检查、结果登记、取消、父子交付 | `controller.py` |
 | 自动求解生命周期 | 活动执行排他、共享截止时间、阶段检查、父任务编排、状态投影 | `automatic_solve_lifecycle.py`、`cli.py`、`controller.py` |
-| 显式 worker 控制面 | worker/attempt、owner、等待、排队消息和结果持久化；并发取消隔离与重启恢复存在已复现缺陷 | `workers.py`、`store.py` |
+| 显式 worker 控制面 | 独立 attempt 执行、owner 活性锁、等待、原子消息续跑、精确进程清理及结果持久化 | `workers.py`、`worker_ownership.py`、`store.py` |
 | 状态层 | run/task/attempt、事件、产物索引、计划版本、进程归属 | `store.py`、`models.py` |
 | 计划与角色 | 任务合同、依赖图、领域与能力选择、恢复建议 | `conversational.py`、`algorithm.py`、`policy.py`、`routing.py`、`profiles.py`、`recovery.py` |
 | 模型与工具 | Mock、显式进程、兼容接口；工具循环、请求预算、会话 | `runtime.py`、`agents.py`、`agent_loop.py`、`tools.py`、`model_profile.py` |
@@ -64,14 +65,17 @@ flowchart TD
 Feature 143 增加了一条与普通 task DAG 分开的显式 worker 链路：Controller 通过
 `dispatch_worker/send_worker/list_workers/wait_worker/cancel_worker/resume_worker` 操作稳定的
 worker identity，Store 保存 worker、attempt 和受限事件。worker 的 activity phase 与最近一次
-outcome 分开记录；直接 owner 才能操作，父取消会传播到已验证的子树，进程重启时未完成运行
-标记为 `lost`。结果默认内联截断，大结果写入 worker attempt 目录并由带 SHA-256 的引用读取。
+outcome 分开记录；直接 owner 才能操作，父取消会传播到已验证的子树。显式恢复只将已确认
+owner 中断且完成进程清理的未完成 attempt 标记为 `lost`，缺少 owner/锁证据的记录保持原状。
+结果默认内联截断，大结果写入 worker attempt 目录并由带 SHA-256 的引用读取。
 
-这条链路尚未接入 CLI `delegate` 或 AgentLoop 的工具。2026-09-21 审计用纯本地假 adapter
-复现：共享实例取消误伤另一 worker、新服务初始化误将仍活动的 worker 标为 `lost`、已取消
-的排队 worker 仍执行 adapter。当前 `_execute` 也未接实际进程 observer；`send` 消息要到显式
-resume 才消费。上述原测试未覆盖的缺口已写回 143 SDD，不能把 API 存在当作并发多 Agent
-已验收。普通 DAG 的独立 runtime 并发与这里的 worker session 是不同路径。
+这条链路尚未接入 CLI `delegate` 或 AgentLoop 的工具。2026-09-21 审计发现的共享取消、
+误判中断和排队取消缺陷已补修复：每个 attempt 由 factory 创建独立 adapter/runtime，
+执行前核对 Store 状态，回调与关闭绑定精确 attempt，实际 PID/PGID 由 observer 登记和清理。
+Store migration 8 增加可空 service owner 和独立进程表；服务持有本地锁证明活性，打开第二个
+服务不触发全库恢复。`send` 消息到显式 resume 时与启动认领原子消费，后来消息留到下次。
+修复共享回归 260 项通过，完整验证见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
+普通 DAG 的独立 runtime 并发与这里的 worker session 仍是不同路径。
 这条链路复用现有 AgentAdapter，但尚未迁移普通 delegation，也没有改变 task DAG 或自动多文件
 入口的生命周期。
 

@@ -1,7 +1,7 @@
 # Feature Specification: Local multi-agent worker lifecycle
 
 **Created**: 2026-09-20
-**Status**: Local APIs implemented; lifecycle acceptance reopened by the 2026-09-21 audit;
+**Status**: Local lifecycle hardening validated on 2026-09-21;
 explicit delegation migration remains deferred
 **Input**: WebAgent famou-v2.5 multiagent review and Lunar capability comparison
 
@@ -137,3 +137,31 @@ No dynamic role prompt catalog, approval gate, remote cancellation promise, cumu
 automatic retry, live message interruption, WebAgent effect/parity claim, or real provider campaign
 is included. T009 remains deferred until the reopened lifecycle acceptance passes; its absence
 does not block Feature 142's separate foreground automatic multi-file acceptance.
+
+## Execution and migration contract
+
+Concurrent workers allocate a fresh adapter with `AgentRegistry.create_execution_adapter`.
+Built-in command adapters reuse only their configuration. Runtime adapters require an explicit
+`runtime_factory`; custom adapters require a registered `execution_factory`. Missing or reused
+execution instances are rejected before invoking a worker. Ordinary `select`/`run_agent` entry
+and selection contracts remain compatible; shared command process cleanup and re-entry are also
+hardened. This deliberately tightens the initial worker API, whose shared instances were not
+safe for concurrent execution. Factories must also isolate any mutable state inside their objects.
+
+Schema migration 8 adds a nullable service execution owner to worker attempts and an independent
+process registration table. Existing rows remain readable; absent owner evidence is unknown,
+not proof of a dead service. A service takes a Store-scoped owner file lock before claiming an
+attempt and keeps it until its last active attempt has drained. Opening another service does
+not reconcile anything. Explicit `reconcile(owner_id)` checks only that caller's attempts and
+requires an existing, safely opened, unheld owner lock before cleanup and exact-attempt `lost`
+settlement. Missing/unsafe locks and unconfirmed process cleanup retain the prior records.
+
+Cancellation, service close, process release and late finalizers refer to exact attempt identities.
+Explicit resume can start an isolated new attempt after cancellation when there are no retained
+process registrations; an older callback cannot remove the new handle or replace its outcome.
+Queued messages are snapshotted for resume; their existence is checked and only those exact IDs
+are consumed atomically with the attempt claim. A stale snapshot is rejected before invocation,
+and a message arriving during the new execution remains available for its next continuation.
+
+See [quickstart.md](quickstart.md) for the explicit local API and recovery limits. T009 remains
+required before claiming integration with CLI delegation or model-facing worker tools.

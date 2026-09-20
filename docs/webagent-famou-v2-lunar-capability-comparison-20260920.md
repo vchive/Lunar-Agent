@@ -1,6 +1,6 @@
 # Lunar 与 WebAgent + famou-v2 能力对照
 
-创建日期：2026-09-20；当前状态更新于 2026-09-21，产品基线 `65d9ae2`。
+创建日期：2026-09-20；2026-09-21 更新包含已完成本地验收的 143 修复，142 历史基线为 `65d9ae2`。
 
 本文将当前 Lunar 源码、离线验证和 Feature 139 的唯一真实多文件运行，与本地审计过的
 WebAgent v2.5 和 famou-v2 引擎做能力对照。这里的“覆盖”指 Lunar 具备对应的本地
@@ -22,10 +22,10 @@ Lunar 没有覆盖 WebAgent 的 OpenCode 产品层和 famou-v2 的远程实验�
 审批门、完整 WorkerRegistry 语义、`FamouClient`/`famou-ctl`、远程 GPU sandbox、project relay、
 SSE replay 和多租户服务。这些不是当前本地路线的默认依赖。
 
-Feature 143 已实现本地持久 worker API，但 2026-09-21 的纯 mock 复核复现了并发隔离与恢复
-缺口：共享 adapter 取消影响无关 worker；第二个 WorkerService 构造会误将活跃 worker
-按全库恢复逻辑置为 `lost`；已取消的 queued worker 仍可调用 adapter。这些问题待修复和
-回归，T009 实际 delegation consumer 也尚未接入；该 consumer 接线不是 Feature 142 的依赖。
+Feature 143 已修复本地 worker 的并发取消、活性恢复和排队取消缺陷，补上独立执行工厂、
+精确 attempt 进程清理及消息原子消费，共享回归 260 项通过。T009 实际 delegation consumer
+尚未接入；本地 API 验收不代表模型已能使用 worker 工具，该接线不是 Feature 142 的依赖。
+最终验证记录见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
 
 ## 能力矩阵
 
@@ -47,7 +47,7 @@ Feature 143 已实现本地持久 worker API，但 2026-09-21 的纯 mock 复核
 | 失败分类、unknown、checkpoint/resume | **部分覆盖**。候选失败、timeout、unknown、run failure 和 preparation failure 有固定记录。 | 与 famou-v2 的 retry queue/正式 iteration 语义不同；不能宣称恢复语义完全相同。 |
 | 全链路 wall-clock、父子取消、后台自动多文件 | **部分覆盖**。Feature 142 Phase A/B 已实现一次活动执行的共享墙钟、父编排、父子取消、实际进程登记和清理，并完成离线验收；Phase C 尚未实现，automatic `--detach` 仍拒绝。 | 剩余缺口是自动后台入口及前后台一致性验收；本地清理也不证明远端 provider 已停止计算。 |
 | WebAgent 持久 approval gate | **部分覆盖**。Lunar 有 policy、event ledger、recovery 和 cancel，但没有完整的 `pending/approved/failed/timed_out/abandoned/not_confirmed` 状态机、同会话阻断和 bypass 防护。 | 应吸收状态机和未知终态原则，不必复制 OpenCode hook。 |
-| WebAgent WorkerRegistry | **部分覆盖**。Feature 143 已有持久 Worker/WorkerAttempt、`dispatch/send/list/wait/resume/cancel`、owner/depth 校验和结果投递 API；并发取消隔离、活跃 worker 的恢复判定及 queued 取消准入存在已复现缺陷，T009 consumer 尚未接入。 | 不能宣称完整生命周期等价或并发恢复已验收；T009 接线不阻塞 Feature 142。 |
+| WebAgent WorkerRegistry | **部分覆盖**。Feature 143 已有持久 Worker/WorkerAttempt、`dispatch/send/list/wait/resume/cancel`、owner/depth 校验和结果投递 API；已补独立执行、活性锁、精确进程清理和排队取消修复，T009 consumer 尚未接入。 | 不能宣称完整产品集成等价或真实效果持平；T009 接线不阻塞 Feature 142。 |
 | WebAgent `evolve_*` / `FamouClient` / `famou-ctl` | **未覆盖，且当前不迁移**。Lunar 默认使用本地 population 和本地 Store。 | 对方是远程实验控制面；Lunar 只保留 transport-neutral 的协议边界。 |
 | 远程 GPU、sandbox、upload/download、project relay | **未覆盖**。Lunar 当前是本地受控子进程和本地 workspace。 | 属于 WebAgent/famou-v2 服务部署能力，当前产品没有这个运行前提。 |
 | Provider HTTP trace、SSE stall replay、OpenCode plugin compatibility | **未覆盖等价实现**。Lunar 有 transcript、usage 和事件诊断，但没有 provider fetch hook 或 OpenCode 1.3.10 插件兼容层。 | 只能吸收脱敏、可审计和 unknown 不自动重试的原则。 |
@@ -76,8 +76,8 @@ WebAgent 持平，也不能把 Feature 139 描述为端到端成功。
 如果目标是“本地可验证的 Agent + 程序演化系统”，Lunar 已经覆盖参考仓库最值得迁移的核心，
 并在 evaluator receipt、候选身份和交付证据上走得更严格。下一步的高价值工作是新的真实
 前台闭环验收、Feature 142 Phase C 后台入口，以及提高严格最终响应协议在真实模型下产出
-可执行候选的成功率。Feature 143 的并发隔离与恢复缺陷可以独立修复，再验证实际 consumer 接线。
-跨平台发布验证还有当前 Linux CI 测试失败需要定位，具体状态见[系统评估](system-readiness-20260916.md)；
+可执行候选的成功率。Feature 143 本地生命周期已补修复，下一步验证实际 consumer 接线。
+跨平台验证已定位并修复正向执行 fixture 的符号链接路径问题，Linux 矩阵仍待完成，具体见[系统评估](system-readiness-20260916.md)；
 本表的本地能力覆盖不代表 CI 或真实任务验收均通过。
 
 如果目标是“兼容 WebAgent 的线上产品形态”，还需要另行建设 OpenCode 插件/审批、完整多

@@ -1,6 +1,7 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-21 核对至已推送的产品 `65d9ae2`：Feature 142 Phase A
+评估创建于 2026-09-16，2026-09-21 更新包含已完成本地验收的 143 修复。已推送的 142 历史产品
+基线为 `65d9ae2`：Feature 142 Phase A
 前台生命周期和 Phase B 进程取消/清理已完成。本机定向、兼容和双阶段全量回归均通过；
 同一产品提交的 Linux CI 测试失败，跨平台发布验证尚未关闭，具体证据见下文。
 Feature 140 的持久候选生成回执已推送；Feature 141 的原生多文件 CLI 显式候选预算已由
@@ -22,34 +23,40 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 
 | 优先级/范围 | 尚未完成 | 完成条件 |
 | --- | --- | --- |
-| P0：发布验证 | `65d9ae2` 的 Linux/Python 3.11 CI 在测试步骤失败；3.12/3.13 被矩阵取消 | 取得失败日志，定位和复现具体用例或回归阶段，修复后通过支持版本的完整 CI；不能以本机结果代替 |
+| P0：发布验证 | 诊断矩阵三个版本均报 96 项失败；shell 符号链接路径问题已复现并修正 fixture，`93469e7` 已推送 | 验证修复后支持版本完整 CI，确认是否还有其他失败；不能以本机结果代替 |
 | P0：前台自动多文件验收 | 当前产品的真实完整交付；新验收只有计划，还没有新登记、执行证据或结果 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：候选完成可靠性 | 139 的真实失败是 `worker_failed` / `malformed_candidate`；改进最终响应协议及更细失败诊断尚未落地 | 单独明确改动规格，保留严格解析和失败分母，先做相应离线 fixture，再用新验收检验；延长等待不构成修复 |
 | P1：包含自动后台的发布 | 142 Phase C T018–T021 | solve/resume/answer 后台入口、启动认领与退出释放、答案只接收一次、前后台一致性、取消与恢复均通过验收 |
-| P1：包含并发多 Agent 的发布 | 143 并发隔离/恢复修复及 T009 consumer 接线 | 修复下列已复现问题，补实际进程登记和清理回归，再把一个真实 delegation 入口接入 worker API |
+| P1：包含并发多 Agent 的发布 | 143 T009 consumer 接线；本地生命周期修复已通过完整回归 | 将一个实际 delegation 入口接入已隔离的 worker API，验证用户操作、结果回流、取消和恢复 |
 | 后续能力 | OpenEvolve/Shinka 多文件接入、Shinka 启动调度及真实框架验收 | 外部候选走同一执行/评分/交付链，在新独立登记中验证；不重跑 WebAgent |
 | 后续扩展 | 更复杂输入、跨文件依赖、通用仓库/workflow 与远端运行 | 明确支持范围和代表性验收，不从一个双文件样例外推 |
 
 公共 GitHub Actions 元数据确认 [run 35522272395](https://github.com/vchive/Lunar-Agent/actions/runs/35522272395)
 中的 Python 3.11 checkout、环境和依赖安装成功，`Run tests` 退出 1，静态检查未运行。
 3.12/3.13 的取消原因明确为矩阵中 3.11 失败，不是两个版本各自验收失败。公开注释没有
-失败测试名，日志要求登录，下载接口返回 403，且本次无上传报告；目前无法判定 current
-还是 frozen123 阶段失败，也不能归因于冻结历史 guard。下一步先取得具体日志并定位；这不
-改变已经保留的本机双阶段通过证据，但不能宣称当前跨平台 CI 通过。
+失败测试名，日志要求登录，下载接口返回 403，且该次无上传报告；当时无法判定 current
+还是 frozen123 阶段失败，也不能归因于冻结历史 guard。旧运行的这些限制不改变已经保留的
+本机双阶段通过证据；后续通过新增诊断定位问题，进度如下。
 
-Feature 143 已有稳定 worker identity、直接 owner 校验、深度限制、六项本地 API、持久事件和
-大结果引用。但本次纯本地假 adapter 审计复现三项未被原测试覆盖的问题：共享有状态 adapter
-使取消目标影响无关 worker；第二个 WorkerService 构造会把第一个仍执行的 worker 误标为
-`lost`；排队 worker 已取消仍可能进入 `adapter.run()`。实际 worker 执行也未接 process observer。
-因此不能把现有 API 直接迁到用户入口并称为并发隔离已完成。最新全量中原有 worker 测试
-9 项通过，仅证明原覆盖范围。`send` 当前排队到显式 resume 消费，不表示正在运行的模型已收到
-消息。修复项继续在 [143 SDD](../specs/143-local-worker-lifecycle/tasks.md) 跟踪。
+随后 `c22bd37` 增加有界公开失败摘要、报告保存和独立矩阵运行，新诊断 run 三版本均报
+96 项失败，首批定位到候选执行。受控本地复现确认 shell 的符号链接路径触发既有安全拒绝；
+`93469e7` 已将四个正向 fixture 改成真实可执行路径，相关 164 项通过，产品安全约束不变。
+新矩阵正在验证其余失败是否一并消失，详见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
+
+Feature 143 已修复审计发现的三项问题：每个 attempt 使用独立执行 adapter/runtime，第二个
+服务不再误判活动 owner，已取消的排队任务不会进入 adapter。实际进程 observer 绑定精确
+attempt；登记异常会停止对应执行，清理未确认时保留进程记录。跨服务关闭/恢复和迟到结果
+也不会覆盖新的 attempt。Store migration 8 保留未知 owner 的旧记录；显式恢复需要确认
+owner 已中断并完成清理。`send` 仍排队到显式 resume，与启动认领在同一事务消费。
+共享回归 260 项通过；完整当前 8708 passed、1 skipped、24 deselected，冻结 24 passed。
+完整证据见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
+T009 实际用户入口仍待接入，不能把本地 API 验收当作模型多 Agent 产品链已完成。
 
 当前 CLI `delegate` 仍走同步 `run_agent()`，142 前台自动多文件也不依赖该 WorkerService；
-这些新发现不撤销 142 Phase A/B 的验收。真实前台验收准备、Phase C 和 143 修复可分轨推进，
+这些 worker 修复不改变 142 Phase A/B 的验收。真实前台验收准备、Phase C 和 143 集成可分轨推进，
 但在新真实验收登记时必须固定产品，不能运行途中换代码。143 T009 不阻塞 142。
 
-本轮只核对实现、复现本地缺陷并同步 SDD/发布清单，没有修复上述 worker 缺陷或新增真实结果。
+本轮包含 worker 产品修复、永久回归与 CI 诊断；没有 provider 请求或新增真实效果结果。
 历史 139 的未勾选项是冻结的离线检查点；其唯一槽已经结束，不是待重跑任务。104/133 后续
 均已实现，不能仍按最初“只写规格”状态算欠账。旧 002 已被 003 替代，094 的漏勾项已有实现
 验收。冻结记录不为清理待办而重写。
@@ -262,7 +269,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 多文件候选 | command/Agent/native runtime 生成 → bundle → 执行/独立评测 → receipt/archive/population → 父任务交付/terminal resume 已完成 | 普通 intake、完整父代上下文、helper-only 改进、有效性选优、迁移、失败保留、完整交付与不重跑 fixture |
 | 自动 evaluator/profile | 自动 compiler/auditor、输出探针、独立 preparation 请求/墙钟预算与冻结恢复已接通；源码文件数另做确定性检查；其他 source/execution 提前报不支持 | 128及134真实准备通过，各自8/8留出；134完整交付仍为0/1 |
 | 自动 solve 前台生命周期 | 一次活动执行的共享 deadline、durable parent orchestration、统一入口、排他继续、只读状态和实际进程取消/清理已实现 | Feature 142 Phase A/B 定向与最终双阶段离线回归通过；自动 detach 和新的真实完整交付尚未验收 |
-| 显式 worker API | 有独立 worker/attempt、owner、六项操作和结果引用；实际 delegation 尚未迁入 | 原有 9 项 worker 测试通过；本次并发取消、重复服务恢复及排队取消反例已复现，修复仍未完成 |
+| 显式 worker API | 有独立 worker/attempt、owner 活性、六项操作、进程清理和结果引用；实际 delegation 尚未迁入 | 并发隔离、恢复和排队取消缺陷已补修复，共享回归 260 项通过；T009 尚未验收 |
 | OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现 | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证 |
 | ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现 | 本地 fixture；尚无 Shinka launcher/调度实现 |
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |

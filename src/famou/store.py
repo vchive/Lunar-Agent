@@ -12,7 +12,7 @@ import math
 import re
 import sqlite3
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +31,7 @@ from .models import (
     WorkerAttempt,
     WorkerOutcome,
     WorkerPhase,
+    WorkerProcess,
     WorkerStopReason,
 )
 from .policy import (
@@ -148,9 +149,17 @@ CREATE TABLE IF NOT EXISTS worker_attempts (
     finished_at TEXT,
     outcome TEXT,
     result TEXT,
-    error TEXT
+    error TEXT,
+    service_owner_id TEXT
 );
 CREATE INDEX IF NOT EXISTS worker_attempts_worker_idx ON worker_attempts(worker_id, started_at);
+CREATE TABLE IF NOT EXISTS worker_attempt_processes (
+    attempt_id TEXT NOT NULL REFERENCES worker_attempts(id),
+    pid INTEGER NOT NULL,
+    pgid INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(attempt_id, pid, pgid)
+);
 CREATE TABLE IF NOT EXISTS worker_inputs (
     id TEXT PRIMARY KEY,
     worker_id TEXT NOT NULL REFERENCES workers(id),
@@ -250,6 +259,11 @@ class Store:
             self._ensure_column(connection, "attempts", "pid", "INTEGER")
             self._ensure_column(connection, "attempts", "pgid", "INTEGER")
             self._ensure_column(connection, "workers", "result_ref", "TEXT")
+            self._ensure_column(connection, "worker_attempts", "service_owner_id", "TEXT")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS worker_attempts_owner_idx "
+                "ON worker_attempts(service_owner_id, status)"
+            )
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                 (1, utc_now()),
@@ -277,6 +291,10 @@ class Store:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                 (7, utc_now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (8, utc_now()),
             )
 
     @staticmethod
@@ -3190,12 +3208,34 @@ class Store:
             ).fetchall()
         return [self._worker_from_row(row) for row in rows]
 
-    def start_worker_attempt(self, worker_id: str, owner_id: str, prompt: str) -> WorkerAttempt:
+    def start_worker_attempt(
+        self,
+        worker_id: str,
+        owner_id: str,
+        prompt: str,
+        *,
+        service_owner_id: str | None = None,
+        input_ids: Sequence[str] = (),
+    ) -> WorkerAttempt:
         if not prompt.strip() or len(prompt.encode("utf-8")) > 64 * 1024:
             raise ValueError("worker prompt must be non-empty and at most 64 KiB")
+        if service_owner_id is not None and (
+            not isinstance(service_owner_id, str)
+            or not service_owner_id.strip()
+            or len(service_owner_id) > 128
+        ):
+            raise ValueError("worker service owner must be a non-empty bounded identifier")
+        if isinstance(input_ids, (str, bytes)):
+            raise TypeError("worker input identities must be a sequence of strings")
+        consumed_ids = tuple(input_ids)
+        if any(not isinstance(item, str) or not item for item in consumed_ids):
+            raise ValueError("worker input identities must be non-empty strings")
+        if len(consumed_ids) != len(set(consumed_ids)):
+            raise ValueError("worker input identities must be unique")
         attempt_id = f"worker-attempt-{uuid.uuid4().hex}"
         timestamp = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             worker = connection.execute(
                 "SELECT * FROM workers WHERE id = ? AND owner_id = ?", (worker_id, owner_id)
             ).fetchone()
@@ -3203,9 +3243,29 @@ class Store:
                 raise PermissionError("worker is not owned by caller")
             if worker["phase"] == WorkerPhase.RUNNING.value:
                 raise ValueError("worker is already running")
+            if connection.execute(
+                "SELECT 1 FROM worker_attempts a WHERE a.worker_id = ? AND "
+                "(a.status = 'running' OR EXISTS (SELECT 1 FROM worker_attempt_processes p "
+                "WHERE p.attempt_id = a.id)) LIMIT 1",
+                (worker_id,),
+            ).fetchone():
+                raise ValueError("worker still has an active attempt or retained process ownership")
+            if consumed_ids:
+                current_ids = {
+                    row["id"] for row in connection.execute(
+                        "SELECT id FROM worker_inputs WHERE worker_id = ?", (worker_id,),
+                    ).fetchall()
+                }
+                if not set(consumed_ids).issubset(current_ids):
+                    raise ValueError("worker input identities changed before attempt start")
             connection.execute(
-                "INSERT INTO worker_attempts(id, worker_id, prompt, status, started_at) VALUES(?, ?, ?, ?, ?)",
-                (attempt_id, worker_id, prompt, "running", timestamp),
+                "INSERT INTO worker_attempts(id, worker_id, prompt, status, started_at, service_owner_id) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (attempt_id, worker_id, prompt, "running", timestamp, service_owner_id),
+            )
+            connection.executemany(
+                "DELETE FROM worker_inputs WHERE worker_id = ? AND id = ?",
+                [(worker_id, input_id) for input_id in consumed_ids],
             )
             connection.execute(
                 "UPDATE workers SET phase = ?, stop_reason = NULL, last_error = NULL, updated_at = ? WHERE id = ?",
@@ -3215,11 +3275,96 @@ class Store:
             row = connection.execute("SELECT * FROM worker_attempts WHERE id = ?", (attempt_id,)).fetchone()
         return self._worker_attempt_from_row(row)  # type: ignore[arg-type]
 
+    def get_worker_attempt(
+        self,
+        worker_id: str,
+        attempt_id: str,
+        *,
+        owner_id: str | None = None,
+        service_owner_id: str | None = None,
+    ) -> WorkerAttempt | None:
+        query = (
+            "SELECT a.* FROM worker_attempts a JOIN workers w ON w.id = a.worker_id "
+            "WHERE a.worker_id = ? AND a.id = ?"
+        )
+        args: list[object] = [worker_id, attempt_id]
+        if owner_id is not None:
+            query += " AND w.owner_id = ?"
+            args.append(owner_id)
+        if service_owner_id is not None:
+            query += " AND a.service_owner_id = ?"
+            args.append(service_owner_id)
+        with self._connect() as connection:
+            row = connection.execute(query, args).fetchone()
+        return self._worker_attempt_from_row(row) if row else None
+
+    def list_worker_owned_attempts(self, owner_id: str) -> list[WorkerAttempt]:
+        """Find scoped recovery candidates without claiming that any owner has died.
+
+        Legacy attempts have no service owner and therefore no verifiable liveness authority.
+        Terminal attempts remain visible while they retain process cleanup obligations.
+        """
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT a.* FROM worker_attempts a JOIN workers w ON w.id = a.worker_id "
+                "WHERE w.owner_id = ? AND a.service_owner_id IS NOT NULL AND "
+                "(a.status = 'running' OR EXISTS (SELECT 1 FROM worker_attempt_processes p "
+                "WHERE p.attempt_id = a.id)) ORDER BY a.started_at, a.id",
+                (owner_id,),
+            ).fetchall()
+        return [self._worker_attempt_from_row(row) for row in rows]
+
+    def register_worker_process(
+        self, worker_id: str, attempt_id: str, service_owner_id: str, pid: int, pgid: int,
+    ) -> bool:
+        """Retain one exact execution's process until its cleanup is verified.
+
+        A launch racing with cancellation can arrive after terminal settlement. Registering it
+        still matters: the execution owner must clean the process before releasing its lock.
+        """
+        if any(isinstance(value, bool) or not isinstance(value, int) or value <= 1 for value in (pid, pgid)):
+            raise ValueError("worker process identifiers must be integers greater than one")
+        with self._connect() as connection:
+            inserted = connection.execute(
+                "INSERT INTO worker_attempt_processes(attempt_id, pid, pgid, created_at) "
+                "SELECT id, ?, ?, ? FROM worker_attempts "
+                "WHERE worker_id = ? AND id = ? AND service_owner_id = ? "
+                "ON CONFLICT(attempt_id, pid, pgid) DO UPDATE SET created_at = worker_attempt_processes.created_at",
+                (pid, pgid, utc_now(), worker_id, attempt_id, service_owner_id),
+            ).rowcount
+        return inserted == 1
+
+    def list_worker_processes(
+        self, worker_id: str, attempt_id: str, service_owner_id: str,
+    ) -> list[WorkerProcess]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT a.worker_id, a.id AS attempt_id, a.service_owner_id, p.pid, p.pgid "
+                "FROM worker_attempt_processes p JOIN worker_attempts a ON a.id = p.attempt_id "
+                "WHERE a.worker_id = ? AND a.id = ? AND a.service_owner_id = ? "
+                "ORDER BY p.created_at, p.pid, p.pgid",
+                (worker_id, attempt_id, service_owner_id),
+            ).fetchall()
+        return [WorkerProcess(**dict(row)) for row in rows]
+
+    def clear_worker_process(
+        self, worker_id: str, attempt_id: str, service_owner_id: str, pid: int, pgid: int,
+    ) -> bool:
+        with self._connect() as connection:
+            deleted = connection.execute(
+                "DELETE FROM worker_attempt_processes WHERE attempt_id = ? AND pid = ? AND pgid = ? "
+                "AND EXISTS (SELECT 1 FROM worker_attempts a WHERE a.id = attempt_id "
+                "AND a.worker_id = ? AND a.service_owner_id = ?)",
+                (attempt_id, pid, pgid, worker_id, service_owner_id),
+            ).rowcount
+        return deleted == 1
+
     def append_worker_input(self, worker_id: str, owner_id: str, content: str) -> bool:
         if not content.strip() or len(content.encode("utf-8")) > 16 * 1024:
             raise ValueError("worker input must be non-empty and at most 16 KiB")
         timestamp = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT id, phase FROM workers WHERE id = ? AND owner_id = ?", (worker_id, owner_id)
             ).fetchone()
@@ -3260,6 +3405,28 @@ class Store:
                 connection.executemany("DELETE FROM worker_inputs WHERE id = ?", [(row["id"],) for row in rows])
         return values
 
+    def list_worker_input_records(self, worker_id: str) -> list[tuple[str, str]]:
+        """Snapshot message identities so resumption only consumes incorporated inputs."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, content FROM worker_inputs WHERE worker_id = ? ORDER BY created_at, id",
+                (worker_id,),
+            ).fetchall()
+        return [(row["id"], row["content"]) for row in rows]
+
+    def consume_worker_inputs(self, worker_id: str, owner_id: str, input_ids: Sequence[str]) -> int:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute(
+                "SELECT 1 FROM workers WHERE id = ? AND owner_id = ?", (worker_id, owner_id),
+            ).fetchone() is None:
+                raise PermissionError("worker is not owned by caller")
+            deleted = connection.executemany(
+                "DELETE FROM worker_inputs WHERE id = ? AND worker_id = ?",
+                [(input_id, worker_id) for input_id in input_ids],
+            ).rowcount
+        return deleted
+
     def settle_worker(
         self,
         worker_id: str,
@@ -3282,6 +3449,7 @@ class Store:
             raise ValueError("delivery must be waiter, notification, or None")
         timestamp = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             attempt = connection.execute(
                 "SELECT worker_id, status FROM worker_attempts WHERE id = ?", (attempt_id,)
             ).fetchone()
@@ -3319,6 +3487,7 @@ class Store:
     def cancel_worker_tree(self, worker_id: str, owner_id: str) -> list[str]:
         timestamp = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             root = connection.execute(
                 "SELECT id FROM workers WHERE id = ? AND owner_id = ?", (worker_id, owner_id)
             ).fetchone()
@@ -3368,22 +3537,54 @@ class Store:
                     )
         return ids
 
-    def reconcile_workers(self) -> int:
+    def reconcile_workers(
+        self,
+        *,
+        owner_id: str | None = None,
+        service_owner_id: str | None = None,
+        worker_id: str | None = None,
+        attempt_id: str | None = None,
+    ) -> int:
+        """Settle one verified abandoned owner scope, after process cleanup.
+
+        The caller must hold the service owner's liveness lock while calling this operation.
+        Merely opening a Store or discovering a candidate is never evidence of owner death.
+        Omitted scopes intentionally preserve legacy calls as read-only no-ops.
+        """
+        if not all((owner_id, service_owner_id, worker_id, attempt_id)):
+            return 0
         timestamp = utc_now()
         with self._connect() as connection:
-            rows = connection.execute("SELECT id FROM workers WHERE phase = ?", (WorkerPhase.RUNNING.value,)).fetchall()
-            for row in rows:
-                worker_id = row["id"]
-                connection.execute(
-                    "UPDATE worker_attempts SET status = ?, finished_at = ?, outcome = ?, error = ? WHERE worker_id = ? AND status = ?",
-                    ("finished", timestamp, WorkerOutcome.LOST.value, WorkerStopReason.RESTART.value, worker_id, "running"),
-                )
-                connection.execute(
-                    "UPDATE workers SET phase = ?, outcome = ?, stop_reason = ?, last_error = ?, updated_at = ? WHERE id = ?",
-                    (WorkerPhase.IDLE.value, WorkerOutcome.LOST.value, WorkerStopReason.RESTART.value, "controller restarted before worker completed", timestamp, worker_id),
-                )
-                self._append_worker_event(connection, worker_id, "worker_lost", {"outcome": "lost", "reason": "restart"})
-        return len(rows)
+            connection.execute("BEGIN IMMEDIATE")
+            changed = connection.execute(
+                "UPDATE worker_attempts SET status = ?, finished_at = ?, outcome = ?, error = ? "
+                "WHERE id = ? AND worker_id = ? AND service_owner_id = ? AND status = ? "
+                "AND EXISTS (SELECT 1 FROM workers w WHERE w.id = worker_id "
+                "AND w.owner_id = ? AND w.phase = ?) "
+                "AND NOT EXISTS (SELECT 1 FROM worker_attempt_processes p WHERE p.attempt_id = worker_attempts.id) "
+                "AND NOT EXISTS (SELECT 1 FROM worker_attempts other WHERE other.worker_id = worker_attempts.worker_id "
+                "AND other.id != worker_attempts.id AND other.status = ?)",
+                (
+                    "finished", timestamp, WorkerOutcome.LOST.value, WorkerStopReason.RESTART.value,
+                    attempt_id, worker_id, service_owner_id, "running", owner_id,
+                    WorkerPhase.RUNNING.value, "running",
+                ),
+            ).rowcount
+            if changed != 1:
+                return 0
+            connection.execute(
+                "UPDATE workers SET phase = ?, outcome = ?, stop_reason = ?, last_error = ?, updated_at = ? "
+                "WHERE id = ? AND owner_id = ? AND phase = ?",
+                (
+                    WorkerPhase.IDLE.value, WorkerOutcome.LOST.value, WorkerStopReason.RESTART.value,
+                    "controller restarted before worker completed", timestamp, worker_id, owner_id,
+                    WorkerPhase.RUNNING.value,
+                ),
+            )
+            self._append_worker_event(
+                connection, worker_id, "worker_lost", {"outcome": "lost", "reason": "restart"}, attempt_id,
+            )
+        return 1
 
     def list_worker_events(self, worker_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -3419,6 +3620,7 @@ class Store:
             started_at=row["started_at"], finished_at=row["finished_at"],
             outcome=WorkerOutcome(row["outcome"]) if row["outcome"] else None,
             result=row["result"], error=row["error"],
+            service_owner_id=row["service_owner_id"],
         )
 
     @staticmethod

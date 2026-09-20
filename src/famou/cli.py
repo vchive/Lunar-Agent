@@ -1248,7 +1248,7 @@ def _controller(args: argparse.Namespace, config: Config) -> LocalController:
     return LocalController(
         config,
         runtime,
-        runtime_factory=make_runtime if workers > 1 else None,
+        runtime_factory=make_runtime,
         max_workers=workers,
     )
 

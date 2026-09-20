@@ -196,7 +196,9 @@ class LocalController:
         self.profiles = profiles or ProfileRegistry()
         self.policy = MasterPolicy()
         self.recovery_policy = RecoveryPolicy()
-        self.agent_registry = agent_registry or AgentRegistry([RuntimeAgentAdapter(runtime)])
+        self.agent_registry = agent_registry or AgentRegistry([
+            RuntimeAgentAdapter(runtime, runtime_factory=runtime_factory),
+        ])
         self.workers = WorkerService(self.store, self.agent_registry, config.home / "worker-sessions")
 
     # Explicit worker-session control plane. These methods intentionally do not alter the

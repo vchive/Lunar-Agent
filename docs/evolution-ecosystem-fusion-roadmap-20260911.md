@@ -10,12 +10,11 @@ Phase C 自动后台执行尚未实现，automatic `--detach` 仍拒绝。新的
 [计划](../specs/142-automatic-solve-lifecycle/real-acceptance-plan.md)，尚无新登记或运行；
 Feature 139 的 preparation `1/1`、primary/joint `0/1` 保持不变。
 
-[Feature 143](../specs/143-local-worker-lifecycle/spec.md) 已有持久 Worker/WorkerAttempt 和
-`dispatch/send/list/wait/resume/cancel` API，但 2026-09-21 的纯 mock 复核复现了三个待修问题：
-共享 adapter 的取消可影响无关 worker；第二个 WorkerService 构造会把仍活跃的 worker
-按全库恢复逻辑标记为 `lost`；已取消的 queued worker 仍可调用 adapter。并发隔离、重启判定和
-取消后准入需修复与回归，不能把已有 API 等同于完整生命周期验收。T009 尚未接入实际
-delegation consumer；该接线不是 Feature 142 的依赖。
+[Feature 143](../specs/143-local-worker-lifecycle/spec.md) 已修复审计发现的共享取消、误判中断
+和排队取消缺陷，补上独立 adapter/runtime、精确 attempt 进程登记清理、owner 活性锁与消息
+原子消费。共享回归 260 项通过，最终验证见 [validation](../specs/143-local-worker-lifecycle/validation.md)。
+T009 尚未接入实际 delegation consumer，不能把本地 API 验收等同于用户入口已接通；该接线
+不是 Feature 142 的依赖。
 
 以下按日期保留实现和测量过程；旧条目中的“下一步”以上述状态和最新 HANDOFF 为准。
 
