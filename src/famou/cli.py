@@ -44,6 +44,7 @@ from .algorithm import (
     AlgorithmProblemContract,
 )
 from .artifacts import ArtifactStore
+from .automatic_solve_lifecycle import SolveExecutionControl, own_automatic_solve
 from .benchmark import BenchmarkConfig, BenchmarkRunner
 from .budget import BudgetSpec
 from .config import Config
@@ -2355,6 +2356,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         )
         effective_args = _evolution_args(args, evolution_request)
         if effective_args.evolve and settled.current_plan_id is not None:
+            _bind_solve_execution_control(effective_args, controller, settled)
             _solve_evolution(config, effective_args, controller, settled)
             settled = controller.store.get_run(settled.id) or settled
         return _solve_payload(controller, settled)
@@ -2384,9 +2386,28 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     )
     effective_args = _evolution_args(args, evolution_request)
     if effective_args.evolve and settled.current_plan_id is not None:
+        _bind_solve_execution_control(effective_args, controller, settled)
         _solve_evolution(config, effective_args, controller, settled)
         settled = controller.store.get_run(settled.id) or settled
     return _solve_payload(controller, settled)
+
+
+def _bind_solve_execution_control(
+    args: argparse.Namespace, controller: LocalController, run: Run,
+) -> None:
+    """Attach one process-local solve deadline to an automatic multi-file execution."""
+    timeout = getattr(args, "solve_wall_timeout", None)
+    if not getattr(args, "multi_file", False) or timeout is None:
+        return
+    args._solve_execution_control = SolveExecutionControl(
+        timeout,
+        cancellation_callbacks=(
+            lambda: (
+                (current := controller.store.get_run(run.id)) is None
+                or current.status.value == "cancelled"
+            ),
+        ),
+    )
 
 
 def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
@@ -2871,7 +2892,20 @@ def _validate_conversational_bundle_link(args, store, parent):
 def _solve_evolution(
     config: Config, args: argparse.Namespace, controller: LocalController, parent: Run
 ) -> dict[str, object]:
+    """Run one automatic evolution under a process-local exclusive owner."""
+    if getattr(args, "multi_file", False):
+        with own_automatic_solve(parent.id):
+            return _solve_evolution_impl(config, args, controller, parent)
+    return _solve_evolution_impl(config, args, controller, parent)
+
+
+def _solve_evolution_impl(
+    config: Config, args: argparse.Namespace, controller: LocalController, parent: Run
+) -> dict[str, object]:
     """Create or resume the evolution child linked to one compiled conversational run."""
+    solve_control = getattr(args, "_solve_execution_control", None)
+    if solve_control is not None:
+        solve_control.check("contract")
     if parent.status.value == "awaiting_input" and controller.store.pending_input(parent.id) is None:
         # Correct legacy dependency-only waits on explicit continuation, without rewriting
         # historical rows merely because a user inspected status.
@@ -2918,12 +2952,15 @@ def _solve_evolution(
                 evaluator_preparation_wall_timeout_seconds=getattr(
                     args, "evaluator_preparation_wall_timeout", None,
                 ),
+                solve_control=solve_control,
             )
         except AutomaticBundlePreparationError:
             # The preparation ledger retains this failure; callers emit the ordinary parent
             # payload and a nonzero result without creating a child or discarding the contract.
             return {"run": controller.store.get_run(parent.id) or parent}
     bundle_pipeline = getattr(args, "_bundle_pipeline", None)
+    if solve_control is not None:
+        solve_control.check("candidate_generation")
     if bundle_pipeline is not None:
         if strategy_name != "population":
             raise EvolutionError("solve_bundle_requires_population")
@@ -3125,6 +3162,8 @@ def _solve_evolution(
             ):
                 raise EvolutionError("solve evolution settings do not match the existing handoff")
         controller.copy_staged_inputs(parent.id, child.id)
+        if solve_control is not None:
+            solve_control.check("evolution")
         child, result = controller.run_evolution(
             child.id,
             contract,
@@ -3185,6 +3224,8 @@ def _solve_evolution(
         event_id="event-evolution-parent-link-" + hashlib.sha256(parent.id.encode()).hexdigest(),
     )
 
+    if solve_control is not None:
+        solve_control.check("evolution")
     child, result = controller.run_evolution(
         child.id,
         contract,

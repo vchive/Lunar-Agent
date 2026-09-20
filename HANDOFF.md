@@ -46,9 +46,12 @@ legacy handoff 注入和损坏 marker；省略值保持无策略的旧行为。
 Feature 143 的 Worker/WorkerAttempt 仅作为可复用控制面基础设施，不能替代 142 的父编排生命周期；
 143 T009 显式 delegation consumer 迁移不阻塞 142。
 
-本阶段没有 provider 请求、真实 campaign、WebAgent 重跑或历史测量改写。下一步按 142 Phase A
-继续实现一个独占 automatic execution owner 与共享 monotonic deadline，再补确定性 clock 和
-parent lifecycle 集成测试；Phase B 清理验收通过前不开放 automatic detached。
+本阶段没有 provider 请求、真实 campaign、WebAgent 重跑或历史测量改写。T005 已完成：增加一个
+独占 automatic execution owner 与共享 process-local monotonic deadline，preparation 会使用固定
+deadline 的剩余时间；新增 lifecycle focused 测试，并通过 automatic solve wall/preparation/bundle
+回归。控制对象不进入任何持久身份内容，automatic `--detach` 仍保持拒绝。下一步按 142 Phase A
+继续实现 durable parent orchestration task，并把同一控制对象传入 candidate generation、local
+execution、scoring、selection 与 parent delivery；Phase B 清理验收通过前不开放 automatic detached。
 
 ## Feature 141：原生自动多文件 CLI 显式候选预算（2026-09-19，离线完成）
 

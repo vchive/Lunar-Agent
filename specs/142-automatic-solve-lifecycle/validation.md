@@ -2,10 +2,11 @@
 
 ## Current status
 
-Implementation checkpoint dated 2026-09-20. Phase A CLI policy validation and handoff persistence
-are implemented and verified by focused offline tests. Shared execution deadlines, parent
-orchestration, cancellation/process cleanup, and detached execution remain unimplemented and are
-not claimed by this checkpoint.
+Implementation checkpoint dated 2026-09-20. Phase A CLI policy validation, handoff persistence,
+the process-local execution control/owner, and preparation deadline narrowing are implemented and
+verified by focused offline tests. Candidate/evolution/delivery propagation, parent orchestration,
+cancellation/process cleanup, and detached execution remain open and are not claimed by this
+checkpoint.
 
 Only `spec.md`, `plan.md`, `tasks.md`, and this validation record are in scope for this checkpoint.
 No `src` file, Feature 139 file, retained historical evidence, provider configuration, real
@@ -27,7 +28,7 @@ These are document checks only. They do not close any product acceptance row bel
 | --- | --- | --- |
 | CLI validation | Valid bounds; zero/negative/bool/non-finite/malformed/out-of-range rejection; all unsupported modes rejected before side effects | Focused pass |
 | Persistence | Explicit policy and lifecycle marker; exact restore/match; no legacy policy injection; secrets excluded | Focused pass |
-| Shared deadline | One deterministic clock across intake, preparation, generation, execution, scoring, selection, and delivery; tighter local ceilings honored | Not run |
+| Shared deadline | Deterministic control/owner and preparation narrowing are verified; full generation, execution, scoring, selection, and delivery propagation remains open | Control/preparation focused pass; full propagation not run |
 | Exhaustion | Before claim/request/process, after late result, and before publication; one terminal event; no new work on continuation | Not run |
 | Parent lifecycle | Parent remains active while child runs; only verified delivery completes orchestration; ordinary scheduler cannot claim control task | Not run |
 | Recovery | Awaiting-input/answer, admissible preparation recovery, interrupted nonterminal ownership, successful/cancelled/exhausted terminal idempotency | Not run |

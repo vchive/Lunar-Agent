@@ -596,6 +596,7 @@ def prepare_automatic_solve_bundle(
     timeout_seconds: float = 900.0,
     evaluator_preparation_timeout_seconds: float | None = None,
     evaluator_preparation_wall_timeout_seconds: float | None = None,
+    solve_control=None,
 ):
     """Compile once, freeze and pin a regular pipeline before any child candidate is created."""
     try:
@@ -677,6 +678,11 @@ def prepare_automatic_solve_bundle(
                 if current.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
                     _fail("terminal")
                 held.check()
+                if solve_control is not None:
+                    try:
+                        solve_control.check("preparation")
+                    except TimeoutError as exc:
+                        raise EvaluatorPreparationWallTimeout("preparation") from exc
 
             descriptors, concrete, input_profile = _descriptors(controller.store, parent, contract)
             attempt_id = "preparation-" + secrets.token_hex(16)
@@ -693,12 +699,20 @@ def prepare_automatic_solve_bundle(
 
             def remaining_timeout(current_stage):
                 continuation_guard()
-                remaining = wall_timeout - (monotonic() - started_at)
+                remaining = wall_timeout - (monotonic() - started_at) if wall_timeout is not None else None
+                if solve_control is not None:
+                    try:
+                        solve_remaining = solve_control.check(current_stage)
+                    except TimeoutError as exc:
+                        raise EvaluatorPreparationWallTimeout(current_stage) from exc
+                    remaining = solve_remaining if remaining is None else min(remaining, solve_remaining)
+                if remaining is None:
+                    raise RuntimeError("preparation remaining timeout requested without a deadline")
                 if remaining <= 0:
                     raise EvaluatorPreparationWallTimeout(current_stage)
                 return remaining
 
-            remaining = remaining_timeout if wall_timeout is not None else None
+            remaining = remaining_timeout if (wall_timeout is not None or solve_control is not None) else None
 
             def publication_guard():
                 continuation_guard()

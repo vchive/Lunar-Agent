@@ -17,8 +17,10 @@ cleanup acceptance passes.
       `solve --resume`, resume, and answer, before runtime and mutation side effects.
 - [x] T004 Persist explicit solve policy and a lifecycle marker; restore exact values on
       continuation, reject mismatches/legacy injection, and preserve omitted legacy behavior.
-- [ ] T005 Add one exclusive automatic execution owner and one shared process-local monotonic
+- [x] T005 Add one exclusive automatic execution owner and one shared process-local monotonic
       deadline; never reset it per phase, request, candidate, retry, or nested Controller call.
+      The control object and owner are implemented and preparation consumes their fixed
+      process-local remainder; full candidate/evolution/delivery propagation remains T008.
 - [ ] T006 Establish/reuse a parent orchestration task after contract intake and before preparation
       or handoff settlement; prevent ordinary scheduling and premature parent success.
 - [ ] T007 Route all automatic continuation entry points through the same orchestration, including
