@@ -18,6 +18,7 @@ from typing import NoReturn
 
 from ._benchmark_files import BenchmarkFileError, absolute_path
 from ._candidate_workspace_io import DirectoryChain, identity
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .candidate_bundle import CandidateBundleError, verify_candidate_source_bundle
 from .candidate_execution import CandidateExecutionError, admit_candidate_execution
 from .candidate_execution_runner import CandidateExecutionRunnerError, run_candidate_execution
@@ -433,6 +434,8 @@ def run_candidate_execution_recorded(
     attempt_path: str | os.PathLike[str], expected_admission_sha256: str | None = None,
     expected_plan_sha256: str | None = None, expected_bundle_sha256: str | None = None,
     expected_contract_sha256: str | None = None,
+    timeout_seconds: float | None = None,
+    remaining_timeout=None,
 ) -> CandidateExecutionRecord:
     """Reserve a new attempt, persist intent, invoke the runner once, and bind its telemetry."""
     pins = {
@@ -496,7 +499,11 @@ def run_candidate_execution_recorded(
         try:
             returned = run_candidate_execution(
                 admitted, plan=parsed, workspace_path=workspace, input_path=inputs, **pins,
+                timeout_seconds=timeout_seconds,
+                remaining_timeout=remaining_timeout,
             )
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
         except Exception:  # noqa: BLE001 - runner exceptions cannot expose candidate or host prose
             _fail("runner_failed")
         for chain in handles:
@@ -504,6 +511,8 @@ def run_candidate_execution_recorded(
         if _read(attempt_chain, _INTENT) != (intent_bytes, intent_descriptor):
             _fail("record_changed")
         metadata = _result(returned.to_dict(), parsed, admitted)
+        if remaining_timeout is not None:
+            remaining_timeout("candidate_execution")
         _, result_descriptor = _write(attempt_chain, _RESULT, {
             "protocol": _PROTOCOL + "result-v1", "schema_version": "1",
             "launch_intent_sha256": _sha(intent_bytes), "runner_result": metadata,
@@ -517,6 +526,8 @@ def run_candidate_execution_recorded(
         if record.status != "recorded":
             _fail("record_changed")
         return record
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except CandidateExecutionRunnerError:
         _fail("runner_failed")
     except BenchmarkFileError:

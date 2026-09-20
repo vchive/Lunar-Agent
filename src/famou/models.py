@@ -127,6 +127,7 @@ class Task:
     input_options: tuple[str, ...] = ()
     input_answer_path: Path | None = None
     plan_task_id: str | None = None
+    orchestration: bool = False
 
 
 @dataclass(frozen=True)

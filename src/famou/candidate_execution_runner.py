@@ -6,13 +6,14 @@ evidence, touches Store/Candidate state, imports candidate code, or invokes an e
 """
 from __future__ import annotations
 
+import math
 import os
 import selectors
 import signal
 import stat
 import subprocess
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import Literal
 
 from ._benchmark_files import BenchmarkFileError, absolute_path
 from ._candidate_workspace_io import DirectoryChain, identity
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .candidate_bundle import CandidateBundleError, verify_candidate_source_bundle
 from .candidate_execution import (
     CandidateExecutionAdmission,
@@ -344,7 +346,18 @@ class CandidateExecutionRunner:
         expected_plan_sha256: str | None = None,
         expected_bundle_sha256: str | None = None,
         expected_contract_sha256: str | None = None,
+        timeout_seconds: float | None = None,
+        remaining_timeout: Callable[[str], float] | None = None,
     ) -> CandidateExecutionRun:
+        if remaining_timeout is not None and not callable(remaining_timeout):
+            raise CandidateExecutionRunnerError("invalid")
+        if timeout_seconds is not None and (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(float(timeout_seconds))
+            or timeout_seconds <= 0
+        ):
+            raise CandidateExecutionRunnerError("invalid")
         try:
             parsed_plan = validate_candidate_workspace_plan(
                 plan if isinstance(plan, CandidateWorkspacePlan) else CandidateWorkspacePlan.from_dict(dict(plan))
@@ -353,6 +366,20 @@ class CandidateExecutionRunner:
             if isinstance(exc, CandidateWorkspaceError):
                 raise CandidateExecutionRunnerError("plan_mismatch") from None
             raise CandidateExecutionRunnerError("invalid") from None
+
+        def operational_timeout():
+            ceiling = parsed_plan.timeout_seconds
+            if timeout_seconds is not None:
+                ceiling = min(ceiling, float(timeout_seconds))
+            if remaining_timeout is not None:
+                remaining = remaining_timeout("candidate_execution")
+                if (isinstance(remaining, bool) or not isinstance(remaining, (int, float))
+                        or not math.isfinite(float(remaining)) or remaining <= 0):
+                    raise CandidateExecutionRunnerError("invalid")
+                ceiling = min(ceiling, float(remaining))
+            return ceiling
+
+        operational_timeout()
         try:
             verified = admit_candidate_execution(
                 admission,
@@ -441,17 +468,21 @@ class CandidateExecutionRunner:
             _check_chain(input_chain, "input_unsafe")
             executable.check()
             started = time.monotonic()
+            effective_timeout = operational_timeout()
             try:
                 # Plan validation allows 32 command items; the entrypoint is one fixed extra.
                 stdout, stderr, status, exit_code, error = _bounded_process(
                     [*command, parsed_plan.entrypoint], cwd=str(workspace), environment=environment,
-                    timeout=parsed_plan.timeout_seconds, output_limit=output_limit,
+                    timeout=effective_timeout, output_limit=output_limit,
                 )
+            except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                raise
             except OSError:
                 stdout = stderr = ""
                 status = "failed"
                 exit_code = None
                 error = "process_start_failed"
+            operational_timeout()
         duration_ms = min(86_400_000, max(0, round((time.monotonic() - started) * 1000)))
         execution = CandidateExecution(status, exit_code, duration_ms, stdout, stderr, error)
         return CandidateExecutionRun(
@@ -466,12 +497,16 @@ def run_candidate_execution(
     input_path: str | os.PathLike[str], expected_admission_sha256: str | None = None,
     expected_plan_sha256: str | None = None, expected_bundle_sha256: str | None = None,
     expected_contract_sha256: str | None = None,
+    timeout_seconds: float | None = None,
+    remaining_timeout: Callable[[str], float] | None = None,
 ) -> CandidateExecutionRun:
     return CandidateExecutionRunner().run(
         admission, plan=plan, workspace_path=workspace_path, input_path=input_path,
         expected_admission_sha256=expected_admission_sha256,
         expected_plan_sha256=expected_plan_sha256, expected_bundle_sha256=expected_bundle_sha256,
         expected_contract_sha256=expected_contract_sha256,
+        timeout_seconds=timeout_seconds,
+        remaining_timeout=remaining_timeout,
     )
 
 

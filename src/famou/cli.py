@@ -13,6 +13,7 @@ import sys
 import unicodedata
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -44,7 +45,15 @@ from .algorithm import (
     AlgorithmProblemContract,
 )
 from .artifacts import ArtifactStore
-from .automatic_solve_lifecycle import SolveExecutionControl, own_automatic_solve
+from .automatic_solve_lifecycle import (
+    AutomaticSolveAlreadyRunning,
+    SolveExecutionBudgetExceeded,
+    SolveExecutionCancelled,
+    SolveExecutionControl,
+    SolveExecutionObservation,
+    own_automatic_solve,
+    solve_execution_status,
+)
 from .benchmark import BenchmarkConfig, BenchmarkRunner
 from .budget import BudgetSpec
 from .config import Config
@@ -1614,6 +1623,7 @@ def _status_payload(config: Config, run_id: str) -> dict[str, object] | None:
     )
     return {
         **projection,
+        **({"solve_execution": execution_status} if (execution_status := solve_execution_status(store, run)) is not None else {}),
         "run": {
             "id": run.id,
             "goal": run.goal,
@@ -2347,6 +2357,11 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         _validate_conversational_bundle_link(args, controller.store, run)
         _stage_input_files(run, controller.store, args.input_files)
         _bind_conversational_bundle_inputs(args, controller.store, run)
+        if _lifecycle_enabled(evolution_request):
+            settled = _resume_automatic_solve(
+                config, _evolution_args(args, evolution_request), controller, run, manifest,
+            )
+            return _solve_payload(controller, settled)
         settled = controller.resume_conversational(
             run.id,
             RuntimeContractCompiler(runtime),
@@ -2377,6 +2392,11 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
     _bind_conversational_bundle_inputs(args, controller.store, run)
     if args.detach:
         return _detach_solve(config, args, run)
+    if _lifecycle_enabled(evolution_request):
+        settled = _resume_automatic_solve(
+            config, _evolution_args(args, evolution_request), controller, run,
+        )
+        return _solve_payload(controller, settled)
     settled = controller.resume_conversational(
         run.id,
         RuntimeContractCompiler(runtime),
@@ -2394,6 +2414,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
 
 def _bind_solve_execution_control(
     args: argparse.Namespace, controller: LocalController, run: Run,
+    *, observe_stage=None,
 ) -> None:
     """Attach one process-local solve deadline to an automatic multi-file execution."""
     timeout = getattr(args, "solve_wall_timeout", None)
@@ -2401,6 +2422,7 @@ def _bind_solve_execution_control(
         return
     args._solve_execution_control = SolveExecutionControl(
         timeout,
+        observe_stage=observe_stage,
         cancellation_callbacks=(
             lambda: (
                 (current := controller.store.get_run(run.id)) is None
@@ -2408,6 +2430,96 @@ def _bind_solve_execution_control(
             ),
         ),
     )
+
+
+def _lifecycle_enabled(request: dict | None) -> bool:
+    return (isinstance(request, dict) and request.get("bundle_mode") == "compiled"
+            and request.get("automatic_lifecycle_version") == _AUTOMATIC_LIFECYCLE_VERSION)
+
+
+def _automatic_solve_child(controller: LocalController, parent: Run) -> Run | None:
+    """Select only the reciprocally bound child for this exact accepted contract."""
+    plan = controller.store.get_current_plan(parent.id)
+    if plan is None or plan.algorithm_problem is None:
+        return None
+    digest = AlgorithmProblemContract.from_dict(plan.algorithm_problem).digest()
+    links = [e["payload"] for e in controller.store.list_events(parent.id) if e["type"] == "evolution_linked"]
+    if not links or not isinstance(links[0], dict):
+        return None
+    child_id = links[0].get("evolution_run_id")
+    expected = {"evolution_run_id": child_id, "contract_sha256": digest, "strategy": "population"}
+    if not isinstance(child_id, str) or child_id == parent.id or any(link != expected for link in links):
+        return None
+    child = controller.store.get_run(child_id)
+    reverse = [e["payload"] for e in controller.store.list_events(child_id) if e["type"] == "evolution_parent_linked"]
+    if child is None or not reverse or any(link != {"parent_run_id": parent.id, "contract_sha256": digest} for link in reverse):
+        return None
+    return child
+
+
+def _resume_automatic_solve(config, args, controller, run, manifest=None, *, owner_held=False) -> Run:
+    """One admitted foreground execution spans intake, preparation, evolution and delivery."""
+    if run.status.value in {"succeeded", "failed", "cancelled"} or controller.store.pending_input(run.id) is not None:
+        return run
+    from .automatic_solve_bundle import validate_automatic_preparation_recovery
+
+    validate_automatic_preparation_recovery(controller.store, run.id)
+    with (nullcontext() if owner_held else own_automatic_solve(run.id, Path(run.workspace))):
+        run = controller.store.get_run(run.id) or run
+        if run.status.value in {"succeeded", "failed", "cancelled"}:
+            return run
+        observation = SolveExecutionObservation(controller.store, run.id, getattr(args, "solve_wall_timeout", None))
+        _bind_solve_execution_control(args, controller, run, observe_stage=observation.observe)
+        args._solve_owner_held = True
+        args._solve_observation = observation
+        try:
+            settled = controller.resume_conversational(
+                run.id, RuntimeContractCompiler(controller.runtime),
+                compiler_fingerprint=_compiler_fingerprint(controller.runtime),
+                plan_factory=_conversation_plan_factory(args, manifest), execute_plan=False,
+                solve_control=getattr(args, "_solve_execution_control", None),
+            )
+            if settled.current_plan_id is not None and settled.status.value not in {"failed", "cancelled"}:
+                _solve_evolution(config, args, controller, settled)
+        except SolveExecutionBudgetExceeded as exc:
+            controller.store.fail_budget(run.id, exc.limit, exc.actual, exc.maximum, str(exc))
+            child = _automatic_solve_child(controller, run)
+            if child is not None:
+                if controller.store.get_run(run.id).status.value == "cancelled":
+                    controller.store.cancel_run(child.id)
+                else:
+                    controller.store.fail_budget(child.id, exc.limit, exc.actual, exc.maximum, str(exc))
+        except SolveExecutionCancelled:
+            controller.store.cancel_run(run.id)
+            child = _automatic_solve_child(controller, run)
+            if child is not None:
+                controller.store.cancel_run(child.id)
+        except Exception:
+            for task in controller.store.list_tasks(run.id):
+                if task.orchestration and (attempt := controller.store.active_attempt(task.id)) is not None:
+                    controller.store.finish_task(task.id, attempt.id, False, error="automatic solve failed")
+            controller.store.settle_run(run.id)
+            raise
+        finally:
+            args._solve_owner_held = False
+            current = controller.store.get_run(run.id) or run
+            state, reason = "inactive", "interrupted"
+            if current.status.value in {"succeeded", "failed", "cancelled"}:
+                state = "terminal"
+                reason = {"succeeded": "completed", "failed": "failed", "cancelled": "cancelled"}[current.status.value]
+                if current.status.value == "failed" and any(
+                    e["type"] == "budget_exceeded" and e["payload"].get("limit") == "solve_wall_timeout"
+                    for e in controller.store.list_events(run.id)
+                ):
+                    reason = "solve_wall_timeout"
+            elif current.status.value == "awaiting_input":
+                state, reason = "awaiting_input", "awaiting_input"
+            else:
+                preparation = _bundle_preparation_payload(controller.store, run.id)
+                if preparation and preparation.get("recoverable"):
+                    reason = "preparation_recoverable"
+            observation.observe(observation.stage, state=state, reason=reason)
+        return controller.store.get_run(run.id) or run
 
 
 def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
@@ -2893,7 +3005,7 @@ def _solve_evolution(
     config: Config, args: argparse.Namespace, controller: LocalController, parent: Run
 ) -> dict[str, object]:
     """Run one automatic evolution under a process-local exclusive owner."""
-    if getattr(args, "multi_file", False):
+    if getattr(args, "multi_file", False) and not getattr(args, "_solve_owner_held", False):
         with own_automatic_solve(parent.id):
             return _solve_evolution_impl(config, args, controller, parent)
     return _solve_evolution_impl(config, args, controller, parent)
@@ -2929,6 +3041,59 @@ def _solve_evolution_impl(
     strategy_name = args.strategy or contract.evolution.strategy
     if strategy_name == "loop":
         raise ValueError(LOOP_STRATEGY_RETIRED_MESSAGE)
+    orchestration_task = None
+    orchestration_attempt = None
+    lifecycle_request = _latest_evolution_request(controller.store, parent.id)
+    lifecycle_enabled = (
+        getattr(args, "multi_file", False)
+        and lifecycle_request is not None
+        and lifecycle_request.get("automatic_lifecycle_version") == _AUTOMATIC_LIFECYCLE_VERSION
+    )
+    if lifecycle_enabled:
+        orchestration_task = controller.store.ensure_orchestration_task(
+            parent.id,
+            title="Automatic solve orchestration",
+            prompt=f"Coordinate evolution and delivery for {contract.problem_id}",
+        )
+        if orchestration_task.state.value in {"succeeded", "failed", "cancelled"}:
+            return {"run": controller.store.get_run(parent.id) or parent}
+        orchestration_attempt = controller.store.claim_orchestration_task(
+            orchestration_task.id, "automatic-solve",
+        )
+        if orchestration_attempt is None:
+            raise EvolutionError("automatic solve orchestration task is not runnable")
+        controller.store.append_event(
+            parent.id,
+            "automatic_solve_orchestration_started",
+            {"task_id": orchestration_task.id, "attempt_id": orchestration_attempt.id},
+            event_id="event-automatic-solve-orchestration-" + hashlib.sha256(parent.id.encode()).hexdigest(),
+        )
+        controller.store.supersede_pending_tasks(parent.id, "replaced by explicit evolution handoff")
+
+    def finish_orchestration(success: bool, error: str | None = None) -> None:
+        if orchestration_task is None or orchestration_attempt is None:
+            return
+        controller.store.finish_task(
+            orchestration_task.id,
+            orchestration_attempt.id,
+            success,
+            error=error,
+        )
+        controller.store.settle_run(parent.id)
+
+    def finish_child_orchestration(child: Run, delivery: dict[str, object] | None) -> None:
+        if solve_control is not None:
+            solve_control.check("delivery")
+        if child.status.value == "cancelled":
+            controller.store.cancel_run(parent.id)
+        elif child.status.value == "failed":
+            finish_orchestration(False, "linked evolution failed")
+        elif child.status.value == "succeeded":
+            if lifecycle_enabled and (delivery is None or delivery.get("status") != "succeeded"):
+                finish_orchestration(False, "automatic solve delivery did not succeed")
+            else:
+                finish_orchestration(True)
+
     if getattr(args, "multi_file", False):
         if strategy_name != "population":
             raise EvolutionError("solve_bundle_requires_population")
@@ -2939,6 +3104,8 @@ def _solve_evolution_impl(
             AutomaticBundlePreparationError,
             prepare_automatic_solve_bundle,
         )
+        if (observation := getattr(args, "_solve_observation", None)) is not None:
+            observation.observe("preparation")
 
         try:
             args._bundle_pipeline = prepare_automatic_solve_bundle(
@@ -2959,6 +3126,8 @@ def _solve_evolution_impl(
             # payload and a nonzero result without creating a child or discarding the contract.
             return {"run": controller.store.get_run(parent.id) or parent}
     bundle_pipeline = getattr(args, "_bundle_pipeline", None)
+    if (observation := getattr(args, "_solve_observation", None)) is not None:
+        observation.observe("candidate_generation")
     if solve_control is not None:
         solve_control.check("candidate_generation")
     if bundle_pipeline is not None:
@@ -3164,24 +3333,43 @@ def _solve_evolution_impl(
         controller.copy_staged_inputs(parent.id, child.id)
         if solve_control is not None:
             solve_control.check("evolution")
-        child, result = controller.run_evolution(
-            child.id,
-            contract,
-            generator,
-            execution_grounded_evaluator(child),
-            evolution_config,
-            resume=child.status.value not in {"succeeded", "failed", "cancelled"},
-            bundle_pipeline=bundle_pipeline,
-        )
-        if child.status.value == "succeeded" and (bundle_pipeline is not None or contract.outputs):
-            if bundle_pipeline is not None:
-                controller.deliver_bundle_to_parent(parent.id, child.id, contract, result)
-            else:
-                controller.materialize_evolved_outputs(
-                    parent.id, child.id, contract, result,
-                    timeout_seconds=evolution_config.timeout_seconds,
-                )
-        return {"run": parent, "child": child}
+        try:
+            child, result = controller.run_evolution(
+                child.id,
+                contract,
+                generator,
+                execution_grounded_evaluator(child),
+                evolution_config,
+                resume=child.status.value not in {"succeeded", "failed", "cancelled"},
+                bundle_pipeline=bundle_pipeline,
+                remaining_timeout=(
+                    (lambda stage: solve_control.effective_timeout(stage=stage))
+                    if solve_control is not None else None
+                ),
+            )
+            delivery = None
+            if child.status.value == "succeeded" and (bundle_pipeline is not None or contract.outputs):
+                if (observation := getattr(args, "_solve_observation", None)) is not None:
+                    observation.observe("delivery")
+                if solve_control is not None:
+                    solve_control.check("delivery")
+                if bundle_pipeline is not None:
+                    delivery = controller.deliver_bundle_to_parent(
+                        parent.id, child.id, contract, result,
+                        **({"continuation_guard": lambda: solve_control.check("delivery")} if solve_control is not None else {}),
+                    )
+                else:
+                    controller.materialize_evolved_outputs(
+                        parent.id, child.id, contract, result,
+                        timeout_seconds=evolution_config.timeout_seconds,
+                    )
+            finish_child_orchestration(child, delivery)
+            return {"run": controller.store.get_run(parent.id) or parent, "child": child}
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
+        except Exception as exc:
+            finish_orchestration(False, " ".join(str(exc).split())[-2_000:] or "automatic solve failed")
+            raise
 
     child_workspace = Path(parent.workspace) / "evolution-run"
     if bundle_pipeline is None:
@@ -3205,8 +3393,11 @@ def _solve_evolution_impl(
     # Re-run the copy after a crash between child creation and linking; identical bytes are
     # idempotent and conflicting bytes fail closed before strategy execution.
     controller.copy_staged_inputs(parent.id, child.id)
-    controller.store.supersede_pending_tasks(parent.id, "replaced by explicit evolution handoff")
-    controller.store.settle_run(parent.id)
+    if orchestration_task is None:
+        # Preserve the legacy single-file handoff lifecycle.  Automatic multi-file solves use the
+        # durable orchestration task above and remain running until child delivery settles them.
+        controller.store.supersede_pending_tasks(parent.id, "replaced by explicit evolution handoff")
+        controller.store.settle_run(parent.id)
     controller.store.append_event(
         parent.id,
         "evolution_linked",
@@ -3226,23 +3417,42 @@ def _solve_evolution_impl(
 
     if solve_control is not None:
         solve_control.check("evolution")
-    child, result = controller.run_evolution(
-        child.id,
-        contract,
-        generator,
-        execution_grounded_evaluator(child),
-        evolution_config,
-        bundle_pipeline=bundle_pipeline,
-    )
-    if child.status.value == "succeeded" and (bundle_pipeline is not None or contract.outputs):
-        if bundle_pipeline is not None:
-            controller.deliver_bundle_to_parent(parent.id, child.id, contract, result)
-        else:
-            controller.materialize_evolved_outputs(
-                parent.id, child.id, contract, result,
-                timeout_seconds=evolution_config.timeout_seconds,
-            )
-    return {"run": parent, "child": controller.store.get_run(child.id) or child}
+    try:
+        child, result = controller.run_evolution(
+            child.id,
+            contract,
+            generator,
+            execution_grounded_evaluator(child),
+            evolution_config,
+            bundle_pipeline=bundle_pipeline,
+            remaining_timeout=(
+                (lambda stage: solve_control.effective_timeout(stage=stage))
+                if solve_control is not None else None
+            ),
+        )
+        delivery = None
+        if child.status.value == "succeeded" and (bundle_pipeline is not None or contract.outputs):
+            if (observation := getattr(args, "_solve_observation", None)) is not None:
+                observation.observe("delivery")
+            if solve_control is not None:
+                solve_control.check("delivery")
+            if bundle_pipeline is not None:
+                delivery = controller.deliver_bundle_to_parent(
+                    parent.id, child.id, contract, result,
+                    **({"continuation_guard": lambda: solve_control.check("delivery")} if solve_control is not None else {}),
+                )
+            else:
+                controller.materialize_evolved_outputs(
+                    parent.id, child.id, contract, result,
+                    timeout_seconds=evolution_config.timeout_seconds,
+                )
+        finish_child_orchestration(child, delivery)
+        return {"run": controller.store.get_run(parent.id) or parent, "child": controller.store.get_run(child.id) or child}
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
+    except Exception as exc:
+        finish_orchestration(False, " ".join(str(exc).split())[-2_000:] or "automatic solve failed")
+        raise
 
 
 def _preparation_budgets_payload(store: Store, run_id: str) -> dict[str, object] | None:
@@ -3412,6 +3622,8 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
         payload.update(_loop_retirement_payload())
     if evolution_payload is not None:
         payload["evolution"] = evolution_payload
+    if (execution_status := solve_execution_status(controller.store, run)) is not None:
+        payload["solve_execution"] = execution_status
     return payload
 
 
@@ -4954,77 +5166,90 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
             current_fingerprint,
         }:
             raise ValueError("answer compiler runtime does not match the existing conversational run")
-    artifacts = ArtifactStore(run.workspace, store, run.id)
-    answer_path = artifacts.write_text(
-        f"tasks/{pending['task_id']}/input-answer.json",
-        json.dumps({"answer": answer.strip()}, ensure_ascii=False, indent=2) + "\n",
-        pending["task_id"],
-        kind="input",
-    )
-    relative_answer = str(answer_path.relative_to(run.workspace))
-    task_id = store.answer_input(run.id, relative_answer)
-    if task_id is None:
-        raise ValueError("input request was answered concurrently; inspect status")
-    controller = _controller(args, config)
-    evolution_request = _latest_evolution_request(store, run.id)
-    if evolution_request is not None:
-        compiled = bool(evolution_request.get("compile_evaluator", False))
-        if getattr(args, "compile_evaluator", False) and not compiled:
-            raise EvolutionError("solve evolution did not configure a compiled evaluator")
-        if getattr(args, "evaluator_command", None) and compiled:
-            raise EvolutionError(
-                "compiled evaluator and evaluator command are mutually exclusive"
-            )
-    if conversation and run.current_plan_id is None:
-        resumed = controller.resume_conversational(
-            run.id,
-            RuntimeContractCompiler(controller.runtime),
-            compiler_fingerprint=_compiler_fingerprint(controller.runtime),
-            plan_factory=_conversation_plan_factory(args, manifest),
-            execute_plan=evolution_request is None,
+    automatic_answer = conversation and _lifecycle_enabled(evolution_request)
+    ownership = own_automatic_solve(run.id, Path(run.workspace)) if automatic_answer else nullcontext()
+    with ownership:
+        if store.pending_input(run.id) != pending:
+            raise ValueError("input request changed concurrently; inspect status")
+        artifacts = ArtifactStore(run.workspace, store, run.id)
+        answer_path = artifacts.write_text(
+            f"tasks/{pending['task_id']}/input-answer.json",
+            json.dumps({"answer": answer.strip()}, ensure_ascii=False, indent=2) + "\n",
+            pending["task_id"],
+            kind="input",
         )
-    else:
-        resumed = controller.resume(run.id)
-    evolution_request = _latest_evolution_request(controller.store, resumed.id)
-    if resumed.current_plan_id is not None and evolution_request is not None:
-        evolution_args = _evolution_args(args, evolution_request)
-        # An OpenEvolve executable is intentionally not persisted in the request event. The
-        # same is true for an objective harness. The caller must continue either explicit path
-        # with ``solve --resume`` and provide the command again; runtime-backed native handoffs
-        # can resume automatically.
-        harness_deferred = bool(evolution_request.get("evaluator_command_configured")) and not bool(
-            getattr(args, "evaluator_command", None)
-        )
-        if (
-            not evolution_request.get("evaluator_command_configured")
-            and getattr(args, "evaluator_command", None)
-        ):
-            raise EvolutionError("solve evolution did not configure an evaluator command")
-        if not (
-            harness_deferred
-            or (
-                getattr(evolution_args, "strategy", None) == "openevolve"
-                and not getattr(args, "openevolve_command", None)
+        relative_answer = str(answer_path.relative_to(run.workspace))
+        task_id = store.answer_input(run.id, relative_answer)
+        if task_id is None:
+            raise ValueError("input request was answered concurrently; inspect status")
+        controller = _controller(args, config)
+        evolution_request = _latest_evolution_request(store, run.id)
+        if evolution_request is not None:
+            compiled = bool(evolution_request.get("compile_evaluator", False))
+            if getattr(args, "compile_evaluator", False) and not compiled:
+                raise EvolutionError("solve evolution did not configure a compiled evaluator")
+            if getattr(args, "evaluator_command", None) and compiled:
+                raise EvolutionError(
+                    "compiled evaluator and evaluator command are mutually exclusive"
+                )
+        automatic_continuation = conversation and _lifecycle_enabled(evolution_request)
+        if automatic_continuation:
+            resumed = _resume_automatic_solve(
+                config, _evolution_args(args, evolution_request), controller,
+                controller.store.get_run(run.id) or run, manifest, owner_held=True,
             )
-        ):
-            _solve_evolution(config, evolution_args, controller, resumed)
-            resumed = controller.store.get_run(resumed.id) or resumed
-    solved_payload = _solve_payload(controller, resumed)
-    payload = {
-        "run_id": resumed.id,
-        "task_id": task_id,
-        "status": solved_payload["status"],
-        "run_status": resumed.status.value,
-        "workspace": str(resumed.workspace),
-        "answer_path": relative_answer,
-        "workers": controller.max_workers,
-        "input_request": solved_payload["input_request"],
-        "algorithm_outputs": solved_payload.get("algorithm_outputs", []),
-        "evolution": solved_payload.get("evolution"),
-    }
-    if solved_payload.get("error") == LOOP_STRATEGY_RETIRED:
-        payload.update(_loop_retirement_payload())
-    return payload
+        elif conversation and (run.current_plan_id is None or evolution_request is not None):
+            resumed = controller.resume_conversational(
+                run.id,
+                RuntimeContractCompiler(controller.runtime),
+                compiler_fingerprint=_compiler_fingerprint(controller.runtime),
+                plan_factory=_conversation_plan_factory(args, manifest),
+                execute_plan=evolution_request is None,
+            )
+        else:
+            resumed = controller.resume(run.id)
+        evolution_request = _latest_evolution_request(controller.store, resumed.id)
+        if not automatic_continuation and resumed.current_plan_id is not None and evolution_request is not None:
+            evolution_args = _evolution_args(args, evolution_request)
+            # An OpenEvolve executable is intentionally not persisted in the request event. The
+            # same is true for an objective harness. The caller must continue either explicit path
+            # with ``solve --resume`` and provide the command again; runtime-backed native handoffs
+            # can resume automatically.
+            harness_deferred = bool(evolution_request.get("evaluator_command_configured")) and not bool(
+                getattr(args, "evaluator_command", None)
+            )
+            if (
+                not evolution_request.get("evaluator_command_configured")
+                and getattr(args, "evaluator_command", None)
+            ):
+                raise EvolutionError("solve evolution did not configure an evaluator command")
+            if not (
+                harness_deferred
+                or (
+                    getattr(evolution_args, "strategy", None) == "openevolve"
+                    and not getattr(args, "openevolve_command", None)
+                )
+            ):
+                _bind_solve_execution_control(evolution_args, controller, resumed)
+                _solve_evolution(config, evolution_args, controller, resumed)
+                resumed = controller.store.get_run(resumed.id) or resumed
+        solved_payload = _solve_payload(controller, resumed)
+        payload = {
+            "run_id": resumed.id,
+            "task_id": task_id,
+            "status": solved_payload["status"],
+            "run_status": resumed.status.value,
+            "workspace": str(resumed.workspace),
+            "answer_path": relative_answer,
+            "workers": controller.max_workers,
+            "input_request": solved_payload["input_request"],
+            "algorithm_outputs": solved_payload.get("algorithm_outputs", []),
+            "evolution": solved_payload.get("evolution"),
+            **({"solve_execution": solved_payload["solve_execution"]} if "solve_execution" in solved_payload else {}),
+        }
+        if solved_payload.get("error") == LOOP_STRATEGY_RETIRED:
+            payload.update(_loop_retirement_payload())
+        return payload
 
 
 def _export_shinka(args: argparse.Namespace) -> dict[str, object]:
@@ -5782,6 +6007,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     except (
         AgentError,
+        AutomaticSolveAlreadyRunning,
         ValueError,
         TypeError,
         OSError,

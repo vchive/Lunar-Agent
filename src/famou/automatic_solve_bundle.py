@@ -16,6 +16,7 @@ from time import monotonic
 from ._benchmark_files import absolute_path, read_regular_file
 from ._candidate_workspace_io import DirectoryChain
 from .algorithm import AlgorithmProblemContract
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .budget import BudgetSpec
 from .bundle_evolution import load_bundle_pipeline
 from .candidate_evaluation_spec import CandidateEvaluationSpec, canonical_json, strict_json
@@ -588,6 +589,53 @@ def _write_profile(held, root, raw):
         _fail("profile_mismatch")
 
 
+def validate_automatic_preparation_recovery(store, parent_id):
+    """Reject corrupt recovery evidence before any new execution observation or attempt."""
+    parent, _ = _parent(store, parent_id)
+    _, prepared = _event(store, parent)
+    if prepared is not None:
+        return
+    # A new attempt is an explicit recovery operation.  Do not let a
+    # malformed or non-recoverable failure observation become an
+    # implicit retry merely because the profile event is absent.
+    previous = automatic_bundle_preparation_status(store, parent.id)
+    preparation_events = store.list_events(parent.id)
+    has_prior_failure = any(item.get("type") == _FAILED for item in preparation_events)
+    valid_interrupted_start = False
+    if (previous is not None and previous.get("status") == "unknown"
+            and not has_prior_failure):
+        starts = [item for item in preparation_events
+                  if item.get("type") == _STARTED]
+        raw_start = starts[0].get("payload") if len(starts) == 1 else None
+        relevant = [item for item in preparation_events
+                    if item.get("type") in {_STARTED, _FAILED, _EVENT}]
+        valid_interrupted_start = (
+            len(starts) == 1 and relevant[-1] == starts[0]
+            and isinstance(raw_start, dict)
+            and previous.get("attempt_id") is not None
+            and raw_start.get("attempt_id") == previous["attempt_id"]
+            and raw_start.get("parent_run_id") == parent.id
+            and _valid_start(raw_start, parent.id, raw_start["attempt_id"], preparation_events)
+        )
+        if not valid_interrupted_start:
+            _fail("recovery_not_admitted")
+    if (previous is not None
+            and (previous.get("status") == "failed"
+                 or (previous.get("status") == "unknown" and has_prior_failure))
+            and previous.get("recoverable") is not True
+            and not (
+                previous.get("error_category") == "unsupported_verification"
+                and "unsupported_constraints" in previous
+            )
+            and not (
+                previous.get("error_category") == "validation_error"
+                and "local_failure" in previous
+            )
+            and not valid_interrupted_start
+            and previous.get("failure_reason") != "budget_exceeded"):
+        _fail("recovery_not_admitted")
+
+
 def prepare_automatic_solve_bundle(
     controller,
     parent_id: str,
@@ -620,11 +668,15 @@ def prepare_automatic_solve_bundle(
                 _fail("settings_invalid")
             wall_timeout = float(wall_timeout)
         validate_automatic_solve_bundle(controller.store, parent_id)
+        if solve_control is not None:
+            solve_control.check("preparation")
         _, event = _event(controller.store, parent)
         if event is not None:
             return _read_preparation(controller.store, parent, contract, expected_timeout=timeout)[0]
         root = absolute_path(parent.workspace)
         with _locked(root) as held:
+            if solve_control is not None:
+                solve_control.check("preparation")
             parent, _ = _parent(controller.store, parent_id, contract)
             validate_automatic_solve_bundle(controller.store, parent_id)
             _, event = _event(controller.store, parent)
@@ -633,45 +685,7 @@ def prepare_automatic_solve_bundle(
             if parent.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
                 _fail("terminal")
 
-            # A new attempt is an explicit recovery operation.  Do not let a
-            # malformed or non-recoverable failure observation become an
-            # implicit retry merely because the profile event is absent.
-            previous = automatic_bundle_preparation_status(controller.store, parent.id)
-            preparation_events = controller.store.list_events(parent.id)
-            has_prior_failure = any(item.get("type") == _FAILED for item in preparation_events)
-            valid_interrupted_start = False
-            if (previous is not None and previous.get("status") == "unknown"
-                    and not has_prior_failure):
-                starts = [item for item in preparation_events
-                          if item.get("type") == _STARTED]
-                raw_start = starts[0].get("payload") if len(starts) == 1 else None
-                relevant = [item for item in preparation_events
-                            if item.get("type") in {_STARTED, _FAILED, _EVENT}]
-                valid_interrupted_start = (
-                    len(starts) == 1 and relevant[-1] == starts[0]
-                    and isinstance(raw_start, dict)
-                    and previous.get("attempt_id") is not None
-                    and raw_start.get("attempt_id") == previous["attempt_id"]
-                    and raw_start.get("parent_run_id") == parent.id
-                    and _valid_start(raw_start, parent.id, raw_start["attempt_id"], preparation_events)
-                )
-                if not valid_interrupted_start:
-                    _fail("recovery_not_admitted")
-            if (previous is not None
-                    and (previous.get("status") == "failed"
-                         or (previous.get("status") == "unknown" and has_prior_failure))
-                    and previous.get("recoverable") is not True
-                    and not (
-                        previous.get("error_category") == "unsupported_verification"
-                        and "unsupported_constraints" in previous
-                    )
-                    and not (
-                        previous.get("error_category") == "validation_error"
-                        and "local_failure" in previous
-                    )
-                    and not valid_interrupted_start
-                    and previous.get("failure_reason") != "budget_exceeded"):
-                _fail("recovery_not_admitted")
+            validate_automatic_preparation_recovery(controller.store, parent.id)
 
             def continuation_guard():
                 current, _ = _parent(controller.store, parent.id, contract)
@@ -679,10 +693,7 @@ def prepare_automatic_solve_bundle(
                     _fail("terminal")
                 held.check()
                 if solve_control is not None:
-                    try:
-                        solve_control.check("preparation")
-                    except TimeoutError as exc:
-                        raise EvaluatorPreparationWallTimeout("preparation") from exc
+                    solve_control.check("preparation")
 
             descriptors, concrete, input_profile = _descriptors(controller.store, parent, contract)
             attempt_id = "preparation-" + secrets.token_hex(16)
@@ -701,10 +712,7 @@ def prepare_automatic_solve_bundle(
                 continuation_guard()
                 remaining = wall_timeout - (monotonic() - started_at) if wall_timeout is not None else None
                 if solve_control is not None:
-                    try:
-                        solve_remaining = solve_control.check(current_stage)
-                    except TimeoutError as exc:
-                        raise EvaluatorPreparationWallTimeout(current_stage) from exc
+                    solve_remaining = solve_control.check(current_stage)
                     remaining = solve_remaining if remaining is None else min(remaining, solve_remaining)
                 if remaining is None:
                     raise RuntimeError("preparation remaining timeout requested without a deadline")
@@ -750,6 +758,10 @@ def prepare_automatic_solve_bundle(
                 publication_guard()
                 controller.store.append_event(parent.id, _EVENT, payload, event_id=event_id)
                 return _read_preparation(controller.store, parent, contract, expected_timeout=timeout)[0]
+            except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                # Solve exhaustion is terminal for the parent, unlike the independently
+                # recoverable preparation wall budget. Preserve its typed authority.
+                raise
             except Exception as exc:
                 category, recoverable = "validation_error", False
                 unsupported_constraints = None
@@ -778,6 +790,8 @@ def prepare_automatic_solve_bundle(
                         continuation_guard()
                         validate_automatic_solve_bundle(controller.store, parent.id)
                         held.check()
+                    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                        raise
                     except (EvolutionError, OSError, TypeError, ValueError):
                         pass
                     else:
@@ -794,6 +808,8 @@ def prepare_automatic_solve_bundle(
                         validate_automatic_solve_bundle(controller.store, parent.id)
                         if _descriptors(controller.store, parent, contract) != (descriptors, concrete, input_profile):
                             _fail("inputs_changed")
+                    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                        raise
                     except (EvolutionError, OSError, TypeError, ValueError):
                         pass
                     else:
@@ -841,5 +857,7 @@ def prepare_automatic_solve_bundle(
                     observation,
                     budget_exceeded=budget_exceeded,
                 ) from exc
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except (AttributeError, KeyError, OSError, TypeError, ValueError, RecursionError):
         _fail()

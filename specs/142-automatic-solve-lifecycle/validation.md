@@ -1,104 +1,94 @@
 # Validation
 
-## Current status
+## Scope of this checkpoint
 
-Implementation checkpoint dated 2026-09-20. Phase A CLI policy validation, handoff persistence,
-the process-local execution control/owner, and preparation deadline narrowing are implemented and
-verified by focused offline tests. Candidate/evolution/delivery propagation, parent orchestration,
-cancellation/process cleanup, and detached execution remain open and are not claimed by this
-checkpoint.
+2026-09-20: Phase A foreground implementation is complete. A shared monotonic deadline now spans
+contract intake, preparation, generation, candidate execution, independent scoring, selection and
+parent delivery. Durable orchestration prevents premature parent success. Solve, resume and answer
+share execution admission; process-local ownership plus a nonblocking workspace lock excludes
+concurrent foreground owners. Answer acquires ownership before accepting its artifact.
 
-Only `spec.md`, `plan.md`, `tasks.md`, and this validation record are in scope for this checkpoint.
-No `src` file, Feature 139 file, retained historical evidence, provider configuration, real
-registration, or campaign root is changed or executed by this specification work.
+This is one **active execution** budget. Human waiting and admissible explicit continuations create
+separate execution identities under the same policy. Observed exhaustion is terminal and cannot
+be replenished by continuation. The status projection contains bounded recorded facts and never
+reconstructs a live monotonic remainder from persisted timestamps.
 
-## Completed document checks
+Phase B in-flight cancellation, owned process registration/cleanup and Phase C detached entry
+points remain open. Automatic `--detach` remains rejected. Typed cooperative stop checks and
+narrower local process timeouts do not establish immediate cancellation of every running process
+or termination of remote provider work.
 
-- Specify prerequisites passed with `--require-tasks --include-tasks` for this feature directory.
-- The four expected Markdown files are present, and both local document links resolve.
-- The task list has T001/T002 specification items and T003/T004 implementation items complete;
-  the remaining implementation and verification tasks are open.
-- `git diff --check` passed at the specification checkpoint.
+## Offline acceptance
 
-These are document checks only. They do not close any product acceptance row below.
-
-## Planned acceptance matrix
-
-| Area | Required offline evidence | Status |
+| Area | Evidence | Result |
 | --- | --- | --- |
-| CLI validation | Valid bounds; zero/negative/bool/non-finite/malformed/out-of-range rejection; all unsupported modes rejected before side effects | Focused pass |
-| Persistence | Explicit policy and lifecycle marker; exact restore/match; no legacy policy injection; secrets excluded | Focused pass |
-| Shared deadline | Deterministic control/owner and preparation narrowing are verified; full generation, execution, scoring, selection, and delivery propagation remains open | Control/preparation focused pass; full propagation not run |
-| Exhaustion | Before claim/request/process, after late result, and before publication; one terminal event; no new work on continuation | Not run |
-| Parent lifecycle | Parent remains active while child runs; only verified delivery completes orchestration; ordinary scheduler cannot claim control task | Not run |
-| Recovery | Awaiting-input/answer, admissible preparation recovery, interrupted nonterminal ownership, successful/cancelled/exhausted terminal idempotency | Not run |
-| Identity preservation | Byte/digest equality for input, profile, contract, evaluator, source, execution admission/plan; separate truthful effective-timeout observation | Not run |
-| Cancellation | Every phase; reciprocal child binding; unrelated run untouched; late result rejection; cancellation/deadline winner retained | Not run |
-| Local cleanup | All owned probe/candidate/evaluator groups reaped; callback failure does not stop fan-out; coordinating worker cleaned last | Not run |
-| Detached gate | Automatic detach remains rejected until local cleanup acceptance passes | Not run |
-| Detached behavior | Fresh/resumed/answered background runs; exact policy; secret-free argv; one owner; status/cancel; all exit paths clear ownership | Not run |
-| Compatibility | Existing 133/137/141, CLI, Controller, preparation, process, generation receipt, execution/evaluation, and delivery regressions | Not run |
-| Full regression | Current full offline suite and fixed historical stage, with exact counts and report paths | Not run |
-| Historical evidence | Exact retained Feature 131/134 file sets, sizes, and hashes; no Feature 139 rewrite or provider activity | Not run |
+| Policy validation | solve/resume/answer bounds, unsupported modes, exact restoration, legacy injection rejection | Pass |
+| Shared deadline | Deterministic native fixture covers contract/compiler/auditor/generation, local execution, scoring and delivery under one control | Pass |
+| Immutable identity | Frozen inputs, profile, contract, evaluator and plan bytes retain their configured ceilings while actual process timeouts narrow | Pass |
+| Parent lifecycle | Parent running during delivery, one reused orchestration task, ordinary scheduler exclusion, child failure cannot succeed parent | Pass |
+| Recovery | Human wait starts a new active execution; valid preparation recovery retained; corrupt recovery rejected before any new observation; successful/exhausted continuation is read-only | Pass |
+| Terminal precedence | One solve-policy budget event; cancellation-first and budget-first preserved; late task success cannot replace the budget failure | Pass |
+| Ownership | Busy same-process and cross-process owners reject admission; busy answer does not consume input or write artifacts | Pass |
+| Status | Fixed fields, absent/explicit policy origin, successful final delivery phase, malformed observation rejection and no status writes | Pass |
+| Delivery | Deadline checks after material reads, before copy/output commit, and before successful parent settlement; unfinished output batches reconcile on typed stop | Pass |
+| In-flight cancellation and local cleanup | Full owned probe/candidate/evaluator fan-out | Not implemented in this checkpoint |
+| Detached execution | Automatic entry point remains rejected | Gate preserved; positive behavior not implemented |
 
-## Test design rules
+## Focused verification
 
-Use injectable monotonic clocks for deadline ordering and fresh local fixture programs for actual
-process termination. Fake the provider transport while keeping native CLI, Controller, Store,
-generation, execution, scoring, and delivery paths real where integration needs to be established.
-Never execute retained provider-generated historical source as a regression fixture.
+New/extended suites:
 
-Check configured and effective timeouts independently: a request-level 600-second ceiling, a
-900-second preparation ceiling, and a smaller solve remainder must produce the minimum applicable
-value without rewriting any frozen policy or input. Exhaustion observed after local work may
-retain bounded diagnostic materials but cannot authorize the next stage or parent success.
+- `tests/test_automatic_solve_lifecycle.py`: deadline math, typed stop, process/workspace ownership,
+  unsafe lock rejection, and budget failure between last-task success and parent settlement.
+- `tests/test_automatic_solve_deadline_integration.py`: 15 native offline integration cases, all
+  passing; local model responses are fixtures, and candidate/evaluator programs are fresh fixtures.
+- `tests/test_automatic_solve_status.py`: 13 cases passing, including answer identity, read-only
+  status, bounded diagnostics and terminal winner behavior.
+- `tests/test_solve_budget_propagation.py`: 23 cases passing, including timeout ceilings,
+  independent scoring admission and typed stops surviving broad exception handlers.
+- `tests/test_automatic_solve_orchestration.py`: Store, scheduler, child outcome, delivery and legacy
+  compatibility; output-publication Store tests cover rejection after failed/cancelled parents.
 
-Distinguish active-execution scope from cumulative lifetime. An awaiting-input or admissible
-nonterminal continuation obtains a new execution identity under the unchanged policy; tests must
-not falsely assert that the sum of those executions is bounded by one allowance. Conversely, an
-observed solve-budget terminal failure must never regain an allowance through any continuation.
+The policy/preparation/automatic-bundle/orchestration compatibility command passed 227 tests.
+Preparation-recovery/status/deadline integration passed 42 tests before the final five boundary
+cases were added. A subsequent 28-test status/integration run and independent 15-test integration
+run passed. Final Store/Controller/run-budget/lifecycle/status refinement passed 46 tests. The
+materialization and attestation compatibility suites passed 186 tests after the additive task
+schema fixture update; publication and lifecycle boundary suites passed 134 tests.
 
-Before enabling detach, run real local process fixtures that exercise independent subprocess
-groups, including children with open output pipes and cleanup callbacks that raise. Assert their
-owned PIDs/groups are gone or reaped before the coordinator is reported cleaned up. No provider
-side cancellation or completion claim can be inferred from these local tests.
+Ruff for all `src` and `tests`, compileall, Specify prerequisites with `--require-tasks
+--include-tasks`, and `git diff --check` pass. Local Markdown links are checked before commit.
 
-## Planned verification commands
+## Full regression
 
-The focused file list will be filled in after implementation; do not treat an empty placeholder
-suite as completed validation. Existing preparation/Controller/process/delivery suites and new
-native lifecycle integration tests are required, followed by:
+The final two-stage run is recorded in `.lunar/test-results/feature142-final3/`:
 
-```sh
-.venv/bin/ruff check src tests specs/142-automatic-solve-lifecycle
-.venv/bin/python -m compileall -q src tests
-SPECIFY_FEATURE_DIRECTORY=specs/142-automatic-solve-lifecycle \
-  bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
-git diff --check
-.venv/bin/python tools/run_tests.py --junit-dir .lunar/test-results/feature142
-```
+- Current working tree: **8522 passed, 1 skipped, 24 deselected**, 0 failures and 0 errors,
+  exit 0 (`current.xml`).
+- Frozen Feature 123 registration stage: **24 passed**, 0 skipped, 0 failures and 0 errors,
+  exit 0 (`frozen123.xml`).
 
-The first implementation checkpoint passed the focused command below (automatic handoff,
-preparation policy, and solve-wall policy suites):
+The current stage executed 8523 collected tests; the 24 deselected nodes are the immutable
+historical registration selection. The run took 790.25 seconds. The earlier interrupted run and
+its partial report remain historical context only.
 
-```sh
-.venv/bin/pytest -q tests/test_solve_wall_timeout_cli.py \
-  tests/test_conversational_automatic_bundle.py \
-  tests/test_preparation_wall_timeout_cli.py
-```
+## Independent review and retained evidence
 
-Ruff passed for `src/famou/cli.py` and the new solve-wall policy tests. This is not a Phase A
-completion claim; deterministic shared-deadline and parent-lifecycle tests remain required.
+Independent budget-boundary review found and resolved typed timeout swallowing (including the
+`TimeoutError`/`OSError` inheritance boundary), fresh per-stage allowances, missing scoring timeout
+propagation and late publication checks. Independent lifecycle review found and resolved busy
+answer consumption, incomplete status records and preparation recovery mutation before admission.
+The task discriminator schema refinement and cross-process advisory owner are documented in the
+existing SDD; this is a continuation of Feature 142.
 
-Also verify local Markdown links and compare historical inventories with the retained authorities.
-Record exact test counts, skips, elapsed time, report locations, and independent review findings
-here when those checks actually run. Specifications can pass structural checks before product
-implementation; such results must be labelled document checks and must not close implementation
-tasks or the detached cleanup gate.
+Feature 131 retained inventory: **21 files / 155485 bytes**. Feature 134: **97 files / 327394 bytes**.
+Each relative path, size and SHA-256 matches its retained `postrun/evidence.json`; no symlinks or
+historical SQLite mutation. The product diff contains no Feature 139 source/evidence change.
+No provider, real campaign, retained generated program, or WebAgent was executed.
 
 ## Release boundary
 
-Passing offline tests would establish automatic lifecycle behavior, local deadlines, and local
-cleanup only. It would not establish evaluator quality, provider completion, current-model task
-success, WebAgent parity, or completion of Feature 139's independent real acceptance. This feature
-does not introduce a new attestation or user-confirmation step for routine product development.
+Offline correctness here does not establish evaluator quality, current-model task success,
+WebAgent parity or successful real automatic multi-file delivery. Feature 139 remains preparation
+1/1 and primary/joint 0/1. Phase B/C and a separately scoped real acceptance remain outstanding;
+this checkpoint does not claim the whole feature or system release is complete.

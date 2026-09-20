@@ -506,22 +506,23 @@ def test_solve_evolve_materializes_reports_and_delivers_output(
 
 
 @pytest.mark.parametrize(
-    ("source", "error"),
+    ("source", "error", "timeout_seconds"),
     [
-        ("pass\n", "regular file"),
+        ("pass\n", "regular file", 1.0),
         (
             """from pathlib import Path
 Path('output').mkdir()
 Path('output/routes.csv').write_text('item_id\\norder-1\\n')
 """,
             "fields",
+            1.0,
         ),
-        ("raise SystemExit(7)\n", "process"),
-        ("import time\ntime.sleep(0.2)\n", "timed out"),
+        ("raise SystemExit(7)\n", "process", 1.0),
+        ("import time\ntime.sleep(0.2)\n", "timed out", 0.02),
     ],
 )
 def test_materialization_failures_do_not_promote_outputs(
-    tmp_path: Path, source: str, error: str
+    tmp_path: Path, source: str, error: str, timeout_seconds: float
 ) -> None:
     controller, parent, child, result = _evolution_fixture(tmp_path, source)
     materialized = controller.materialize_evolved_outputs(
@@ -529,7 +530,7 @@ def test_materialization_failures_do_not_promote_outputs(
         child.id,
         _contract(),
         result,
-        timeout_seconds=0.02,
+        timeout_seconds=timeout_seconds,
     )
 
     assert materialized["status"] == "failed"

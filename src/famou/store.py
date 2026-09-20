@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     input_options TEXT NOT NULL DEFAULT '[]',
     input_answer_path TEXT,
     plan_task_id TEXT,
+    orchestration INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -245,6 +246,7 @@ class Store:
             self._ensure_column(connection, "tasks", "input_options", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(connection, "tasks", "input_answer_path", "TEXT")
             self._ensure_column(connection, "tasks", "plan_task_id", "TEXT")
+            self._ensure_column(connection, "tasks", "orchestration", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(connection, "attempts", "pid", "INTEGER")
             self._ensure_column(connection, "attempts", "pgid", "INTEGER")
             self._ensure_column(connection, "workers", "result_ref", "TEXT")
@@ -977,6 +979,7 @@ class Store:
                         )
             row = connection.execute(
                 "SELECT * FROM tasks WHERE run_id = ? AND state IN (?, ?) "
+                "AND orchestration = 0 "
                 "ORDER BY created_at, id LIMIT 1",
                 (
                     run_id,
@@ -986,13 +989,16 @@ class Store:
             ).fetchone()
         return self._task_from_row(row) if row else None
 
-    def claim_task(self, task_id: str, runtime: str) -> Attempt | None:
+    def claim_task(
+        self, task_id: str, runtime: str, *, allow_orchestration: bool = False,
+    ) -> Attempt | None:
         attempt_id = f"attempt-{uuid.uuid4().hex}"
         timestamp = utc_now()
         with self._connect() as connection:
             updated = connection.execute(
                 "UPDATE tasks SET state = ?, attempts = attempts + 1, updated_at = ? "
-                "WHERE id = ? AND state IN (?, ?, ?)",
+                "WHERE id = ? AND state IN (?, ?, ?) "
+                "AND (orchestration = 0 OR ? = 1)",
                 (
                     TaskStatus.RUNNING.value,
                     timestamp,
@@ -1000,6 +1006,7 @@ class Store:
                     TaskStatus.PENDING.value,
                     TaskStatus.READY.value,
                     TaskStatus.UNCERTAIN.value,
+                    int(allow_orchestration),
                 ),
             ).rowcount
             if updated != 1:
@@ -1023,6 +1030,83 @@ class Store:
             )
             row = connection.execute("SELECT * FROM attempts WHERE id = ?", (attempt_id,)).fetchone()
         return self._attempt_from_row(row)
+
+    def ensure_orchestration_task(
+        self, run_id: str, *, title: str, prompt: str,
+    ) -> Task:
+        """Create or reuse the durable task coordinating an automatic solve handoff.
+
+        Orchestration tasks are intentionally outside the ordinary scheduler DAG.  They keep the
+        parent run active while a linked evolution child and its delivery are in progress, and
+        callers must explicitly claim them with ``allow_orchestration=True``.
+        """
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("orchestration task title must be non-empty")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("orchestration task prompt must be non-empty")
+        timestamp = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = connection.execute("SELECT id, status FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise ValueError(f"unknown run: {run_id}")
+            existing = connection.execute(
+                "SELECT * FROM tasks WHERE run_id = ? AND orchestration = 1 "
+                "ORDER BY created_at, id LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            if existing is not None:
+                return self._task_from_row(existing)
+            if run["status"] in {
+                RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value,
+            }:
+                raise ValueError("cannot add orchestration to a terminal run")
+            task_id = f"orchestration-{uuid.uuid4().hex}"
+            connection.execute(
+                "INSERT INTO tasks(id, run_id, title, prompt, state, dependencies, acceptance, "
+                "orchestration, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    task_id,
+                    run_id,
+                    title.strip(),
+                    prompt.strip(),
+                    TaskStatus.READY.value,
+                    "[]",
+                    None,
+                    1,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            self._append_event(
+                connection,
+                run_id,
+                task_id,
+                "task_created",
+                {"title": title.strip(), "orchestration": True},
+            )
+            row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return self._task_from_row(row)  # type: ignore[arg-type]
+
+    def active_attempt(self, task_id: str) -> Attempt | None:
+        """Return the currently running attempt for a task, if one exists."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM attempts WHERE task_id = ? AND status = ? "
+                "ORDER BY started_at DESC, id DESC LIMIT 1",
+                (task_id, "running"),
+            ).fetchone()
+        return self._attempt_from_row(row) if row else None
+
+    def claim_orchestration_task(self, task_id: str, runtime: str) -> Attempt | None:
+        """Claim one automatic-solve orchestration task explicitly."""
+        task = self.get_task(task_id)
+        if task is None or not task.orchestration:
+            raise ValueError("task is not an orchestration task")
+        active = self.active_attempt(task_id)
+        if active is not None:
+            return active
+        return self.claim_task(task_id, runtime, allow_orchestration=True)
 
     def await_input(
         self,
@@ -1308,9 +1392,17 @@ class Store:
     def settle_run(self, run_id: str) -> Run | None:
         timestamp = utc_now()
         with self._connect() as connection:
+            # Read task states and commit the derived run state under one writer lock. A
+            # concurrent budget failure must not be overwritten using a stale task snapshot.
+            connection.execute("BEGIN IMMEDIATE")
             current = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
             if current is None:
                 return None
+            if current["status"] == RunStatus.FAILED.value and connection.execute(
+                "SELECT 1 FROM events WHERE id = ? AND run_id = ? AND type = 'budget_exceeded'",
+                (f"event-budget-solve_wall_timeout-{run_id}", run_id),
+            ).fetchone() is not None:
+                return self.get_run(run_id)
             rows = connection.execute(
                 "SELECT state, input_question FROM tasks WHERE run_id = ?", (run_id,),
             ).fetchall()
@@ -1674,6 +1766,7 @@ class Store:
         """Commit every output row and its evidence together, or roll back the whole batch."""
         safe_errors = {
             "output_publication_ledger_mismatch", "output_publication_budget_exceeded",
+            "output_publication_parent_terminal",
         }
         try:
             manifest = self._output_publication_manifest(run_id, evolution_run_id, outputs, journal_sha256)
@@ -1689,6 +1782,19 @@ class Store:
                 )
                 if committed:
                     return
+                parent = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+                if parent is not None and parent["status"] in {RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
+                    # Only new automatic handoffs keep parent terminal state authoritative
+                    # through delivery. Legacy publication retains its existing semantics.
+                    requests = connection.execute(
+                        "SELECT payload FROM events WHERE run_id = ? AND type = 'evolution_requested'",
+                        (run_id,),
+                    )
+                    for row in requests:
+                        request = json.loads(row["payload"])
+                        if (isinstance(request, dict) and request.get("bundle_mode") == "compiled"
+                                and request.get("automatic_lifecycle_version") == 1):
+                            raise ValueError("output_publication_parent_terminal")
                 sizes = [row["size"] for row in connection.execute(
                     "SELECT size FROM artifacts WHERE run_id = ?", (run_id,),
                 )]
@@ -2932,8 +3038,11 @@ class Store:
     def fail_budget(self, run_id: str, limit: str, actual: float, maximum: float, reason: str) -> bool:
         """Record a fail-closed budget violation and transition unfinished work to failed."""
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
             if row is None or row["status"] in {RunStatus.SUCCEEDED.value, RunStatus.CANCELLED.value}:
+                return False
+            if limit == "solve_wall_timeout" and row["status"] == RunStatus.FAILED.value:
                 return False
             timestamp = utc_now()
             connection.execute(
@@ -2948,6 +3057,14 @@ class Store:
                 "UPDATE attempts SET status = ?, finished_at = ?, heartbeat_at = ?, error = ? WHERE task_id IN (SELECT id FROM tasks WHERE run_id = ?) AND status = ?",
                 ("failed", timestamp, timestamp, reason, run_id, "running"),
             )
+            if limit == "solve_wall_timeout":
+                connection.execute(
+                    "UPDATE tasks SET state = ?, last_error = ?, updated_at = ? "
+                    "WHERE run_id = ? AND orchestration = 1 AND state IN (?, ?, ?, ?, ?, ?)",
+                    (TaskStatus.FAILED.value, reason, timestamp, run_id,
+                     TaskStatus.BLOCKED.value, TaskStatus.PENDING.value, TaskStatus.READY.value,
+                     TaskStatus.WAITING.value, TaskStatus.RUNNING.value, TaskStatus.UNCERTAIN.value),
+                )
             return self._append_event(
                 connection, run_id, None, "budget_exceeded",
                 {"limit": limit, "actual": actual, "maximum": maximum, "reason": reason},
@@ -3292,6 +3409,7 @@ class Store:
             input_options=tuple(json.loads(row["input_options"] or "[]")),
             input_answer_path=Path(row["input_answer_path"]) if row["input_answer_path"] else None,
             plan_task_id=row["plan_task_id"],
+            orchestration=bool(row["orchestration"]) if "orchestration" in row.keys() else False,  # noqa: SIM118 - sqlite rows contain values.
         )
 
     @staticmethod

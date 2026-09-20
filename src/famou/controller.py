@@ -36,6 +36,11 @@ from .algorithm import (
     materialize_algorithm_workspace,
 )
 from .artifacts import ArtifactError, ArtifactStore
+from .automatic_solve_lifecycle import (
+    SolveExecutionBudgetExceeded,
+    SolveExecutionCancelled,
+    SolveExecutionControl,
+)
 from .budget import BudgetExceeded, BudgetSpec
 from .config import Config
 from .conversational import (
@@ -687,6 +692,7 @@ class LocalController:
         seed_dependency_sha256: str | None = None,
         seed_environment_sha256: str | None = None,
         bundle_pipeline: MultiFileCandidatePipeline | None = None,
+        remaining_timeout: Callable[[str], float] | None = None,
     ) -> tuple[Run, StrategyResult]:
         """Execute or resume an evolution strategy while retaining SQLite run authority."""
         run = self.store.get_run(run_id)
@@ -1003,6 +1009,7 @@ class LocalController:
                     or latest.status == RunStatus.CANCELLED
                 ),
                 observe=observe,
+                remaining_timeout=remaining_timeout,
             )
             return build_strategy(context)
 
@@ -1160,6 +1167,10 @@ class LocalController:
                 )
             settled = self.store.settle_run(run.id)
             return settled or run, result
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            # The automatic parent owns stop classification and terminal precedence. Do not
+            # turn its shared deadline into an ordinary candidate/evolution failure.
+            raise
         except Exception as exc:
             try:
                 self._index_evolution_candidate_integrity_artifacts(
@@ -1297,11 +1308,15 @@ class LocalController:
     def deliver_bundle_to_parent(
         self, parent_id: str, child_id: str, contract: AlgorithmProblemContract,
         result: StrategyResult,
+        *, continuation_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Publish an already scored bundle through the parent run's recoverable output batch."""
         from .bundle_parent_delivery import finish_bundle_parent_delivery
 
-        return finish_bundle_parent_delivery(self, parent_id, child_id, contract, result)
+        return finish_bundle_parent_delivery(
+            self, parent_id, child_id, contract, result,
+            continuation_guard=continuation_guard,
+        )
 
     @staticmethod
     def _decode_materialization_identity_json(
@@ -1892,7 +1907,7 @@ class LocalController:
             prepare_launch_intent(self.store, child, launch_identity, runner)
             launch_entered = True
             try:
-                execution = runner.run(candidate_copy, attempt, timeout=float(timeout_seconds))
+                execution = runner.run(candidate_copy, attempt)
             except Exception as exc:
                 raise MaterializationLaunchUncertain(
                     "materialization_launch_outcome_unknown"
@@ -3180,6 +3195,7 @@ class LocalController:
         *,
         plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
         execute_plan: bool = True,
+        solve_control: SolveExecutionControl | None = None,
     ) -> Run:
         """Run one intake attempt and either pause for input or install the generated plan."""
         if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
@@ -3191,6 +3207,8 @@ class LocalController:
             return self.resume(run.id) if execute_plan else (self.store.get_run(run.id) or run)
         if task.state.value == "waiting":
             return run
+        if solve_control is not None:
+            solve_control.check("contract")
         attempt = self.store.claim_task(task.id, "contract-compiler")
         if attempt is None:
             latest = self.store.get_run(run.id)
@@ -3236,8 +3254,11 @@ class LocalController:
                 run.goal,
                 task_root,
                 answer=answer,
-                timeout=self.config.runtime_timeout,
+                timeout=(solve_control.effective_timeout(self.config.runtime_timeout, stage="contract")
+                         if solve_control is not None else self.config.runtime_timeout),
             )
+            if solve_control is not None:
+                solve_control.check("contract")
             if not self._task_is_running(task.id):
                 self._discard_late_result(run.id, task.id, attempt.id)
                 return self.store.get_run(run.id) or run
@@ -3335,6 +3356,8 @@ class LocalController:
                 },
                 task_id=task.id,
             )
+            if solve_control is not None:
+                solve_control.check("contract")
             self.store.finish_task(
                 task.id,
                 attempt.id,
@@ -3343,9 +3366,15 @@ class LocalController:
             )
             self.store.settle_run(run.id)
             return self.resume(run.id) if execute_plan else (self.store.get_run(run.id) or run)
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
         except ContractCompilationError as exc:
+            if solve_control is not None:
+                solve_control.check("contract")
             error = str(exc)[-2_000:] or "contract compilation failed"
         except Exception as exc:  # noqa: BLE001 - compiler is an untrusted boundary
+            if solve_control is not None:
+                solve_control.check("contract")
             error = self._sanitize_error(exc)
         finally:
             if compiler_runtime is not None:
@@ -3369,6 +3398,7 @@ class LocalController:
         compiler_fingerprint: str | None = None,
         plan_factory: Callable[[str, AlgorithmProblemContract], PlanDocument] | None = None,
         execute_plan: bool = True,
+        solve_control: SolveExecutionControl | None = None,
     ) -> Run:
         """Resume intake or generated tasks; optionally stop after contract attachment."""
         run = self.store.get_run(run_id)
@@ -3384,6 +3414,7 @@ class LocalController:
             compiler_fingerprint,
             plan_factory=plan_factory,
             execute_plan=execute_plan,
+            solve_control=solve_control,
         )
 
     def _write_compiler_manifest(

@@ -27,31 +27,45 @@ Feature 142 控制。没有 provider 请求、WebAgent 重跑或真实 campaign�
 Feature 143 离线验证已完成：worker focused 8 passed，shared regression 通过，Ruff、
 compileall 和 diff 检查通过。全量回归除冻结 Feature 123 的 24 个 setup guard 因当前产品
 已不等于其历史提交而预期报 `product_changed` 外，其余测试通过；冻结历史证据未改写。
-当前 worker 层仍是显式本地 API，不代表自动多文件已有统一 wall-clock、后台、取消编排，
-也不代表真实模型端到端闭环已成功。
+当前 worker 层仍是显式本地 API；自动多文件的活动墙钟、父编排与恢复由 Feature 142 负责，
+进度见下文。worker 离线通过不代表真实模型端到端闭环已成功。
 
-## Feature 142：自动多文件 solve 生命周期（2026-09-20，Phase A 策略层开始实现）
+## Feature 142：自动多文件 solve 生命周期（2026-09-20，Phase A 前台实现与最终离线回归完成）
 
-不新开 SDD，继续沿用 `specs/142-automatic-solve-lifecycle/`。本阶段已把
+不新开 SDD，继续沿用 `specs/142-automatic-solve-lifecycle/`。本阶段把
 `--solve-wall-timeout` 接入 `solve`、`resume`、`answer`，限制为原生自动多文件流程，校验有限
 正数范围和模式，并在 runtime、Store mutation、preparation 或答案工件之前拒绝非法值。
 新的自动 handoff 持久化 `automatic_lifecycle_version=1`；显式策略才写入
 `solve_wall_timeout` 与 `solve_wall_timeout_source=explicit`。续跑恢复精确值并拒绝不匹配、
-legacy handoff 注入和损坏 marker；省略值保持无策略的旧行为。
+legacy handoff 注入和损坏 marker；省略值不隐式增加 solve 总时限，旧 handoff 不补写新生命周期。
 
-新增 focused 回归覆盖新鲜请求、续跑恢复、legacy 兼容、错误值和副作用前拒绝；自动 bundle
-与 preparation wall budget 回归保持通过。当前只完成 Feature 142 T003/T004。T005–T012 的
-共享活动 deadline、父编排 task、自动 answer 统一路径、阶段预算传播、预算终态和状态投影仍
-未完成；T013–T017 的父子取消与本地进程组清理仍未完成，automatic `--detach` 继续明确拒绝。
-Feature 143 的 Worker/WorkerAttempt 仅作为可复用控制面基础设施，不能替代 142 的父编排生命周期；
-143 T009 显式 delegation consumer 迁移不阻塞 142。
+前台 `solve`、`solve --resume`、`resume` 与 `answer` 现在共用自动编排入口。一次活动执行从
+合同 intake 开始共享同一个 monotonic deadline，覆盖 preparation、候选生成、本地执行、独立
+评分、选择和父任务交付；每次请求只收窄为原阶段上限与剩余时间的较小值，不重置 deadline。
+这不是跨多次 resume/answer 累计的 lifetime budget：等待用户输入结束本次活动执行，合法显式
+继续使用同一持久策略启动新 execution；已耗尽或其他终态的 run 不能借继续操作补充预算。
+控制对象和临时 timeout 不进入冻结的 profile、contract、plan、receipt 或候选身份。
 
-本阶段没有 provider 请求、真实 campaign、WebAgent 重跑或历史测量改写。T005 已完成：增加一个
-独占 automatic execution owner 与共享 process-local monotonic deadline，preparation 会使用固定
-deadline 的剩余时间；新增 lifecycle focused 测试，并通过 automatic solve wall/preparation/bundle
-回归。控制对象不进入任何持久身份内容，automatic `--detach` 仍保持拒绝。下一步按 142 Phase A
-继续实现 durable parent orchestration task，并把同一控制对象传入 candidate generation、local
-execution、scoring、selection 与 parent delivery；Phase B 清理验收通过前不开放 automatic detached。
+合同接受后创建或复用唯一 durable parent orchestration task，普通 scheduler 不会领取它，
+generated plan 被替换也不会使 parent 提前成功。parent 贯穿 child 与 delivery 保持 running，
+只有验证交付成功才完成；预算失败、取消和已有终态遵循 Store winner，晚到成功与新输出提交
+不能覆盖它。recoverable preparation 仍保持 effective failed / persisted nonterminal 的恢复契约。
+同一 parent 以进程内 owner 和跨进程 `flock` 排他；answer 在写答案工件前取得同一锁，避免重复
+继续。终态 continuation 不新增候选、交付或 worker。
+
+`solve`、`answer` 与只读 `status` 增加受限 `solve_execution`：execution ID、active-execution
+scope、持久策略及来源、固定阶段和 stopping reason。它不暴露实时 monotonic 剩余量，不推断
+远端请求是否完成，也不把任意异常文本作为公开状态。损坏准备历史仍在新增观察或 attempt 前
+拒绝。定向生命周期、状态与兼容回归已通过。最终双阶段全量回归通过：当前套件
+`8522 passed, 1 skipped, 24 deselected`，冻结 Feature 123 阶段 `24 passed`，两阶段均
+exit 0；报告位于 `.lunar/test-results/feature142-final3/`。本节改动在本交接点完成验证，
+随后提交并推送。
+
+Phase B 的父子取消到运行中实际进程的传播、ownership/进程组清理和独立验收仍未完成；
+Phase C 自动后台执行未开放，automatic `--detach` 继续明确拒绝。Feature 143 的
+Worker/WorkerAttempt 可复用但不能替代这些验收，143 T009 显式 delegation consumer 迁移不阻塞
+142。本阶段没有 provider 请求、真实 campaign、WebAgent 重跑或历史测量改写；Feature 139
+preparation `1/1`、primary/joint `0/1` 保持不变。
 
 ## Feature 141：原生自动多文件 CLI 显式候选预算（2026-09-19，离线完成）
 
@@ -136,12 +150,10 @@ holdout 且可正常汇总；只读分析不调用 provider、候选或 evaluato
 T007 离线验证、T008 登记与 preflight、T009 唯一真实运行、T010 单次 summary/独立审计均已
 完成；结果为 preparation `1/1`、primary/joint `0/1`，监督耗时 811.740448 秒，native/process
 exit 均为 1，cleanup 通过。真实结果与限制见 `specs/139-real-multifile-closure/postrun/`；
-后续产品工作应另立 SDD，保留 strict parser，并补 typed worker failure 与更可靠的候选最终
-响应协议。Feature 142 的全流程 wall timeout、父子取消传播、进程组清理和自动多文件 detached
-仍未实现。
-
-[Feature 142](specs/142-automatic-solve-lifecycle/spec.md) 的 spec/plan/tasks/validation
-四份 SDD 已写，产品全流程预算与取消编排实现尚未开始，23 项任务待完成。
+后续候选生成可靠性工作应独立明确规格，保留 strict parser，并补 typed worker failure 与更可靠的候选最终
+响应协议。此处保留 Feature 139 的验收结果；后续生命周期开发继续既有
+[Feature 142](specs/142-automatic-solve-lifecycle/spec.md) SDD。其前台活动墙钟与父编排已经实现，
+当前验证及 Phase B/C 剩余范围以上方 Feature 142 最新段落为准，不改变本真实槽的 `0/1`。
 
 ## Feature 137：run 墙钟预算传播到 Agent 请求（2026-09-18，离线完成）
 

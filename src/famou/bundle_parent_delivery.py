@@ -21,7 +21,7 @@ from .bundle_delivery import (
 from .candidate_evaluation_spec import canonical_json
 from .evaluator import MAX_ARTIFACT_BYTES, Evaluation
 from .evolution import EvolutionError, StrategyResult
-from .models import RunStatus
+from .models import RunStatus, TaskStatus
 from .output_publication import (
     OutputPublicationError,
     OutputPublicationUncertain,
@@ -87,7 +87,18 @@ def _validated(controller, parent_id, child_id, contract, result=None):
         _fail("links_invalid")
     if parent.status == RunStatus.CANCELLED:
         _fail("cancelled")
-    if parent.status != RunStatus.SUCCEEDED or child.status != RunStatus.SUCCEEDED:
+    parent_ready = parent.status == RunStatus.SUCCEEDED
+    if parent.status == RunStatus.RUNNING:
+        # Feature 142 keeps the parent active until this delivery completes.  The explicit
+        # orchestration task is the durable readiness proof for this transitional state.
+        orchestration = [task for task in controller.store.list_tasks(parent.id) if task.orchestration]
+        requests = [event.get("payload") for event in controller.store.list_events(parent.id)
+                    if event.get("type") == "evolution_requested"]
+        parent_ready = (len(orchestration) == 1 and orchestration[0].state == TaskStatus.RUNNING
+                        and len(requests) == 1 and isinstance(requests[0], dict)
+                        and requests[0].get("automatic_lifecycle_version") == 1
+                        and requests[0].get("bundle_mode") == "compiled")
+    if not parent_ready or child.status != RunStatus.SUCCEEDED:
         _fail("run_not_ready")
     actual = controller._algorithm_contract(parent)
     if actual is None or actual.digest() != contract.digest():
@@ -311,19 +322,28 @@ def inspect_bundle_parent_delivery(controller, parent_id, child_id, contract):
     return result
 
 
-def finish_bundle_parent_delivery(controller, parent_id, child_id, contract, result):
+def finish_bundle_parent_delivery(
+    controller, parent_id, child_id, contract, result, *, continuation_guard=None,
+):
     """Reuse a pinned copy and the existing output journal after an interrupted publication."""
+    def guard():
+        if continuation_guard is not None:
+            continuation_guard()
+
+    guard()
     parent, child, identity, materials, result, owner = _validated(controller, parent_id, child_id, contract, result)
     copied = _prepared(controller, parent, child, identity, materials)
     prepared = _outputs(controller, parent, contract, materials)
     package_path = copied.delivery_path.relative_to(Path(parent.workspace)).as_posix() if copied else None
     _budget(controller, parent, materials, identity, prepared, package_path)
     with _locked(parent) as destination:
+        guard()
         parent, child, identity, materials, result, owner = _validated(controller, parent_id, child_id, contract, result)
         copied = _prepared(controller, parent, child, identity, materials)
         if copied is not None:
             terminal = _inspect_terminal(controller, parent, child, contract, identity, materials, result, owner, copied)
             if terminal is not None:
+                guard()
                 return terminal
         elif _event(controller, parent, child, _TERMINAL) is not None:
             _fail("prepared_missing")
@@ -333,19 +353,27 @@ def finish_bundle_parent_delivery(controller, parent_id, child_id, contract, res
         if copied is None:
             recover_output_batch(controller.store, parent, child.id, tuple(spec for spec, _ in prepared),
                                  expected_outputs=_output_metadata(prepared), reconcile=False)
+            guard()
             copied = publish_bundle_delivery(destination, identity=identity, materials=materials)
+            guard()
             _append(controller, parent, child, _PREPARED, {
                 "schema_version": "1", "parent_run_id": parent.id, "evolution_run_id": child.id,
                 "identity": identity, "delivery_path": copied.delivery_path.relative_to(Path(parent.workspace)).as_posix(),
                 "delivery_sha256": copied.digest(),
             })
+        guard()
         _artifacts(controller, parent, owner, copied, materials, register=True)
         parent, child, identity, materials, result, owner = _validated(controller, parent_id, child_id, contract, result)
         limit = _budget(controller, parent, materials, identity, prepared,
                         copied.delivery_path.relative_to(Path(parent.workspace)).as_posix())
         error = None
         try:
-            outputs = publish_outputs(controller.store, parent, child.id, owner, prepared, limit)
+            guard()
+            outputs = publish_outputs(
+                controller.store, parent, child.id, owner, prepared, limit,
+                **({"continuation_guard": guard} if continuation_guard is not None else {}),
+            )
+            guard()
         except OutputPublicationUncertain:
             raise
         except OutputPublicationError:
@@ -359,5 +387,6 @@ def finish_bundle_parent_delivery(controller, parent_id, child_id, contract, res
         payload = _payload(parent, child, identity, result, copied, outputs, error)
         _validated(controller, parent_id, child_id, contract, result)
         _prepared(controller, parent, child, identity, materials)
+        guard()
         _append(controller, parent, child, _TERMINAL, payload)
         return _inspect_terminal(controller, parent, child, contract, identity, materials, result, owner, copied)

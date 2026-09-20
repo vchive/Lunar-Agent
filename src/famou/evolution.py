@@ -37,6 +37,7 @@ from .algorithm import (
     EvaluationReport,
     OutputSpec,
 )
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .evaluator import evaluate_output_contract
 
 MAX_SOURCE_BYTES = 512 * 1024
@@ -1066,7 +1067,10 @@ class CommandCandidateRunner:
             or effective_timeout <= 0
         ):
             raise ValueError("candidate runner timeout must be positive")
-        effective_timeout = max(float(effective_timeout), MIN_PROCESS_TIMEOUT_SECONDS)
+        effective_timeout = (
+            max(float(effective_timeout), MIN_PROCESS_TIMEOUT_SECONDS)
+            if timeout is None else min(self.timeout_seconds, float(effective_timeout))
+        )
         workspace.mkdir(parents=True, exist_ok=True)
         started = time.monotonic()
         process: subprocess.Popen[str] | None = None
@@ -2078,6 +2082,7 @@ class CommandCandidateEvaluator:
             raise ValueError("candidate evaluator timeout must be positive")
         self.command = command
         self.timeout_seconds = float(timeout_seconds)
+        self._remaining_timeout: Callable[[str], float] | None = None
         if environment is None:
             self.environment = None
         else:
@@ -2099,8 +2104,19 @@ class CommandCandidateEvaluator:
                 normalized_environment[key] = value
             self.environment = normalized_environment
 
+    def set_remaining_timeout(self, callback: Callable[[str], float] | None) -> None:
+        if callback is not None and not callable(callback):
+            raise TypeError("remaining timeout callback must be callable or None")
+        self._remaining_timeout = callback
+
     def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
         del contract
+        timeout = self.timeout_seconds
+        if self._remaining_timeout is not None:
+            remaining = self._remaining_timeout("evaluation")
+            if isinstance(remaining, bool) or not isinstance(remaining, (int, float)) or not math.isfinite(float(remaining)) or remaining <= 0:
+                raise EvolutionError("automatic solve execution budget exhausted")
+            timeout = min(timeout, float(remaining))
         try:
             completed = subprocess.run(
                 [*self.command, str(candidate_path)],
@@ -2109,13 +2125,19 @@ class CommandCandidateEvaluator:
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout_seconds,
+                timeout=timeout,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
+            if self._remaining_timeout is not None:
+                self._remaining_timeout("evaluation")
             raise EvolutionError(f"candidate evaluator timed out after {self.timeout_seconds:g}s") from exc
         except OSError as exc:
+            if self._remaining_timeout is not None:
+                self._remaining_timeout("evaluation")
             raise EvolutionError(_bounded_error(exc)) from exc
+        if self._remaining_timeout is not None:
+            self._remaining_timeout("evaluation")
         if completed.returncode != 0:
             raise EvolutionError(_bounded_error(completed.stderr or completed.stdout or f"evaluator exited with {completed.returncode}"))
         if len(completed.stdout.encode("utf-8")) > MAX_EXTERNAL_RESULT_BYTES:
@@ -2145,6 +2167,9 @@ class EvolutionContext:
     dependency_sha256: str | None = None
     environment_sha256: str | None = None
     bundle_pipeline: Any | None = None
+    # Process-local operational budget hook. It is deliberately not part of persisted config or
+    # candidate identity; automatic solve binds the same monotonic deadline to every phase.
+    remaining_timeout: Callable[[str], float] | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -5047,6 +5072,15 @@ class ExecutionAwareCandidateEvaluator:
             raise TypeError("evaluator must be callable")
         self.runner = runner
         self.evaluator = evaluator
+        self._remaining_timeout: Callable[[str], float] | None = None
+
+    def set_remaining_timeout(self, callback: Callable[[str], float] | None) -> None:
+        if callback is not None and not callable(callback):
+            raise TypeError("remaining timeout callback must be callable or None")
+        self._remaining_timeout = callback
+        setter = getattr(self.evaluator, "set_remaining_timeout", None)
+        if callable(setter):
+            setter(callback)
 
     def set_observer(self, observer: Callable[[str, dict[str, Any]], None] | None) -> None:
         """Forward optional Agent evidence observation through the execution wrapper."""
@@ -5059,8 +5093,19 @@ class ExecutionAwareCandidateEvaluator:
     ) -> EvaluationReport:
         candidate = Path(candidate_path).expanduser().resolve(strict=False)
         workspace = candidate.parent
+        timeout = None
+        if self._remaining_timeout is not None:
+            remaining = self._remaining_timeout("candidate_execution")
+            if isinstance(remaining, bool) or not isinstance(remaining, (int, float)) or not math.isfinite(float(remaining)) or remaining <= 0:
+                raise EvolutionError("automatic solve execution budget exhausted")
+            timeout = float(remaining)
         try:
-            execution = self.runner.run(candidate, workspace)
+            execution = (
+                self.runner.run(candidate, workspace)
+                if timeout is None else self.runner.run(candidate, workspace, timeout=timeout)
+            )
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
         except Exception as exc:  # noqa: BLE001 - runner is an injected local boundary
             execution = CandidateExecution(
                 status="failed",
@@ -5070,10 +5115,15 @@ class ExecutionAwareCandidateEvaluator:
                 stderr=_bounded_output(str(exc), MAX_EXECUTION_OUTPUT_BYTES),
             )
             _write_execution_evidence(workspace, execution)
+        if self._remaining_timeout is not None:
+            self._remaining_timeout("evaluation")
         if execution.status != "succeeded":
             detail = execution.error or f"execution_{execution.status}"
             return _invalid_report(detail)
-        return _report(self.evaluator(candidate, contract))
+        report = _report(self.evaluator(candidate, contract))
+        if self._remaining_timeout is not None:
+            self._remaining_timeout("evaluation")
+        return report
 
 
 def _drafts(value: CandidateDraft | Sequence[CandidateDraft]) -> tuple[CandidateDraft, ...]:
@@ -5111,6 +5161,23 @@ class _BaseStrategy:
         self._transient_evaluations: dict[str, EvaluationReport] = {}
         self._bind_observer(context.generate)
         self._bind_observer(context.evaluate)
+        self._bind_timeout(context.generate)
+        self._bind_timeout(context.evaluate)
+        self._bind_timeout(context.bundle_pipeline)
+
+    def _bind_timeout(self, target: object) -> None:
+        if target is None:
+            return
+        setter = getattr(target, "set_remaining_timeout", None)
+        if callable(setter):
+            setter(self.context.remaining_timeout)
+
+    def _check_stage(self, stage: str) -> None:
+        callback = self.context.remaining_timeout
+        if callback is not None:
+            remaining = callback(stage)
+            if isinstance(remaining, bool) or not isinstance(remaining, (int, float)) or not math.isfinite(float(remaining)) or remaining <= 0:
+                raise EvolutionError("automatic solve execution budget exhausted")
 
     def _bind_observer(self, target: object) -> None:
         setter = getattr(target, "set_observer", None)
@@ -5164,11 +5231,14 @@ class _BaseStrategy:
         parent: Candidate | None,
         island_id: int | None,
     ) -> Candidate:
+        self._check_stage("candidate_persistence")
         if self.context.bundle_pipeline is not None:
-            return self.context.bundle_pipeline.persist(
+            candidate = self.context.bundle_pipeline.persist(
                 self, draft, iteration=iteration, generation=generation, parent=parent,
                 island_id=island_id,
             )
+            self._check_stage("candidate_persistence")
+            return candidate
         if draft.source_files is not None:
             raise _InitialCandidateFailure("candidate_failed")
         candidate_id = self.archive.next_id()
@@ -5194,13 +5264,25 @@ class _BaseStrategy:
             )
             if source_snapshot.content != source_bytes:
                 raise EvolutionError("ordinary_candidate_source_changed")
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            if source_snapshot is not None:
+                source_snapshot.close()
+            self._discard_unarchived_candidate(candidate_id)
+            raise
         except Exception:  # noqa: BLE001 - candidate staging is a fixed boundary
             if source_snapshot is not None:
                 source_snapshot.close()
             self._discard_unarchived_candidate(candidate_id)
             raise _InitialCandidateFailure("candidate_failed") from None
         try:
+            self._check_stage("evaluation")
             evaluation = _report(self.context.evaluate(path, self.context.contract))
+            self._check_stage("evaluation")
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            if source_snapshot is not None:
+                source_snapshot.close()
+            self._discard_unarchived_candidate(candidate_id)
+            raise
         except Exception as exc:  # noqa: BLE001 - evaluator is an injected boundary
             if source_snapshot is not None:
                 source_snapshot.close()
@@ -5228,6 +5310,7 @@ class _BaseStrategy:
             self._discard_unarchived_candidate(candidate_id)
             raise _InitialCandidateFailure("candidate_failed") from None
         try:
+            self._check_stage("candidate_persistence")
             candidate = self.archive.persist(
                 draft,
                 candidate_id=candidate_id,
@@ -5246,6 +5329,13 @@ class _BaseStrategy:
             # The complete source and sidecars are the only recoverable evidence when an archive
             # append cannot be confirmed or rolled back.  Never delete them in this ambiguity.
             raise
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            if source_snapshot is not None:
+                source_snapshot.close()
+            if execution_snapshot is not None:
+                execution_snapshot.close()
+            self._discard_unarchived_candidate(candidate_id)
+            raise
         except Exception:  # noqa: BLE001 - persistence has one fixed candidate outcome
             if source_snapshot is not None:
                 source_snapshot.close()
@@ -5259,6 +5349,7 @@ class _BaseStrategy:
             if execution_snapshot is not None:
                 execution_snapshot.close()
         self._transient_evaluations[candidate.candidate_id] = evaluation
+        self._check_stage("candidate_persistence")
         try:
             self.context.observe("candidate", candidate.to_dict())
         except Exception as exc:  # noqa: BLE001 - optional audit sink
@@ -5318,6 +5409,7 @@ class _BaseStrategy:
 
     def _state(self, status: str, iteration: int, **extra: Any) -> None:
         payload = self._state_payload(status, iteration, **extra)
+        self._check_stage("selection")
         self.archive.write_state(payload)
         try:
             self.context.observe("state", payload)
@@ -6604,11 +6696,16 @@ class PopulationStrategy(_BaseStrategy):
                 workspace=self.context.workspace,
                 candidate_id=self.archive.next_id(),
             )
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
         except Exception:  # noqa: BLE001 - no narrower attempt result exists yet
             return OffspringOutcome(iteration, attempt, island, "run_failed")
 
         try:
             draft = _drafts(self.context.generate(request))[0]
+            self._check_stage("candidate_generation")
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
         except Exception:  # noqa: BLE001 - generator prose must not enter durable state
             return OffspringOutcome(iteration, attempt, island, "candidate_failed")
 
@@ -6620,7 +6717,7 @@ class PopulationStrategy(_BaseStrategy):
                 parent=selected_parent,
                 island_id=island,
             )
-        except _CandidateArchivePublicationUnknown:
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled, _CandidateArchivePublicationUnknown):
             raise
         except _InitialCandidateFailure as exc:
             return OffspringOutcome(iteration, attempt, island, exc.code)
@@ -6918,6 +7015,7 @@ class PopulationStrategy(_BaseStrategy):
                 initialization_error: str | None = None
                 evaluator_failure: str | None = None
                 for index in range(self.config.population_size):
+                    self._check_stage("candidate_generation")
                     if self._cancelled():
                         self._trim(active)
                         current = self.archive.best()
@@ -6944,12 +7042,15 @@ class PopulationStrategy(_BaseStrategy):
                     )
                     try:
                         drafts = _drafts(self.context.generate(request))
+                        self._check_stage("candidate_generation")
                         draft = drafts[0]
                         candidate = self._persist(draft, iteration=0, generation=0, parent=None, island_id=index % self.config.num_islands)
                         if candidate.evaluation.validity == 1:
                             active[index % self.config.num_islands].append(
                                 candidate.candidate_id
                             )
+                    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                        raise
                     except _CandidateArchivePublicationUnknown:
                         raise
                     except _InitialCandidateFailure as exc:
@@ -7016,6 +7117,7 @@ class PopulationStrategy(_BaseStrategy):
             )
 
         while iteration < self.config.max_rounds:
+            self._check_stage("selection")
             if self._cancelled():
                 current = self.archive.best()
                 self._state(
@@ -7032,6 +7134,7 @@ class PopulationStrategy(_BaseStrategy):
             state = self._begin_offspring_batch(state, active)
             target_iteration, _ = self._pending_offspring(state) or (iteration + 1, 0)
             for offset in range(self.config.offspring_per_iteration):
+                self._check_stage("candidate_generation")
                 outcome = self._attempt_offspring(
                     active,
                     iteration=target_iteration,
@@ -7040,11 +7143,13 @@ class PopulationStrategy(_BaseStrategy):
                 # If this append fails, pending intent remains canonical. Resume rejects the
                 # incomplete batch and never repeats an attempt with uncertain terminal state.
                 self.archive.append_offspring_outcome(outcome)
+                self._check_stage("candidate_persistence")
                 try:
                     self.context.observe("offspring_outcome", outcome.to_dict())
                 except Exception as exc:  # noqa: BLE001 - optional audit sink
                     del exc
             state, active = self._finish_offspring_batch(state, active)
+            self._check_stage("selection")
             terminal = self._terminal(state)
             if terminal:
                 return terminal

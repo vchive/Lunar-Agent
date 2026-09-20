@@ -1,10 +1,13 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-20 更新至 Feature 139 离线集成：Feature 140 的持久候选生成回执
-已推送；Feature 141 的原生多文件 CLI 显式候选预算已由 `87d86d9` 推送，409 项聚焦测试、
-当时全量当前 8166 项和历史固定 24 项通过（当前 1 skipped）。Feature 139 的原生证据链、
-worker 和只读 summary 已完成离线集成及独立复核；363 项专项测试在本轮全量中全部通过。
-完整双阶段为当前 8409 passed / 1 skipped / 24 deselected、固定历史 24 passed，overall exit0。
+评估创建于 2026-09-16，2026-09-20 更新至 Feature 142 Phase A 前台实现。当前定向生命周期、
+状态与兼容回归已通过，最终双阶段全量回归也已通过；本批改动待本交接点完成提交推送。
+Feature 140 的持久候选生成回执已推送；Feature 141 的原生多文件 CLI 显式候选预算已由
+`87d86d9` 推送，409 项聚焦测试、当时全量当前 8166 项和历史固定 24 项通过（当前 1 skipped）。
+Feature 139 的原生证据链、worker 和只读 summary 已完成离线集成及独立复核；其检查点完整
+双阶段为当前 8409 passed / 1 skipped / 24 deselected、固定历史 24 passed，overall exit0，
+包含全部 363 项专项测试。本轮 Feature 142 的最终双阶段结果为当前 `8522 passed / 1 skipped / 24 deselected`、冻结
+历史 `24 passed`，overall exit 0；报告位于 `.lunar/test-results/feature142-final3/`。
 Feature 139 的唯一真实 `attempt-001` 已完成，但未通过自动多文件完整交付验收：
 preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或父任务交付。
 以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
@@ -20,10 +23,25 @@ Feature 131/134/139 证据未修改。
 
 这还不是“整个 Lunar Agent 对外发布”的充分条件。发布候选可以包含当前普通本地 Agent、任务
 DAG、单文件演化、离线多文件 pipeline、外部候选准入协议和显式本地 worker API；自动多文件真实
-模型闭环仍只有 Feature 139 的 `0/1` 证据，不能宣称端到端成功或与 WebAgent 持平。正式发布前
-仍需完成 Feature 142 的自动求解总墙钟、父子取消/后台生命周期编排，并对至少一个真实模型任务
-重新独立登记验收；OpenEvolve/Shinka 多文件自动接线和真实效果验证属于后续能力，不应由离线协议
-测试替代。
+模型闭环仍只有 Feature 139 的 `0/1` 证据，不能宣称端到端成功或与 WebAgent 持平。
+Feature 142 Phase A 已实现前台共享活动墙钟、父编排、终态与只读状态。正式发布前仍需完成
+Phase B 的运行中父子取消、实际进程 ownership 与清理验收，再完成 Phase C 自动后台生命周期，
+并对至少一个真实模型任务重新独立登记验收；OpenEvolve/Shinka 多文件自动接线和真实效果验证
+属于后续能力，不应由离线协议测试替代。
+
+Feature 142 沿用已有 SDD，不重起方案。`solve`、`solve --resume`、`resume` 与 `answer` 的新
+automatic handoff 共用前台入口；显式 `--solve-wall-timeout` 给一次活动执行建立固定 deadline，
+从合同 intake 覆盖到 preparation、候选生成/执行/独立评分、选择和父任务交付。阶段和请求只
+收窄 operational timeout，不改变冻结 profile、plan、contract、receipt 或候选身份。策略持久化，
+但耗时不跨 resume/answer 累计；合法继续是新的 active execution，终态或已耗尽 run 不可补充
+预算。未指定该选项不会产生隐式 solve 时限，旧 handoff 保持原语义。
+
+唯一 durable parent orchestration task 在合同接受后建立，普通 scheduler 不执行它；父任务在
+child 与 verified delivery 完成前保持运行。跨进程 `flock` 与进程内 owner 防止同一 parent
+并行继续，answer 在写入前取得锁。预算、取消和先有终态按 Store winner 收口，晚到成功或新
+输出发布不能覆盖终态。`solve_execution` 只读公开 execution ID、策略及来源、固定阶段、状态
+和 stopping reason，不报告实时 monotonic 剩余量或猜测远端 provider 状态。automatic
+`--detach` 仍拒绝；本轮没有 provider 请求或真实 campaign，Feature 139 的 `0/1` 不变。
 
 Feature 136 已为单文件和 bundle 候选生成加入显式、不可变的每候选 tool-step budget 与
 authority-bound identity，并将 runtime failure、空响应和 parser failure 投影为有界诊断。
@@ -212,6 +230,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 单文件 population | 生成、独立评估、receipt、archive/选择/迁移、checkpoint/resume 与交付已集成 | 代码和离线 fixture；当前版本收益仍待实测 |
 | 多文件候选 | command/Agent/native runtime 生成 → bundle → 执行/独立评测 → receipt/archive/population → 父任务交付/terminal resume 已完成 | 普通 intake、完整父代上下文、helper-only 改进、有效性选优、迁移、失败保留、完整交付与不重跑 fixture |
 | 自动 evaluator/profile | 自动 compiler/auditor、输出探针、独立 preparation 请求/墙钟预算与冻结恢复已接通；源码文件数另做确定性检查；其他 source/execution 提前报不支持 | 128及134真实准备通过，各自8/8留出；134完整交付仍为0/1 |
+| 自动 solve 前台生命周期 | 一次活动执行的共享 deadline、durable parent orchestration、solve/resume/answer 统一入口、排他继续及只读 solve_execution 已实现 | Feature 142 定向与最终双阶段离线回归通过；实际进程取消/清理与自动 detach 尚未验收 |
 | OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现 | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证 |
 | ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现 | 本地 fixture；尚无 Shinka launcher/调度实现 |
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |
@@ -227,7 +246,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | --- | --- | --- |
 | 1 | 多文件 exact evaluator 与输出契约：已完成本地实现与验证 | evaluator 实现与契约固定，成功 execution record 关联评测时输出快照；坏输出直接无效，失败进程拒绝；评测不重跑候选 |
 | 2 | 多文件进入演化与最终交付：原生本地闭环已完成，外部 producer 接线待补 | Candidate/receipt/archive/lineage 已表达 bundle；command generator 和 controller 已接通；helper 模块任务完成生成、评分、下一代选择与可复核交付；OpenEvolve/Shinka 通用 material 仍为单文件 |
-| 3 | 统一用户入口与恢复：已有普通 solve 自动准备、独立 preparation 预算、父任务交付及 terminal resume | parent 输入/profile 绑定与 publication journal 已接通；支持范围内无需手写 profile/harness；全链路预算、运行中取消编排与更大输入格式/探针容量继续待补 |
+| 3 | 统一用户入口与恢复：自动准备、preparation 预算、共享活动墙钟、父编排与交付、terminal resume 已实现 | parent 输入/profile 绑定与 publication journal 已接通；支持范围内无需手写 profile/harness；运行中实际进程取消/清理、自动后台和更大输入格式/探针容量继续待补 |
 | 4 | 当前版本真实验收 | 使用明确模型、输入、预算和 evaluator，分别验证 normal、原生 population、多文件与至少一个真实外部 producer 路径；保留失败分母，报告有效解率、分数、耗时和已知用量 |
 
 第 4 项应先用小规模端到端样例贯穿开发，再在实现冻结后形成正式测量。不能等到所有
@@ -269,8 +288,11 @@ HTTP 200，已知用量 135344 tokens；preparation `1/1`，两个候选生成�
 通过。结果不是预算耗尽，也不证明当前模型的自动多文件交付成功；完整报告见
 `../specs/139-real-multifile-closure/postrun/report.md`。
 
-[Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 的四份 SDD 已写，产品全流程
-预算与取消编排实现尚未开始，23 项任务待完成。
+[Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 已继续既有 SDD 完成 Phase A 前台
+实现：共享 active-execution deadline、durable parent orchestration、统一 continuation、终态
+处理与只读 `solve_execution`。定向与最终双阶段全量回归已通过；当前不宣称完整功能
+已发布。下一步是 Phase B 的运行中实际进程取消/ownership 清理及独立验收，随后才开放和验证
+Phase C automatic detach。预算不是跨 resume 累计的任务 lifetime 上限。
 
 1. 113/115/117/120 各自为0/2。118/119已修复合同兼容和支持范围内的源码检查，
    121/122补齐生成协议和传输观测；123小型准备诊断收到响应后本地失败，为独立0/1。
@@ -288,11 +310,13 @@ HTTP 200，已知用量 135344 tokens；preparation `1/1`，两个候选生成�
    历史远端耗时原因仍未知；
    不补旧槽、不改失败分母，也不把本地协议验证当成模型成功率或质量已提高。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
-   workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
-   和全链路总时长编排继续待补，未知现场不自动重跑，终态恢复不增加候选或交付副本。
+   workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。142 已补一次
+   活动执行的共享墙钟和父任务编排，运行中实际进程取消/清理及自动后台仍待完成；未知现场
+   不自动重跑，终态恢复不增加候选或交付副本。
 3. Feature 140/141 已补持久生成回执、CLI 预算并完成验证推送；Feature 139 的真实槽已
-   完成但没有 completed candidate 或交付。下一项产品工作应另立 SDD，优先提高严格最终
-   响应协议的可完成性并保留 typed worker failure；失败分母保持为1，不重开旧槽。
+   完成但没有 completed candidate 或交付。生命周期继续既有 142 SDD；候选完成可靠性的
+   后续产品工作应独立明确规格，提高严格最终响应协议的可完成性并保留 typed worker failure；
+   失败分母保持为1，不重开旧槽。
 4. 扩展通用 producer material/SeedManifest 的多文件接线，使 OpenEvolve/Shinka 输出也
    进入同一完整源码路径，再用独立登记的小规模任务验证当前模型和真实 producer 效果。
 

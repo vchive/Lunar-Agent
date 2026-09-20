@@ -213,8 +213,10 @@ def test_exact_launch_authority_is_required_in_same_snapshot(attested: Any, auth
             connection.execute("DELETE FROM events WHERE id=?", (ids(attested[:-1])["launch"],))
         elif authority == "extra_task":
             connection.execute(
-                "INSERT INTO tasks SELECT 'extra-task',run_id,parent_id,title,prompt,state,attempts,result_path,last_error,"
-                "dependencies,acceptance,input_question,input_options,input_answer_path,plan_task_id,created_at,updated_at "
+                "INSERT INTO tasks(id,run_id,parent_id,title,prompt,state,attempts,result_path,last_error,"
+                "dependencies,acceptance,input_question,input_options,input_answer_path,plan_task_id,orchestration,created_at,updated_at) "
+                "SELECT 'extra-task',run_id,parent_id,title,prompt,state,attempts,result_path,last_error,"
+                "dependencies,acceptance,input_question,input_options,input_answer_path,plan_task_id,orchestration,created_at,updated_at "
                 "FROM tasks WHERE run_id=?", (child,),
             )
         else:
@@ -254,8 +256,10 @@ def test_global_nonce_cannot_be_reused_for_another_pair(attested: Any) -> None:
                            "current_plan_id,current_plan_version,route_domain,route_reason,route_confidence,solver_profile,"
                            "evaluator_profile,route_required_capabilities,route_evidence,budget FROM runs WHERE id=?",
                            (other_child, child))
-        connection.execute("INSERT INTO tasks SELECT ?,?,parent_id,title,prompt,state,attempts,result_path,last_error,dependencies,"
-                           "acceptance,input_question,input_options,input_answer_path,plan_task_id,created_at,updated_at FROM tasks WHERE id=?",
+        connection.execute("INSERT INTO tasks(id,run_id,parent_id,title,prompt,state,attempts,result_path,last_error,dependencies,"
+                           "acceptance,input_question,input_options,input_answer_path,plan_task_id,orchestration,created_at,updated_at) "
+                           "SELECT ?,?,parent_id,title,prompt,state,attempts,result_path,last_error,dependencies,"
+                           "acceptance,input_question,input_options,input_answer_path,plan_task_id,orchestration,created_at,updated_at FROM tasks WHERE id=?",
                            (other_task, other_child, task))
     other_intent = {**intent, "evolution_run_id": other_child, "task_id": other_task}
     store.record_materialization_launch_intent(parent, other_child, other_task, other_intent)

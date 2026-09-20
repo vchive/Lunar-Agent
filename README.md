@@ -1374,6 +1374,50 @@ answer/resume infer this mode and reuse those files without another evaluator co
 Ordinary `deliver` also verifies the preparation evidence. The solver receives inputs and independent
 feedback; evaluator source and probes are not staged in its context.
 
+Feature [142](specs/142-automatic-solve-lifecycle/spec.md) adds a shared foreground execution
+budget for this automatic native multi-file path:
+
+```bash
+lunar-agent solve 'Optimize the supplied data' --evolve --multi-file \
+  --input ./data.csv=data.csv --runtime openai-compatible --endpoint YOUR_ENDPOINT \
+  --model YOUR_MODEL --agent-loop --workspace ./mission \
+  --timeout 600 --evaluator-preparation-timeout 900 \
+  --evaluator-preparation-wall-timeout 1860 --solve-wall-timeout 3000 \
+  --candidate-generation-max-steps 12 --home .lunar --json
+```
+
+These are example limits, not new defaults. `--solve-wall-timeout` accepts a finite positive number
+of seconds up to 86400 and is optional. When supplied, one fixed deadline covers contract intake,
+evaluator preparation, candidate generation, local execution, scoring, selection and parent
+delivery. Requests use the smaller of their existing stage limit and the remaining solve time;
+each candidate or phase does not receive a fresh solve budget. Preparation and candidate tool-step
+limits continue to apply independently. Temporary timeouts do not change frozen evaluator/profile,
+contract, plan or candidate receipt identities.
+
+This is an **active execution** budget, not a lifetime limit accumulated across `resume` or `answer`.
+Waiting for user input ends the current execution. A valid explicit continuation starts another
+execution under the same persisted policy; omit the option to restore it, or repeat exactly the
+same value. A legacy handoff cannot acquire this policy later, and an exhausted or otherwise
+terminal run cannot replenish its budget through continuation.
+
+```bash
+lunar-agent resume RUN_ID --runtime openai-compatible --endpoint YOUR_ENDPOINT \
+  --model YOUR_MODEL --agent-loop --home .lunar --json
+lunar-agent status RUN_ID --home .lunar --json
+```
+
+The parent remains running through evolution and succeeds only after verified delivery. A durable
+orchestration task is reused on continuation; terminal continuation creates no new candidates or
+delivery copies. One parent has one active owner across local processes, and `answer` acquires the
+same lock before recording the answer. `solve`, `answer` and read-only `status` expose a bounded
+`solve_execution` object with execution ID, policy and origin, phase, state and stopping reason.
+It does not report a live monotonic remainder or infer whether a remote request finished.
+
+Phase A foreground behavior has offline coverage. Cancellation of all running owned processes and
+process-group cleanup still require Phase B acceptance; automatic `--detach` remains rejected until
+the later background phase is implemented and validated. This change made no provider requests and
+does not change Feature 139's real automatic multi-file result of `0/1`.
+
 Automatic preparation retains the existing compiler's input-format and probe capacity limits.
 It requires all contract inputs to match registered `csv`, `json`, `jsonl` or `text` files and uses
 local Python without installing dependencies. Probe success covers the tested cases and does not

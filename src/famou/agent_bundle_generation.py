@@ -9,6 +9,7 @@ from . import _benchmark_files as files
 from ._candidate_workspace_io import DirectoryChain, PrivateTree
 from .agents import MAX_TEXT_BYTES, AgentInvocationError, AgentRequest, AgentResult
 from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .bundle_evolution import read_candidate_source_files, validate_candidate_bundle_evidence
 from .candidate_bundle import MAX_CANDIDATE_TOTAL_SOURCE_BYTES
 from .candidate_evaluation import _close, _Observation, _Resources
@@ -337,20 +338,26 @@ def generate_bundle_candidate(generator, request):
             for snapshot in [*observed, *staged]:
                 snapshot.check()
             _verify_request(generator, request, workspace)
+            timeout = generator._effective_timeout("candidate_generation")
             agent_request = AgentRequest(
                 run_id=f"evolution-{workspace.name or 'workspace'}",
                 task_id=f"generation-{request.iteration:08d}-{generator._calls:04d}", role=generator.role,
                 prompt=prompt, required_capabilities=generator.required_capabilities,
-                workspace=destination, timeout=generator.timeout,
-                candidate_budget=generator._request_budget(request),
+                workspace=destination, timeout=timeout,
+                candidate_budget=generator._request_budget(request, timeout=timeout),
             )
             try:
                 result = generator.adapter.run(agent_request)
+                generator._effective_timeout("candidate_generation")
+            except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                raise
             except AgentInvocationError as exc:
+                generator._effective_timeout("candidate_generation")
                 if not getattr(exc, "candidate_diagnostic", None):
                     generator._emit_generation_diagnostic(agent_request, reason="worker_failed")
                 _fail("worker_failed")
             except Exception:  # noqa: BLE001 - an external Agent failure has one fixed boundary
+                generator._effective_timeout("candidate_generation")
                 generator._emit_generation_diagnostic(agent_request, reason="worker_failed")
                 _fail("worker_failed")
             if (not isinstance(result, AgentResult) or result.status != "succeeded"
@@ -371,6 +378,7 @@ def generate_bundle_candidate(generator, request):
             except EvolutionError:
                 generator._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
                 raise
+            generator._effective_timeout("candidate_generation")
             generator._emit_generation_diagnostic(
                 agent_request,
                 reason="completed",
@@ -380,5 +388,7 @@ def generate_bundle_candidate(generator, request):
             )
             generator._observe_artifacts(result, destination, workspace, agent_request.task_id)
             return draft
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RecursionError):
         _fail("invalid")

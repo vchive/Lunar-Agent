@@ -98,6 +98,56 @@ def test_reuses_matching_row_owned_by_another_parent_task(publication: Any) -> N
     assert len([event for event in store.list_events(run_id) if event["type"] == "artifact_recorded"]) == 2
 
 
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+def test_lifecycle_terminal_parent_rejects_new_output_commit(publication: Any, status: str) -> None:
+    store, run_id, _task_id, _outputs = publication
+    store.append_event(run_id, "evolution_requested", {
+        "bundle_mode": "compiled", "automatic_lifecycle_version": 1,
+    })
+    with store._connect() as connection:
+        connection.execute("UPDATE runs SET status = ? WHERE id = ?", (status, run_id))
+    before = snapshot(store, run_id)
+    with pytest.raises(ValueError, match="^output_publication_parent_terminal$"):
+        commit(publication)
+    assert snapshot(store, run_id) == before
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+@pytest.mark.parametrize("lifecycle", [False, True])
+def test_terminal_parent_keeps_exact_committed_replay_read_only(publication: Any, status: str, lifecycle: bool) -> None:
+    store, run_id, _task_id, _outputs = publication
+    if lifecycle:
+        store.append_event(run_id, "evolution_requested", {
+            "bundle_mode": "compiled", "automatic_lifecycle_version": 1,
+        })
+    commit(publication)
+    with store._connect() as connection:
+        connection.execute("UPDATE runs SET status = ? WHERE id = ?", (status, run_id))
+    before = snapshot(store, run_id)
+    commit(publication)
+    assert snapshot(store, run_id) == before
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+@pytest.mark.parametrize("policy", [
+    None,
+    {"bundle_mode": "compiled"},
+    {"bundle_mode": "single", "automatic_lifecycle_version": 1},
+])
+def test_legacy_terminal_parent_keeps_publication_compatibility(
+    publication: Any, status: str, policy: dict[str, Any] | None,
+) -> None:
+    store, run_id, _task_id, outputs = publication
+    if policy is not None:
+        store.append_event(run_id, "evolution_requested", policy)
+    with store._connect() as connection:
+        connection.execute("UPDATE runs SET status = ? WHERE id = ?", (status, run_id))
+    commit(publication)
+    assert committed(publication)
+    assert len(store.list_artifacts(run_id)) == len(outputs)
+    assert store.get_run(run_id).status.value == status
+
+
 def test_second_artifact_insert_failure_rolls_back_every_row_and_event(publication: Any) -> None:
     store, run_id, _task_id, outputs = publication
     with store._connect() as connection:

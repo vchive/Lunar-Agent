@@ -20,6 +20,7 @@ from .agents import (
     CandidateGenerationBudget,
 )
 from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract, EvaluationReport
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .evaluator_bundle import SolverScoringContract
 from .evolution import (
     CandidateDraft,
@@ -269,6 +270,26 @@ class AgentCandidateGenerator:
             self._bundle_identity = bundle_generator_identity(bundle_pipeline, contract)
         self._calls = 0
         self._observer: AgentEvidenceObserver | None = None
+        self._remaining_timeout: Callable[[str], float] | None = None
+
+    def set_remaining_timeout(self, callback: Callable[[str], float] | None) -> None:
+        if callback is not None and not callable(callback):
+            raise TypeError("remaining timeout callback must be callable or None")
+        self._remaining_timeout = callback
+
+    def _effective_timeout(self, stage: str) -> float | None:
+        callback = self._remaining_timeout
+        if callback is None:
+            return self.timeout
+        remaining = callback(stage)
+        if (
+            isinstance(remaining, bool)
+            or not isinstance(remaining, (int, float))
+            or not math.isfinite(float(remaining))
+            or remaining <= 0
+        ):
+            raise EvolutionError("automatic solve execution budget exhausted")
+        return float(remaining) if self.timeout is None else min(self.timeout, float(remaining))
 
     def set_observer(self, observer: AgentEvidenceObserver | None) -> None:
         """Attach an optional evolution audit observer without coupling the strategy to Agents."""
@@ -297,6 +318,7 @@ class AgentCandidateGenerator:
         if self.scoring is not None:
             self.scoring.stage(generation_workspace)
         prompt = self._prompt(request)
+        timeout = self._effective_timeout("candidate_generation")
         agent_request = AgentRequest(
             run_id=f"evolution-{request.workspace.name or 'workspace'}",
             task_id=f"generation-{request.iteration:08d}-{self._calls:04d}",
@@ -304,16 +326,21 @@ class AgentCandidateGenerator:
             prompt=prompt,
             required_capabilities=self.required_capabilities,
             workspace=generation_workspace,
-            timeout=self.timeout,
-            candidate_budget=self._request_budget(request),
+            timeout=timeout,
+            candidate_budget=self._request_budget(request, timeout=timeout),
         )
         try:
             result = self.adapter.run(agent_request)
+            self._effective_timeout("candidate_generation")
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
         except AgentError as exc:
+            self._effective_timeout("candidate_generation")
             if not getattr(exc, "candidate_diagnostic", None):
                 self._emit_generation_diagnostic(agent_request, reason="worker_failed")
             raise EvolutionError(f"agent candidate generation failed: {_bounded_error(exc)}") from exc
         except Exception as exc:
+            self._effective_timeout("candidate_generation")
             self._emit_generation_diagnostic(agent_request, reason="worker_failed")
             raise EvolutionError(f"agent candidate generation failed: {_bounded_error(exc)}") from exc
         if not isinstance(result, AgentResult):
@@ -335,6 +362,7 @@ class AgentCandidateGenerator:
         except EvolutionError:
             self._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
             raise
+        self._effective_timeout("candidate_generation")
         self._emit_generation_diagnostic(
             agent_request,
             reason="completed",
@@ -353,15 +381,21 @@ class AgentCandidateGenerator:
         contract_sha256 = self.contract.digest() if self.contract is not None else "0" * 64
         return validate_bundle_draft(draft, contract_sha256).digest()
 
-    def _request_budget(self, request: GenerationRequest) -> CandidateGenerationBudget | None:
+    def _request_budget(
+        self, request: GenerationRequest, *, timeout: float | None = None
+    ) -> CandidateGenerationBudget | None:
         if self.candidate_budget is None:
             return None
-        if self.candidate_budget.budget_id != "candidate-generation":
-            return self.candidate_budget
+        budget_id = self.candidate_budget.budget_id
+        if budget_id == "candidate-generation":
+            budget_id = f"candidate-{request.iteration:08d}-{self._calls:04d}"
+        budget_timeout = self.candidate_budget.timeout_seconds
+        if timeout is not None:
+            budget_timeout = timeout if budget_timeout is None else min(budget_timeout, timeout)
         return CandidateGenerationBudget(
-            budget_id=f"candidate-{request.iteration:08d}-{self._calls:04d}",
+            budget_id=budget_id,
             max_tool_steps=self.candidate_budget.max_tool_steps,
-            timeout_seconds=self.candidate_budget.timeout_seconds,
+            timeout_seconds=budget_timeout,
         )
 
     def _emit_generation_diagnostic(
@@ -750,6 +784,12 @@ class AgentPortfolioGenerator:
         for generator in self.generators:
             generator.set_observer(observer)
 
+    def set_remaining_timeout(self, callback: Callable[[str], float] | None) -> None:
+        if callback is not None and not callable(callback):
+            raise TypeError("remaining timeout callback must be callable or None")
+        for generator in self.generators:
+            generator.set_remaining_timeout(callback)
+
     def __call__(self, request: GenerationRequest) -> CandidateDraft:
         self._calls += 1
         generator = self.generators[(self._calls - 1) % len(self.generators)]
@@ -787,6 +827,26 @@ class AgentCandidateEvaluator:
             raise ValueError("workspace_name must be one safe path segment")
         self.workspace_name = workspace_name
         self._observer: AgentEvidenceObserver | None = None
+        self._remaining_timeout: Callable[[str], float] | None = None
+
+    def set_remaining_timeout(self, callback: Callable[[str], float] | None) -> None:
+        if callback is not None and not callable(callback):
+            raise TypeError("remaining timeout callback must be callable or None")
+        self._remaining_timeout = callback
+
+    def _effective_timeout(self, stage: str) -> float | None:
+        callback = self._remaining_timeout
+        if callback is None:
+            return self.timeout
+        remaining = callback(stage)
+        if (
+            isinstance(remaining, bool)
+            or not isinstance(remaining, (int, float))
+            or not math.isfinite(float(remaining))
+            or remaining <= 0
+        ):
+            raise EvolutionError("automatic solve execution budget exhausted")
+        return float(remaining) if self.timeout is None else min(self.timeout, float(remaining))
 
     def set_observer(self, observer: AgentEvidenceObserver | None) -> None:
         if observer is not None and not callable(observer):
@@ -797,6 +857,7 @@ class AgentCandidateEvaluator:
             set_event_sink(observer)
 
     def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
+        timeout = self._effective_timeout("candidate_evaluation")
         candidate = Path(candidate_path).expanduser().resolve(strict=False)
         if not candidate.is_file():
             raise EvolutionError("candidate evaluator Agent received a missing candidate path")
@@ -810,13 +871,18 @@ class AgentCandidateEvaluator:
             prompt=prompt,
             required_capabilities=self.required_capabilities,
             workspace=workspace,
-            timeout=self.timeout,
+            timeout=timeout,
         )
         try:
             result = self.adapter.run(request)
+            self._effective_timeout("candidate_evaluation")
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            raise
         except AgentError as exc:
+            self._effective_timeout("candidate_evaluation")
             raise EvolutionError(f"agent candidate evaluation failed: {_bounded_error(exc)}") from exc
         except Exception as exc:
+            self._effective_timeout("candidate_evaluation")
             raise EvolutionError(f"agent candidate evaluation failed: {_bounded_error(exc)}") from exc
         if not isinstance(result, AgentResult):
             raise EvolutionError("agent candidate evaluation returned an invalid result")
@@ -995,11 +1061,19 @@ class AgentEvaluatorEnsemble:
         for evaluator in self.evaluators:
             evaluator.set_observer(observer)
 
+    def set_remaining_timeout(self, callback: Callable[[str], float] | None) -> None:
+        if callback is not None and not callable(callback):
+            raise TypeError("remaining timeout callback must be callable or None")
+        for evaluator in self.evaluators:
+            evaluator.set_remaining_timeout(callback)
+
     def __call__(self, candidate_path: Path, contract: AlgorithmProblemContract) -> EvaluationReport:
         reports: list[EvaluationReport] = []
         for evaluator in self.evaluators:
             try:
                 reports.append(evaluator(candidate_path, contract))
+            except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                raise
             except (EvolutionError, OSError, TypeError, ValueError):
                 # Keep adapter/runtime details out of a later solver prompt. The local ledger
                 # still records a controlled invalid result for human diagnosis.

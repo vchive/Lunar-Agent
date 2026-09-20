@@ -1,7 +1,8 @@
 # Tasks
 
-**Status**: Implementation in progress. T003 and T004 are complete; remaining implementation
-and acceptance tasks are open. Phase C must not open automatic background execution before phase B
+**Status**: Phase A foreground implementation and final two-stage offline verification are
+complete.
+Phase B/C implementation and their final feature acceptance remain open. Phase C must not open automatic background execution before phase B
 cleanup acceptance passes.
 
 ## Specification
@@ -19,21 +20,22 @@ cleanup acceptance passes.
       continuation, reject mismatches/legacy injection, and preserve omitted legacy behavior.
 - [x] T005 Add one exclusive automatic execution owner and one shared process-local monotonic
       deadline; never reset it per phase, request, candidate, retry, or nested Controller call.
-      The control object and owner are implemented and preparation consumes their fixed
-      process-local remainder; full candidate/evolution/delivery propagation remains T008.
-- [ ] T006 Establish/reuse a parent orchestration task after contract intake and before preparation
+      The same workspace lock also excludes other foreground processes; answer acquires it
+      before consuming the pending input. Human waiting closes the prior execution.
+- [x] T006 Establish/reuse a parent orchestration task after contract intake and before preparation
       or handoff settlement; prevent ordinary scheduling and premature parent success.
-- [ ] T007 Route all automatic continuation entry points through the same orchestration, including
+- [x] T007 Route all automatic continuation entry points through the same orchestration, including
       answer. Preserve awaiting-input, preparation recovery, and terminal idempotency semantics.
-- [ ] T008 Propagate remaining time through intake, preparation lock/checks, compiler/auditor,
+- [x] T008 Propagate remaining time through intake, preparation lock/checks, compiler/auditor,
       candidate generation, local execution, scoring, selection, and parent delivery.
-- [ ] T009 Add narrower operational timeout/stop hooks without modifying frozen profile, input,
-      contract, source, evaluator, execution admission, plan, or receipt identity.
-- [ ] T010 Persist one solve-policy budget failure with existing Store terminal precedence; block
+- [x] T009 Add narrower operational timeout/stop hooks without modifying frozen profile, input,
+      contract, source, evaluator, execution admission, plan, or receipt identity. These are
+      cooperative admission/result checks; in-flight process cancellation is Phase B.
+- [x] T010 Persist one solve-policy budget failure with existing Store terminal precedence; block
       late success/publication and any continuation that would replenish an exhausted solve.
-- [ ] T011 Add bounded read-only execution status, policy origin, fixed phase, and stopping reason;
+- [x] T011 Add bounded read-only execution status, policy origin, fixed phase, and stopping reason;
       do not infer a live monotonic remainder or remote provider result.
-- [ ] T012 Verify phase A with deterministic clock and fake-transport native CLI tests, including
+- [x] T012 Verify phase A with deterministic clock and fake-transport native CLI tests, including
       immutable-byte checks and existing preparation/Controller/receipt compatibility suites.
 
 ## Phase B: Cancellation and owned process cleanup
@@ -62,11 +64,12 @@ cleanup acceptance passes.
 
 ## Completion
 
-- [ ] T022 Run focused/shared regressions, current full regression and fixed historical test stage,
+- [x] T022 Run focused/shared regressions, current full regression and fixed historical test stage,
       Ruff, compileall, Specify prerequisites, Markdown-link checks, and `git diff --check`.
-- [ ] T023 Independently verify Feature 131/134 retained file sets, sizes, and SHA-256 values remain
+- [x] T023 Independently verify Feature 131/134 retained file sets, sizes, and SHA-256 values remain
       unchanged; verify this feature did not modify Feature 139 source/evidence or launch a provider.
-- [ ] T024 Complete independent review and record exact validation results and residual limits;
+- [x] T024 Complete independent review and record exact validation results and residual limits;
       update roadmap/handoff to distinguish active-execution from cumulative lifetime budgeting.
 - [ ] T025 Commit and push the verified product implementation. Do not claim implementation,
-      detached availability, or real end-to-end success from this specification-only checkpoint.
+      detached availability or real-provider end-to-end success from an offline implementation.
+      Phase A is committed separately; the complete-feature commit remains open until B/C pass.

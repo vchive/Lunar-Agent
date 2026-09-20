@@ -2,9 +2,9 @@
 
 **Created**: 2026-09-20
 
-**Status**: Implementation in progress. Phase A policy validation and handoff persistence are
-landed; shared deadline, parent lifecycle, cancellation cleanup, and detached execution remain
-open.
+**Status**: Phase A foreground shared budget and parent lifecycle are implemented and in final
+offline regression. Phase B cancellation/process cleanup and Phase C detached entry points remain
+open; automatic `--detach` remains rejected.
 
 **Input**: Continue product development using SDD; connect full automatic multi-file execution
 budgets, parent/child cancellation, and local background execution using existing product controls.
@@ -125,6 +125,14 @@ the correct behavior. Historical terminal parents are not rewritten or retrofitt
 Legacy foreground handoffs retain their existing compatibility rules. Automatic background mode
 requires the new lifecycle marker; it must not reinterpret a legacy terminal parent as active.
 
+Implementation refinement (2026-09-20): the existing task schema needs one additive
+`orchestration INTEGER NOT NULL DEFAULT 0` column. This explicit scheduler discriminator prevents
+ordinary `next_task` and `claim_task` from executing a controller-owned task. Initialization adds
+the column to a writable Store; read-only legacy task projection treats its absence as false.
+Existing rows and historical run states are not reclassified. Task creation/reuse is transactional
+and limited to lifecycle-enabled nonterminal parents. A workspace advisory lock supplements the
+process-local owner so two foreground processes cannot enter the same active solve concurrently.
+
 ## Cancellation and cleanup
 
 `cancel <parent-id>` reuses existing Controller/Store cancellation. Resolve only the verified,
@@ -212,5 +220,5 @@ check arrives later. Status and terminal continuation never start work to fill m
 No cumulative cross-continuation budget, remote cancellation promise, new provider request/token/
 cost cap, external producer integration, generic background scheduler, new attestation flow,
 automatic repair/retry, historical measurement rewrite, WebAgent rerun, real campaign launch, or
-quality/parity claim is included. Database migration is not planned; if an unavoidable schema
-need appears, document it in this SDD before expanding implementation.
+quality/parity claim is included. The only schema change is the additive task discriminator
+described above; no worker registry or historical evidence migration is introduced.

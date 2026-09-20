@@ -20,6 +20,7 @@ from typing import Any
 
 from .algorithm import MAX_OUTPUTS, OutputSpec
 from .artifacts import ArtifactError
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .evaluator import MAX_ARTIFACT_BYTES
 from .evolution import (
     EvolutionError,
@@ -457,8 +458,14 @@ def publish_outputs(
     owner_task_id: str,
     prepared: list[tuple[OutputSpec, bytes]],
     max_artifact_bytes: int,
+    *, continuation_guard=None,
 ) -> tuple[dict[str, Any], ...]:
     """Publish a verified batch, or restore its previously absent final paths."""
+    def guard():
+        if continuation_guard is not None:
+            continuation_guard()
+
+    guard()
     if not prepared:
         recover_outputs(store, parent, evolution_run_id, ())
         return ()
@@ -470,6 +477,7 @@ def publish_outputs(
         raise OutputPublicationError(_INVALID)
     try:
         with _locked(root) as publications:
+            guard()
             directory = publications / _key(parent.id, evolution_run_id)
             if _present(directory):
                 journal, _ = _load(directory, parent, evolution_run_id, specs)
@@ -481,6 +489,7 @@ def publish_outputs(
                     raise OutputPublicationUncertain(_INVALID)
                 status, outputs = _reconcile(store, parent, evolution_run_id, specs, directory)
                 if status == "committed":
+                    guard()
                     return outputs
                 raise OutputPublicationError("output_publication_already_rolled_back")
             _require_no_publication(store, parent.id, evolution_run_id)
@@ -545,6 +554,7 @@ def publish_outputs(
                 ):
                     raise OutputPublicationUncertain("output_publication_commit_unknown")
                 for entry in entries:
+                    guard()
                     target = _target(root, entry["output"]["path"])
                     if entry["existed"]:
                         continue
@@ -556,6 +566,7 @@ def publish_outputs(
                 _verify_files(root, directory, entries)
                 _sync_outputs(root, entries)
                 _verify_files(root, directory, entries)
+                guard()
                 store.commit_output_publication(
                     parent.id, owner_task_id, evolution_run_id, outputs,
                     journal_sha256=_digest(_encode(journal)), max_artifact_bytes=max_artifact_bytes,
@@ -563,13 +574,17 @@ def publish_outputs(
                 status, verified = _reconcile(store, parent, evolution_run_id, specs, directory)
                 if status != "committed":
                     raise OutputPublicationUncertain("output_publication_commit_unknown")
+                guard()
                 return verified
+            except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                _reconcile(store, parent, evolution_run_id, specs, directory)
+                raise
             except Exception as exc:
                 status, verified = _reconcile(store, parent, evolution_run_id, specs, directory)
                 if status == "committed":
                     return verified
                 raise OutputPublicationError("output_publication_rolled_back") from exc
-    except OutputPublicationError:
+    except (OutputPublicationError, SolveExecutionBudgetExceeded, SolveExecutionCancelled):
         raise
     except Exception as exc:
         raise OutputPublicationUncertain("output_publication_prepare_failed") from exc

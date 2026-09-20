@@ -2,7 +2,8 @@
 
 **Date**: 2026-09-20
 
-**Status**: Implementation in progress; T003 and T004 are landed and verified offline.
+**Status**: Phase A foreground implementation and final two-stage offline verification are
+complete. Phase B cancellation/process cleanup and Phase C detached entry points remain open.
 
 **Spec**: [spec.md](spec.md)
 
@@ -30,11 +31,16 @@ explicit delegation consumer migration, is optional and does not block this life
 3. Admit one active execution owner and create one process-local control object with monotonic
    start/deadline, stage checks, and cancellation observation. Existing explicit recovery rules
    decide whether a nonterminal interrupted run is admissible; this feature does not infer an
-   active worker to be stale merely because another process asked to resume it.
+   active worker to be stale merely because another process asked to resume it. Supplement the
+   in-process owner with a nonblocking workspace advisory lock; acquire it before consuming an
+   automatic answer as well as before intake.
 4. After accepted contract intake, establish one parent orchestration task before preparation or
    superseding the generated tasks. Reuse it on continuation and settle it only on delivery,
    cancellation, or terminal failure. Keep it outside ordinary scheduling and preserve historical
-   terminal parents. The existing intake task continues to own contract compilation.
+   terminal parents. The existing intake task continues to own contract compilation. Add the
+   default-false `tasks.orchestration` discriminator described in the specification, with legacy
+   read-only row compatibility. Store settlement and budget failure use writer transactions so
+   stale task snapshots cannot replace a concurrent terminal outcome.
 5. Thread the shared control through contract compilation, `prepare_automatic_solve_bundle`,
    `_solve_evolution`, generation, execution, scoring, and delivery. Preparation composes its own
    remaining callback with the solve remainder, including lock acquisition. Requests and local

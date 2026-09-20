@@ -435,7 +435,9 @@ def test_candidate_generation_budget_is_forwarded_and_receipt_bound(
         "--home", str(tmp_path / "home"), "--json",
     ]) == 0
     capsys.readouterr()
-    assert captured == [captured[0], captured[0]]
+    # A completed lifecycle handoff returns its persisted terminal result without allocating a
+    # new generator or candidate budget on an idempotent continuation.
+    assert captured == [captured[0]]
     assert runtime.generator_calls == 4
     assert receipts == [event for event in store.list_events(child_id)
                         if event["type"] == "agent_candidate_generation"]

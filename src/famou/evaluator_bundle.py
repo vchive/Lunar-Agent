@@ -29,6 +29,7 @@ from .algorithm import (
     AlgorithmProblemContract,
     EvaluationReport,
 )
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .data_profile import (
     MAX_PROFILE_DEPTH,
     MAX_PROFILE_FIELD_BYTES,
@@ -538,6 +539,8 @@ def compile_evaluator_bundle(
     request_limit = _preparation_timeout(request_timeout, preparation_remaining_timeout, "evaluator_compile")
     try:
         result = _run_isolated(runtime, prompt, compiler_workspace, request_limit)
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except Exception as exc:
         _request_after_failure(preparation_remaining_timeout, "evaluator_compile", exc)
         raise EvaluatorBundleRuntimeError(
@@ -1225,6 +1228,8 @@ def _snapshot_probe(evaluator, probe, contract, workspace, timeout, *, preparati
                 raise _ProbeFailure("snapshot evaluator preflight failed", "evidence_changed") from exc
             _preparation_timeout(timeout, preparation_remaining_timeout, stage)
         return report
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except (OSError, KeyError, TypeError, ValueError) as exc:
         raise EvaluatorBundleError("snapshot evaluator preflight failed") from exc
 
@@ -1245,7 +1250,8 @@ def _preflight(
         _preflight_suite(evaluator, suite, contract, staging, timeout, label=label,
                          invocation=invocation, stage=stage,
                          preparation_remaining_timeout=preparation_remaining_timeout)
-    except (EvaluatorPreparationError, EvaluatorPreparationWallTimeout):
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled,
+            EvaluatorPreparationError, EvaluatorPreparationWallTimeout):
         raise
     except (EvaluatorBundleError, OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
         raise _local_failure(str(exc), stage, "preflight_failed") from exc
@@ -1696,6 +1702,8 @@ def _compile_audit_suite(
             workspace,
             request_limit,
         )
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except Exception as exc:
         _request_after_failure(preparation_remaining_timeout, "evaluator_audit", exc)
         raise EvaluatorBundleRuntimeError(

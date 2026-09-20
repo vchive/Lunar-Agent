@@ -7,10 +7,16 @@ admission and pass its remaining time to each bounded operation.
 
 from __future__ import annotations
 
+import fcntl
 import math
+import os
+import re
+import stat
 import time
+import uuid
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from threading import RLock
 from typing import ClassVar, Final, Self
 
@@ -79,6 +85,7 @@ class SolveExecutionControl:
         started_at: float | None = None,
         cancellation_callbacks: Iterable[CancellationCallback] = (),
         cancelled: CancellationCallback | None = None,
+        observe_stage: Callable[[str], None] | None = None,
     ) -> None:
         self.timeout_seconds = _positive_timeout(timeout_seconds, "solve wall timeout")
         if clock is not None and not callable(clock):
@@ -93,6 +100,7 @@ class SolveExecutionControl:
             raise TypeError("cancellation callbacks must be callable")
         self._cancellation_callbacks: list[CancellationCallback] = callbacks
         self._cancelled = False
+        self._observe_stage = observe_stage
         self._lock = RLock()
 
     def add_cancellation_callback(self, callback: CancellationCallback) -> SolveExecutionControl:
@@ -140,6 +148,8 @@ class SolveExecutionControl:
         """Require positive budget and no cancellation before admitting a stage."""
 
         stage = _stage_name(stage)
+        if self._observe_stage is not None:
+            self._observe_stage(stage)
         if self.is_cancelled():
             raise SolveExecutionCancelled(stage)
         observed_at = self._now()
@@ -213,11 +223,104 @@ class AutomaticSolveExecutionOwner:
 
 
 @contextmanager
-def own_automatic_solve(parent_id: str) -> Iterator[AutomaticSolveExecutionOwner]:
+def own_automatic_solve(
+    parent_id: str, workspace: Path | None = None,
+) -> Iterator[AutomaticSolveExecutionOwner]:
     """Acquire and reliably release an active solve owner."""
     owner = AutomaticSolveExecutionOwner(parent_id)
     with owner:
-        yield owner
+        if workspace is None:
+            yield owner
+            return
+        path = Path(workspace) / ".automatic-solve.lock"
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError("invalid automatic solve ownership file")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise AutomaticSolveAlreadyRunning("automatic solve already has an active execution owner") from None
+            named = path.lstat()
+            if (info.st_dev, info.st_ino) != (named.st_dev, named.st_ino):
+                raise ValueError("automatic solve ownership file changed")
+            yield owner
+        finally:
+            os.close(fd)
+
+
+_STAGES = frozenset({
+    "contract", "preparation", "candidate_generation", "candidate_execution",
+    "evaluation", "selection", "delivery", "solve",
+})
+_REASONS = frozenset({"completed", "cancelled", "solve_wall_timeout", "failed", "interrupted", "awaiting_input", "preparation_recoverable"})
+_STATES = frozenset({"active", "awaiting_input", "terminal", "inactive"})
+
+
+class SolveExecutionObservation:
+    """Persist bounded observations; never serialize a process-local monotonic deadline."""
+
+    def __init__(self, store, run_id: str, timeout: float | None) -> None:
+        self.store, self.run_id = store, run_id
+        self.execution_id = "solve-" + uuid.uuid4().hex
+        self.timeout = timeout
+        self.stage = "contract"
+        self.state = None
+        self.observe("contract")
+
+    def observe(self, stage: str, *, state: str = "active", reason: str | None = None) -> None:
+        stage = {"candidate_evaluation": "evaluation", "candidate_persistence": "selection",
+                 "evolution": "selection", "generation": "candidate_generation"}.get(stage, stage)
+        stage = stage if stage in _STAGES else "preparation"
+        if state not in _STATES or reason is not None and reason not in _REASONS:
+            raise ValueError("invalid solve observation")
+        if (stage, state) == (self.stage, self.state):
+            return
+        self.stage, self.state = stage, state
+        self.store.append_event(self.run_id, "solve_execution", {
+            "schema_version": "1", "execution_id": self.execution_id,
+            "scope": "active_execution", "policy_seconds": self.timeout,
+            "policy_origin": "explicit" if self.timeout is not None else "absent",
+            "stage": stage, "state": state, "stopping_reason": reason,
+        })
+
+
+def solve_execution_status(store, run) -> dict | None:
+    """Read only fixed diagnostic fields, with terminal Store state taking precedence."""
+    events = store.list_events(run.id)
+    requests = [e.get("payload") for e in events if e.get("type") == "evolution_requested"]
+    if not requests or not isinstance(requests[-1], dict) or requests[-1].get("automatic_lifecycle_version") != 1:
+        return None
+    payload = next((e.get("payload") for e in reversed(events) if e.get("type") == "solve_execution"), None)
+    fields = {"schema_version", "execution_id", "scope", "policy_seconds", "policy_origin",
+              "stage", "state", "stopping_reason"}
+    if not isinstance(payload, dict) or not fields.issubset(payload):
+        return None
+    execution_id, timeout = payload.get("execution_id"), payload.get("policy_seconds")
+    if (not isinstance(execution_id, str) or not re.fullmatch(r"solve-[0-9a-f]{32}", execution_id)
+            or payload.get("schema_version") != "1" or payload.get("scope") != "active_execution"
+            or not isinstance(payload.get("stage"), str) or not isinstance(payload.get("state"), str)
+            or payload.get("stopping_reason") is not None and not isinstance(payload.get("stopping_reason"), str)
+            or payload.get("stage") not in _STAGES or payload.get("state") not in _STATES
+            or payload.get("stopping_reason") not in _REASONS | {None}
+            or timeout is not None and (type(timeout) not in {int, float} or not 0 < timeout <= 86400)
+            or payload.get("policy_origin") != ("explicit" if timeout is not None else "absent")
+            or timeout != requests[-1].get("solve_wall_timeout")):
+        return None
+    result = {key: payload[key] for key in (
+        "schema_version", "execution_id", "scope", "policy_seconds", "policy_origin",
+        "stage", "state", "stopping_reason",
+    )}
+    if run.status.value in {"succeeded", "failed", "cancelled"}:
+        result["state"] = "terminal"
+        result["stopping_reason"] = {
+            "succeeded": "completed", "cancelled": "cancelled", "failed": "failed",
+        }[run.status.value]
+        if run.status.value == "failed" and any(e.get("type") == "budget_exceeded"
+                and isinstance(e.get("payload"), dict) and e["payload"].get("limit") == "solve_wall_timeout" for e in events):
+            result["stopping_reason"] = "solve_wall_timeout"
+    return result
 
 
 def _positive_timeout(value: object, label: str) -> float:

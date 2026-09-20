@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import stat
 import sys
@@ -18,6 +19,7 @@ from . import candidate_execution_evidence as evidence
 from ._benchmark_files import BenchmarkFileError, absolute_path
 from ._candidate_workspace_io import DirectoryChain, PrivateTree, identity
 from .algorithm import MAX_REPORT_BYTES, AlgorithmProblemContract, EvaluationReport
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .candidate_evaluation_spec import (
     CandidateEvaluationError,
     candidate_output_contract_sha256,
@@ -482,8 +484,21 @@ def evaluate_candidate_execution(
     admission, *, plan, contract, evaluator, harness_path, workspace_path, input_path,
     attempt_path, evaluation_root, expected_admission_sha256=None, expected_plan_sha256=None,
     expected_bundle_sha256=None, expected_contract_sha256=None, expected_completion_sha256=None,
+    remaining_timeout=None,
 ):
     """Snapshot and score one successful attempt. Allocated evaluation trees are retained."""
+    if remaining_timeout is not None and not callable(remaining_timeout):
+        raise TypeError("remaining timeout callback must be callable or None")
+
+    def effective_timeout():
+        if remaining_timeout is None:
+            return evaluator.timeout_seconds
+        remaining = remaining_timeout("evaluation")
+        if (isinstance(remaining, bool) or not isinstance(remaining, (int, float))
+                or not math.isfinite(float(remaining)) or remaining <= 0):
+            _fail("invalid")
+        return min(evaluator.timeout_seconds, float(remaining))
+
     contract = _contract(contract)
     try:
         validate_source_capabilities(contract)
@@ -491,6 +506,7 @@ def evaluate_candidate_execution(
         _fail("unsupported_constraints")
     extended = bool(source_constraints(contract))
     evaluator = parse_candidate_evaluation_spec(evaluator)
+    effective_timeout()
     pins = {
         "expected_admission_sha256": expected_admission_sha256,
         "expected_plan_sha256": expected_plan_sha256,
@@ -612,14 +628,16 @@ def evaluate_candidate_execution(
                 executable = _Executable(Path(evaluator.command[0]))
                 stack.callback(_close, executable.close)
                 executable.check()
+                timeout = effective_timeout()
                 try:
                     stdout, _, status, _, error = _bounded_process_bytes(
                         [*evaluator.command, "evaluator.py", "request.json"], cwd=str(destination),
-                        environment=dict(evaluator.environment), timeout=evaluator.timeout_seconds,
+                        environment=dict(evaluator.environment), timeout=timeout,
                         output_limit=MAX_REPORT_BYTES, capture_limit=MAX_REPORT_BYTES,
                     )
                 except OSError:
                     _fail("process_start_failed")
+                effective_timeout()
                 if status != "succeeded":
                     _fail(error or "process_failed")
                 report = parse_candidate_evaluation_report(stdout, evaluator_id=evaluator.evaluator_id)
@@ -640,6 +658,7 @@ def evaluate_candidate_execution(
                     or evidence._read(attempt_chain, "launch-intent.json") != (intent_bytes, intent_descriptor)):
                 _fail("identity_mismatch")
             tree.sync_and_check()
+            effective_timeout()
             if extended:
                 # The output harness must not supply or observe this independent evidence.
                 tree.write("source-checks.json", canonical_json(source_evidence, maximum=MAX_SOURCE_CHECK_BYTES))
@@ -661,11 +680,14 @@ def evaluate_candidate_execution(
                 manifest["source_constraints_valid"] = source_valid
             for observed in observations:
                 observed.check()
+            effective_timeout()
             tree.write("evaluation.json", canonical_json(manifest))
             tree.sync_and_check()
             return inspect_candidate_evaluation(
                 destination, expected_evaluation_sha256=_sha(canonical_json(manifest)),
             )
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except evidence.CandidateExecutionEvidenceError:
         _fail("execution_invalid")
     except CandidateExecutionRunnerError:

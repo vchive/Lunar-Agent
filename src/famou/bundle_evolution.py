@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import re
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
 from . import _benchmark_files as files
 from ._candidate_workspace_io import DirectoryChain, PrivateTree
+from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .candidate_bundle import (
     MAX_CANDIDATE_BUNDLE_BYTES,
     CandidateSourceBundle,
@@ -272,6 +275,7 @@ class MultiFileCandidatePipeline:
                 evaluator=self.evaluator.pin(), output_contract_sha256="1" * 64, budget=self.budget,
             )
             self.dependency_sha256, self.environment_sha256 = dependency_sha256, environment_sha256
+            self._remaining_timeout: Callable[[str], float] | None = None
         except (ValueError, TypeError, OSError, AttributeError):
             _fail("profile_invalid")
 
@@ -291,6 +295,24 @@ class MultiFileCandidatePipeline:
         if any(getattr(config, name) not in (None, value) for name, value in values.items()):
             _fail("authority_mismatch")
         return replace(config, **values)
+
+    def set_remaining_timeout(self, callback: Callable[[str], float] | None) -> None:
+        if callback is not None and not callable(callback):
+            raise TypeError("remaining timeout callback must be callable or None")
+        self._remaining_timeout = callback
+
+    def _effective_timeout(self, stage: str) -> float:
+        if self._remaining_timeout is None:
+            return self.timeout_seconds
+        remaining = self._remaining_timeout(stage)
+        if (
+            isinstance(remaining, bool)
+            or not isinstance(remaining, (int, float))
+            or not math.isfinite(float(remaining))
+            or remaining <= 0
+        ):
+            _fail("solve_budget_exhausted")
+        return min(self.timeout_seconds, float(remaining))
 
     def validate_context(self, context, authority):
         try:
@@ -364,6 +386,7 @@ class MultiFileCandidatePipeline:
             _InitialCandidateFailure,
         )
         archive = strategy.archive
+        self._effective_timeout("candidate_execution")
         candidate_id = archive.next_id()
         # Only the reusable source staging is discarded. Allocated run roots are never removed.
         strategy._discard_unarchived_candidate(candidate_id)
@@ -406,15 +429,21 @@ class MultiFileCandidatePipeline:
             record = run_candidate_execution_recorded(
                 admission, plan=plan, workspace_path=copied.workspace_path, input_path=staged.input_path,
                 attempt_path=run_root / "attempt", expected_admission_sha256=admission.digest(),
+                timeout_seconds=self._effective_timeout("candidate_execution"),
+                remaining_timeout=self._remaining_timeout,
             )
+            self._effective_timeout("candidate_execution")
             if record.to_dict().get("runner_result", {}).get("status") != "succeeded":
                 raise _InitialCandidateFailure("candidate_failed")
+            self._effective_timeout("evaluation")
             result = evaluate_candidate_execution(
                 admission, plan=plan, contract=strategy.context.contract, evaluator=self.evaluator,
                 harness_path=self.harness_path, workspace_path=copied.workspace_path, input_path=staged.input_path,
                 attempt_path=run_root / "attempt", evaluation_root=run_root / "evaluations",
                 expected_admission_sha256=admission.digest(), expected_completion_sha256=record.completion_sha256,
+                remaining_timeout=self._remaining_timeout,
             )
+            self._effective_timeout("evaluation")
             binding = {
                 "protocol": _PROTOCOL, "bundle_sha256": bundle.digest(),
                 "bundle_path": bundle_path.relative_to(archive.workspace).as_posix(),
@@ -430,6 +459,10 @@ class MultiFileCandidatePipeline:
                 generation=generation, parent_id=parent.candidate_id if parent else None, island_id=island_id,
                 evaluation=result.report, integrity_authority=strategy.integrity_authority, bundle_evidence=binding,
             )
+            self._effective_timeout("candidate_persistence")
+        except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+            strategy._discard_unarchived_candidate(candidate_id)
+            raise
         except _CandidateArchivePublicationUnknown:
             raise
         except Exception:  # noqa: BLE001 - all operational failures use the population outcome journal
