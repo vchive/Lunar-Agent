@@ -20,7 +20,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install package and test dependencies
-        run: python -m pip install -e '.[dev]'
+        # Historical identity checks require the local .venv and uv's console launcher.
+        run: |
+          python -m pip install 'uv==0.11.8'
+          python -m venv .venv
+          uv pip install --python .venv/bin/python -e '.[dev,lint]'
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Run tests
         shell: bash
         run: |
@@ -43,4 +48,4 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
       - name: Static checks
-        run: python -m pip install 'ruff>=0.6' && ruff check src tests tools
+        run: ruff check src tests tools

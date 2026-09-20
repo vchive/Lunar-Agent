@@ -180,3 +180,44 @@ no complete cross-platform pass is inferred from the local reproduction. The new
 T009 remains deferred: CLI `delegate` and AgentLoop do not yet consume these worker APIs.
 Feature 142 Phase C automatic background execution and new real-model foreground acceptance
 remain separate work. Passing local fixtures cannot change Feature 139's primary/joint `0/1`.
+
+
+## CI environment follow-up after the worker commit
+
+Worker commit `e9ea0de` was pushed after the complete local regression above. The first CI fixture
+fix (`93469e7`, run 35525074826) removed the candidate-execution failures, but all three versions
+still exposed four historical-environment failures; Python 3.12 additionally exposed one
+intermittent attestation fixture failure. These are new concrete diagnostics, not evidence that
+the earlier worker regression failed locally.
+
+- Three 076/078/082 history unit tests depended on eight untracked local campaign files. A
+  tracked-only temporary checkout reproduces the refusal. The current regression tests now first
+  verify the actual tracked sealed files against their unchanged pins, then run the unchanged
+  historical algorithm against an explicit, complete synthetic chain in a temporary directory.
+  The predecessor path set and 24/30/36 chain sizes are preserved. This tests the algorithm; it is
+  **not** a fresh verification of real private historical inventories. No private campaign bytes
+  are exported, and no historical manifest, helper, loader pin or retained result is edited.
+- Thirty-nine new negative/isolation cases check actual seal drift, missing/changed/linked
+  dependencies, invalid maps, resealed final acceptance semantics, and refusal by the original
+  validator when a real inventory is absent. The three audit modules plus these cases passed
+  **193 tests**. Independent review confirmed that no reader, hash check or history validator
+  is stubbed to return success. Prior tests loaded as sealed helpers are still the unchanged
+  Feature 074 files; the 076/078 current regression edits do not rewrite their historical pins.
+- The unchanged Feature 082 runtime test requires a repository `.venv` and the frozen supported
+  console-launcher format. CI now creates the matrix interpreter's `.venv` and uses fixed
+  `uv==0.11.8` to install the editable dev/lint environment. A fresh temporary source copy with
+  Python 3.11 and that installation passed the original identity capture and verification.
+  The 082 runtime plus diagnostic helper suite passed **41 tests**. The frozen runtime test and
+  identity helper bytes are unchanged.
+- Python 3.12 reproduced the attestation fixture failure in 6 of 20 runs: garbage collection
+  closed old SQLite connections and checkpointed the live WAL during the protected snapshot.
+  The guard correctly rejected `diagnostic_database_changed`. The receipt immutability test
+  now holds its own fixture connection through CLI completion and also forces GC in a second
+  case. The same stress check then passed 20 of 20; each of Python 3.12 and 3.13 passed all
+  **76 attestation tests**, and related snapshot/diagnostic/Store suites passed **250 tests**.
+  Source Store, snapshot, authorization and attestation checks were not changed.
+
+These later changes affect only CI setup, current regression fixtures and their documentation;
+they do not change the worker product validated by the 8708/24 report pair. Their focused suites,
+Ruff and diff checks passed. The next complete Linux matrix is the cross-platform acceptance;
+the earlier local full count is not relabeled as a rerun of these additional fixture cases.

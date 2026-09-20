@@ -23,7 +23,7 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 
 | 优先级/范围 | 尚未完成 | 完成条件 |
 | --- | --- | --- |
-| P0：发布验证 | 诊断矩阵三个版本均报 96 项失败；shell 符号链接路径问题已复现并修正 fixture，`93469e7` 已推送 | 验证修复后支持版本完整 CI，确认是否还有其他失败；不能以本机结果代替 |
+| P0：发布验证 | 已修 shell fixture、旧历史链的本机文件依赖、CI 虚拟环境及 Python 3.12 的测试连接寿命；需最终矩阵确认 | 支持版本完整 CI 全通过；不能以本机结果代替 |
 | P0：前台自动多文件验收 | 当前产品的真实完整交付；新验收只有计划，还没有新登记、执行证据或结果 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：候选完成可靠性 | 139 的真实失败是 `worker_failed` / `malformed_candidate`；改进最终响应协议及更细失败诊断尚未落地 | 单独明确改动规格，保留严格解析和失败分母，先做相应离线 fixture，再用新验收检验；延长等待不构成修复 |
 | P1：包含自动后台的发布 | 142 Phase C T018–T021 | solve/resume/answer 后台入口、启动认领与退出释放、答案只接收一次、前后台一致性、取消与恢复均通过验收 |
@@ -41,7 +41,10 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 随后 `c22bd37` 增加有界公开失败摘要、报告保存和独立矩阵运行，新诊断 run 三版本均报
 96 项失败，首批定位到候选执行。受控本地复现确认 shell 的符号链接路径触发既有安全拒绝；
 `93469e7` 已将四个正向 fixture 改成真实可执行路径，相关 164 项通过，产品安全约束不变。
-新矩阵正在验证其余失败是否一并消失，详见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
+该矩阵已确认候选执行失败消失，另暴露三项历史链单测依赖私人本机文件、一项虚拟环境
+身份不匹配，以及 Python 3.12 的间歇性测试连接 GC 问题。后续仅在 CI 设置与测试 fixture 修复，
+新增负测并保持原校验函数、真实历史记录不变；最终矩阵尚待完成。详见
+[143 validation](../specs/143-local-worker-lifecycle/validation.md)。
 
 Feature 143 已修复审计发现的三项问题：每个 attempt 使用独立执行 adapter/runtime，第二个
 服务不再误判活动 owner，已取消的排队任务不会进入 adapter。实际进程 observer 绑定精确

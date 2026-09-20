@@ -1,11 +1,12 @@
 """Explicit operator receipts register exact offline fixture evidence without rerunning it."""
 
+import gc
 import hashlib
 import json
 import os
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 import pytest
@@ -382,7 +383,10 @@ def test_inode_replacement_during_registration_never_consumes_nonce(tmp_path, mo
     assert not controller.store.has_materialization_execution(fixture[1].id, child.id)
 
 
-def test_cli_uses_one_frozen_receipt_for_registration_and_response(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("collect_connections", [False, True])
+def test_cli_uses_one_frozen_receipt_for_registration_and_response(
+    tmp_path, monkeypatch, capsys, collect_connections,
+):
     fixture = _raw(tmp_path, monkeypatch)
     controller, parent, child, _, path = fixture
     original_receipt = json.loads(path.read_bytes())
@@ -390,11 +394,16 @@ def test_cli_uses_one_frozen_receipt_for_registration_and_response(tmp_path, mon
     @contextmanager
     def replace_after_preflight(database):
         with original_snapshot(database) as copied:
+            if collect_connections:
+                gc.collect()
             yield copied
         changed = {**original_receipt, "nonce": "another-operator-receipt-000000001"}
         path.write_bytes(_encode(changed))
     monkeypatch.setattr(attestation, "_snapshot_store", replace_after_preflight)
-    assert cli.main(["attest-materialization-execution", parent.id, child.id, "--receipt", str(path), "--home", str(controller.config.home), "--json"]) == 0
+    # Keep this fixture's live WAL open: collecting older connections must not checkpoint
+    # the source halfway through a test of receipt immutability. The snapshot guard stays strict.
+    with closing(controller.store._connect()):
+        assert cli.main(["attest-materialization-execution", parent.id, child.id, "--receipt", str(path), "--home", str(controller.config.home), "--json"]) == 0
     response = json.loads(capsys.readouterr().out)
     stored = next(event for event in controller.store.list_events(child.id) if event["type"] == ATTESTED)["payload"]
     assert stored["nonce"] == original_receipt["nonce"]

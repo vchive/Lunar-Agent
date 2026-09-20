@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+from measurement_history_fixtures import prepare_history_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = ROOT / "specs/076-public-plan-handoff-measurement/measurement/adapter.py"
@@ -79,12 +80,13 @@ def test_new_audit_default_and_explicit_paths_reject_old_registration(audit, ada
                     tmp_path / ".lunar/real-eval-glm-5.2-corrected-staged-20260910", repo=tmp_path)
 
 
-def test_history_uses_sealed_074_chain_and_keeps_historical_samples_out(audit):
+def test_history_uses_sealed_074_chain_and_keeps_historical_samples_out(audit, tmp_path, monkeypatch):
     assert audit.PRIOR_ROOT == "specs/074-corrected-staged-measurement"
     assert audit.SEALED_HISTORY[audit.PRIOR_ROOT + "/measurement/manifest.json"] == (
         "b154975d9557b9697fcdc7915de3ab7bb225165c6aaa1c6c0ab3f432a2123229"
     )
-    history = audit.historical_map(ROOT)
+    fixture_root = prepare_history_fixture(audit, ROOT, tmp_path, monkeypatch)
+    history = audit.historical_map(fixture_root)
     assert set(audit.SEALED_HISTORY) <= set(history)
     assert any(path.startswith("specs/072-master-budget-measurement/") for path in history)
     assert any(path.startswith("specs/069-webagent-normal-workflow/") for path in history)
