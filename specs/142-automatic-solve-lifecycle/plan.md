@@ -2,8 +2,9 @@
 
 **Date**: 2026-09-20
 
-**Status**: Phase A foreground implementation and final two-stage offline verification are
-complete. Phase B cancellation/process cleanup and Phase C detached entry points remain open.
+**Status**: Phase A foreground implementation and Phase B cancellation/process cleanup are
+complete and pass final two-stage offline verification. Phase C detached entry points remain
+open; automatic `--detach` remains rejected.
 
 **Spec**: [spec.md](spec.md)
 
@@ -72,9 +73,17 @@ explicit delegation consumer migration, is optional and does not block this life
 5. Add deterministic local-process tests for each phase, parent/child races, callback errors,
    delayed responses, and runner ownership release. These are a prerequisite for phase C.
 
+Phase B acceptance is complete: 146 focused regressions pass, including parent/child cancellation,
+real local process-group cleanup, ownership races, failed-cleanup retention and coordinator cleanup
+ordering. The final current suite recorded **8636 passed, 1 skipped, 24 deselected** and the frozen
+Feature 123 stage **24 passed**, with zero failures or errors. Reports are retained at
+`.lunar/test-results/feature142-phase-b-20260921/{current,frozen123}.xml`. Phase C is now the only
+remaining implementation phase: detached routing, exact policy propagation, worker ownership,
+launch/exit recovery and foreground/background equivalence.
+
 ## Phase C: Detached automatic entry points
 
-1. Keep the current automatic `--detach` rejection until phase B's cleanup tests pass. Reuse
+1. Keep the current automatic `--detach` rejection until phase B's cleanup acceptance passes. Reuse
    `_detach_solve` and the same execution owner/continuation path; do not create a second lifecycle.
 2. Add detach routing for fresh solve, `solve --resume`, generic resume, and answer. For answer,
    validate the policy first, durably accept the existing pending answer once, then launch a

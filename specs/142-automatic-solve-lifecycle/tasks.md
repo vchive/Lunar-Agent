@@ -1,9 +1,8 @@
 # Tasks
 
-**Status**: Phase A foreground implementation and final two-stage offline verification are
-complete.
-Phase B/C implementation and their final feature acceptance remain open. Phase C must not open automatic background execution before phase B
-cleanup acceptance passes.
+**Status**: Phase A foreground implementation and Phase B owned-process cancellation/cleanup
+implementation are complete and pass the final two-stage offline verification. Phase C remains
+closed. Automatic background execution must not open before its own implementation and acceptance.
 
 ## Specification
 
@@ -40,16 +39,23 @@ cleanup acceptance passes.
 
 ## Phase B: Cancellation and owned process cleanup
 
-- [ ] T013 Connect parent cancellation to its exactly verified child and evolution predicate using
+- [x] T013 Connect parent cancellation to its exactly verified child and evolution predicate using
       existing Controller/Store cancellation; preserve unrelated runs and terminal winners.
-- [ ] T014 Register actual local probe/candidate/evaluator process ownership through existing
+- [x] T014 Register actual local probe/candidate/evaluator process ownership through existing
       process tracking, including independent process groups and ownership release.
-- [ ] T015 Reuse cancellation/cleanup fan-out for deadline exhaustion and cancellation; continue
+- [x] T015 Reuse cancellation/cleanup fan-out for deadline exhaustion and cancellation; continue
       cleanup after callback failure and clean owned subprocesses before the coordinating worker.
-- [ ] T016 Test cancellation at each phase, before/after linking and delivery, late responses,
+- [x] T016 Test cancellation at each phase, before/after linking and delivery, late responses,
       cancellation/deadline races, failed cleanup callbacks, and no remaining owned local process.
-- [ ] T017 Independently review phase B and record passing process cleanup evidence. Keep
+- [x] T017 Independently review phase B and record passing process cleanup evidence. Keep
       automatic `--detach` rejected until this task is complete.
+
+Phase B evidence: 146 focused cancellation, process-ownership, deadline-integration and pipeline
+regressions pass. The final current regression recorded **8636 passed, 1 skipped, 24 deselected**;
+the frozen Feature 123 registration stage recorded **24 passed**, with no failures or errors.
+Reports are retained at `.lunar/test-results/feature142-phase-b-20260921/{current,frozen123}.xml`.
+Phase C remains the boundary for detached solve/resume/answer routing, worker ownership and
+foreground/background equivalence; automatic `--detach` remains rejected.
 
 ## Phase C: Detached automatic execution
 
@@ -70,6 +76,6 @@ cleanup acceptance passes.
       unchanged; verify this feature did not modify Feature 139 source/evidence or launch a provider.
 - [x] T024 Complete independent review and record exact validation results and residual limits;
       update roadmap/handoff to distinguish active-execution from cumulative lifetime budgeting.
-- [ ] T025 Commit and push the verified product implementation. Do not claim implementation,
-      detached availability or real-provider end-to-end success from an offline implementation.
-      Phase A is committed separately; the complete-feature commit remains open until B/C pass.
+- [x] T025 Commit and push the verified Phase B product implementation. Do not claim detached
+      availability or real-provider end-to-end success from an offline implementation. Phase C
+      remains a separate future delivery.

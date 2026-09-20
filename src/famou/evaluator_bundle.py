@@ -498,10 +498,13 @@ def compile_evaluator_bundle(
     preparation_remaining_timeout: Callable[[str], float] | None = None,
     invocation: str = "candidate",
     continuation_guard: Callable[[], None] | None = None,
+    process_observer: Callable[[int, int | None], None] | None = None,
+    process_released: Callable[[int, int | None], None] | None = None,
 ) -> FrozenEvaluatorBundle:
     """Compile and preflight a bundle, or verify and reuse an existing frozen bundle."""
     if not isinstance(contract, AlgorithmProblemContract):
         raise TypeError("contract must be an AlgorithmProblemContract")
+    process_options = _process_options(process_observer, process_released)
     timeout = _timeout(timeout)
     request_timeout = timeout if preparation_request_timeout is None else _timeout(preparation_request_timeout)
     _preparation_timeout(timeout, preparation_remaining_timeout, "preparation")
@@ -579,6 +582,7 @@ def compile_evaluator_bundle(
             label="compiler",
             invocation=invocation,
             preparation_remaining_timeout=preparation_remaining_timeout,
+            **process_options,
         )
         current = tuple(staging.iterdir())
         if {path.name for path in current} != set(frozen_inputs) or any(
@@ -612,6 +616,7 @@ def compile_evaluator_bundle(
             label="audit",
             invocation=invocation,
             preparation_remaining_timeout=preparation_remaining_timeout,
+            **process_options,
         )
         current = tuple(staging.iterdir())
         if {path.name for path in current} != set(frozen_inputs) or any(
@@ -1134,8 +1139,19 @@ def _snapshot_invocation_prompt() -> str:
     )
 
 
+def _process_options(process_observer, process_released):
+    """Keep operational process ownership separate from frozen evaluator identity."""
+    options = {}
+    for name, callback in (("process_observer", process_observer), ("process_released", process_released)):
+        if callback is not None:
+            if not callable(callback):
+                raise TypeError(f"{name} must be callable or None")
+            options[name] = callback
+    return options
+
+
 def _snapshot_probe(evaluator, probe, contract, workspace, timeout, *, preparation_remaining_timeout=None,
-                    stage="compiler_preflight"):
+                    stage="compiler_preflight", process_observer=None, process_released=None):
     """Run the actual 108 harness interface on synthetic data, without an execution record."""
     from .algorithm import MAX_REPORT_BYTES
     from .candidate_evaluation import (
@@ -1209,7 +1225,10 @@ def _snapshot_probe(evaluator, probe, contract, workspace, timeout, *, preparati
                     [*spec.command, "evaluator.py", "request.json"], cwd=str(workspace),
                     environment=dict(spec.environment), timeout=process_timeout,
                     output_limit=MAX_REPORT_BYTES, capture_limit=MAX_REPORT_BYTES,
+                    **_process_options(process_observer, process_released),
                 )
+            except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+                raise
             except OSError as exc:
                 raise _ProbeFailure("snapshot evaluator preflight failed", "process_failed") from exc
             if status != "succeeded":
@@ -1244,12 +1263,15 @@ def _preflight(
     label: str,
     invocation: str = "candidate",
     preparation_remaining_timeout: Callable[[str], float] | None = None,
+    process_observer: Callable[[int, int | None], None] | None = None,
+    process_released: Callable[[int, int | None], None] | None = None,
 ) -> None:
     stage = "auditor_preflight" if label == "audit" else "compiler_preflight"
     try:
         _preflight_suite(evaluator, suite, contract, staging, timeout, label=label,
                          invocation=invocation, stage=stage,
-                         preparation_remaining_timeout=preparation_remaining_timeout)
+                         preparation_remaining_timeout=preparation_remaining_timeout,
+                         **_process_options(process_observer, process_released))
     except (SolveExecutionBudgetExceeded, SolveExecutionCancelled,
             EvaluatorPreparationError, EvaluatorPreparationWallTimeout):
         raise
@@ -1258,7 +1280,7 @@ def _preflight(
 
 
 def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, invocation, stage,
-                     preparation_remaining_timeout=None):
+                     preparation_remaining_timeout=None, process_observer=None, process_released=None):
     # Admit the whole suite before executing even its first probe. This is creation-time
     # validation only; loading an existing frozen bundle never replays its probes.
     for probe_index, probe in enumerate(suite.probes, 1):
@@ -1282,6 +1304,7 @@ def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, inv
             try:
                 options = ({"preparation_remaining_timeout": preparation_remaining_timeout, "stage": stage}
                            if preparation_remaining_timeout is not None else {})
+                options.update(_process_options(process_observer, process_released))
                 report = _snapshot_probe(evaluator, probe, contract, workspace, timeout, **options)
             except _ProbeFailure as exc:
                 raise _local_failure(str(exc), stage, exc.reason, probe_index=probe_index) from exc
@@ -1331,7 +1354,8 @@ def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, inv
                 )
         try:
             process_timeout = _preparation_timeout(timeout, preparation_remaining_timeout, stage)
-            report = _run_evaluator(evaluator, candidate, process_timeout)
+            report = _run_evaluator(evaluator, candidate, process_timeout,
+                                    **_process_options(process_observer, process_released))
         except _ProbeFailure as exc:
             if exc.reason == "process_failed":
                 _preparation_timeout(timeout, preparation_remaining_timeout, stage)
@@ -1362,25 +1386,40 @@ def _preflight_suite(evaluator, suite, contract, staging, timeout, *, label, inv
     shutil.rmtree(probe_root)
 
 
-def _run_evaluator(evaluator: Path, candidate: Path, timeout: float) -> EvaluationReport:
+def _run_evaluator(
+    evaluator: Path, candidate: Path, timeout: float, *,
+    process_observer: Callable[[int, int | None], None] | None = None,
+    process_released: Callable[[int, int | None], None] | None = None,
+) -> EvaluationReport:
     if not candidate.is_file() or candidate.is_symlink():
         raise EvaluatorBundleError("evaluator candidate path is missing or unsafe")
+    process_options = _process_options(process_observer, process_released)
+    command = [sys.executable, "-I", str(evaluator), str(candidate)]
+    environment = {
+        "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PYTHONHASHSEED": "0",
+        "PYTHONIOENCODING": "utf-8",
+    }
     try:
-        completed = subprocess.run(
-            [sys.executable, "-I", str(evaluator), str(candidate)],
-            cwd=candidate.parent,
-            env={
-                "LANG": "C.UTF-8",
-                "LC_ALL": "C.UTF-8",
-                "PYTHONHASHSEED": "0",
-                "PYTHONIOENCODING": "utf-8",
-            },
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        if process_options:
+            from .candidate_execution_runner import _bounded_process_bytes
+
+            stdout, stderr, status, returncode, _ = _bounded_process_bytes(
+                command, cwd=str(candidate.parent), environment=environment, timeout=timeout,
+                output_limit=MAX_EVALUATOR_OUTPUT_BYTES, capture_limit=MAX_EVALUATOR_OUTPUT_BYTES,
+                **process_options,
+            )
+            if status != "succeeded":
+                raise _ProbeFailure("frozen evaluator failed or exceeded its limits", "process_failed")
+            completed = subprocess.CompletedProcess(
+                command, returncode, stdout.decode("utf-8"), stderr.decode("utf-8"),
+            )
+        else:
+            completed = subprocess.run(
+                command, cwd=candidate.parent, env=environment,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout, check=False,
+            )
+    except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
+        raise
     except subprocess.TimeoutExpired as exc:
         raise _ProbeFailure("frozen evaluator timed out", "process_failed") from exc
     except OSError as exc:

@@ -30,7 +30,7 @@ SNAPSHOT_SOURCE = EVALUATOR_SOURCE.replace(
 ).replace('"data/raw/orders.csv"', '"inputs/orders.csv"')
 
 
-def _compile(runtime, root, *, invocation="snapshot", timeout=2):
+def _compile(runtime, root, *, invocation="snapshot", timeout=2, **kwargs):
     target = root / "data/raw/orders.csv"
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
@@ -39,6 +39,7 @@ def _compile(runtime, root, *, invocation="snapshot", timeout=2):
     descriptor = CandidateInputArtifact("data/raw/orders.csv", len(content), hashlib.sha256(content).hexdigest())
     return compile_evaluator_bundle(
         runtime, _contract(), root, inputs=(descriptor,), timeout=timeout, invocation=invocation,
+        **kwargs,
     )
 
 
@@ -99,6 +100,30 @@ def test_snapshot_resume_only_loads_same_frozen_mode_and_rechecks_input_bytes(tm
     with pytest.raises(EvaluatorBundleError, match="input profile digest"):
         _compile(runtime, tmp_path)
     assert runtime.bundle_calls == runtime.audit_calls == 1
+
+
+def test_snapshot_compiler_and_auditor_probes_preserve_process_ownership_callbacks(tmp_path):
+    events = []
+    runtime = _runtime()
+    callbacks = {
+        "process_observer": lambda pid, pgid: events.append(("observed", pid, pgid)),
+        "process_released": lambda pid, pgid: events.append(("released", pid, pgid)),
+    }
+
+    bundle = _compile(runtime, tmp_path, **callbacks)
+
+    assert bundle.invocation == "snapshot"
+    # Compiler and independent auditor each execute three synthetic probes.
+    assert len(events) == 2 * 3 * 2
+    for registered, released in zip(events[::2], events[1::2], strict=True):
+        assert registered[0] == "observed"
+        assert registered[1] > 0
+        assert registered[1] == registered[2]
+        assert released == ("released", registered[1], registered[2])
+
+    events.clear()
+    assert _compile(runtime, tmp_path, **callbacks) == bundle
+    assert events == []
 
 
 @pytest.mark.parametrize("invocation", ["candidate", "snapshot"])

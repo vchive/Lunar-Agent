@@ -2170,6 +2170,10 @@ class EvolutionContext:
     # Process-local operational budget hook. It is deliberately not part of persisted config or
     # candidate identity; automatic solve binds the same monotonic deadline to every phase.
     remaining_timeout: Callable[[str], float] | None = None
+    # Optional local subprocess ownership hooks used by automatic lifecycle execution.
+    process_observer: Callable[[int, int | None], None] | None = None
+    process_released: Callable[[int, int | None], None] | None = None
+    continuation_guard: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -5164,6 +5168,10 @@ class _BaseStrategy:
         self._bind_timeout(context.generate)
         self._bind_timeout(context.evaluate)
         self._bind_timeout(context.bundle_pipeline)
+        self._bind_process_ownership(context.bundle_pipeline)
+        setter = getattr(context.bundle_pipeline, "set_continuation_guard", None)
+        if callable(setter):
+            setter(context.continuation_guard)
 
     def _bind_timeout(self, target: object) -> None:
         if target is None:
@@ -5172,7 +5180,16 @@ class _BaseStrategy:
         if callable(setter):
             setter(self.context.remaining_timeout)
 
+    def _bind_process_ownership(self, target: object) -> None:
+        if target is None:
+            return
+        setter = getattr(target, "set_process_observer", None)
+        if callable(setter):
+            setter(self.context.process_observer, self.context.process_released)
+
     def _check_stage(self, stage: str) -> None:
+        if self.context.continuation_guard is not None:
+            self.context.continuation_guard()
         callback = self.context.remaining_timeout
         if callback is not None:
             remaining = callback(stage)

@@ -242,6 +242,32 @@ def test_terminal_bundle_resume_is_read_only_and_never_reexecutes(tmp_path):
     assert _files(context.workspace) == before
 
 
+def test_population_observes_and_releases_each_candidate_and_independent_evaluator(tmp_path):
+    events = []
+    context = replace(
+        build_context(tmp_path),
+        process_observer=lambda pid, pgid: events.append(("observed", pid, pgid)),
+        process_released=lambda pid, pgid: events.append(("released", pid, pgid)),
+    )
+
+    result = PopulationStrategy(context).run()
+
+    assert result.status == "completed"
+    assert result.evaluated_candidates == 4
+    # Each proposal has a candidate process followed by its independent evaluator.
+    assert len(events) == 4 * 2 * 2
+    for registered, released in zip(events[::2], events[1::2], strict=True):
+        assert registered[0] == "observed"
+        assert registered[1] > 0
+        assert registered[1] == registered[2]
+        assert released == ("released", registered[1], registered[2])
+
+    events.clear()
+    resumed = PopulationStrategy(replace(context, generate=_reject_generate)).resume()
+    assert resumed.to_dict() == result.to_dict()
+    assert events == []
+
+
 @pytest.mark.parametrize("tamper", ["helper", "evaluation_output", "receipt_binding"])
 def test_resume_rejects_changed_bundle_or_evaluation_before_generation(tmp_path, tamper):
     context = build_context(tmp_path)

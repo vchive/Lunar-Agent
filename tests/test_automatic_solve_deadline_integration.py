@@ -341,3 +341,56 @@ def test_recorded_terminal_winner_survives_late_runtime_and_budget_check(
     assert sum(event["type"] == "budget_exceeded" for event in events) == (winner == "budget")
     assert not any(event["type"] == "bundle_candidate_delivered" for event in events)
     assert runtime.generator_calls == 1
+
+
+@pytest.mark.parametrize("boundary", ["generation", "candidate_execution", "scoring"])
+def test_cancellation_without_wall_timeout_blocks_later_execution_and_delivery(
+    tmp_path, monkeypatch, capsys, boundary,
+):
+    from famou import candidate_execution_runner
+
+    runtime, args = automatic_setup(tmp_path, monkeypatch)
+    original_runtime = runtime.run
+    original_candidate = candidate_execution_runner._bounded_process
+    original_evaluator = candidate_evaluation._bounded_process_bytes
+    candidate_calls = []
+    evaluator_calls = []
+
+    def cancel_parent():
+        store, parent = parent_state(tmp_path)
+        assert store.cancel_run(parent.id)
+
+    def run(prompt, workspace, timeout=None, **kwargs):
+        result = original_runtime(prompt, workspace, timeout, **kwargs)
+        if boundary == "generation" and stage_of(prompt) == "generation":
+            cancel_parent()
+        return result
+
+    def candidate(*args, **kwargs):
+        candidate_calls.append(True)
+        result = original_candidate(*args, **kwargs)
+        if boundary == "candidate_execution":
+            cancel_parent()
+        return result
+
+    def evaluator(*args, **kwargs):
+        evaluator_calls.append(True)
+        result = original_evaluator(*args, **kwargs)
+        if boundary == "scoring":
+            cancel_parent()
+        return result
+
+    monkeypatch.setattr(runtime, "run", run)
+    monkeypatch.setattr(candidate_execution_runner, "_bounded_process", candidate)
+    monkeypatch.setattr(candidate_evaluation, "_bounded_process_bytes", evaluator)
+
+    assert cli.main(args) != 0
+    capsys.readouterr()
+
+    store, parent = parent_state(tmp_path)
+    assert parent.status.value == "cancelled"
+    assert runtime.generator_calls == 1
+    assert len(candidate_calls) == (0 if boundary == "generation" else 1)
+    assert len(evaluator_calls) == (1 if boundary == "scoring" else 0)
+    assert not any(event["type"] == "bundle_candidate_delivered" for event in store.list_events(parent.id))
+    assert not (parent.workspace / "output/result.json").exists()

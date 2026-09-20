@@ -14,8 +14,10 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
+from threading import Event
 
 from .agents import CandidateGenerationDiagnostic, candidate_failure_reason
+from .automatic_solve_lifecycle import SolveExecutionCancelled
 from .memory import MemoryStore
 from .model_profile import BudgetFailureEvidence, ProfileBudgetExceeded, UsageLedger
 from .profiles import ModelProfile
@@ -155,6 +157,8 @@ class AgentLoopRuntime:
         self._last_tool_steps = 0
         self._last_invocation = InvocationDiagnostics()
         self._last_candidate_diagnostic: dict[str, object] | None = None
+        self._continuation_guard: Callable[[], None] | None = None
+        self._cancelled = Event()
 
     def set_context(self, run_id: str, task_id: str, goal: str | None = None) -> None:
         """Attach durable identity for memory scoping and observability."""
@@ -183,11 +187,30 @@ class AgentLoopRuntime:
 
     def set_process_observer(self, observer: Callable[[int, int | None], None] | None) -> None:
         self.model.set_process_observer(observer)
+        self.tools.set_process_observer(observer)
+
+    def set_process_released(self, released: Callable[[int, int | None], None] | None) -> None:
+        setter = getattr(self.model, "set_process_released", None)
+        if callable(setter):
+            setter(released)
+        self.tools.set_process_released(released)
 
     def process_info(self) -> tuple[int | None, int | None]:
         return self.model.process_info()
 
+    def set_continuation_guard(self, guard: Callable[[], None] | None) -> None:
+        if guard is not None and not callable(guard):
+            raise TypeError("continuation guard must be callable or None")
+        self._continuation_guard = guard
+
+    def _check_continuation(self) -> None:
+        if self._continuation_guard is not None:
+            self._continuation_guard()
+        if self._cancelled.is_set():
+            raise SolveExecutionCancelled("solve")
+
     def cancel(self) -> None:
+        self._cancelled.set()
         self.model.cancel()
 
     @property
@@ -216,6 +239,8 @@ class AgentLoopRuntime:
         max_tool_steps: int | None = None,
         budget_id: str | None = None,
     ) -> RuntimeResult:
+        self._cancelled.clear()
+        self._check_continuation()
         effective_timeout = self._profile_timeout(timeout)
         if max_tool_steps is not None:
             if isinstance(max_tool_steps, bool) or not isinstance(max_tool_steps, int) or max_tool_steps < 1:
@@ -296,7 +321,9 @@ class AgentLoopRuntime:
                 transcript_complete=False,
             )
             try:
+                self._check_continuation()
                 turn = self.model.complete(request_messages, self.tools.schemas(), remaining)
+                self._check_continuation()
             except AgentInputRequired:
                 if ledger is not None:
                     ledger.mark_usage_unavailable()
@@ -343,6 +370,7 @@ class AgentLoopRuntime:
                     )
                     raise
             if not turn.tool_calls:
+                self._check_continuation()
                 if not turn.text:
                     self._set_candidate_diagnostic(
                         budget_id, effective_max_steps, tool_steps, 0, False, "empty_response", "response",
@@ -400,6 +428,7 @@ class AgentLoopRuntime:
             messages.append(self._assistant_message(turn))
             self._append_transcript(messages[-1])
             for call in turn.tool_calls:
+                self._check_continuation()
                 if self.profile is not None:
                     try:
                         self._remaining_timeout(started, effective_timeout)
@@ -419,7 +448,9 @@ class AgentLoopRuntime:
                         else nullcontext()
                     )
                     with deadline_scope:
+                        self._check_continuation()
                         result = self.tools.execute(call.name, call.arguments, workspace)
+                        self._check_continuation()
                 except Exception as exc:
                     self._set_candidate_diagnostic(
                         budget_id, effective_max_steps, tool_steps, 1, False,
@@ -547,10 +578,13 @@ class AgentLoopRuntime:
         memory tools, or a previous compiler response. Keeping this primitive on the repository-
         owned loop lets protocol code request that boundary without depending on model internals.
         """
+        self._cancelled.clear()
+        self._check_continuation()
         effective_timeout = self._profile_timeout(timeout)
         workspace.mkdir(parents=True, exist_ok=True)
         ledger = UsageLedger(self.profile) if self.profile is not None else None
         started = time.monotonic()
+        self._check_continuation()
         turn = self.model.complete(
             [
                 {"role": "system", "content": ISOLATED_SYSTEM_PROMPT},
@@ -560,6 +594,7 @@ class AgentLoopRuntime:
             self._remaining_timeout(started, effective_timeout)
             if self.profile is not None else timeout,
         )
+        self._check_continuation()
         if self.profile is not None:
             self._remaining_timeout(started, effective_timeout)
         self._record_profile_usage(turn, ledger)

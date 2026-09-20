@@ -93,7 +93,28 @@ def _default_owner_check(registration: RegisteredProcess) -> bool:
         return False
 
 
-def _check_owner(registration: RegisteredProcess) -> tuple[bool, ProcessCleanupStatus | None]:
+def _check_owner(
+    registration: RegisteredProcess, *, allow_exited_leader: bool = False,
+) -> tuple[bool, ProcessCleanupStatus | None]:
+    # A durable database predicate is necessary but not sufficient: the OS identity must
+    # still resolve to the same process group, otherwise a reused PID could receive a signal.
+    try:
+        os_owned = os.getpgid(registration.pid) == registration.pgid
+    except ProcessLookupError:
+        # After our verified SIGTERM the leader may already have been reaped while its
+        # descendants keep the process group alive. POSIX reserves that group ID until the
+        # group is empty. Only extend our earlier authority for an actual group leader and
+        # while the durable registration can still be checked; a missing PID never grants
+        # initial signal authority, and a reused PID in another group still fails above.
+        os_owned = (
+            allow_exited_leader
+            and registration.pid == registration.pgid
+            and registration.owner_check is not None
+        )
+    except Exception:  # noqa: BLE001 - the OS boundary is fail-closed.
+        return False, ProcessCleanupStatus.OWNER_CHECK_FAILED
+    if not os_owned:
+        return False, ProcessCleanupStatus.OWNERSHIP_LOST
     try:
         owned = (
             registration.owner_check()
@@ -165,7 +186,7 @@ def cleanup_registered_process(
             break
         sleep(min(0.01, remaining))
 
-    owned, failure = _check_owner(registration)
+    owned, failure = _check_owner(registration, allow_exited_leader=True)
     if not owned:
         return _result(
             registration, failure or ProcessCleanupStatus.OWNERSHIP_LOST,
@@ -210,13 +231,33 @@ def cleanup_registered_processes(
 ) -> tuple[ProcessCleanupResult, ...]:
     """Clean all registrations, preserving fan-out after callback or OS failures."""
     results: list[ProcessCleanupResult] = []
+    completed: dict[tuple[int, int], ProcessCleanupResult] = {}
     for registration in registrations:
-        try:
-            results.append(cleanup(registration, grace_seconds=grace_seconds))
-        except Exception as exc:  # noqa: BLE001 - continue fan-out after one callback fails.
-            results.append(_result(
-                registration, ProcessCleanupStatus.CALLBACK_FAILED, error=type(exc).__name__,
+        identity = (registration.pid, registration.pgid)
+        prior = completed.get(identity)
+        if prior is not None:
+            # A successfully cleaned group needs no more signals. Retain one result per
+            # durable registration so each row can be conditionally released by the caller.
+            results.append(ProcessCleanupResult(
+                registration.label,
+                registration.pid,
+                registration.pgid,
+                prior.status,
+                term_sent=prior.term_sent,
+                kill_sent=prior.kill_sent,
+                alive_after=prior.alive_after,
+                error=prior.error,
             ))
+            continue
+        try:
+            result = cleanup(registration, grace_seconds=grace_seconds)
+        except Exception as exc:  # noqa: BLE001 - continue fan-out after one callback fails.
+            result = _result(
+                registration, ProcessCleanupStatus.CALLBACK_FAILED, error=type(exc).__name__,
+            )
+        results.append(result)
+        if result.status in {ProcessCleanupStatus.CLEANED, ProcessCleanupStatus.ALREADY_EXITED}:
+            completed[identity] = result
     return tuple(results)
 
 

@@ -208,3 +208,22 @@ def test_evaluator_implementation_and_output_contract_pins_are_required(tmp_path
         with pytest.raises(CandidateEvaluationError, match="(evaluator|output_contract)_mismatch"):
             evaluate_candidate_execution(changed, **request)
     assert list(request["evaluation_root"].iterdir()) == []
+
+
+def test_independent_evaluator_preserves_process_ownership_callbacks(tmp_path):
+    admission, request = fixture(tmp_path)
+    events = []
+
+    result = evaluate_candidate_execution(
+        admission, **request,
+        process_observer=lambda pid, pgid: events.append(("observed", pid, pgid)),
+        process_released=lambda pid, pgid: events.append(("released", pid, pgid)),
+    )
+
+    assert result.status == "evaluated"
+    assert result.report.validity == 1
+    assert len(events) == 2
+    assert events[0] == ("observed", events[0][1], events[0][1])
+    assert events[0][1] > 0
+    assert events[1] == ("released", events[0][1], events[0][2])
+    assert (request["workspace_path"] / "count").read_text() == "x"

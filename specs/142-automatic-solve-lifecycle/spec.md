@@ -2,9 +2,9 @@
 
 **Created**: 2026-09-20
 
-**Status**: Phase A foreground shared budget and parent lifecycle are implemented and in final
-offline regression. Phase B cancellation/process cleanup and Phase C detached entry points remain
-open; automatic `--detach` remains rejected.
+**Status**: Phase A foreground shared budget and parent lifecycle plus Phase B cancellation/process
+cleanup are implemented and offline-verified. Phase C detached entry points remain open; automatic
+`--detach` remains rejected.
 
 **Input**: Continue product development using SDD; connect full automatic multi-file execution
 budgets, parent/child cancellation, and local background execution using existing product controls.

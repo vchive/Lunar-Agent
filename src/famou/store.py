@@ -840,12 +840,20 @@ class Store:
             ).rowcount
         return changed == 1
 
-    def clear_runner_process(self, run_id: str, pid: int | None = None) -> bool:
+    def clear_runner_process(
+        self, run_id: str, pid: int | None = None, pgid: int | None = None,
+    ) -> bool:
         with self._connect() as connection:
             if pid is None:
                 changed = connection.execute(
                     "UPDATE runs SET runner_pid = NULL, runner_pgid = NULL, updated_at = ? WHERE id = ?",
                     (utc_now(), run_id),
+                ).rowcount
+            elif pgid is not None:
+                changed = connection.execute(
+                    "UPDATE runs SET runner_pid = NULL, runner_pgid = NULL, updated_at = ? "
+                    "WHERE id = ? AND runner_pid = ? AND runner_pgid = ?",
+                    (utc_now(), run_id, pid, pgid),
                 ).rowcount
             else:
                 changed = connection.execute(
@@ -1350,6 +1358,47 @@ class Store:
                 (pid, pgid, utc_now(), attempt_id),
             ).rowcount
         return changed == 1
+
+    def get_attempt(self, attempt_id: str) -> Attempt | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM attempts WHERE id = ?", (attempt_id,)).fetchone()
+        return self._attempt_from_row(row) if row else None
+
+    def clear_attempt_process(
+        self, attempt_id: str, pid: int | None = None, pgid: int | None = None,
+    ) -> bool:
+        with self._connect() as connection:
+            if pid is None:
+                changed = connection.execute(
+                    "UPDATE attempts SET pid = NULL, pgid = NULL, heartbeat_at = ? WHERE id = ?",
+                    (utc_now(), attempt_id),
+                ).rowcount
+            elif pgid is not None:
+                changed = connection.execute(
+                    "UPDATE attempts SET pid = NULL, pgid = NULL, heartbeat_at = ? "
+                    "WHERE id = ? AND pid = ? AND pgid = ?",
+                    (utc_now(), attempt_id, pid, pgid),
+                ).rowcount
+            else:
+                changed = connection.execute(
+                    "UPDATE attempts SET pid = NULL, pgid = NULL, heartbeat_at = ? "
+                    "WHERE id = ? AND pid = ?",
+                    (utc_now(), attempt_id, pid),
+                ).rowcount
+        return changed == 1
+
+    def list_attempt_processes(self, run_id: str) -> list[dict[str, object]]:
+        """Return active attempt process registrations for one run before cancellation."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT attempts.id, attempts.task_id, attempts.pid, attempts.pgid "
+                "FROM attempts JOIN tasks ON tasks.id = attempts.task_id "
+                "WHERE tasks.run_id = ? "
+                "AND attempts.pid IS NOT NULL AND attempts.pgid IS NOT NULL "
+                "ORDER BY attempts.started_at, attempts.id",
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def recover_running(self, run_id: str) -> int:
         timestamp = utc_now()

@@ -72,6 +72,28 @@ def _kill_group(process: subprocess.Popen[str]) -> bool:
             return process.poll() is not None
 
 
+def _wait_owned_group_exit(pid: int, pgid: int | None) -> bool:
+    """Confirm a private invocation's entire group is gone before releasing ownership."""
+    if pgid != pid or pid <= 1 or pgid == os.getpgrp():
+        return False
+    deadline = time.monotonic() + PROCESS_CLEANUP_GRACE_SECONDS
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            # Some systems report EPERM while a killed group is being reaped. It remains
+            # unconfirmed until ESRCH, rather than becoming proof of successful cleanup.
+            pass
+        except OSError:
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.01, remaining))
+
+
 def _bounded(value: object, limit: int) -> tuple[str, bool]:
     if isinstance(value, bytes):
         raw = value
@@ -91,7 +113,8 @@ def _bounded(value: object, limit: int) -> tuple[str, bool]:
 
 def _bounded_process_bytes(
     command: list[str], *, cwd: str, environment: dict[str, str], timeout: float, output_limit: int,
-    capture_limit: int,
+    capture_limit: int, process_observer: Callable[[int, int | None], None] | None = None,
+    process_released: Callable[[int, int | None], None] | None = None,
 ) -> tuple[bytes, bytes, Literal["succeeded", "failed", "timed_out"], int | None, str | None]:
     """Run a process while keeping each captured stream bounded in memory.
 
@@ -102,6 +125,7 @@ def _bounded_process_bytes(
     the limits, including ``0 < capture_limit <= output_limit``; returned bytes are never decoded.
     """
     process: subprocess.Popen[bytes] | None = None
+    process_identity: tuple[int, int | None] | None = None
     selector: selectors.BaseSelector | None = None
     streams: list[object] = []
     output = {"stdout": bytearray(), "stderr": bytearray()}
@@ -109,6 +133,7 @@ def _bounded_process_bytes(
     overflow = False
     reason: Literal["timeout", "overflow"] | None = None
     cleanup_ok = True
+    owned_group_exited = True
     cleanup_deadline: float | None = None
     exit_code: int | None = None
     started = time.monotonic()
@@ -131,6 +156,14 @@ def _bounded_process_bytes(
             text=False,
             start_new_session=True,
         )
+        # A successful start_new_session makes this exact invocation its group leader.
+        # Preserve the identity even if a very short-lived child exits before getpgid.
+        process_identity = (process.pid, process.pid)
+        if process_observer is not None:
+            try:
+                process_observer(*process_identity)
+            except Exception:  # noqa: BLE001, S110 - ownership metadata must not change execution
+                pass
         assert process.stdout is not None and process.stderr is not None
         streams = [process.stdout, process.stderr]
         selector = selectors.DefaultSelector()
@@ -198,11 +231,24 @@ def _bounded_process_bytes(
                     process.wait(timeout=PROCESS_CLEANUP_GRACE_SECONDS)
                 except subprocess.TimeoutExpired:
                     cleanup_ok = False
+        if process is not None and process_observer is not None:
+            owned_group_exited = (
+                process_identity is not None and _wait_owned_group_exit(*process_identity)
+            )
+            cleanup_ok = cleanup_ok and owned_group_exited
+        if (process is not None and process.poll() is not None and cleanup_ok
+                and process_identity is not None and process_released is not None):
+            try:
+                process_released(*process_identity)
+            except Exception:  # noqa: BLE001, S110 - ownership metadata must not mask the result
+                pass
 
     if process is not None and exit_code is None and reason != "timeout":
         exit_code = process.returncode
     stdout = bytes(output["stdout"])
     stderr = bytes(output["stderr"])
+    if not owned_group_exited:
+        return stdout, stderr, "failed", exit_code, "process_cleanup_failed"
     if reason == "timeout" and cleanup_ok:
         return stdout, stderr, "timed_out", None, "process_timed_out"
     if overflow:
@@ -216,11 +262,14 @@ def _bounded_process_bytes(
 
 def _bounded_process(
     command: list[str], *, cwd: str, environment: dict[str, str], timeout: float, output_limit: int,
+    process_observer: Callable[[int, int | None], None] | None = None,
+    process_released: Callable[[int, int | None], None] | None = None,
 ) -> tuple[str, str, Literal["succeeded", "failed", "timed_out"], int | None, str | None]:
     """Keep the candidate runner's historical bounded, replacement-decoded text projection."""
     raw_stdout, raw_stderr, status, exit_code, error = _bounded_process_bytes(
         command, cwd=cwd, environment=environment, timeout=timeout, output_limit=output_limit,
         capture_limit=min(output_limit, MAX_RESULT_OUTPUT_BYTES),
+        process_observer=process_observer, process_released=process_released,
     )
     stdout, stdout_overflow = _bounded(raw_stdout, output_limit)
     stderr, stderr_overflow = _bounded(raw_stderr, output_limit)
@@ -348,6 +397,8 @@ class CandidateExecutionRunner:
         expected_contract_sha256: str | None = None,
         timeout_seconds: float | None = None,
         remaining_timeout: Callable[[str], float] | None = None,
+        process_observer: Callable[[int, int | None], None] | None = None,
+        process_released: Callable[[int, int | None], None] | None = None,
     ) -> CandidateExecutionRun:
         if remaining_timeout is not None and not callable(remaining_timeout):
             raise CandidateExecutionRunnerError("invalid")
@@ -474,6 +525,7 @@ class CandidateExecutionRunner:
                 stdout, stderr, status, exit_code, error = _bounded_process(
                     [*command, parsed_plan.entrypoint], cwd=str(workspace), environment=environment,
                     timeout=effective_timeout, output_limit=output_limit,
+                    process_observer=process_observer, process_released=process_released,
                 )
             except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
                 raise
@@ -499,6 +551,8 @@ def run_candidate_execution(
     expected_contract_sha256: str | None = None,
     timeout_seconds: float | None = None,
     remaining_timeout: Callable[[str], float] | None = None,
+    process_observer: Callable[[int, int | None], None] | None = None,
+    process_released: Callable[[int, int | None], None] | None = None,
 ) -> CandidateExecutionRun:
     return CandidateExecutionRunner().run(
         admission, plan=plan, workspace_path=workspace_path, input_path=input_path,
@@ -507,6 +561,7 @@ def run_candidate_execution(
         expected_contract_sha256=expected_contract_sha256,
         timeout_seconds=timeout_seconds,
         remaining_timeout=remaining_timeout,
+        process_observer=process_observer, process_released=process_released,
     )
 
 

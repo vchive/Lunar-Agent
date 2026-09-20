@@ -1,4 +1,4 @@
-# Feature 142 Phase A real automatic multi-file acceptance plan
+# Feature 142 Phase B real automatic multi-file acceptance plan
 
 **Date**: 2026-09-20
 **Status**: Preregistration plan; no provider request has been made
@@ -6,18 +6,18 @@
 
 ## Purpose and scope
 
-This plan defines the next single real-model acceptance attempt after Feature 142 Phase A's
+This plan defines the next single real-model acceptance attempt after Feature 142 Phase B's
 offline implementation and regression checkpoint. The attempt is intended to observe the
 foreground native automatic multi-file path from contract intake through parent delivery:
 preparation, candidate generation, isolated execution, independent scoring, validity-first
 selection, and verified delivery.
 
-The acceptance is limited to the Phase A behavior that is implemented and verified offline:
-one shared active-execution deadline, durable parent orchestration, unified `solve`/`resume`/
-`answer` continuation, terminal precedence, and read-only `solve_execution` status. It does not
-enable or claim detached automatic execution, complete Phase B in-flight cancellation and local
-process cleanup, or establish WebAgent parity. It is a product closure observation, not a model
-quality study or a provider authorization.
+The acceptance covers the foreground behavior implemented and verified offline: one shared
+active-execution deadline, durable parent orchestration, unified `solve`/`resume`/`answer`
+continuation, terminal precedence, read-only `solve_execution` status, and Phase B local process
+ownership/cancellation cleanup. It does not enable or claim detached automatic execution or
+establish WebAgent parity. It is a product closure observation, not a model quality study or a
+provider authorization.
 
 Feature 139 is a closed historical slot. Its evidence, registration, campaign root, and
 `0/1` primary and joint outcomes remain unchanged. Feature 131 and Feature 134 evidence also
@@ -30,8 +30,8 @@ No provider request may occur until every gate below has a retained, inspectable
 1. **Offline product gate.** The focused lifecycle suites, shared compatibility suites, full
    two-stage regression, lint/compile checks, SDD prerequisite checks, and local link/diff checks
    pass on the candidate product. The regression evidence is retained separately from the real
-   campaign evidence. A Phase B or Phase C item that is still open does not get silently counted
-   as implemented by this plan.
+   campaign evidence. The remaining Phase C item does not get silently counted as implemented by
+   this plan.
 2. **Immutable checkout gate.** The product commit is fixed, the worktree is clean, and the
    checkout is verified to equal the pushed `origin/main` revision. The exact commit value is
    written into the manifest at launch preparation; this document deliberately does not invent
@@ -136,7 +136,8 @@ The real attempt must retain bounded observations that are specific to Phase A:
 - A budget or cancellation terminal write retains Store terminal precedence and is idempotent.
   Late child results, scores, or delivery attempts cannot overwrite a recorded terminal outcome.
   This plan observes the recorded precedence if a terminal boundary is reached; it does not add
-  a deliberate cancellation experiment while Phase B process fan-out remains unfinished.
+  a deliberate cancellation experiment; the campaign observes the implemented local cleanup
+  behavior without treating remote provider cancellation as observable.
 - Status, events, and retained public results contain bounded reason codes and identities only.
   Prompts, provider bodies, credentials, endpoint values, and arbitrary exception text remain
   private or absent.
@@ -207,8 +208,9 @@ real closure is claimed only when the stated primary or joint gates are all evid
   that the registered model will succeed.
 - It does not rerun WebAgent, compare WebAgent scores, or infer general quality from eight
   holdouts. WebAgent and prior model measurements remain reference history only.
-- It does not enable detached automatic execution or claim Phase B process ownership and
-  cancellation cleanup. Those remain separate implementation gates in Feature 142.
+- It does not enable detached automatic execution. Phase B process ownership and cancellation
+  cleanup are implemented and covered offline, but this acceptance does not claim remote provider
+  cancellation or detached behavior.
 - It does not import OpenEvolve/Shinka producers, add remote scheduling, broaden retry policy,
   migrate historical databases, or alter the strict candidate parser.
 - It does not reopen, resume, repair, replace, or rewrite Feature 131, 134, or 139 evidence.

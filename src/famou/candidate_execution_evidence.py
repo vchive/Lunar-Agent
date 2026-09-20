@@ -436,6 +436,8 @@ def run_candidate_execution_recorded(
     expected_contract_sha256: str | None = None,
     timeout_seconds: float | None = None,
     remaining_timeout=None,
+    process_observer=None,
+    process_released=None,
 ) -> CandidateExecutionRecord:
     """Reserve a new attempt, persist intent, invoke the runner once, and bind its telemetry."""
     pins = {
@@ -501,6 +503,8 @@ def run_candidate_execution_recorded(
                 admitted, plan=parsed, workspace_path=workspace, input_path=inputs, **pins,
                 timeout_seconds=timeout_seconds,
                 remaining_timeout=remaining_timeout,
+                process_observer=process_observer,
+                process_released=process_released,
             )
         except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
             raise

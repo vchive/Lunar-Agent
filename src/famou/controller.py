@@ -13,6 +13,8 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -112,6 +114,11 @@ from .output_publication import (
     recover_outputs,
 )
 from .policy import MasterPolicy, PlanDocument, PlanPatch, PolicyDecision
+from .process_ownership import (
+    ProcessCleanupStatus,
+    RegisteredProcess,
+    cleanup_registered_processes,
+)
 from .profiles import ProfileRegistry
 from .recovery import RecoveryPolicy, RecoveryProposal
 from .routing import DomainRouter, RouteDecision
@@ -123,6 +130,15 @@ from .workers import WorkerService
 if TYPE_CHECKING:
     from .bundle_delivery import BundleDeliveryResult
     from .bundle_evolution import MultiFileCandidatePipeline
+
+
+@dataclass(frozen=True)
+class _AutomaticCancelDecision:
+    """Cancellation authority selected from one parent lifecycle marker."""
+
+    child_id: str | None = None
+    targets: tuple[RegisteredProcess, ...] = ()
+    verified: bool = False
 
 
 class LocalController:
@@ -693,6 +709,7 @@ class LocalController:
         seed_environment_sha256: str | None = None,
         bundle_pipeline: MultiFileCandidatePipeline | None = None,
         remaining_timeout: Callable[[str], float] | None = None,
+        automatic_parent_id: str | None = None,
     ) -> tuple[Run, StrategyResult]:
         """Execute or resume an evolution strategy while retaining SQLite run authority."""
         run = self.store.get_run(run_id)
@@ -725,6 +742,21 @@ class LocalController:
         if len(task) != 1:
             raise EvolutionError("evolution run must contain exactly one task")
         evolution_task = task[0]
+        process_observer = process_released = None
+        attempt = None
+
+        def continuation_guard() -> None:
+            if automatic_parent_id is None:
+                return
+            authority = self._automatic_cancel_targets(automatic_parent_id)
+            parent = self.store.get_run(automatic_parent_id)
+            current = self.store.get_run(run_id)
+            if (authority is None or not authority.verified or authority.child_id != run_id
+                    or parent is None or parent.status in {RunStatus.CANCELLED, RunStatus.FAILED}
+                    or current is None or current.status == RunStatus.CANCELLED):
+                raise SolveExecutionCancelled("evolution")
+            if attempt is not None:
+                self.ensure_attempt_process_released(run_id, attempt.id, parent_id=automatic_parent_id)
 
         if seed_manifest is None and (
             seed_dependency_sha256 is not None
@@ -1010,6 +1042,9 @@ class LocalController:
                 ),
                 observe=observe,
                 remaining_timeout=remaining_timeout,
+                process_observer=process_observer,
+                process_released=process_released,
+                continuation_guard=continuation_guard if automatic_parent_id is not None else None,
             )
             return build_strategy(context)
 
@@ -1064,10 +1099,21 @@ class LocalController:
             task_id=evolution_task.id,
         )
         strategy = None
+        if automatic_parent_id is not None:
+            process_observer, process_released = self.attempt_process_observers(
+                run.id, attempt.id, parent_id=automatic_parent_id,
+            )
+        runtime_scope = self.observe_attempt_runtime(
+            run.id, attempt.id, parent_id=automatic_parent_id,
+        ) if automatic_parent_id is not None else None
         try:
+            if runtime_scope is not None:
+                runtime_scope.__enter__()
+            continuation_guard()
             admitted_seeds, summary = adjudicate_initial_seeds()
             strategy = configured_strategy(admitted_seeds, summary)
             result = strategy.resume() if resume else strategy.run()
+            continuation_guard()
             record_committed_seed_admission(summary)
             self._index_evolution_candidate_integrity_artifacts(
                 run,
@@ -1199,6 +1245,9 @@ class LocalController:
             )
             settled = self.store.settle_run(run.id)
             raise EvolutionError(error) from exc
+        finally:
+            if runtime_scope is not None:
+                runtime_scope.__exit__(None, None, None)
 
     def deliver_bundle_evolution(
         self, run_id: str, destination_root: str | Path,
@@ -3236,17 +3285,35 @@ class LocalController:
                 self.store.finish_task(task.id, attempt.id, False, error=error)
                 return self.store.settle_run(run.id) or run
         compiler_runtime = getattr(compiler, "runtime", None)
+        automatic_scope = self._automatic_cancel_targets(run.id)
         if compiler_runtime is not None:
             with self._active_lock:
                 self._active_runtimes[attempt.id] = compiler_runtime
             set_observer = getattr(compiler_runtime, "set_process_observer", None)
             if callable(set_observer):
                 try:
-                    set_observer(
-                        lambda pid, pgid, attempt_id=attempt.id: self.store.set_attempt_process(
-                            attempt_id, pid, pgid
+                    if automatic_scope is not None and automatic_scope.verified:
+                        observe, release = self.attempt_process_observers(run.id, attempt.id)
+                        set_observer(observe)
+                        def guard() -> None:
+                            current = self.store.get_run(run.id)
+                            if current is None or current.status in {RunStatus.CANCELLED, RunStatus.FAILED}:
+                                raise SolveExecutionCancelled("contract")
+                            if solve_control is not None:
+                                solve_control.check("contract")
+                            self.ensure_attempt_process_released(run.id, attempt.id)
+                        set_guard = getattr(compiler_runtime, "set_continuation_guard", None)
+                        if callable(set_guard):
+                            set_guard(guard)
+                        set_released = getattr(compiler_runtime, "set_process_released", None)
+                        if callable(set_released):
+                            set_released(release)
+                    else:
+                        set_observer(
+                            lambda pid, pgid, attempt_id=attempt.id: self.store.set_attempt_process(
+                                attempt_id, pid, pgid
+                            )
                         )
-                    )
                 except Exception as observer_error:  # noqa: BLE001 - observer must not block intake
                     del observer_error
         try:
@@ -3257,6 +3324,8 @@ class LocalController:
                 timeout=(solve_control.effective_timeout(self.config.runtime_timeout, stage="contract")
                          if solve_control is not None else self.config.runtime_timeout),
             )
+            if automatic_scope is not None and automatic_scope.verified:
+                self.ensure_attempt_process_released(run.id, attempt.id)
             if solve_control is not None:
                 solve_control.check("contract")
             if not self._task_is_running(task.id):
@@ -3386,6 +3455,13 @@ class LocalController:
                         del observer_error
                 with self._active_lock:
                     self._active_runtimes.pop(attempt.id, None)
+                for name in ("set_process_released", "set_continuation_guard"):
+                    reset_hook = getattr(compiler_runtime, name, None)
+                    if callable(reset_hook):
+                        try:
+                            reset_hook(None)
+                        except Exception:  # noqa: BLE001, S110 - cleanup cannot mask the result
+                            pass
         self.store.finish_task(task.id, attempt.id, False, error=error)
         settled = self.store.settle_run(run.id)
         return settled or run
@@ -3906,31 +3982,266 @@ class LocalController:
             with self._active_lock:
                 self._active_runtimes.pop(attempt.id, None)
 
+    def _attempt_registration(self, attempt_id: str, pid: int, pgid: int) -> RegisteredProcess:
+        return RegisteredProcess(
+            pid, pgid,
+            owner_check=lambda: (
+                (current := self.store.get_attempt(attempt_id)) is not None
+                and current.pid == pid and current.pgid == pgid
+            ),
+            label=f"attempt:{attempt_id}",
+        )
+
+    def _cleanup_process_registrations(self, registrations) -> None:
+        # A foreground coordinator must finish its own terminal bookkeeping. External cancel
+        # callers still terminate detached coordinators, after all registered work groups.
+        targets = tuple(reg for reg in registrations if not (
+            reg.label.startswith("run:") and reg.pid == os.getpid()
+        ))
+        results = cleanup_registered_processes(targets)
+        for registration, result in zip(targets, results, strict=True):
+            if result.status not in {ProcessCleanupStatus.CLEANED, ProcessCleanupStatus.ALREADY_EXITED}:
+                continue
+            if registration.label.startswith("run:"):
+                self.store.clear_runner_process(
+                    registration.label.removeprefix("run:"), registration.pid, registration.pgid,
+                )
+            elif registration.label.startswith("attempt:"):
+                self.store.clear_attempt_process(
+                    registration.label.removeprefix("attempt:"), registration.pid, registration.pgid,
+                )
+
+    def attempt_process_observers(self, run_id: str, attempt_id: str, *, parent_id: str | None = None):
+        """Register sequential local work and reject a launch that lost its execution owner.
+
+        Registration precedes the terminal-state check: cancellation either observes this row,
+        or the registering thread observes cancellation and cleans this exact process itself.
+        """
+        def observe(pid: int, pgid: int | None) -> None:
+            attempt = self.store.get_attempt(attempt_id)
+            task = self.store.get_task(attempt.task_id) if attempt is not None else None
+            if task is None or task.run_id != run_id:
+                raise ValueError("process attempt does not belong to run")
+            if (isinstance(attempt.pid, int) and isinstance(attempt.pgid, int)
+                    and (attempt.pid, attempt.pgid) != (pid, pgid)):
+                # Sequential work must not overwrite a registration retained after failed
+                # cleanup. Retry that exact owner; if still unresolved, stop the just-spawned
+                # private group while keeping the original durable record available.
+                self._cleanup_process_registrations((
+                    self._attempt_registration(attempt_id, attempt.pid, attempt.pgid),
+                ))
+                retained = self.store.get_attempt(attempt_id)
+                if retained is not None and retained.pid is not None:
+                    if isinstance(pgid, int):
+                        cleanup_registered_processes((RegisteredProcess(
+                            pid, pgid, owner_check=lambda: True, label="unregistered-launch",
+                        ),))
+                    return
+            self.store.set_attempt_process(attempt_id, pid, pgid)
+            current = self.store.get_run(run_id)
+            latest = self.store.get_attempt(attempt_id)
+            stopped = (current is None or current.status in {
+                RunStatus.CANCELLED, RunStatus.FAILED, RunStatus.SUCCEEDED,
+            } or latest is None or latest.status != "running")
+            if parent_id is not None:
+                parent = self.store.get_run(parent_id)
+                authority = self._automatic_cancel_targets(parent_id)
+                stopped = stopped or (parent is None or parent.status in {
+                    RunStatus.CANCELLED, RunStatus.FAILED, RunStatus.SUCCEEDED,
+                } or authority is None or not authority.verified or authority.child_id != run_id)
+            if stopped and isinstance(pgid, int):
+                self._cleanup_process_registrations((self._attempt_registration(attempt_id, pid, pgid),))
+
+        def release(pid: int, pgid: int | None) -> None:
+            if pgid is not None:
+                self.store.clear_attempt_process(attempt_id, pid, pgid)
+
+        return observe, release
+
+    def ensure_attempt_process_released(self, run_id: str, attempt_id: str, *, parent_id: str | None = None) -> None:
+        """A sequential automatic stage cannot continue past unresolved local cleanup."""
+        attempt = self.store.get_attempt(attempt_id)
+        if attempt is None or attempt.pid is None or attempt.pgid is None:
+            return
+        self._cleanup_process_registrations((
+            self._attempt_registration(attempt.id, attempt.pid, attempt.pgid),
+        ))
+        current = self.store.get_attempt(attempt_id)
+        if current is None or current.pid is None:
+            return
+        self.store.finish_task(attempt.task_id, attempt.id, False, error="automatic process cleanup failed")
+        self.store.settle_run(run_id)
+        if parent_id is not None:
+            parent_run = self.store.get_run(parent_id)
+            if parent_run is not None and parent_run.status not in {
+                RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.SUCCEEDED,
+            }:
+                self.store.fail_budget(
+                    parent_id, "automatic_process_cleanup", 1.0, 0.0,
+                    "automatic process cleanup failed",
+                )
+            for task in self.store.list_tasks(parent_id):
+                active = self.store.active_attempt(task.id) if task.orchestration else None
+                if active is not None:
+                    self.store.finish_task(task.id, active.id, False, error="automatic process cleanup failed")
+            self.store.settle_run(parent_id)
+        raise SolveExecutionCancelled("process_cleanup")
+
+    @contextmanager
+    def observe_attempt_runtime(self, run_id: str, attempt_id: str, *, parent_id: str | None = None):
+        """Bind the existing runtime and optional local tools to one automatic attempt."""
+        observe, release = self.attempt_process_observers(run_id, attempt_id, parent_id=parent_id)
+
+        def guard() -> None:
+            for target in (run_id, parent_id):
+                if target is None:
+                    continue
+                current = self.store.get_run(target)
+                if current is None or current.status in {
+                    RunStatus.CANCELLED, RunStatus.FAILED, RunStatus.SUCCEEDED,
+                }:
+                    raise SolveExecutionCancelled("runtime")
+            self.ensure_attempt_process_released(run_id, attempt_id, parent_id=parent_id)
+
+        with self._active_lock:
+            self._active_runtimes[attempt_id] = self.runtime
+        try:
+            for name, callback in (("set_process_observer", observe), ("set_process_released", release),
+                                   ("set_continuation_guard", guard)):
+                setter = getattr(self.runtime, name, None)
+                if callable(setter):
+                    setter(callback)
+            yield observe, release
+        finally:
+            for name in ("set_process_observer", "set_process_released", "set_continuation_guard"):
+                setter = getattr(self.runtime, name, None)
+                if callable(setter):
+                    try:
+                        setter(None)
+                    except Exception:  # noqa: BLE001, S110 - fan-out must survive adapter failure
+                        pass
+            with self._active_lock:
+                self._active_runtimes.pop(attempt_id, None)
+
+    def _cancel_active_callbacks(self, run_ids: set[str] | None = None) -> None:
+        with self._active_lock:
+            active = [*self._active_runtimes.items(), *self._active_agents.items()]
+        cancellables = []
+        for attempt_id, runtime in active:
+            attempt = self.store.get_attempt(attempt_id)
+            task = self.store.get_task(attempt.task_id) if attempt is not None else None
+            if run_ids is None or (task is not None and task.run_id in run_ids):
+                cancellables.append(runtime)
+        if run_ids is None and not cancellables:
+            cancellables = [self.runtime]
+        seen: set[int] = set()
+        for runtime in cancellables:
+            if id(runtime) in seen:
+                continue
+            seen.add(id(runtime))
+            try:
+                runtime.cancel()
+            except Exception:  # noqa: BLE001, S110 - one adapter must not prevent remaining cleanup
+                pass
+
+    def cleanup_automatic_solve(self, parent_id: str) -> None:
+        """Clean owned work even after a terminal Store write changed attempt statuses."""
+        scope = self._automatic_cancel_targets(parent_id)
+        if scope is None or not scope.verified:
+            return
+        run_ids = {parent_id}
+        if scope.child_id is not None:
+            run_ids.add(scope.child_id)
+        attempts = tuple(reg for reg in scope.targets if reg.label.startswith("attempt:"))
+        runners = tuple(reg for reg in scope.targets if reg.label.startswith("run:"))
+        self._cleanup_process_registrations(attempts)
+        self._cancel_active_callbacks(run_ids)
+        self._cleanup_process_registrations(runners)
+
     def cancel(self, run_id: str) -> bool:
         cancelled = self.store.cancel_run(run_id)
-        if cancelled:
-            with self._active_lock:
-                runtimes = list(self._active_runtimes.values())
-                agents = list(self._active_agents.values())
-            seen: set[int] = set()
-            cancellables: list[object] = [*runtimes, *agents]
-            if not cancellables:
-                cancellables = [self.runtime]
-            for runtime in cancellables:
-                identity = id(runtime)
-                if identity in seen:
-                    continue
-                seen.add(identity)
-                try:
-                    runtime.cancel()
-                except Exception as exc:  # noqa: BLE001 - cancellation must continue to all workers
-                    # One adapter failing to cancel must not prevent the remaining adapters.
-                    del exc
-            run = self.store.get_run(run_id)
-            if run is not None:
+        run = self.store.get_run(run_id)
+        if not cancelled and (run is None or run.status != RunStatus.CANCELLED):
+            return False
+        # Snapshot after stopping admission. Late registrations independently recheck the stop.
+        scope = self._automatic_cancel_targets(run_id)
+        if scope is None:
+            if cancelled and run is not None:
+                self._cancel_active_callbacks()
                 self._terminate_process_group(run.runner_pid, run.runner_pgid)
                 self.store.clear_runner_process(run_id)
+        elif scope.verified:
+            if scope.child_id is not None:
+                self.store.cancel_run(scope.child_id)
+            self.cleanup_automatic_solve(run_id)
         return cancelled
+
+    def _automatic_cancel_targets(self, parent_id: str) -> _AutomaticCancelDecision | None:
+        """Select parent work and, only with exact reciprocal evidence, child work.
+
+        No marker selects legacy behavior. Any malformed marker/link fails closed. Before a
+        child is linked, the exact lifecycle marker still authorizes the parent's own work.
+        """
+        parent = self.store.get_run(parent_id)
+        if parent is None:
+            return None
+        events = self.store.list_events(parent_id)
+        requests = [e.get("payload") for e in events if e.get("type") == "evolution_requested"]
+        if not requests:
+            return None
+        marked = [r for r in requests if isinstance(r, dict) and "automatic_lifecycle_version" in r]
+        if not marked:
+            return None
+        if len(requests) != 1 or not isinstance(requests[0], dict):
+            return _AutomaticCancelDecision()
+        request = requests[-1]
+        if (request.get("bundle_mode") != "compiled"
+                or type(request.get("automatic_lifecycle_version")) is not int
+                or request["automatic_lifecycle_version"] != 1):
+            return _AutomaticCancelDecision()
+        links = [e.get("payload") for e in events if e.get("type") == "evolution_linked"]
+        child = None
+        if links:
+            try:
+                contract = self._algorithm_contract(parent)
+            except (ValueError, TypeError, KeyError):
+                return _AutomaticCancelDecision()
+            if contract is None or len(links) != 1 or not isinstance(links[0], dict):
+                return _AutomaticCancelDecision()
+            digest = contract.digest()
+            child_id = links[0].get("evolution_run_id")
+            if (not isinstance(child_id, str) or not child_id or child_id == parent_id
+                    or links[0] != {"evolution_run_id": child_id, "contract_sha256": digest,
+                                    "strategy": "population"}):
+                return _AutomaticCancelDecision()
+            child = self.store.get_run(child_id)
+            reverse = [e.get("payload") for e in self.store.list_events(child_id)
+                       if e.get("type") == "evolution_parent_linked"]
+            if child is None or reverse != [{"parent_run_id": parent_id, "contract_sha256": digest}]:
+                return _AutomaticCancelDecision()
+        registrations: list[RegisteredProcess] = []
+        runs = [parent] + ([child] if child is not None else [])
+        for run in runs:
+            for row in self.store.list_attempt_processes(run.id):
+                pid, pgid, attempt_id = row.get("pid"), row.get("pgid"), row.get("id")
+                if isinstance(pid, int) and isinstance(pgid, int) and isinstance(attempt_id, str):
+                    registrations.append(self._attempt_registration(attempt_id, pid, pgid))
+        # A detached parent coordinates the whole execution and must be stopped last.
+        for run in reversed(runs):
+            if not isinstance(run.runner_pid, int) or not isinstance(run.runner_pgid, int):
+                continue
+            run_id, pid, pgid = run.id, run.runner_pid, run.runner_pgid
+            registrations.append(RegisteredProcess(
+                pid, pgid,
+                owner_check=lambda run_id=run_id, pid=pid, pgid=pgid: (
+                    (current := self.store.get_run(run_id)) is not None
+                    and current.runner_pid == pid and current.runner_pgid == pgid
+                ),
+                label=f"run:{run_id}",
+            ))
+        return _AutomaticCancelDecision(
+            child_id=child.id if child is not None else None, targets=tuple(registrations), verified=True,
+        )
 
     def recover(self, run_id: str) -> RecoveryProposal:
         """Persist an advisory recovery proposal without changing execution state.

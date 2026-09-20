@@ -2439,22 +2439,10 @@ def _lifecycle_enabled(request: dict | None) -> bool:
 
 def _automatic_solve_child(controller: LocalController, parent: Run) -> Run | None:
     """Select only the reciprocally bound child for this exact accepted contract."""
-    plan = controller.store.get_current_plan(parent.id)
-    if plan is None or plan.algorithm_problem is None:
+    scope = controller._automatic_cancel_targets(parent.id)
+    if scope is None or not scope.verified or scope.child_id is None:
         return None
-    digest = AlgorithmProblemContract.from_dict(plan.algorithm_problem).digest()
-    links = [e["payload"] for e in controller.store.list_events(parent.id) if e["type"] == "evolution_linked"]
-    if not links or not isinstance(links[0], dict):
-        return None
-    child_id = links[0].get("evolution_run_id")
-    expected = {"evolution_run_id": child_id, "contract_sha256": digest, "strategy": "population"}
-    if not isinstance(child_id, str) or child_id == parent.id or any(link != expected for link in links):
-        return None
-    child = controller.store.get_run(child_id)
-    reverse = [e["payload"] for e in controller.store.list_events(child_id) if e["type"] == "evolution_parent_linked"]
-    if child is None or not reverse or any(link != {"parent_run_id": parent.id, "contract_sha256": digest} for link in reverse):
-        return None
-    return child
+    return controller.store.get_run(scope.child_id)
 
 
 def _resume_automatic_solve(config, args, controller, run, manifest=None, *, owner_held=False) -> Run:
@@ -2489,11 +2477,10 @@ def _resume_automatic_solve(config, args, controller, run, manifest=None, *, own
                     controller.store.cancel_run(child.id)
                 else:
                     controller.store.fail_budget(child.id, exc.limit, exc.actual, exc.maximum, str(exc))
+            controller.cleanup_automatic_solve(run.id)
         except SolveExecutionCancelled:
-            controller.store.cancel_run(run.id)
-            child = _automatic_solve_child(controller, run)
-            if child is not None:
-                controller.store.cancel_run(child.id)
+            controller.cancel(run.id)
+            controller.cleanup_automatic_solve(run.id)
         except Exception:
             for task in controller.store.list_tasks(run.id):
                 if task.orchestration and (attempt := controller.store.active_attempt(task.id)) is not None:
@@ -3070,6 +3057,14 @@ def _solve_evolution_impl(
         )
         controller.store.supersede_pending_tasks(parent.id, "replaced by explicit evolution handoff")
 
+    def delivery_guard() -> None:
+        if solve_control is not None:
+            solve_control.check("delivery")
+        if lifecycle_enabled:
+            current = controller.store.get_run(parent.id)
+            if current is None or current.status.value in {"cancelled", "failed"}:
+                raise SolveExecutionCancelled("delivery")
+
     def finish_orchestration(success: bool, error: str | None = None) -> None:
         if orchestration_task is None or orchestration_attempt is None:
             return
@@ -3082,8 +3077,7 @@ def _solve_evolution_impl(
         controller.store.settle_run(parent.id)
 
     def finish_child_orchestration(child: Run, delivery: dict[str, object] | None) -> None:
-        if solve_control is not None:
-            solve_control.check("delivery")
+        delivery_guard()
         if child.status.value == "cancelled":
             controller.store.cancel_run(parent.id)
         elif child.status.value == "failed":
@@ -3108,19 +3102,27 @@ def _solve_evolution_impl(
             observation.observe("preparation")
 
         try:
-            args._bundle_pipeline = prepare_automatic_solve_bundle(
-                controller, parent.id, contract,
-                timeout_seconds=args.timeout if args.timeout is not None else 900.0,
-                evaluator_preparation_timeout_seconds=(
-                    getattr(args, "evaluator_preparation_timeout", None)
-                    if getattr(args, "evaluator_preparation_timeout", None) is not None
-                    else args.timeout if args.timeout is not None else 900.0
-                ),
-                evaluator_preparation_wall_timeout_seconds=getattr(
-                    args, "evaluator_preparation_wall_timeout", None,
-                ),
-                solve_control=solve_control,
-            )
+            scope = (controller.observe_attempt_runtime(parent.id, orchestration_attempt.id)
+                     if orchestration_attempt is not None else nullcontext((None, None)))
+            with scope as (process_observer, process_released):
+                args._bundle_pipeline = prepare_automatic_solve_bundle(
+                    controller, parent.id, contract,
+                    timeout_seconds=args.timeout if args.timeout is not None else 900.0,
+                    evaluator_preparation_timeout_seconds=(
+                        getattr(args, "evaluator_preparation_timeout", None)
+                        if getattr(args, "evaluator_preparation_timeout", None) is not None
+                        else args.timeout if args.timeout is not None else 900.0
+                    ),
+                    evaluator_preparation_wall_timeout_seconds=getattr(
+                        args, "evaluator_preparation_wall_timeout", None,
+                    ),
+                    solve_control=solve_control,
+                    **({"process_observer": process_observer, "process_released": process_released,
+                        "process_guard": lambda: controller.ensure_attempt_process_released(
+                            parent.id, orchestration_attempt.id,
+                        )}
+                       if process_observer is not None else {}),
+                )
         except AutomaticBundlePreparationError:
             # The preparation ledger retains this failure; callers emit the ordinary parent
             # payload and a nonzero result without creating a child or discarding the contract.
@@ -3342,6 +3344,7 @@ def _solve_evolution_impl(
                 evolution_config,
                 resume=child.status.value not in {"succeeded", "failed", "cancelled"},
                 bundle_pipeline=bundle_pipeline,
+                **({"automatic_parent_id": parent.id} if lifecycle_enabled else {}),
                 remaining_timeout=(
                     (lambda stage: solve_control.effective_timeout(stage=stage))
                     if solve_control is not None else None
@@ -3356,7 +3359,7 @@ def _solve_evolution_impl(
                 if bundle_pipeline is not None:
                     delivery = controller.deliver_bundle_to_parent(
                         parent.id, child.id, contract, result,
-                        **({"continuation_guard": lambda: solve_control.check("delivery")} if solve_control is not None else {}),
+                        **({"continuation_guard": delivery_guard} if lifecycle_enabled or solve_control is not None else {}),
                     )
                 else:
                     controller.materialize_evolved_outputs(
@@ -3425,6 +3428,7 @@ def _solve_evolution_impl(
             execution_grounded_evaluator(child),
             evolution_config,
             bundle_pipeline=bundle_pipeline,
+            **({"automatic_parent_id": parent.id} if lifecycle_enabled else {}),
             remaining_timeout=(
                 (lambda stage: solve_control.effective_timeout(stage=stage))
                 if solve_control is not None else None
@@ -3439,7 +3443,7 @@ def _solve_evolution_impl(
             if bundle_pipeline is not None:
                 delivery = controller.deliver_bundle_to_parent(
                     parent.id, child.id, contract, result,
-                    **({"continuation_guard": lambda: solve_control.check("delivery")} if solve_control is not None else {}),
+                    **({"continuation_guard": delivery_guard} if lifecycle_enabled or solve_control is not None else {}),
                 )
             else:
                 controller.materialize_evolved_outputs(

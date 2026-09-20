@@ -16,7 +16,7 @@ import stat
 import subprocess
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -68,6 +68,14 @@ class LocalToolRegistry:
         self._execution_deadline: ContextVar[float | None] = ContextVar(
             "lunar_tool_execution_deadline", default=None
         )
+        self._process_observer: Callable[[int, int | None], None] | None = None
+        self._process_released: Callable[[int, int | None], None] | None = None
+
+    def set_process_observer(self, observer: Callable[[int, int | None], None] | None) -> None:
+        self._process_observer = observer
+
+    def set_process_released(self, released: Callable[[int, int | None], None] | None) -> None:
+        self._process_released = released
 
     @contextmanager
     def execution_deadline(self, deadline: float) -> Iterator[None]:
@@ -459,6 +467,26 @@ class LocalToolRegistry:
             if remaining <= 0:
                 raise ToolError("command deadline expired before launch")
             timeout = min(timeout, remaining)
+        if self._process_observer is not None:
+            from .candidate_execution_runner import _bounded_process_bytes
+
+            stdout, stderr, status, returncode, error = _bounded_process_bytes(
+                command, cwd=str(workspace),
+                environment=(dict(os.environ) if self.command_environment is None else self.command_environment),
+                timeout=timeout, output_limit=self.max_output_bytes, capture_limit=self.max_output_bytes,
+                process_observer=self._process_observer, process_released=self._process_released,
+            )
+            if status == "timed_out":
+                return ToolResult(
+                    output=f"command timed out after {timeout:g}s\n{self._bounded_text(stdout + stderr)}",
+                    success=False,
+                )
+            output = f"exit_code={returncode}\nstdout:\n{self._bounded_text(stdout)}"
+            if stderr:
+                output += f"\nstderr:\n{self._bounded_text(stderr)}"
+            if error and status != "succeeded":
+                output += f"\nerror={error}"
+            return ToolResult(output=output, success=status == "succeeded")
         try:
             completed = subprocess.run(
                 command,

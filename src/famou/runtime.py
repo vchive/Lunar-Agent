@@ -12,7 +12,9 @@ import math
 import os
 import re
 import shlex
+import signal
 import subprocess
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -299,15 +301,89 @@ class SubprocessRuntime:
             )
         self._process: subprocess.Popen[str] | None = None
         self._process_observer: Callable[[int, int | None], None] | None = None
+        self._process_released: Callable[[int, int | None], None] | None = None
+        self._process_pgid: int | None = None
 
     def set_process_observer(
         self, observer: Callable[[int, int | None], None] | None
     ) -> None:
         self._process_observer = observer
 
+    def set_process_released(
+        self, released: Callable[[int, int | None], None] | None
+    ) -> None:
+        self._process_released = released
+
+    @staticmethod
+    def _cleanup_owned_process(process: subprocess.Popen[str], pgid: int) -> bool:
+        """Bound cleanup to the private session created for this exact Popen invocation."""
+        if pgid != process.pid or pgid <= 1 or pgid == os.getpgrp():
+            return False
+
+        def alive() -> bool:
+            try:
+                os.killpg(pgid, 0)
+                return True
+            except ProcessLookupError:
+                return False
+
+        try:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                if not alive():
+                    process.poll()
+                    return True
+                # A live leader must still belong to its original private group. Once this
+                # invocation reaps its leader, the retained group may contain its descendants.
+                try:
+                    if os.getpgid(process.pid) != pgid:
+                        return False
+                except ProcessLookupError:
+                    if process.poll() is None:
+                        return False
+                try:
+                    os.killpg(pgid, sig)
+                except ProcessLookupError:
+                    process.poll()
+                    return True
+                deadline = monotonic() + 0.25
+                while monotonic() < deadline:
+                    process.poll()
+                    if not alive():
+                        return True
+                    time.sleep(0.01)
+            process.poll()
+            return not alive()
+        except OSError:
+            return False
+
+    def _communicate_owned(
+        self, process: subprocess.Popen[str], prompt: str, timeout: float | None, pgid: int,
+    ) -> tuple[str, str]:
+        deadline = None if timeout is None else monotonic() + timeout
+        first = True
+        while True:
+            remaining = None if deadline is None else deadline - monotonic()
+            if remaining is not None and remaining <= 0:
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            try:
+                result = process.communicate(
+                    input=prompt if first else None,
+                    timeout=0.05 if remaining is None else min(0.05, remaining),
+                )
+                return result
+            except subprocess.TimeoutExpired:
+                first = False
+                if process.poll() is not None:
+                    # Descendants can keep inherited pipes open after the leader exits.
+                    self._cleanup_owned_process(process, pgid)
+                    return process.communicate(timeout=0.25)
+
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
         workspace.mkdir(parents=True, exist_ok=True)
         process: subprocess.Popen[str] | None = None
+        observer, released = self._process_observer, self._process_released
+        pgid: int | None = None
+        cleaned = True
         try:
             process = subprocess.Popen(
                 self.command,
@@ -316,27 +392,49 @@ class SubprocessRuntime:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                **({"start_new_session": True} if observer is not None else {}),
             )
             self._process = process
-            if self._process_observer is not None:
+            if observer is not None:
+                # Successful start_new_session makes the child its own process-group leader.
+                pgid = process.pid
+                self._process_pgid = pgid
                 try:
-                    pgid = os.getpgid(process.pid)
-                except OSError:
-                    pgid = None
-                try:
-                    self._process_observer(process.pid, pgid)
+                    observer(process.pid, pgid)
                 except Exception as observer_error:  # noqa: BLE001 - metadata must not break execution
                     del observer_error
-            stdout, stderr = process.communicate(input=prompt, timeout=timeout)
+            stdout, stderr = (
+                self._communicate_owned(process, prompt, timeout, pgid)
+                if pgid is not None else process.communicate(input=prompt, timeout=timeout)
+            )
         except subprocess.TimeoutExpired as exc:
             if process is not None:
-                process.kill()
-                process.communicate()
+                if pgid is not None:
+                    self._cleanup_owned_process(process, pgid)
+                else:
+                    process.kill()
+                    process.communicate()
             raise RuntimeExecutionError(f"runtime timed out after {timeout}s") from exc
         except OSError as exc:
             raise RuntimeExecutionError(f"could not start runtime: {exc}") from exc
         finally:
+            if process is not None and pgid is not None:
+                cleaned = self._cleanup_owned_process(process, pgid)
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+                if cleaned and released is not None:
+                    try:
+                        released(process.pid, pgid)
+                    except Exception as release_error:  # noqa: BLE001 - metadata preserves outcome
+                        del release_error
             self._process = None
+            self._process_pgid = None
+        if not cleaned:
+            raise RuntimeExecutionError("runtime process cleanup could not be confirmed")
         if process.returncode != 0:
             detail = stderr.strip()[-2000:]
             suffix = f": {detail}" if detail else ""
@@ -352,8 +450,12 @@ class SubprocessRuntime:
         )
 
     def cancel(self) -> None:
-        if self._process and self._process.poll() is None:
-            self._process.terminate()
+        process, pgid = self._process, self._process_pgid
+        if process is not None:
+            if pgid is not None:
+                self._cleanup_owned_process(process, pgid)
+            elif process.poll() is None:
+                process.terminate()
 
     def process_info(self) -> tuple[int | None, int | None]:
         process = self._process

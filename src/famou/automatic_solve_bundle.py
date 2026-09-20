@@ -645,6 +645,9 @@ def prepare_automatic_solve_bundle(
     evaluator_preparation_timeout_seconds: float | None = None,
     evaluator_preparation_wall_timeout_seconds: float | None = None,
     solve_control=None,
+    process_observer=None,
+    process_released=None,
+    process_guard=None,
 ):
     """Compile once, freeze and pin a regular pipeline before any child candidate is created."""
     try:
@@ -694,6 +697,8 @@ def prepare_automatic_solve_bundle(
                 held.check()
                 if solve_control is not None:
                     solve_control.check("preparation")
+                if process_guard is not None:
+                    process_guard()
 
             descriptors, concrete, input_profile = _descriptors(controller.store, parent, contract)
             attempt_id = "preparation-" + secrets.token_hex(16)
@@ -715,12 +720,15 @@ def prepare_automatic_solve_bundle(
                     solve_remaining = solve_control.check(current_stage)
                     remaining = solve_remaining if remaining is None else min(remaining, solve_remaining)
                 if remaining is None:
-                    raise RuntimeError("preparation remaining timeout requested without a deadline")
+                    # Cancellation-only admission must preserve both original stage ceilings.
+                    return max(timeout, request_timeout)
                 if remaining <= 0:
                     raise EvaluatorPreparationWallTimeout(current_stage)
                 return remaining
 
-            remaining = remaining_timeout if (wall_timeout is not None or solve_control is not None) else None
+            remaining = remaining_timeout if (
+                wall_timeout is not None or solve_control is not None or process_guard is not None
+            ) else None
 
             def publication_guard():
                 continuation_guard()
@@ -733,6 +741,8 @@ def prepare_automatic_solve_bundle(
                                                   timeout=timeout, invocation="snapshot",
                                                   preparation_request_timeout=request_timeout,
                                                   preparation_remaining_timeout=remaining,
+                                                  process_observer=process_observer,
+                                                  process_released=process_released,
                                                   continuation_guard=continuation_guard)
                 stage = "profile_publish"
                 publication_guard()

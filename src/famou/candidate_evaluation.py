@@ -485,6 +485,8 @@ def evaluate_candidate_execution(
     attempt_path, evaluation_root, expected_admission_sha256=None, expected_plan_sha256=None,
     expected_bundle_sha256=None, expected_contract_sha256=None, expected_completion_sha256=None,
     remaining_timeout=None,
+    process_observer=None,
+    process_released=None,
 ):
     """Snapshot and score one successful attempt. Allocated evaluation trees are retained."""
     if remaining_timeout is not None and not callable(remaining_timeout):
@@ -634,6 +636,8 @@ def evaluate_candidate_execution(
                         [*evaluator.command, "evaluator.py", "request.json"], cwd=str(destination),
                         environment=dict(evaluator.environment), timeout=timeout,
                         output_limit=MAX_REPORT_BYTES, capture_limit=MAX_REPORT_BYTES,
+                        process_observer=process_observer,
+                        process_released=process_released,
                     )
                 except OSError:
                     _fail("process_start_failed")

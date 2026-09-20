@@ -172,3 +172,28 @@ def test_completion_pin_and_admission_mismatch_are_rejected(tmp_path):
     )
     with pytest.raises(CandidateExecutionEvidenceError, match="identity_mismatch"):
         inspect(changed, request)
+
+
+def test_recorded_candidate_preserves_process_ownership_callbacks(tmp_path):
+    admission, request = fixture(tmp_path)
+    events = []
+
+    def observed(pid, pgid):
+        events.append((
+            "observed", pid, pgid,
+            (request["attempt_path"] / "launch-intent.json").is_file(),
+            (request["attempt_path"] / "completed.json").exists(),
+        ))
+
+    record = run_candidate_execution_recorded(
+        admission, **request, process_observer=observed,
+        process_released=lambda pid, pgid: events.append(("released", pid, pgid)),
+    )
+
+    assert record.status == "recorded"
+    assert record.to_dict()["runner_result"]["status"] == "succeeded"
+    assert len(events) == 2
+    assert events[0] == ("observed", events[0][1], events[0][1], True, False)
+    assert events[0][1] > 0
+    assert events[1] == ("released", events[0][1], events[0][2])
+    assert inspect(admission, request) == record

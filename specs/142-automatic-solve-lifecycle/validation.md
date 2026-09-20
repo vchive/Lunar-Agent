@@ -2,7 +2,8 @@
 
 ## Scope of this checkpoint
 
-2026-09-20: Phase A foreground implementation is complete. A shared monotonic deadline now spans
+2026-09-20: Phase A foreground implementation and Phase B cancellation/process cleanup are
+complete. A shared monotonic deadline now spans
 contract intake, preparation, generation, candidate execution, independent scoring, selection and
 parent delivery. Durable orchestration prevents premature parent success. Solve, resume and answer
 share execution admission; process-local ownership plus a nonblocking workspace lock excludes
@@ -13,10 +14,12 @@ separate execution identities under the same policy. Observed exhaustion is term
 be replenished by continuation. The status projection contains bounded recorded facts and never
 reconstructs a live monotonic remainder from persisted timestamps.
 
-Phase B in-flight cancellation, owned process registration/cleanup and Phase C detached entry
-points remain open. Automatic `--detach` remains rejected. Typed cooperative stop checks and
-narrower local process timeouts do not establish immediate cancellation of every running process
-or termination of remote provider work.
+Phase B in-flight cancellation and owned process registration/cleanup are verified. Parent
+cancellation selects only an exactly verified linked child; probe, candidate and evaluator
+processes register their PID/PGID and release ownership, while cancellation and deadline cleanup
+fan out through owned groups before the coordinating worker. Failed cleanup retains the durable
+registration and blocks replacement work. Phase C detached entry points remain open and automatic
+`--detach` remains rejected. Local cleanup does not terminate remote provider work.
 
 ## Offline acceptance
 
@@ -31,7 +34,7 @@ or termination of remote provider work.
 | Ownership | Busy same-process and cross-process owners reject admission; busy answer does not consume input or write artifacts | Pass |
 | Status | Fixed fields, absent/explicit policy origin, successful final delivery phase, malformed observation rejection and no status writes | Pass |
 | Delivery | Deadline checks after material reads, before copy/output commit, and before successful parent settlement; unfinished output batches reconcile on typed stop | Pass |
-| In-flight cancellation and local cleanup | Full owned probe/candidate/evaluator fan-out | Not implemented in this checkpoint |
+| In-flight cancellation and local cleanup | Verified parent/child fan-out, probe/candidate/evaluator PID/PGID registration, ownership release, cancellation/deadline races, late-response guards, cleanup failure retention, and cleanup ordering | Pass (local fixtures) |
 | Detached execution | Automatic entry point remains rejected | Gate preserved; positive behavior not implemented |
 
 ## Focused verification
@@ -40,7 +43,7 @@ New/extended suites:
 
 - `tests/test_automatic_solve_lifecycle.py`: deadline math, typed stop, process/workspace ownership,
   unsafe lock rejection, and budget failure between last-task success and parent settlement.
-- `tests/test_automatic_solve_deadline_integration.py`: 15 native offline integration cases, all
+- `tests/test_automatic_solve_deadline_integration.py`: 18 native offline integration cases, all
   passing; local model responses are fixtures, and candidate/evaluator programs are fresh fixtures.
 - `tests/test_automatic_solve_status.py`: 13 cases passing, including answer identity, read-only
   status, bounded diagnostics and terminal winner behavior.
@@ -48,6 +51,17 @@ New/extended suites:
   independent scoring admission and typed stops surviving broad exception handlers.
 - `tests/test_automatic_solve_orchestration.py`: Store, scheduler, child outcome, delivery and legacy
   compatibility; output-publication Store tests cover rejection after failed/cancelled parents.
+- `tests/test_automatic_cancel_phase_b.py`, `tests/test_automatic_runtime_processes.py`,
+  `tests/test_evaluator_bundle_process_ownership.py`, `tests/test_candidate_process_release.py`,
+  and `tests/test_process_ownership.py`: Phase B cancellation, process registration, cleanup
+  ordering, ownership release, and late-response coverage. The child-stage cleanup fixture
+  includes a claimed parent orchestration attempt, matching the production lifecycle.
+
+The final Phase B focused verification command passed **146 tests in aggregate** across the
+cancellation/deadline, population, candidate evaluation/evaluator/evidence, snapshot evaluator,
+and process ownership suites. The cleanup regressions also prove that a new launch cannot replace
+a registration retained after failed cleanup, and that cancellation blocks later generation,
+execution, scoring and delivery when no wall timeout is configured.
 
 The policy/preparation/automatic-bundle/orchestration compatibility command passed 227 tests.
 Preparation-recovery/status/deadline integration passed 42 tests before the final five boundary
@@ -61,16 +75,19 @@ Ruff for all `src` and `tests`, compileall, Specify prerequisites with `--requir
 
 ## Full regression
 
-The final two-stage run is recorded in `.lunar/test-results/feature142-final3/`:
+The 2026-09-21 Phase B two-stage rerun is recorded in `.lunar/test-results/feature142-phase-b-20260921/`:
 
-- Current working tree: **8522 passed, 1 skipped, 24 deselected**, 0 failures and 0 errors,
+- Current working tree: **8636 passed, 1 skipped, 24 deselected**, 0 failures and 0 errors,
   exit 0 (`current.xml`).
 - Frozen Feature 123 registration stage: **24 passed**, 0 skipped, 0 failures and 0 errors,
   exit 0 (`frozen123.xml`).
 
-The current stage executed 8523 collected tests; the 24 deselected nodes are the immutable
-historical registration selection. The run took 790.25 seconds. The earlier interrupted run and
-its partial report remain historical context only.
+The current stage executed 8637 collected tests; the 24 deselected nodes are the immutable
+historical registration selection. The frozen Feature 123 stage recorded 24 passed tests. These
+reports are the final Phase B checkpoint. An accidentally started duplicate run removed the earlier
+`feature142-phase-b-final/current.xml` before being stopped; that incomplete directory is not the
+final evidence. This rerun restores a complete pair without changing the product or historical
+campaign evidence.
 
 ## Independent review and retained evidence
 
@@ -90,5 +107,8 @@ No provider, real campaign, retained generated program, or WebAgent was executed
 
 Offline correctness here does not establish evaluator quality, current-model task success,
 WebAgent parity or successful real automatic multi-file delivery. Feature 139 remains preparation
-1/1 and primary/joint 0/1. Phase B/C and a separately scoped real acceptance remain outstanding;
-this checkpoint does not claim the whole feature or system release is complete.
+1/1 and primary/joint 0/1. Phase C still requires detached solve/resume/answer routing, exact
+policy restoration, once-only answer acceptance, exclusive worker ownership, launch/exit and
+stale-worker recovery, and foreground/background equivalence with live cancellation. A separately
+scoped real acceptance also remains outstanding; this checkpoint does not claim the whole feature
+or system release is complete.

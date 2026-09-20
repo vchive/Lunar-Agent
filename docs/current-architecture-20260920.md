@@ -1,6 +1,8 @@
 # Lunar Agent：当前架构与执行链路
 
-日期：2026-09-20。依据当前产品源码核对；产品基线为 `87d86d9`，不是未来设计图。
+日期：2026-09-20。依据当前工作树核对：Feature 142 Phase A 前台生命周期、Phase B
+进程登记与取消清理，以及 Feature 143 本地 worker 控制面已经实现并完成离线回归。Phase C
+自动多文件后台入口尚未开放。下文分别说明已经实现的路径和仍待验收的边界。
 
 ## 1. 系统定位
 
@@ -48,6 +50,7 @@ flowchart TD
 | --- | --- | --- |
 | 入口与编排 | 命令、模式校验、输入导入、继续运行、普通/演化分流 | `cli.py` |
 | 控制层 | 创建/领取任务、并发、预算检查、结果登记、取消、父子交付 | `controller.py` |
+| 自动求解生命周期 | 活动执行排他、共享截止时间、阶段检查、父任务编排、状态投影 | `automatic_solve_lifecycle.py`、`cli.py`、`controller.py` |
 | 显式 worker 控制面 | 有 owner 的可恢复 worker session，等待、消息、取消、级联和重启 reconcile | `workers.py`、`store.py` |
 | 状态层 | run/task/attempt、事件、产物索引、计划版本、进程归属 | `store.py`、`models.py` |
 | 计划与角色 | 任务合同、依赖图、领域与能力选择、恢复建议 | `conversational.py`、`algorithm.py`、`policy.py`、`routing.py`、`profiles.py`、`recovery.py` |
@@ -89,8 +92,10 @@ outcome 分开记录；直接 owner 才能操作，父取消会传播到已验�
 
 ```mermaid
 flowchart TD
-    G[目标与输入] --> K[编译任务合同]
-    K --> EC[生成 evaluator 与基础测试]
+    G[目标与输入] --> OWN[参数检查、取得活动执行锁、建立共享截止时间]
+    OWN --> K[编译任务合同]
+    K --> ORCH[建立父任务编排节点，保持父任务运行]
+    ORCH --> EC[生成 evaluator 与基础测试]
     EC --> AU[独立 auditor 提供检查用例]
     AU --> PF[本地预检、冻结 evaluator/profile]
     PF --> CH[建立父子任务关联]
@@ -101,9 +106,31 @@ flowchart TD
     EV --> AR[候选档案、有效性优先选优]
     AR -->|尚有轮次和预算| GEN
     AR -->|已停止且有有效候选| OUT[向父任务交付源码、输出和证据]
+    OUT --> END[核验交付并完成父任务，释放活动执行锁]
 ```
 
 这条链分成准备与搜索两段。准备通过后才创建和运行候选；搜索期间使用同一份冻结评测器。候选生成时，模型写过文件不代表候选已经完成：最终结构必须被解析器接受，并产生绑定 run、task、budget、candidate 和源码摘要的持久记录。
+
+自动入口的具体调用关系是：
+
+```text
+CLI solve / resume / answer
+  → 自动活动执行入口：排他锁、SolveExecutionControl、父编排任务
+  → 合同编译 → prepare_automatic_solve_bundle → evaluator compiler / auditor / probes
+  → LocalController.run_evolution → EvolutionContext → PopulationStrategy
+  → AgentCandidateGenerator → AgentAdapter → AgentLoopRuntime → 模型 / 工具
+  → MultiFileCandidatePipeline.persist
+      → source bundle / workspace plan / input staging / execution admission
+      → run_candidate_execution_recorded → CandidateExecutionRunner → 独立进程组
+      → evaluate_candidate_execution → 评测时文件快照 → 独立 evaluator 进程组
+      → CandidateArchive → 有效性优先选择
+  → 父交付包核验 → 输出发布 → 父任务终态
+```
+
+`EvolutionContext` 把生成器、评测器、取消判断、剩余时间和事件观察统一交给演化策略。
+`MultiFileCandidatePipeline` 管理一个候选的执行与评分，不负责整个 run 的成功判定。
+原生子任务找到最优候选后，Controller 还必须完成父任务交付；因此候选成功、子任务成功和
+用户最终拿到已核验产物是三个不同的检查点。
 
 多文件候选经过源码包检查、工作目录与执行计划绑定、输入登记、候选程序执行、输出检查、独立 evaluator 运行，再进入候选档案。排名先看有效性，再看目标分数；配置启用时还包含种群多样性和岛间迁移等搜索控制。模型和外部生产者自报的分数都不能直接代替 Lunar 的最终评分。
 
@@ -120,6 +147,8 @@ flowchart TD
 | `Run` | 一次持久任务，记录整体状态、工作目录、计划、预算和后台进程 |
 | `Task` | run 内可调度的工作单元，带依赖、验收规则、输入问题和结果路径 |
 | `Attempt` | 一个 task 的一次执行，记录运行时、进程、开始/结束和错误 |
+| `Worker / WorkerAttempt` | 显式本地 Agent 会话及一次执行，与 task 依赖图分开管理 |
+| 自动 `execution_id` | 一次前台或未来后台活动执行的身份；共享截止时间不跨人工等待累计 |
 | `PlanDocument` | 有版本的任务图和问题合同，调整计划需留下版本与事件 |
 | `Artifact` | 产物文件的路径、大小、内容摘要和归属 |
 | `Candidate / Receipt` | 候选源码与生成、执行、评价身份的绑定关系 |
@@ -134,19 +163,33 @@ flowchart TD
 
 普通任务另有自己的恢复语义：中断的 running task 会被标记为 uncertain，显式恢复可能再次调用 runtime。因此不能对所有普通工具副作用承诺“恰好执行一次”。`recover` 命令生成持久建议，`resume` 才执行恢复；两者职责不同。
 
-公开 `status` 和底层 `run_status` 目前可能不同：父任务的合同接收已成功，演化子任务却可能失败。CLI 会结合 preparation、child 和 delivery 投影有效状态。Feature 142 将进一步修正新自动任务的父编排生命周期，使父任务保持运行直到最终交付，而非只靠显示层组合状态。
+公开 `status` 和底层 `run_status` 仍可能不同，例如 preparation 的可恢复失败会保留可继续的
+持久父状态。CLI 会结合 preparation、child 和 delivery 投影有效状态。Feature 142 已为新自动
+任务增加持久编排节点：父任务在 preparation、child 搜索和 delivery 期间保持运行，只有核验
+交付后才成功。旧任务保持历史恢复语义，不会自动补写新生命周期标记。
 
 ## 6. 预算与取消的当前边界
 
-当前已经有多层预算：普通 Controller 活动执行时间、运行时单次超时、模型 profile 的调用限制、Agent 工具次数、每候选显式工具预算、preparation 单次请求与总时长，以及产物大小等限制。
+当前已经有多层预算：普通 Controller 活动执行时间、运行时单次超时、模型 profile 的调用限制、Agent 工具次数、每候选显式工具预算、preparation 单次请求与总时长、自动 solve 活动执行总时限，以及产物大小等限制。
 
-普通 Controller 的活动预算从每次 `resume()` / `run_agent()` 开始计时，不是跨合同编译、用户等待和多次恢复累积的持久总时限。Feature 142 规划的也是一次活动执行预算；人工答复后的新执行沿用原策略，但已观察到总预算耗尽的终态不能靠 resume 补时。
+普通 Controller 的活动预算从每次 `resume()` / `run_agent()` 开始计时，不是跨合同编译、用户等待和多次恢复累积的持久总时限。Feature 142 已实现的 `--solve-wall-timeout` 也限制一次活动执行；人工答复后的新执行沿用原策略，但已观察到总预算耗尽的终态不能靠 resume 补时。
 
 普通 `run --detach` 和普通 `solve --detach` 已有本地后台进程与 PID/进程组登记；未完成的是自动多文件等路径的统一后台编排，并非整个系统完全不能后台运行。
 
-不足之处是这些控制还没有由一个产品级总时限贯穿“合同 → 准备 → 全部候选 → 评分 → 父任务交付”。父 run 与 child 的取消、独立候选/评测进程组清理和后台 worker 生命周期也尚未全部统一。自动多文件入口当前明确拒绝 `--detach`。
+新自动多文件任务已由同一个单调时钟截止时间贯穿“合同 → 准备 → 全部候选 → 评分 → 父任务
+交付”。每个阶段只能取得原上限与剩余时间的较小值，不能重置总时限。策略、输入、评测器和
+候选身份保持固定；实际收窄的 timeout 属于运行控制。省略 solve 选项不会自动增加 50 分钟默认值。
 
-Feature 139 的 50 分钟是这一次真实验收外层监控的预算，不意味着所有日常多文件任务已经具备统一的 50 分钟产品选项。Feature 142 目前只有 SDD：计划增加 `--solve-wall-timeout`，先贯通前台预算和父任务状态，再完成父子取消与进程清理，最后开放后台入口。
+Phase B 已完成父 run 到已验证 child 的停止传播、candidate/evaluator/probe 的实际 PID/PGID
+登记、拥有者释放、失败清理和取消/截止时间竞态保护。清理失败会保留未释放登记并终止当前
+活动阶段，避免新进程覆盖旧拥有者；清理顺序先处理候选/评测等工作组，再处理协调进程。
+这些结论来自本地 fixture 和进程组回归，不代表远端 provider 已停止计算。Phase C 的自动多文件
+`--detach` 仍保持拒绝，直到后台编排另行实现并通过验收。Feature 143 的 worker API 已可
+管理显式 worker，但还没有自动成为这条流程的后台执行器。
+
+Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽已结束。新产品可以明确设置
+`--solve-wall-timeout 3000`。新的真实验收仍使用新登记和目录，区分产品活动预算与验收监督预算。
+本地取消也不能证明远端模型服务已经停止计算。
 
 “隔离执行”目前主要是独立本地工作目录、受限环境、进程组、路径和文件规则；不能把它描述为已经部署了容器或完整操作系统沙箱。
 
@@ -167,15 +210,14 @@ Feature 139 的 50 分钟是这一次真实验收外层监控的预算，不意�
 
 当前最有价值的基础是：状态不依赖模型记忆，产物可定位，生成、执行和评分有独立记录，外部候选可以沿同一套核验流程接入。这些基础让失败诊断和后续接入新生成器有实际落点。
 
-主要负担在编排层。`cli.py`、`controller.py`、`evolution.py` 已承担很多入口、兼容和状态转换职责；普通、单文件演化、多文件演化各自形成了生命周期分支。恢复与验证模块细分很多，但任务级的时间、取消与后台所有权还没有同步集中。
+主要负担在编排层。`cli.py`、`controller.py`、`evolution.py` 已承担很多入口、兼容和状态转换职责；普通、单文件演化、多文件演化各自形成了生命周期分支。自动多文件的时间、父编排、本地取消和进程清理已经统一；自动后台所有权仍属于 Phase C，后续抽取编排模块应以这些验收覆盖为基础。
 
 建议按以下顺序继续，不把大重构作为可用性的前置条件：
 
-1. 完成本次真实多文件闭环验收，明确失败发生在哪一阶段或证实完整交付。
-2. 按 Feature 142 建立共同的自动求解编排边界，统一活动执行时限、父子状态和停止传播；保持已有 profile 和执行身份不变。
-3. 完成本地进程清理验收后开放后台运行，收敛前台、恢复和后台的重复逻辑。
-4. 将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收。
-5. 再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力，而不是把小型样例的成功外推成通用可靠性。
+1. 固定并推送已通过验证的 Phase B 产品，以新的登记开展一次 50 分钟真实多文件验收；分别报告准备与完整交付结果。
+2. 完成 Feature 142 Phase C 后台入口，收敛前台、恢复和后台的重复逻辑。
+3. 在 detached 入口通过独立验收后，将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收。
+4. 再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力，而不是把小型样例的成功外推成通用可靠性。
 
 ## 9. 阅读源码的入口
 
@@ -188,6 +230,8 @@ Feature 139 的 50 分钟是这一次真实验收外层监控的预算，不意�
 - [演化引擎](../src/famou/evolution.py)：`CandidateArchive`、`PopulationStrategy`、`OpenEvolveStrategy`。
 - [独立候选评分](../src/famou/candidate_evaluation.py)：`evaluate_candidate_execution`、`inspect_candidate_evaluation`。
 - [父任务交付](../src/famou/bundle_parent_delivery.py)：`finish_bundle_parent_delivery`、`inspect_bundle_parent_delivery`。
-- [Feature 142 规格](../specs/142-automatic-solve-lifecycle/spec.md)：下一阶段规格，尚未实现。
+- [自动生命周期](../src/famou/automatic_solve_lifecycle.py)：`SolveExecutionControl`、`own_automatic_solve` 和状态投影。
+- [显式 worker](../src/famou/workers.py)：worker 会话、消息、等待、取消及重启处理。
+- [Feature 142 规格](../specs/142-automatic-solve-lifecycle/spec.md)：Phase A/B 已实现并离线验收，Phase C 尚未开放。
 
 本文区分源码已实现、离线验收、真实运行和规划四种状态。当前真实运行结果由 Feature 139 的独立报告记录，架构存在一条执行路径并不自动意味着该路径对所有真实模型任务都已成功。

@@ -276,6 +276,9 @@ class MultiFileCandidatePipeline:
             )
             self.dependency_sha256, self.environment_sha256 = dependency_sha256, environment_sha256
             self._remaining_timeout: Callable[[str], float] | None = None
+            self._process_observer = None
+            self._process_released = None
+            self._continuation_guard = None
         except (ValueError, TypeError, OSError, AttributeError):
             _fail("profile_invalid")
 
@@ -301,7 +304,18 @@ class MultiFileCandidatePipeline:
             raise TypeError("remaining timeout callback must be callable or None")
         self._remaining_timeout = callback
 
+    def set_process_observer(self, observer, released=None) -> None:
+        for callback in (observer, released):
+            if callback is not None and not callable(callback):
+                raise TypeError("process callback must be callable or None")
+        self._process_observer, self._process_released = observer, released
+
+    def set_continuation_guard(self, guard) -> None:
+        self._continuation_guard = guard
+
     def _effective_timeout(self, stage: str) -> float:
+        if self._continuation_guard is not None:
+            self._continuation_guard()
         if self._remaining_timeout is None:
             return self.timeout_seconds
         remaining = self._remaining_timeout(stage)
@@ -431,6 +445,8 @@ class MultiFileCandidatePipeline:
                 attempt_path=run_root / "attempt", expected_admission_sha256=admission.digest(),
                 timeout_seconds=self._effective_timeout("candidate_execution"),
                 remaining_timeout=self._remaining_timeout,
+                process_observer=self._process_observer,
+                process_released=self._process_released,
             )
             self._effective_timeout("candidate_execution")
             if record.to_dict().get("runner_result", {}).get("status") != "succeeded":
@@ -442,6 +458,8 @@ class MultiFileCandidatePipeline:
                 attempt_path=run_root / "attempt", evaluation_root=run_root / "evaluations",
                 expected_admission_sha256=admission.digest(), expected_completion_sha256=record.completion_sha256,
                 remaining_timeout=self._remaining_timeout,
+                process_observer=self._process_observer,
+                process_released=self._process_released,
             )
             self._effective_timeout("evaluation")
             binding = {

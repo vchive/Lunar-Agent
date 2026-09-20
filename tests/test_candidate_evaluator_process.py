@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -124,3 +125,72 @@ def test_candidate_text_wrapper_keeps_telemetry_truncation_and_replacement(tmp_p
     )
     assert stdout == ""
     assert (status, code, error) == ("failed", 0, "output_limit_exceeded")
+
+
+@pytest.mark.parametrize("timeout,expected_status", [(2, "succeeded"), (0.04, "timed_out")])
+def test_process_ownership_is_observed_live_and_released_after_cleanup(tmp_path, timeout, expected_status):
+    events = []
+
+    def observed(pid, pgid):
+        events.append(("observed", pid, pgid, os.getpgid(pid)))
+
+    def released(pid, pgid):
+        try:
+            current_group = os.getpgid(pid)
+        except ProcessLookupError:
+            current_group = None
+        events.append(("released", pid, pgid, current_group))
+
+    _, _, status, _, _ = runner._bounded_process_bytes(
+        [str(Path(sys.executable).resolve()), "-I", "-c", "import time; time.sleep(0.1)"],
+        cwd=str(tmp_path.resolve()), environment={}, timeout=timeout,
+        output_limit=REPORT_LIMIT, capture_limit=REPORT_LIMIT,
+        process_observer=observed, process_released=released,
+    )
+
+    assert status == expected_status
+    assert len(events) == 2
+    registered, completed = events
+    assert registered[0] == "observed"
+    assert registered[1] > 0
+    assert registered[1] == registered[2] == registered[3]
+    assert completed == ("released", registered[1], registered[2], None)
+
+
+def test_process_start_failure_does_not_publish_or_release_ownership(tmp_path, monkeypatch):
+    events = []
+
+    def fail_start(*args, **kwargs):
+        raise OSError("fixture launch failure")
+
+    monkeypatch.setattr(runner.subprocess, "Popen", fail_start)
+    with pytest.raises(OSError, match="fixture launch failure"):
+        runner._bounded_process_bytes(
+            ["fixture-command"], cwd=str(tmp_path.resolve()), environment={}, timeout=2,
+            output_limit=REPORT_LIMIT, capture_limit=REPORT_LIMIT,
+            process_observer=lambda pid, pgid: events.append(("observed", pid, pgid)),
+            process_released=lambda pid, pgid: events.append(("released", pid, pgid)),
+        )
+    assert events == []
+
+
+def test_failed_cleanup_retains_process_registration(tmp_path, monkeypatch):
+    events = []
+    kill = runner._kill_group
+
+    def uncertain(process):
+        kill(process)
+        return False
+
+    monkeypatch.setattr(runner, "_kill_group", uncertain)
+    _, _, status, _, error = runner._bounded_process_bytes(
+        [str(Path(sys.executable).resolve()), "-I", "-c", "import time; time.sleep(10)"],
+        cwd=str(tmp_path.resolve()), environment={}, timeout=0.02,
+        output_limit=REPORT_LIMIT, capture_limit=REPORT_LIMIT,
+        process_observer=lambda pid, pgid: events.append(("observed", pid, pgid)),
+        process_released=lambda pid, pgid: events.append(("released", pid, pgid)),
+    )
+
+    assert (status, error) == ("failed", "process_cleanup_failed")
+    assert len(events) == 1
+    assert events[0][0] == "observed"

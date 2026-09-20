@@ -30,7 +30,7 @@ compileall 和 diff 检查通过。全量回归除冻结 Feature 123 的 24 个 
 当前 worker 层仍是显式本地 API；自动多文件的活动墙钟、父编排与恢复由 Feature 142 负责，
 进度见下文。worker 离线通过不代表真实模型端到端闭环已成功。
 
-## Feature 142：自动多文件 solve 生命周期（2026-09-20，Phase A 前台实现与最终离线回归完成）
+## Feature 142：自动多文件 solve 生命周期（2026-09-20，Phase B 进程清理完成）
 
 不新开 SDD，继续沿用 `specs/142-automatic-solve-lifecycle/`。本阶段把
 `--solve-wall-timeout` 接入 `solve`、`resume`、`answer`，限制为原生自动多文件流程，校验有限
@@ -57,13 +57,15 @@ generated plan 被替换也不会使 parent 提前成功。parent 贯穿 child �
 scope、持久策略及来源、固定阶段和 stopping reason。它不暴露实时 monotonic 剩余量，不推断
 远端请求是否完成，也不把任意异常文本作为公开状态。损坏准备历史仍在新增观察或 attempt 前
 拒绝。定向生命周期、状态与兼容回归已通过。最终双阶段全量回归通过：当前套件
-`8522 passed, 1 skipped, 24 deselected`，冻结 Feature 123 阶段 `24 passed`，两阶段均
-exit 0；报告位于 `.lunar/test-results/feature142-final3/`。本节改动在本交接点完成验证，
-随后提交并推送。
+`8636 passed, 1 skipped, 24 deselected`，冻结 Feature 123 阶段 `24 passed`，两阶段均
+exit 0；2026-09-21 补跑报告位于 `.lunar/test-results/feature142-phase-b-20260921/`。
 
-Phase B 的父子取消到运行中实际进程的传播、ownership/进程组清理和独立验收仍未完成；
-Phase C 自动后台执行未开放，automatic `--detach` 继续明确拒绝。Feature 143 的
-Worker/WorkerAttempt 可复用但不能替代这些验收，143 T009 显式 delegation consumer 迁移不阻塞
+Phase B 已完成：父取消只沿严格 reciprocal parent/child link 传播，并接入 evolution predicate；
+candidate、evaluator、snapshot probe 和 runtime 均登记实际 PID/PGID，清理按独立进程组执行，
+失败时保留未释放 ownership 防止新阶段覆盖。迟到模型响应、deadline/cancel 竞态、child 尚未
+建立、leader 退出而后代仍在、重复组和 cleanup callback 失败均有本地 fixture 覆盖。定向
+Phase B 回归 146 项全部通过。Phase C 自动后台执行未开放，automatic `--detach` 继续明确拒绝。
+Feature 143 的 Worker/WorkerAttempt 可复用但不能替代这些验收，143 T009 显式 delegation consumer 迁移不阻塞
 142。本阶段没有 provider 请求、真实 campaign、WebAgent 重跑或历史测量改写；Feature 139
 preparation `1/1`、primary/joint `0/1` 保持不变。
 
