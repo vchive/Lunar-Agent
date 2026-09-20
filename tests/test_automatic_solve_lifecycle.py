@@ -116,3 +116,55 @@ def test_owner_is_exclusive_and_releases_after_context() -> None:
         AutomaticSolveExecutionOwner("parent").acquire()
     with own_automatic_solve("parent"):
         pass
+
+
+def test_owner_excludes_another_process_and_releases_workspace_lock(tmp_path) -> None:
+    import subprocess
+    import sys
+
+    program = """
+import sys
+from pathlib import Path
+from famou.automatic_solve_lifecycle import own_automatic_solve, AutomaticSolveAlreadyRunning
+try:
+    with own_automatic_solve('parent', Path(sys.argv[1])):
+        pass
+except AutomaticSolveAlreadyRunning:
+    sys.exit(3)
+"""
+    def probe():
+        return subprocess.run([sys.executable, "-c", program, str(tmp_path)], timeout=10, check=False).returncode
+
+    with own_automatic_solve("parent", tmp_path):
+        assert probe() == 3
+    assert probe() == 0
+
+
+def test_workspace_lock_rejects_symlink_without_touching_target(tmp_path) -> None:
+    target = tmp_path / "untouched"
+    target.write_bytes(b"original")
+    (tmp_path / ".automatic-solve.lock").symlink_to(target)
+    with pytest.raises(OSError), own_automatic_solve("parent", tmp_path):
+        pytest.fail("unsafe owner admitted")
+    assert target.read_bytes() == b"original"
+    with own_automatic_solve("parent"):
+        pass
+
+
+def test_budget_wins_between_last_task_success_and_parent_settlement(tmp_path) -> None:
+    from famou.models import RunStatus
+    from famou.store import Store
+
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+    run = store.create_run("solve", tmp_path / "run")
+    task = store.ensure_orchestration_task(run.id, title="solve", prompt="deliver")
+    store.supersede_pending_tasks(run.id, "automatic handoff")
+    attempt = store.claim_orchestration_task(task.id, "automatic-solve")
+    assert attempt is not None
+    assert store.finish_task(task.id, attempt.id, True)
+    assert store.fail_budget(run.id, "solve_wall_timeout", 10, 10, "expired")
+    assert store.settle_run(run.id).status == RunStatus.FAILED
+    assert not store.cancel_run(run.id)
+    assert not store.fail_budget(run.id, "solve_wall_timeout", 20, 10, "expired")
+    assert len([e for e in store.list_events(run.id) if e["type"] == "budget_exceeded"]) == 1
