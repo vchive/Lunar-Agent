@@ -83,8 +83,9 @@ launch/exit recovery and foreground/background equivalence.
 
 ## Phase C: Detached automatic entry points
 
-1. Keep the current automatic `--detach` rejection until phase B's cleanup acceptance passes. Reuse
-   `_detach_solve` and the same execution owner/continuation path; do not create a second lifecycle.
+1. Phase B's cleanup prerequisite has passed. Keep the current automatic `--detach` rejection
+   until Phase C itself is implemented and validated. Reuse `_detach_solve` and the same execution
+   owner/continuation path; do not create a second lifecycle.
 2. Add detach routing for fresh solve, `solve --resume`, generic resume, and answer. For answer,
    validate the policy first, durably accept the existing pending answer once, then launch a
    continuation of the same parent. A launch failure must not silently discard the accepted
@@ -97,6 +98,22 @@ launch/exit recovery and foreground/background equivalence.
    for awaiting input releases ownership and stops the worker until an explicit answer/continue.
 5. Verify equivalence of foreground/background outcomes and all launch/exit cleanup paths with
    fresh synthetic fixtures and no real provider.
+
+The 2026-09-21 code audit confirms the remaining implementation order for T018–T021:
+
+- First establish launch reservation, child ownership claim and conditional exit release. The
+  existing launcher writes runner PID/PGID after process creation; direct reuse alone does not
+  prevent competing continuations or a fast child exit leaving stale ownership. Reuse the existing
+  workspace lock and PID/PGID-conditional clearing, and test loser/late-finalizer behavior.
+- Then route fresh solve, solve continuation and generic resume through the shared automatic
+  execution path. `_evolution_args` already restores persisted policy; verify exact restoration
+  rather than introducing a second policy authority in command-line reconstruction.
+- Add answer detach after launch ownership is established. The ordinary launcher's unconditional
+  parent cancellation on launch failure must not discard an accepted answer's admissible recovery;
+  retain the answer once and allow only explicit continuation under the existing policy.
+- Test actual child processes for launch failure, exit before registration, waiting for input,
+  foreground/background contention, live cancellation and owned-group cleanup before removing
+  the automatic detach gate. No Phase C implementation or acceptance is claimed by this audit.
 
 ## Expected code touch points
 

@@ -1,6 +1,24 @@
 # Evolution ecosystem fusion roadmap（2026-09-11）
 
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
+
+截至 2026-09-21，产品 `65d9ae2` 已完成 [Feature 142](../specs/142-automatic-solve-lifecycle/spec.md)
+Phase A 前台共享活动墙钟、父编排与恢复，以及 Phase B 父子取消、实际进程登记和清理。
+Phase B 定向回归 146 项通过；最终双阶段回归为当前 `8636 passed, 1 skipped, 24 deselected`、
+冻结 Feature 123 阶段 `24 passed`，报告位于 `.lunar/test-results/feature142-phase-b-20260921/`。
+Phase C 自动后台执行尚未实现，automatic `--detach` 仍拒绝。新的 50 分钟前台真实验收只有
+[计划](../specs/142-automatic-solve-lifecycle/real-acceptance-plan.md)，尚无新登记或运行；
+Feature 139 的 preparation `1/1`、primary/joint `0/1` 保持不变。
+
+[Feature 143](../specs/143-local-worker-lifecycle/spec.md) 已有持久 Worker/WorkerAttempt 和
+`dispatch/send/list/wait/resume/cancel` API，但 2026-09-21 的纯 mock 复核复现了三个待修问题：
+共享 adapter 的取消可影响无关 worker；第二个 WorkerService 构造会把仍活跃的 worker
+按全库恢复逻辑标记为 `lost`；已取消的 queued worker 仍可调用 adapter。并发隔离、重启判定和
+取消后准入需修复与回归，不能把已有 API 等同于完整生命周期验收。T009 尚未接入实际
+delegation consumer；该接线不是 Feature 142 的依赖。
+
+以下按日期保留实现和测量过程；旧条目中的“下一步”以上述状态和最新 HANDOFF 为准。
+
 主线收敛为多文件评测、演化/交付接线、统一入口/恢复、当前版本真实验收四项；
 Feature 108–112 已完成多文件评测、Agent 生成、原生 population、普通 solve 入口、自动
 evaluator/profile 准备和父任务交付/终态恢复。Feature 130/132/133 已补合同封装示例、请求
@@ -24,11 +42,9 @@ run 墙钟传播和取消竞态，以及公开 transport status 和 persisted/ef
 执行、评分、选择、交付或 holdout，primary/joint 为 `0/1`。真实结果不是预算耗尽，完整报告见
 `../specs/139-real-multifile-closure/postrun/report.md`。T007 双阶段回归、静态检查和历史字节
 核验仍保持通过；真实槽不重开、不修复、不追加请求。
-外部producer多文件接线、产品全链路预算、运行中取消编排和detached仍未完成；139的固定
-测量预算不替代通用产品能力。
-[Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 的spec/plan/tasks/validation四份
-SDD已写，产品全流程预算与取消编排实现尚未开始，23项任务待完成。
-下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
+Feature 139 的固定测量预算不替代通用产品能力；随后 Feature 142 Phase A/B 已补齐前台
+活动执行预算、父编排、运行中本地取消和清理。当前剩余生命周期工作是 Phase C 自动后台
+执行，外部 producer 多文件接线及真实效果验收也仍在后续范围。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、远端服务或新的 WebAgent 对比；Feature 139 的

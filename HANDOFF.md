@@ -8,25 +8,52 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
-## Feature 143：本地多 Agent worker 生命周期（2026-09-20，控制面实现完成）
+## 2026-09-21 剩余工作审计
+
+Feature 142 Phase B 已由 `65d9ae2` 推送到 `origin/main`；共享活动墙钟、父编排、父子取消、
+实际进程登记/清理和迟到结果拦截均已完成本机离线验收。README、系统评估、架构、融合路线图和
+能力对照已纠正仍写“142 未开始/Phase B 待完成”的过期状态。
+
+本轮另查明该提交的 [Linux CI](https://github.com/vchive/Lunar-Agent/actions/runs/35522272395)
+在 Python 3.11 `Run tests` 阶段退出 1，安装成功、静态检查跳过；3.12/3.13 因矩阵失败被取消。
+公开日志受登录限制且没有上传报告，具体失败用例/阶段尚未取得；不能猜测为 frozen123 guard，
+也不能把本机通过说成跨平台发布通过。下一步先定位此 CI 失败。
+
+其余重点是：新的真实前台完整交付验收（仅有计划，尚无新登记）；候选完成可靠性和更细失败
+诊断；142 Phase C 自动后台入口；143 已复现的并发隔离/恢复问题及其后实际 consumer 接线。
+CI 调查、验收准备、142 Phase C 和 143 修复可分轨推进，真实运行时必须固定产品；
+143 T009 不构成 142 的依赖。
+外部 OpenEvolve/Shinka 多文件接线和真实框架验收属于后续能力。完整清单和各项完成条件见
+[系统评估](docs/system-readiness-20260916.md)。
+
+本轮是只读审计、本地假 adapter 反例复现和文档/SDD 同步，没有产品修复或 provider 请求。
+143 的三个反例见下节，不能沿用“worker 全面完成”结论。139 tasks 中的未勾选项属于冻结
+检查点，该槽已有最终报告；不重跑、不改写。104/133 已有后续实现，002 已被替代，094 的
+漏勾项已有验收，不把这些历史清单误算为新开发任务。
+
+## Feature 143：本地多 Agent worker 生命周期（2026-09-21，隔离/恢复修复待完成）
 
 已根据 WebAgent `famou-v2.5` 的 multiagent 实现完成 SDD 规格、方案、任务和验证边界，并完成
-本地 provider-neutral worker 控制面实现。WebAgent 的 subagent 是独立 worker session，具有
+首版本地 provider-neutral worker 控制面；本次审计发现它尚不满足完整并发隔离与恢复要求。
+WebAgent 的 subagent 是独立 worker session，具有
 `agent/send/list/wait/cancel`、父子 ownership、深度限制、双维 phase/outcome、结算复查、
 结果单出口、级联取消和重启 reconcile/lost；Lunar 现有 `AgentRegistry`、task DAG 和
 Controller 只覆盖角色路由、一次性同步委派、任务持久化和基础取消，不能宣称生命周期等价。
 
-Feature 143 的本地实现新增独立 Worker/WorkerAttempt 层，复用现有 AgentRegistry、runtime
-和 process observer，但不把 `tasks.parent_id` 冒充 worker 树，也不复制 OpenCode plugin 或
+Feature 143 的本地实现新增独立 Worker/WorkerAttempt 层，复用现有 AgentRegistry 和 runtime；
+worker 执行仍缺 process observer 接线。它不把 `tasks.parent_id` 冒充 worker 树，也不复制 OpenCode plugin 或
 远程 FamouClient。现在已提供 `dispatch/send/list/wait/resume/cancel`、直接 owner 校验、
 深度限制、父子级联取消、单次结果投递、重启 `lost` reconcile、超时分类及带 SHA-256
 校验的大结果引用。显式 delegation consumer 尚未迁移；自动多文件和 detached 入口另由
 Feature 142 控制。没有 provider 请求、WebAgent 重跑或真实 campaign。详见
 `specs/143-local-worker-lifecycle/`。
 
-Feature 143 离线验证已完成：worker focused 8 passed，shared regression 通过，Ruff、
-compileall 和 diff 检查通过。全量回归除冻结 Feature 123 的 24 个 setup guard 因当前产品
-已不等于其历史提交而预期报 `product_changed` 外，其余测试通过；冻结历史证据未改写。
+首次 worker focused 8 passed；最新 Phase B 双阶段全量中，worker 测试实际为 9 项且均通过，
+完整当前/冻结阶段均通过，冻结历史证据未改写。这些 fixture 未覆盖本次已复现的三项问题：
+共享 adapter 时取消 target 实际停止 unrelated；第二个 WorkerService 初始化误将仍活动的
+worker 置为 `lost`；排队 worker 已取消仍进入 adapter。需先补独立执行句柄、恢复范围/活性
+判断、取消后的启动拦截和实际进程登记清理，再迁移 T009 consumer。`send` 当前是排队供
+显式 resume 消费，不表示实时消息已注入当前执行。修复任务与反例已写回既有 143 SDD。
 当前 worker 层仍是显式本地 API；自动多文件的活动墙钟、父编排与恢复由 Feature 142 负责，
 进度见下文。worker 离线通过不代表真实模型端到端闭环已成功。
 

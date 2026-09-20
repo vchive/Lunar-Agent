@@ -1,8 +1,9 @@
 # Lunar Agent：当前架构与执行链路
 
-日期：2026-09-20。依据当前工作树核对：Feature 142 Phase A 前台生命周期、Phase B
-进程登记与取消清理，以及 Feature 143 本地 worker 控制面已经实现并完成离线回归。Phase C
-自动多文件后台入口尚未开放。下文分别说明已经实现的路径和仍待验收的边界。
+创建日期：2026-09-20；2026-09-21 核对产品 `65d9ae2`。Feature 142 Phase A 前台生命周期和
+Phase B 进程登记/取消清理已经完成离线验收，Phase C 自动多文件后台入口尚未开放。Feature
+143 已有本地 worker API，但本次审计复现并发隔离与恢复缺陷，尚需修复后再接实际 consumer。
+下文分别说明已经实现的路径和仍待验收的边界。
 
 ## 1. 系统定位
 
@@ -51,7 +52,7 @@ flowchart TD
 | 入口与编排 | 命令、模式校验、输入导入、继续运行、普通/演化分流 | `cli.py` |
 | 控制层 | 创建/领取任务、并发、预算检查、结果登记、取消、父子交付 | `controller.py` |
 | 自动求解生命周期 | 活动执行排他、共享截止时间、阶段检查、父任务编排、状态投影 | `automatic_solve_lifecycle.py`、`cli.py`、`controller.py` |
-| 显式 worker 控制面 | 有 owner 的可恢复 worker session，等待、消息、取消、级联和重启 reconcile | `workers.py`、`store.py` |
+| 显式 worker 控制面 | worker/attempt、owner、等待、排队消息和结果持久化；并发取消隔离与重启恢复存在已复现缺陷 | `workers.py`、`store.py` |
 | 状态层 | run/task/attempt、事件、产物索引、计划版本、进程归属 | `store.py`、`models.py` |
 | 计划与角色 | 任务合同、依赖图、领域与能力选择、恢复建议 | `conversational.py`、`algorithm.py`、`policy.py`、`routing.py`、`profiles.py`、`recovery.py` |
 | 模型与工具 | Mock、显式进程、兼容接口；工具循环、请求预算、会话 | `runtime.py`、`agents.py`、`agent_loop.py`、`tools.py`、`model_profile.py` |
@@ -65,6 +66,12 @@ Feature 143 增加了一条与普通 task DAG 分开的显式 worker 链路：Co
 worker identity，Store 保存 worker、attempt 和受限事件。worker 的 activity phase 与最近一次
 outcome 分开记录；直接 owner 才能操作，父取消会传播到已验证的子树，进程重启时未完成运行
 标记为 `lost`。结果默认内联截断，大结果写入 worker attempt 目录并由带 SHA-256 的引用读取。
+
+这条链路尚未接入 CLI `delegate` 或 AgentLoop 的工具。2026-09-21 审计用纯本地假 adapter
+复现：共享实例取消误伤另一 worker、新服务初始化误将仍活动的 worker 标为 `lost`、已取消
+的排队 worker 仍执行 adapter。当前 `_execute` 也未接实际进程 observer；`send` 消息要到显式
+resume 才消费。上述原测试未覆盖的缺口已写回 143 SDD，不能把 API 存在当作并发多 Agent
+已验收。普通 DAG 的独立 runtime 并发与这里的 worker session 是不同路径。
 这条链路复用现有 AgentAdapter，但尚未迁移普通 delegation，也没有改变 task DAG 或自动多文件
 入口的生命周期。
 
@@ -184,8 +191,8 @@ Phase B 已完成父 run 到已验证 child 的停止传播、candidate/evaluato
 登记、拥有者释放、失败清理和取消/截止时间竞态保护。清理失败会保留未释放登记并终止当前
 活动阶段，避免新进程覆盖旧拥有者；清理顺序先处理候选/评测等工作组，再处理协调进程。
 这些结论来自本地 fixture 和进程组回归，不代表远端 provider 已停止计算。Phase C 的自动多文件
-`--detach` 仍保持拒绝，直到后台编排另行实现并通过验收。Feature 143 的 worker API 已可
-管理显式 worker，但还没有自动成为这条流程的后台执行器。
+`--detach` 仍保持拒绝，直到后台编排另行实现并通过验收。Feature 143 的 worker API 有独立
+隔离/恢复缺口，也没有成为这条流程的后台执行器；142 不依赖 T009 consumer 迁移。
 
 Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽已结束。新产品可以明确设置
 `--solve-wall-timeout 3000`。新的真实验收仍使用新登记和目录，区分产品活动预算与验收监督预算。
@@ -214,10 +221,10 @@ Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽�
 
 建议按以下顺序继续，不把大重构作为可用性的前置条件：
 
-1. 固定并推送已通过验证的 Phase B 产品，以新的登记开展一次 50 分钟真实多文件验收；分别报告准备与完整交付结果。
-2. 完成 Feature 142 Phase C 后台入口，收敛前台、恢复和后台的重复逻辑。
-3. 在 detached 入口通过独立验收后，将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收。
-4. 再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力，而不是把小型样例的成功外推成通用可靠性。
+1. Phase B 产品已经推送，先定位当前 Linux CI 的测试失败并补齐支持版本验证，详见[系统评估](system-readiness-20260916.md)。随后补齐新的 50 分钟前台真实验收实现、登记与启动前检查；候选最终响应可靠性改动须先有明确规格并离线验证，不能运行中修代码。
+2. 按 Feature 142 Phase C 完成后台启动、认领和退出协议，再接 solve/resume/answer 与失败恢复，验证前后台一致性。
+3. 独立修复 143 的 worker 并发隔离、恢复与取消防启动缺口，再迁移一个实际 delegation consumer；它不阻塞 142 前台验收。
+4. 后续将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收，再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力。
 
 ## 9. 阅读源码的入口
 

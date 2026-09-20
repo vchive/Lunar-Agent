@@ -1413,10 +1413,13 @@ same lock before recording the answer. `solve`, `answer` and read-only `status` 
 `solve_execution` object with execution ID, policy and origin, phase, state and stopping reason.
 It does not report a live monotonic remainder or infer whether a remote request finished.
 
-Phase A foreground behavior has offline coverage. Cancellation of all running owned processes and
-process-group cleanup still require Phase B acceptance; automatic `--detach` remains rejected until
-the later background phase is implemented and validated. This change made no provider requests and
-does not change Feature 139's real automatic multi-file result of `0/1`.
+Phase A foreground behavior and Phase B owned-process cancellation/cleanup have passed offline
+acceptance. Parent cancellation follows the verified child link, and local candidate, evaluator,
+probe and runtime processes register their process groups for cleanup. Failed cleanup retains its
+ownership record and blocks later stages. Automatic `--detach` remains rejected until Phase C is
+implemented and validated. Offline coverage does not establish real-model delivery success;
+Feature 139's real automatic multi-file result remains `0/1`. See the current
+[release assessment](docs/system-readiness-20260916.md) for the remaining work.
 
 Automatic preparation retains the existing compiler's input-format and probe capacity limits.
 It requires all contract inputs to match registered `csv`, `json`, `jsonl` or `text` files and uses

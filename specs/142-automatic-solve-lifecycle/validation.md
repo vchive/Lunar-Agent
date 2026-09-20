@@ -105,6 +105,15 @@ No provider, real campaign, retained generated program, or WebAgent was executed
 
 ## Release boundary
 
+The 2026-09-21 readiness audit additionally checked the pushed product `65d9ae2` on
+[GitHub Actions run 35522272395](https://github.com/vchive/Lunar-Agent/actions/runs/35522272395).
+Its Linux/Python 3.11 installation steps passed, but `Run tests` exited 1 and static checks were
+skipped. Python 3.12 and 3.13 were cancelled by matrix fail-fast after that failure. Public metadata
+does not identify a failing test or distinguish current from frozen123 failure; full logs require
+authentication and no report artifact was uploaded. Root cause and cross-platform acceptance
+remain open. The retained local passing reports above are unchanged and are not a claim that
+the remote CI matrix passed.
+
 Offline correctness here does not establish evaluator quality, current-model task success,
 WebAgent parity or successful real automatic multi-file delivery. Feature 139 remains preparation
 1/1 and primary/joint 0/1. Phase C still requires detached solve/resume/answer routing, exact
