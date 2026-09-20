@@ -1,15 +1,82 @@
 # Feature 139 预登记独立审计
 
-**日期**：2026-09-19
-**结论**：尚不具备真实 preregistration 条件；六项剩余阻断必须先修复并复验。
-**检查基线**：`HEAD=741900a1c8068d31094c25d27b1e4c7397b1dbb0` 加本轮未提交的
+**日期**：原始审查 2026-09-19；离线集成独立复核 2026-09-20
+**结论**：B001–B011 及请求/阶段时间关联的实现缺口已修复并完成离线复核；本轮审查未发现
+剩余实现阻断。T007 完整双阶段验证已通过；本次离线实现检查点的具体 manifest/已推送登记
+和真实唯一槽验收尚未完成，
+不能将本结论当作正式登记、启动许可或真实成功结果。
+**原始检查基线**：`HEAD=741900a1c8068d31094c25d27b1e4c7397b1dbb0` 加本轮未提交的
 Feature 139 campaign/ledger 加固。下列行号对应此次审查快照，后续以函数名和阻断编号定位。
 
-本审查只读取实现、执行内存合成复现和离线聚焦测试；未登记、启动 campaign、调用 provider，
-也未执行历史生成源码。Feature 141 的产品验证由主线程独立进行，不属于本审查的完成证明。
+本审查只读取实现、执行合成复现和离线聚焦测试；临时原生 Store/workspace 使用仓库拥有的
+合成候选/evaluator 和替代 provider 响应。未登记或启动真实 campaign、调用 provider，也未
+执行历史生成源码。Feature 141 的既有产品验证不属于本轮实现的完成证明。
 本文是整改依据，不是 registration、launch approval 或真实端到端成功报告。
 
-## 验证结果与边界
+## 当前整改状态（2026-09-20，离线实现复核完成）
+
+工作树已包含并离线复验 B001–B006 的 campaign/ledger 修复及 registration/trust-root/inventory、
+worker、observer、runner 和 supervision。实际 worker、retained summary 和原生 Store 回执也已
+经过离线集成验证；下文 B001–B006 的复现描述保留原始审查快照，不代表当前修复仍能复现。
+
+| 原始编号 | 当前实现与复验结论 |
+| --- | --- |
+| B001 | 请求与 preparation/generation 阶段、run/task/budget identity 双向核验；retained chain 消费全部候选请求，拒绝缺失或无来源的回执。前三个 preparation 请求另须落在 preparation trace 时间窗内。 |
+| B002 | ledger/manifest 预算、启动 argv、provider-independent runtime 参数均严格绑定。summary 以阶段选择请求上限：contract/candidate 为 600 秒，evaluator compiler/auditor 为 900 秒；首合同请求改成 900 秒被拒绝。 |
+| B003 | preparation/total wall、首次 terminal reason 及 monotonic trace 已核验；实际请求 elapsed 超出其 effective timeout 不获成功，trace 末尾不能晚于 guard/worker 终点，本地 holdout 继续受原总 deadline 约束。 |
+| B004 | 首次 closure index/time/reason/摘要不可被第二次 close 改写，增删改 rows 或 token 派生值后的 close 不得修复冲突。 |
+| B005 | canonical registration seal 与 Git 已提交文件清单绑定，修改 manifest 或引用文件、dirty/unpushed checkout、复用 root/slot 均被拒绝。 |
+| B006 | unknown/failed holdout、非零 native/process exit、cleanup unknown 不能形成 joint success；匹配数量不能覆盖未知或失败 outcome。 |
+
+本轮入口审查新增的问题与修复：
+
+| 编号 | 原问题 | 已完成的离线修复与复验 |
+| --- | --- | --- |
+| B007 | retained `summarize()` 未调用原生 generation receipt 核验；孤立 mapper 通过不能证明实际结果绑定了 parser completion。 | `inspect_product()` 接入 `retained_chain` 和原生 trace，核验六阶段、完整源/输入/执行/评分/选择/交付、Store event 与实际请求。缺失、failed 或冲突证据保持零完成与 `0/1`。summary 不调用 runtime、候选或 evaluator；只读 archive 绕过具有恢复副作用的产品构造器，并拒绝 seed recovery 残留。 |
+| B008 | `worker.main()` 将普通 CLI 文本输出重定向到 `xb` 二进制流，触发 `TypeError`。 | 改为 exclusive UTF-8 文本捕获；直接运行原生 CLI 的离线 worker 测试保留 JSON、native exit 和 terminal record，已有文件不覆盖。 |
+| B009 | worker 已有 `holdout_gate` 失败阶段，summary allowlist 却未识别。 | summary 接受受限 `holdout_gate`。缺 primary completion、output artifact 或 source evidence 时零 holdout，失败可正常汇总，primary/joint 保持 `0/1`。 |
+| B010 | preparation 已登记 900 秒，但共享请求 guard 仍按普通 600 秒截短 evaluator compiler/auditor。 | 请求 ceiling 按 thread-local 原生阶段切换，compiler/auditor 得到 900 秒上限；contract/candidate 继续 600 秒，总 deadline 仍可进一步收紧；并发上下文不互相借用时限。 |
+| B011 | 早期 setup 失败可在没有 worker-started 的情况下留下 worker-finished，之后修好输入可能重启同槽。 | worker 入口在 provider 加载前拒绝任一已有 worker-started/worker-finished 或 root/slot finished；失败后的再次调用保留首次 terminal 字节并保持零新增请求。 |
+
+独立复核还实际构造了三个 retained evidence 反例：把请求 effective timeout 改为 `1e-9`、
+把 preparation trace 改为 `0→0` 而三次准备请求仍在其后、把本地阶段移到 worker 结束以后。
+原实现曾错误成功，现均失去 primary/joint credit。首合同请求上限改为 900 秒的反例也已加入
+阶段上限负测。原生 generation event 被删除或 task identity 被替换时，实际 summary 返回
+零完成候选、primary/joint `0/1` 且保留树字节不变。
+
+只读复核对 LocalController/CandidateArchive 构造器、seed recovery、provider、候选执行和
+评分入口放置禁止调用的 sentinel，成功链仍能通过；seed recovery 残留被拒绝而不修复它。
+审计使用私有 SQLite/WAL 副本，成功及失败路径均核对保留文件字节不变。曾在只读 adapter
+重构中途出现的配置兼容失败已修正：允许既有 `command_sha256=None`，非空配置仍拒绝。
+
+T007 已完成：当前 8409 passed / 1 skipped / 24 deselected（668.93s），固定 Feature 123
+阶段 24 passed（22.92s），双阶段 overall exit0。最终静态检查和历史 inventories 通过，详见
+[validation.md](validation.md)。全量启动后补充的 registration inventory 覆盖另经 18 项
+registration_store 与静态/最终清单核验通过，不声称全量重新加载了该窄改动。
+本次离线实现检查点没有具体 manifest、真实槽或 provider 请求。之后登记状态以
+`measurement/manifest.json` 及只读启动检查为准，T008 核验保存在忽略的本地证据中；无需在
+登记后改写本审计快照。
+
+### 本次独立聚焦复验
+
+```sh
+.venv/bin/pytest -o addopts='' -q \
+  tests/test_measurement139_retained_chain.py \
+  tests/test_measurement139_registration.py tests/test_measurement139_stage_chain.py \
+  tests/test_measurement139_public.py tests/test_measurement139_registration_store.py \
+  tests/test_measurement139_observation.py tests/test_measurement139_worker.py
+# 256 passed in 66.68s
+
+.venv/bin/pytest -o addopts='' -q tests/test_measurement139_analysis.py \
+  tests/test_measurement139_retained_chain.py::test_retained_native_closure_is_complete_and_read_only
+# 35 passed in 57.78s
+```
+
+第二组包含最终按 stage 区分合同/候选 600 秒与 evaluator preparation 900 秒的 summary
+负测，以及 effective timeout overrun 和 summary 单次发布/只读验证。两组有重叠，不合并为
+唯一测试总数；它们也不替代 T007 的全量当前与固定历史阶段。
+
+## 原始审查验证结果与边界（2026-09-19）
 
 ```sh
 .venv/bin/pytest -o addopts='' -q \
@@ -22,7 +89,7 @@ Feature 139 campaign/ledger 加固。下列行号对应此次审查快照，后�
 结果为 **120 passed in 0.43s**，`git diff --check` 通过。120 项测试通过仅证明这些已有 fixture
 通过；下列独立复现仍可违反登记/成功规则，所以不能据此宣布登记完成或允许真实运行。
 
-## 前次问题中已确认修复的部分
+## 原始审查时已确认修复的部分（2026-09-19）
 
 | 项目 | 本次只读复验结果 | 实现定位 |
 | --- | --- | --- |
@@ -36,7 +103,7 @@ Feature 139 campaign/ledger 加固。下列行号对应此次审查快照，后�
 上述修复都不替代真实请求、固定预算和保留产物的绑定。特别是，固定 manifest 下的输入检查已
 成立，但 manifest 自身可被修改的问题仍见 B005。
 
-## 六项剩余阻断
+## 原始六项阻断与复验门槛（2026-09-19 快照）
 
 ### B001 — [P1] 完整成功仍只需要任意一个已完成普通请求
 
@@ -149,19 +216,20 @@ unknown；native/process 非零退出。匹配数量不能覆盖失败或未知�
 ## 真实 preregistration 前必须完成的 gate
 
 以下 gate 是对 [spec.md](spec.md)、[plan.md](plan.md)、[tasks.md](tasks.md) 的落地检查，
-不是另一个运行许可。通过离线 fixture 后仍需独立核验具体登记和唯一运行槽。
+不是另一个运行许可。其中实现、离线入口和 T007 验证已完成，要求保留供后续核验；本次
+检查点仍需在 T008 独立核验具体登记和唯一运行槽。
 
 1. **冻结真正要运行的产品和任务。** 固定包含 Feature 140/141 所需行为的已推送产品版本；
-   当前 [case.py](measurement/case.py) 的 Feature 138 产品 pin 和 synthetic task 不可直接
+   当前 [case.py](measurement/case.py) 的离线产品引用 `87d86d9` 和 synthetic task 不可直接
    代替最终真实 registration。固定原生入口、runtime/provider/model 身份、候选工具上限、
    population/seed、输入、受支持的 evaluator/八项 holdout、request/preparation/total wall
    和 source/artifact 限制。若 evaluator 是自动生成的，登记其生成/冻结协议及身份验收规则，
    运行中再保留实际 frozen evaluator/profile 摘要，不预填未产生的产物摘要。
-2. **实现并复核具体 manifest 和启动 preflight。** pin 产品、measurement/spec、运行时与
+2. **复核已实现的 registration/preflight，并冻结具体 manifest。** pin 产品、measurement/spec、运行时与
    历史证据的完整文件集合/大小/SHA；核验 clean worktree、真实 `HEAD == origin/main`、已提交
    并推送的 manifest、运行产品与 pin 一致。实际检查唯一新 ID、root/attempt 不存在，不能用
    调用方传入的默认布尔值或空集合证明这些事实。
-3. **实现持久唯一槽、worker、observer、supervision。** 原子创建未使用 campaign/attempt，
+3. **完成已实现的持久唯一槽、worker、observer、supervision 的入口验收。** 原子创建未使用 campaign/attempt，
    durable 写入 started/finished/terminal；进程失败、重启或中断后不能 retry/resume/replace
    该槽。所有 provider 请求均由统一 admission 路径计数并绑定身份，记录未知请求而不丢弃。
 4. **完成请求与原生六阶段的双向绑定。** 接入
@@ -178,16 +246,19 @@ unknown；native/process 非零退出。匹配数量不能覆盖失败或未知�
    parent publication package 和 reciprocal links。重算实际文件摘要、大小和完整集合；验证
    native/process exit、8/8 holdout expected/actual 及 cleanup。内存 boolean 或一段合法
    SHA 字符串不等于产物证明；不在 summarize/audit 中重跑 provider 或生成源码。
-7. **关闭六项阻断并完成最终验证。** 为 B001–B006 添加失败回归，运行聚焦集、当前全量回归、
+7. **关闭原始阻断及入口集成缺口并完成最终验证。** 复验 B001–B006 失败回归，完成 B007–B011
+   的真实 retained summary/worker 入口离线集成，运行聚焦集、当前全量回归、
    固定历史阶段、Ruff、compileall、Specify 和 diff 检查；独立复核 Feature 131/134 retained
-   文件集合、大小和 SHA 未变。记录最终命令/计数、产品 pin、manifest hash、审计结论，再进入
-   T008。未通过这些 gate 前，T009 不得启动。
+   文件集合、大小和 SHA 未变。T007 已记录最终命令/计数和审计结论；具体产品 pin 与
+   manifest hash 留待 T008 冻结并核验。未通过登记及启动 gate 前，T009 不得启动。
 
 ## 后续交接定位
 
-当前整改范围首先是 campaign-local evidence/ledger/success gate（B001–B006）及真实 harness
-落地；如果发现共享产品无法提供所需原生证据，应按计划另开产品 SDD，不能在测量运行后修补
-产品或改登记。Feature 131/134、WebAgent 及其历史分母保持不变。
+campaign-local evidence/ledger/success gate、真实 harness 入口与 T007 已完成离线验收。
+当前剩余为 T008 的具体登记与启动核验及之后唯一真实槽；如果后续发现共享产品缺口，应
+另开产品 SDD，不能在测量运行后修补产品或改登记。Feature 131/134、WebAgent 及其历史分母
+保持不变。
 
-整改后的复查应逐项标明 B001–B006 的新测试、实现位置和证据，不以测试数量增长代替关闭
-判定。本文记录的是本次未提交快照的审查结果；后续修复提交不会自动使本文结论变为通过。
+本次复核按 B001–B011 及时间关联负测逐项检查实现和实际入口，不以测试数量增长代替关闭
+判定。未来代码变更仍须复验；本次离线关闭不使正式 registration、唯一真实运行或真实闭环
+验收自动完成。

@@ -1,0 +1,70 @@
+# Tasks
+
+**Status**: Specification only. Implementation and implementation validation have not started.
+All implementation tasks below remain open. Phase C must not open automatic background execution
+before phase B cleanup acceptance passes.
+
+## Specification
+
+- [x] T001 Record the option name, active-execution scope, explicit continuation semantics,
+      immutable identity boundary, parent lifecycle, reuse of cancellation, and phased detach gate.
+- [x] T002 Map existing 133/137/141 behavior and actual CLI/Controller/process gaps by read-only
+      inspection. Do not treat this mapping as product implementation or regression completion.
+
+## Phase A: Shared budget and foreground parent lifecycle
+
+- [ ] T003 Add early parser/mode/value validation for `--solve-wall-timeout` across solve,
+      `solve --resume`, resume, and answer, before runtime and mutation side effects.
+- [ ] T004 Persist explicit solve policy and a lifecycle marker; restore exact values on
+      continuation, reject mismatches/legacy injection, and preserve omitted legacy behavior.
+- [ ] T005 Add one exclusive automatic execution owner and one shared process-local monotonic
+      deadline; never reset it per phase, request, candidate, retry, or nested Controller call.
+- [ ] T006 Establish/reuse a parent orchestration task after contract intake and before preparation
+      or handoff settlement; prevent ordinary scheduling and premature parent success.
+- [ ] T007 Route all automatic continuation entry points through the same orchestration, including
+      answer. Preserve awaiting-input, preparation recovery, and terminal idempotency semantics.
+- [ ] T008 Propagate remaining time through intake, preparation lock/checks, compiler/auditor,
+      candidate generation, local execution, scoring, selection, and parent delivery.
+- [ ] T009 Add narrower operational timeout/stop hooks without modifying frozen profile, input,
+      contract, source, evaluator, execution admission, plan, or receipt identity.
+- [ ] T010 Persist one solve-policy budget failure with existing Store terminal precedence; block
+      late success/publication and any continuation that would replenish an exhausted solve.
+- [ ] T011 Add bounded read-only execution status, policy origin, fixed phase, and stopping reason;
+      do not infer a live monotonic remainder or remote provider result.
+- [ ] T012 Verify phase A with deterministic clock and fake-transport native CLI tests, including
+      immutable-byte checks and existing preparation/Controller/receipt compatibility suites.
+
+## Phase B: Cancellation and owned process cleanup
+
+- [ ] T013 Connect parent cancellation to its exactly verified child and evolution predicate using
+      existing Controller/Store cancellation; preserve unrelated runs and terminal winners.
+- [ ] T014 Register actual local probe/candidate/evaluator process ownership through existing
+      process tracking, including independent process groups and ownership release.
+- [ ] T015 Reuse cancellation/cleanup fan-out for deadline exhaustion and cancellation; continue
+      cleanup after callback failure and clean owned subprocesses before the coordinating worker.
+- [ ] T016 Test cancellation at each phase, before/after linking and delivery, late responses,
+      cancellation/deadline races, failed cleanup callbacks, and no remaining owned local process.
+- [ ] T017 Independently review phase B and record passing process cleanup evidence. Keep
+      automatic `--detach` rejected until this task is complete.
+
+## Phase C: Detached automatic execution
+
+- [ ] T018 Reuse `_detach_solve` for new and continued lifecycle-enabled automatic solves; support
+      solve/resume/answer detach routing only after T017 passes.
+- [ ] T019 Propagate/restore runtime, multi-file, preparation, candidate-step, and solve policies
+      exactly without secrets in argv or public state. Keep legacy detach rejection explicit.
+- [ ] T020 Preserve once-only answer acceptance and parent ID on background continuation; prevent
+      duplicate live workers and release only the exiting worker's ownership on every exit path.
+- [ ] T021 Verify foreground/background equivalence, useful status handles, no waiting worker
+      during human input, live cancel, launch failure, stale worker recovery, and process cleanup.
+
+## Completion
+
+- [ ] T022 Run focused/shared regressions, current full regression and fixed historical test stage,
+      Ruff, compileall, Specify prerequisites, Markdown-link checks, and `git diff --check`.
+- [ ] T023 Independently verify Feature 131/134 retained file sets, sizes, and SHA-256 values remain
+      unchanged; verify this feature did not modify Feature 139 source/evidence or launch a provider.
+- [ ] T024 Complete independent review and record exact validation results and residual limits;
+      update roadmap/handoff to distinguish active-execution from cumulative lifetime budgeting.
+- [ ] T025 Commit and push the verified product implementation. Do not claim implementation,
+      detached availability, or real end-to-end success from this specification-only checkpoint.

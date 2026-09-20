@@ -12,6 +12,29 @@ def _rehash_receipts(c):
         row["receipt_sha256"] = campaign.digest_json({key: value for key, value in row.items() if key != "receipt_sha256"})
 
 
+def _rebuild_receipt_chain(c):
+    chain = campaign.digest_json({"schema_version": campaign.SCHEMA_VERSION, **c.identity})
+    delivery_receipt_sha256 = None
+    for row in c.receipts:
+        if row["stage"] == "holdouts" and delivery_receipt_sha256 is not None:
+            row["delivery_receipt_sha256"] = delivery_receipt_sha256
+        row["previous_receipt_sha256"] = chain
+        row["stage_run_sha256"] = campaign.digest_json({
+            "stage": row["stage"], "outcome": row["outcome"],
+            "started_at": row["started_at"], "finished_at": row["finished_at"],
+            "payload": {
+                key: row[key] for key in campaign._STAGE_PAYLOAD_KEYS[row["stage"]]
+            },
+        })
+        row["receipt_sha256"] = campaign.digest_json({
+            key: value for key, value in row.items() if key != "receipt_sha256"
+        })
+        if row["stage"] == "parent_delivery":
+            delivery_receipt_sha256 = row["receipt_sha256"]
+        chain = campaign.digest_json({"previous": chain, "receipt": row["receipt_sha256"]})
+    c._receipt_chain_sha256 = chain
+
+
 def test_public_projection_is_allow_listed_and_redacts_private_evidence():
     c = complete_campaign()
     result = analysis.public_result(c)
@@ -92,8 +115,74 @@ def test_unknown_request_usage_stays_explicit_in_the_public_projection():
     c.ledger.close()
     result = c.public_result()
     assert result["usage"] == {"observed_tokens": None, "complete": False}
+    assert result["primary_success"] == "0/1"
+    assert result["joint_success"] == "0/1"
+
+
+def test_unknown_usage_does_not_fail_success_when_ledger_bindings_are_intact():
+    c = complete_campaign(observed_tokens=None)
+    result = c.public_result()
+    assert result["usage"] == {"observed_tokens": None, "complete": False}
     assert result["primary_success"] == "1/1"
     assert result["joint_success"] == "1/1"
+
+
+def test_extra_unbound_completed_request_cannot_support_success():
+    result = complete_campaign(extra_unbound_request=True).public_result()
+    assert result["provider_requests"] == 5
+    assert result["primary_success"] == "0/1"
+    assert result["joint_success"] == "0/1"
+
+
+@pytest.mark.parametrize("field", ("run_id", "task_id", "budget_id"))
+def test_generation_receipt_identity_must_match_the_bound_request(field):
+    c = complete_campaign()
+    generated = next(row for row in c.receipts if row["stage"] == "candidate_generation")
+    generated[field] = "other-001"
+    _rebuild_receipt_chain(c)
+    with pytest.raises(campaign.CampaignError, match="candidate_receipt_invalid"):
+        c.audit()
+
+
+@pytest.mark.parametrize("field", ("native_exit_code", "process_exit_code"))
+def test_nonzero_cleanup_exit_prevents_joint_success(field):
+    c = complete_campaign()
+    cleanup = next(row for row in c.receipts if row["stage"] == "cleanup")
+    cleanup[field] = 1
+    _rebuild_receipt_chain(c)
+    result = c.public_result()
+    assert result["primary_success"] == "1/1"
+    assert result["joint_success"] == "0/1"
+
+
+def test_cleanup_binds_the_whole_attempt_completion_anchor():
+    c = complete_campaign()
+    cleanup = next(row for row in c.receipts if row["stage"] == "cleanup")
+    assert c.attempt_finished_at == cleanup["finished_at"]
+    assert c.attempt_finished_at > c.ledger.provider_finished_at
+    c.attempt_finished_at += 1
+    with pytest.raises(campaign.CampaignError, match="attempt_completion_anchor_mismatch"):
+        c.audit()
+
+
+def test_local_stage_after_total_wall_is_rejected_even_with_rehashed_receipts():
+    c = complete_campaign()
+    execution = next(row for row in c.receipts if row["stage"] == "candidate_execution")
+    execution["started_at"] = 2401
+    execution["finished_at"] = 2402
+    _rebuild_receipt_chain(c)
+    with pytest.raises(campaign.CampaignError, match="receipt_time_invalid"):
+        c.audit()
+
+
+def test_preparation_receipt_cannot_omit_auditor_after_full_rehash():
+    c = complete_campaign()
+    preparation = next(row for row in c.receipts if row["stage"] == "preparation")
+    preparation["request_count"] = 2
+    preparation["request_ledger_sha256"] = c.ledger.prefix_digest(2)
+    _rebuild_receipt_chain(c)
+    with pytest.raises(campaign.CampaignError, match="receipt_request_binding_mismatch"):
+        c.audit()
 
 
 def test_public_result_rejects_a_tampered_successful_ledger():
@@ -101,6 +190,35 @@ def test_public_result_rejects_a_tampered_successful_ledger():
     c.ledger.usage_complete = False
     with pytest.raises(campaign.CampaignError, match="request_ledger_invalid"):
         c.public_result()
+
+
+def test_public_result_rejects_manifest_tampering_even_when_receipts_are_intact():
+    c = complete_campaign()
+    c.manifest["input_sha256"] = "9" * 64
+    with pytest.raises(campaign.CampaignError, match="manifest_digest_mismatch"):
+        c.public_result()
+
+
+def test_public_result_rejects_forged_campaign_identity_after_full_rehash():
+    c = complete_campaign()
+    forged = {
+        "registration_id": "registration-forged",
+        "campaign_id": "campaign-forged",
+        "attempt_id": "attempt-forged",
+    }
+    c._identity = forged
+    for row in c.receipts:
+        row.update(forged)
+    _rebuild_receipt_chain(c)
+    with pytest.raises(campaign.CampaignError, match="manifest_identity_mismatch"):
+        c.public_result()
+
+
+def test_unknown_holdout_cannot_produce_joint_success():
+    c = complete_campaign(holdout_outcome="unknown")
+    result = c.public_result()
+    assert result["primary_success"] == "1/1"
+    assert result["joint_success"] == "0/1"
 
 
 def test_audit_rejects_rehashed_out_of_order_holdout_receipt():

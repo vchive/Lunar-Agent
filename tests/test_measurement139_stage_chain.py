@@ -39,6 +39,15 @@ def test_complete_stage_chain_binds_all_identities_and_has_one_denominator():
     assert result["completed_candidate_count"] == 1
 
 
+def test_complete_stage_chain_accepts_two_generation_provider_turns():
+    c = complete_campaign(generation_turns=2)
+    result = c.public_result()
+    assert c.ledger.stage_bindings["candidate_generation"] == (4, 5)
+    assert result["provider_requests"] == 5
+    assert result["primary_success"] == "1/1"
+    assert result["joint_success"] == "1/1"
+
+
 def test_stage_order_rejects_missing_receipt_and_never_infers_later_success():
     c = new_campaign()
     with pytest.raises(campaign.CampaignError, match="stage_out_of_order"):
@@ -153,4 +162,35 @@ def test_holdout_and_cleanup_receipts_are_gated_and_bounded():
     c = new_campaign()
     c.preparation(evaluator_sha256="1" * 64, holdout_sha256="2" * 64)
     with pytest.raises(campaign.CampaignError, match="holdouts_before_delivery"):
-        c.holdouts([{"index": index, "matched": True} for index in range(1, 9)])
+        c.holdouts([
+            {"index": row["index"], "actual_value": row["expected_value"],
+             "elapsed_seconds": 0.1}
+            for row in case.default_holdouts()
+        ])
+
+
+def test_holdout_duration_over_registered_limit_is_rejected():
+    c = complete_campaign()
+    holdout = next(row for row in c.receipts if row["stage"] == "holdouts")
+    holdout["results"][0]["elapsed_seconds"] = 5.01
+    with pytest.raises(campaign.CampaignError, match="receipt_digest_mismatch"):
+        c.audit()
+
+    c = complete_campaign()
+    c.receipts = c.receipts[:6]
+    c._failed = False
+    c._receipt_chain_sha256 = c.receipts[-1]["receipt_sha256"]
+    # record() chains over a wrapper hash, so restore the retained chain anchor.
+    chain = campaign.digest_json({"schema_version": campaign.SCHEMA_VERSION, **c.identity})
+    for row in c.receipts:
+        chain = campaign.digest_json({"previous": chain, "receipt": row["receipt_sha256"]})
+    c._receipt_chain_sha256 = chain
+    with pytest.raises(campaign.CampaignError, match="holdout_evidence_invalid"):
+        c.holdouts([
+            {
+                "index": row["index"],
+                "actual_value": row["expected_value"],
+                "elapsed_seconds": 5.01 if row["index"] == 1 else 0.1,
+            }
+            for row in case.default_holdouts()
+        ])

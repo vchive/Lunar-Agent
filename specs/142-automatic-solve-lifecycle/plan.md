@@ -1,0 +1,124 @@
+# Implementation Plan: Automatic multi-file solve lifecycle
+
+**Date**: 2026-09-20
+
+**Status**: Specification only; no product implementation has started.
+
+**Spec**: [spec.md](spec.md)
+
+## Approach
+
+Extend the existing solve orchestration and Controller boundaries. Do not replace Controller
+cancellation, the Store terminal-state rules, Feature 133 preparation policy, Feature 137 request
+clipping, or existing frozen candidate/evaluator identities. Keep the feature limited to native
+automatic multi-file population solving.
+
+## Phase A: Foreground budget and parent lifecycle
+
+1. Add `--solve-wall-timeout` to solve/resume/answer parsers. Validate values and supported modes
+   before side effects, and persist only an explicit value, its source, and a lifecycle version
+   marker in `evolution_requested`. Extend `_evolution_args` and override validation consistently.
+   Historical handoffs keep their absent fields and cannot acquire new policy on continuation.
+2. Consolidate the automatic foreground continuation path shared by `_solve`, `_answer`, and the
+   resume dispatch. In particular, an automatic answer must not fall through to ordinary
+   `controller.resume` and claim the controller-owned orchestration task as model work.
+3. Admit one active execution owner and create one process-local control object with monotonic
+   start/deadline, stage checks, and cancellation observation. Existing explicit recovery rules
+   decide whether a nonterminal interrupted run is admissible; this feature does not infer an
+   active worker to be stale merely because another process asked to resume it.
+4. After accepted contract intake, establish one parent orchestration task before preparation or
+   superseding the generated tasks. Reuse it on continuation and settle it only on delivery,
+   cancellation, or terminal failure. Keep it outside ordinary scheduling and preserve historical
+   terminal parents. The existing intake task continues to own contract compilation.
+5. Thread the shared control through contract compilation, `prepare_automatic_solve_bundle`,
+   `_solve_evolution`, generation, execution, scoring, and delivery. Preparation composes its own
+   remaining callback with the solve remainder, including lock acquisition. Requests and local
+   subprocesses receive the minimum of all applicable ceilings. Preserve post-operation checks.
+6. Add optional operational timeout/stop hooks to execution/evaluation boundaries where needed.
+   Their defaults preserve existing APIs. They must not modify a frozen pipeline/profile,
+   evaluator specification, execution admission, plan, source bundle, or input bytes. Any new
+   bounded observation records the effective value separately from the configured authority.
+7. Reuse `Store.fail_budget` for one fixed solve-policy limit and existing terminal precedence.
+   Ensure child completion cannot publish parent success after a parent stop. Reuse the existing
+   verified delivery path; do not re-execute a selected candidate to recover delivery evidence.
+8. Extend `_solve_payload` and read-only status projection with bounded execution policy/stage/
+   outcome metadata. Do not derive a false live remainder from persisted UTC timestamps.
+
+## Phase B: Parent/child cancellation and local cleanup
+
+1. Extend cancellation orchestration only for new lifecycle-enabled automatic handoffs. Validate
+   reciprocal parent/child links and contract identity before selecting the linked child.
+   Preserve existing Controller/Store terminal transitions and reuse cancellation fan-out.
+2. Feed the same parent and child stop authority into evolution admission and phase guards.
+   Complete child evidence may remain retained, but cancelled/expired parents cannot deliver it.
+3. Trace every local process spawned during preparation, candidate execution, and scoring.
+   Connect actual PID/PGID ownership to existing process observers and Store ownership data.
+   Candidate/evaluator processes have independent process groups and require their own cleanup.
+4. Reuse/extract the existing active-work cleanup logic so budget exhaustion and cancellation
+   reach all owned groups and runtime adapters even when one callback fails. End the coordinating
+   worker only after owned process cleanup. Do not use unrelated process-tree discovery as an
+   authority to terminate arbitrary processes.
+5. Add deterministic local-process tests for each phase, parent/child races, callback errors,
+   delayed responses, and runner ownership release. These are a prerequisite for phase C.
+
+## Phase C: Detached automatic entry points
+
+1. Keep the current automatic `--detach` rejection until phase B's cleanup tests pass. Reuse
+   `_detach_solve` and the same execution owner/continuation path; do not create a second lifecycle.
+2. Add detach routing for fresh solve, `solve --resume`, generic resume, and answer. For answer,
+   validate the policy first, durably accept the existing pending answer once, then launch a
+   continuation of the same parent. A launch failure must not silently discard the accepted
+   answer or start a replacement worker.
+3. Propagate/restore multi-file mode, all preparation policy, candidate step policy, the solve
+   policy, and runtime identity. Credentials retain the existing environment-based propagation;
+   they never enter argv or bounded lifecycle events.
+4. Return the parent handle before model work. Prevent concurrent foreground/background owners,
+   reject stale ownership substitutions, and clear only the exiting worker's ownership. Exiting
+   for awaiting input releases ownership and stops the worker until an explicit answer/continue.
+5. Verify equivalence of foreground/background outcomes and all launch/exit cleanup paths with
+   fresh synthetic fixtures and no real provider.
+
+## Expected code touch points
+
+| Area | Existing attachment point |
+| --- | --- |
+| CLI policy and routing | `src/famou/cli.py`: parsers, `_validate_automatic_bundle_options`, `_evolution_request_payload`, `_evolution_args`, `_solve`, `_answer`, resume dispatch |
+| Detached worker | `src/famou/cli.py`: `_detach_solve`, runner setup and handle projection |
+| Shared execution control | Small product helper used by automatic orchestration; no measurement-module dependency |
+| Parent lifecycle and cancellation | `src/famou/controller.py`: conversational intake, `run_evolution`, `deliver_bundle_to_parent`, `cancel`, existing budget/cleanup helpers |
+| Durable state | `src/famou/store.py`: existing task, event, fail-budget, cancellation, and runner/process ownership operations |
+| Preparation | `src/famou/automatic_solve_bundle.py`, `src/famou/evaluator_bundle.py`: deadline composition, lock wait, phase guards, process observation |
+| Candidate generation | `src/famou/agent_evolution.py`, `src/famou/agent_bundle_generation.py`: request-local remaining timeout and stop propagation |
+| Execution and scoring | `src/famou/bundle_evolution.py`, `candidate_execution_evidence.py`, `candidate_execution_runner.py`, `candidate_evaluation.py`: narrower operational limits and local process cleanup |
+| Validation | New lifecycle fixtures plus existing automatic preparation, Controller, CLI, process, receipt, and delivery regressions |
+
+Expected touch points are design guidance, not authorization to change all listed modules without
+need. Preserve current defaults outside the explicit automatic lifecycle path. Any unavoidable
+new evidence version must be specified and tested for backward read compatibility before writing
+it; an implementation must not silently re-label old authority as a new profile.
+
+## Risks and decisions
+
+- **Scope of time**: this is one active-execution budget. Explicit continuation after human input
+  or an admissible nonterminal interruption starts a new execution under the same policy. Solve
+  budget exhaustion itself is terminal. Cross-continuation accounting is explicitly excluded.
+- **Parent terminal state**: an orchestration task must prevent early success; merely changing
+  status display would leave cancellation and budget writes ineffective in the Store.
+- **Identity drift**: effective remaining time belongs to operational control/observation, not
+  frozen profile/admission/source identity. Validate this byte-for-byte in focused tests.
+- **Process ownership**: local processes use independent groups. Removing the CLI detach ban
+  before process registration/cleanup works would expose orphaned work.
+- **Recovery**: never broaden existing preparation or child recovery admission. Terminal success,
+  cancellation, and solve exhaustion remain non-executing on continuation.
+
+## Verification and release
+
+Use deterministic clocks, fake provider transports, and fresh repository-owned local candidate/
+evaluator/probe programs. After each phase, run focused tests and shared compatibility tests.
+Enable phase C only after phase B is green. Before any product completion claim, run the full
+two-stage regression, Ruff, compileall, Specify prerequisites, diff/link checks, and independent
+historical inventory verification. Record results in [validation.md](validation.md).
+
+No Feature 139 source/evidence changes, provider call, real campaign registration/launch, or
+historical experiment replay is part of this implementation plan. Subsequent commit/push belongs
+to the verified implementation phase; these specification documents alone do not claim completion.

@@ -2,9 +2,13 @@
 
 ## Status
 
-Offline harness and native mapping are implemented as of 2026-09-19, but preregistration remains
-incomplete. No registration, provider request, campaign launch, real evaluator call, or historical
-generated-source execution has occurred. Feature 131/134 and WebAgent are not reopened.
+Offline harness, native mapping, registration, observer, worker, supervision, and retained-evidence
+summary integration are implemented and independently reviewed as of 2026-09-20. B001–B011 and
+the request/stage timing defects are closed in offline validation. T007 full current/frozen
+historical regression passed with overall exit 0. At this offline implementation checkpoint no
+registration, provider request, or real campaign launch has occurred. Native CLI fixtures execute fresh synthetic
+candidates/evaluators with substituted HTTP responses; no historical generated source is executed.
+Feature 131/134 and WebAgent are not reopened.
 
 Feature 140 now persists canonical `agent_candidate_generation` receipts. Feature 141 adds the
 explicit CLI candidate budget required by the proposed native run. The campaign mapping validates
@@ -12,22 +16,35 @@ the Store envelope, deterministic event ID, run/task/budget/candidate identity, 
 ceiling, and parser-accepted bundle digest. Missing, failed, conflicting, or unbound evidence
 remains unknown; downstream artifacts do not establish parser completion.
 
-The independent [preregistration audit](preregistration-audit.md) found six remaining blockers:
+The 2026-09-19 [preregistration audit](preregistration-audit.md) found six blockers:
 request-to-stage identity binding, ledger-policy binding to the manifest, total/preparation wall
 and closure-reason evidence, immutable first closure, immutable registration, and the unknown
-holdout joint-success gate. The real worker/observer/supervision, sealed manifest/file inventory,
-and retained-artifact analysis are also unfinished. Passing current fixtures is not launch proof.
+holdout joint-success gate. Corrections for B001–B006 and the worker/observer/supervision and
+registration/file-inventory implementations have passed independent closure review. A concrete
+manifest has not been created. The retained-artifact integration now exercises the actual native
+CLI, Store, receipts, archive, delivery and summary; this remains offline evidence, not launch proof.
+
+The 2026-09-20 entrypoint review identified three additional integration defects: the retained
+summary did not consume the native generation receipt verifier; the worker redirected ordinary
+CLI text into a binary stream; and summary stage validation omitted `holdout_gate`. T006a–T006c
+are implemented and directly validated. Subsequent review also fixed the evaluator preparation
+ceiling incorrectly capped at 600 seconds and re-entry after an early failed worker setup.
+Effective request timeout overruns, preparation requests outside their trace window, local stages
+after the worker endpoint, and a contract request incorrectly using the 900-second evaluator
+allowance are rejected by the success gates. The completed full regression is recorded below.
+
+## Previously completed validation (2026-09-19 baseline)
 
 The native receipt and Feature 140 focused suite passed 134 tests; the independent Feature 139
 audit suite passed 120 tests while reproducing the six gaps. The combined Feature 141/139 budget,
 CLI, Agent, and receipt suite passed 409 tests. Static checks passed. These are offline checks of
-the current implementation, not proof that all preregistration criteria below have been met.
+that baseline, not proof that all preregistration criteria below have been met.
 
 The combined full regression passed: current 8166 passed / 1 skipped / 24 deselected, immutable
 Feature 123 stage 24 passed, overall exit 0. The product change was committed and pushed as
 `87d86d9bc78171e7ce772dd9069e133249b81312`; `case.py` now uses that revision as its offline reference.
-This replaces the earlier placeholder and does not create a sealed registration. Audit B001–B006
-and the worker/supervision/inventory requirements remain open.
+This replaces the earlier placeholder and does not create a sealed registration. These baseline
+totals do not validate the later working-tree corrections or close T005a/T006a–T006c/T007.
 
 ## Offline exit criteria before registration
 
@@ -48,6 +65,61 @@ and the worker/supervision/inventory requirements remain open.
   files have identical byte sets and SHA-256 inventories before and after offline validation.
 - Native receipt projections distinguish canonical, bound parser-complete Store receipts from
   transient/unbound diagnostics and never synthesize `completed` from downstream artifacts.
+- Actual `runner.summarize()` / `analysis.summarize()` integration reads temporary retained native
+  Store/workspace evidence and invokes the generation receipt verifier. Complete chains can pass;
+  missing/failed/malformed/conflicting/tampered generation receipts cannot add a completed
+  candidate or produce primary/joint success despite later execution, score, selection or delivery.
+- The same summary integration checks the actual request/stage/budget/artifact links and preserves
+  retained file bytes and SQLite/WAL. Provider, candidate and evaluator invocation sentinels remain
+  unused throughout inspection; an isolated `ClosureCampaign` fixture is insufficient.
+- Direct `worker.main()` fixtures use a synthetic native CLI that prints JSON as ordinary text.
+  The exclusive UTF-8 capture is parseable, native exit and terminal records are retained, and an
+  existing capture file is not overwritten. No binary-stdout `TypeError` can replace a valid run.
+- Worker and retained-summary integration recognize `holdout_gate`. Missing primary completion,
+  invalid output or source evidence leads to no holdout invocation, a bounded failed stage, and
+  `0/1` primary/joint without a stage-validation crash or fabricated known values.
+
+## Current offline validation record (2026-09-20)
+
+- The Feature 139 suite contains 363 tests. The 362-test suite snapshot passed, followed by a
+  passing targeted regression for the contract request timeout ceiling; all 363 were included in
+  the final passing full current regression below.
+- Direct native `worker.main()` with substituted HTTP responses completed 5 model requests,
+  2 parser-complete candidates, isolated execution, independent scoring, selection, parent
+  delivery and all 8 holdouts. The retained summary reports primary/joint `1/1`, quality 3 and
+  gap 0 for this synthetic fixture only.
+- Native failures cover contract, compiler/auditor, provider and candidate/source boundaries.
+  Missing primary/output/source evidence prevents holdout invocation; `holdout_gate` is retained
+  and summarized as `0/1`. Unknown usage/status stays explicit. Pending or absent request
+  evidence, unbound identities, budget stops, timing drift and malformed retained markers cannot
+  produce success. Existing captures and first worker terminal records are not overwritten.
+- Read-only summary and receipt verification reject missing/failed/conflicting generation
+  receipts and revalidate actual execution, scoring, selection and delivery materials. Provider,
+  candidate, evaluator, mutating constructors and seed-recovery sentinels remain unused during
+  analysis. Preserved SQLite/WAL and all retained file bytes remain unchanged; a second summary
+  refuses to overwrite the first publication.
+- Independent review closed B001–B011 and the timing counterexamples. See the
+  [preregistration audit](preregistration-audit.md) for the original findings and focused review
+  commands; overlapping test subsets must not be added as a unique total.
+- Ruff across `src`, `tests` and this Feature 139 directory passed. Compileall, Specify
+  prerequisites and `git diff --check` passed.
+- Feature 131 retained inventory remains 21 files / 155485 bytes; Feature 134 remains 97 files /
+  327394 bytes. File sets, sizes and SHA-256 values match their historical evidence. Their tracked
+  historical file sets, respectively 15 and 21 files, are byte-identical to `57bd00d`.
+- `tools/run_tests.py` completed with overall exit 0: current **8409 passed, 1 skipped,
+  24 deselected in 668.93s**; fixed Feature 123 stage **24 passed in 22.92s**. JUnit records are
+  `.lunar/test-results/feature139/current.xml` and
+  `.lunar/test-results/feature139/frozen123.xml`.
+- After the full run started, registration inventory coverage was narrowly extended to include
+  the shared Feature 113 runtime guard and Feature 134 synthetic test fixture. This final inventory
+  change passed 18 `registration_store` tests, static validation and final inventory checks. The
+  already-running full suite did not reload that change; no second full-suite run is claimed.
+
+T007 and offline implementation review are complete. At this checkpoint commit/push, a concrete
+sealed manifest, unused-root and unique-slot launch preflight, and the one real provider attempt
+remain separate work. Subsequent registration status is determined by `measurement/manifest.json`
+and read-only launch checks. T008 verification evidence is retained locally under ignored paths;
+these frozen offline documents need not be rewritten after registration.
 
 ## Planned commands
 

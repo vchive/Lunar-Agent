@@ -1,10 +1,11 @@
 # Lunar-Agent 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-19 更新至 Feature 140/141：Feature 140 的持久候选生成回执
+评估创建于 2026-09-16，2026-09-20 更新至 Feature 139 离线集成：Feature 140 的持久候选生成回执
 已推送；Feature 141 的原生多文件 CLI 显式候选预算已由 `87d86d9` 推送，409 项聚焦测试、
-全量当前 8166 项和历史固定 24 项通过（当前 1 skipped）。Feature 139 已有 native receipt
-映射和离线 harness，仍有
-预登记阻断，尚未登记或运行。当前仍没有通过真实自动多文件完整交付验收。
+当时全量当前 8166 项和历史固定 24 项通过（当前 1 skipped）。Feature 139 的原生证据链、
+worker 和只读 summary 已完成离线集成及独立复核；363 项专项测试在本轮全量中全部通过。
+完整双阶段为当前 8409 passed / 1 skipped / 24 deselected、固定历史 24 passed，overall exit0。
+本次离线实现检查点尚未登记或真实运行，当前仍没有通过真实自动多文件完整交付验收。
 以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
 
 Feature 136 已为单文件和 bundle 候选生成加入显式、不可变的每候选 tool-step budget 与
@@ -240,11 +241,20 @@ event、run/task/budget/candidate identity 和源码 bundle digest；瞬态 diag
 [140 validation](../specs/140-candidate-generation-receipt/validation.md) 和
 [141 validation](../specs/141-native-multifile-cli-budget/validation.md)。这些均不是新真实测量。
 
-Feature 139 已有原生回执映射与离线 harness，但尚不具备登记条件。下一步按[预登记审计](../specs/139-real-multifile-closure/preregistration-audit.md)
-修复并复验六类 gate 缺口：请求与原生阶段双向绑定、ledger 与 manifest 预算绑定、首次关闭
-原因/时间不可变及全阶段墙钟、manifest seal、unknown holdout 不得成功，以及真实 worker/
-supervision 与保留文件 inventory。只有这些条件落实，才能固定并推送新的真实登记、使用
-唯一新槽；当前不登记、不运行，不改写历史分母。
+Feature 139 已完成原生六阶段证据链、worker/supervision、注册 inventory 与实际 retained
+summary 的离线集成。[预登记独立复核](../specs/139-real-multifile-closure/preregistration-audit.md)
+已关闭 B001–B011 和请求/阶段时间关联缺口。仅替换 HTTP 响应的原生 CLI 夹具完成 5 次请求、
+2 个 completed candidates、8 项 holdout 及父任务交付，质量 3/3；缺失证据、超预算及
+holdout_gate 失败均不得获得成功。363 项专项测试在全量内全部通过；T007 双阶段验证为
+当前 8409 passed / 1 skipped / 24 deselected（668.93 秒）及固定历史 24 passed（22.92 秒），
+overall exit0。静态检查和历史字节核验通过；全量开始后登记清单的窄范围补充另经 18 项
+registration_store、静态及最终清单核验通过，未声称全量重新加载该补充。随后仍须提交推送、
+固定具体 manifest 并核验唯一未用槽；本次离线实现检查点尚未登记或真实运行。后续登记以
+`measurement/manifest.json` 和只读启动检查为准，T008 核验保存在忽略的本地证据中。
+离线夹具不能替代真实结果。
+
+[Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 的四份 SDD 已写，产品全流程
+预算与取消编排实现尚未开始，23 项任务待完成。
 
 1. 113/115/117/120 各自为0/2。118/119已修复合同兼容和支持范围内的源码检查，
    121/122补齐生成协议和传输观测；123小型准备诊断收到响应后本地失败，为独立0/1。
@@ -263,8 +273,8 @@ supervision 与保留文件 inventory。只有这些条件落实，才能固定�
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
    和全链路总时长编排继续待补，未知现场不自动重跑，终态恢复不增加候选或交付副本。
-3. Feature 140/141 已补持久生成回执、CLI 预算并完成验证推送；Feature
-   139 的 native mapping/harness 不等于登记完成。先通过上述六类 gate 和具体 manifest/
+3. Feature 140/141 已补持久生成回执、CLI 预算并完成验证推送；Feature 139 的原生闭环、
+   worker/summary 离线集成、独立复核和全量回归已通过。先完成提交推送与具体 manifest/
    启动 preflight，再独立登记一次真实多文件闭环，至少保留一个 completed candidate、
    execution、independent score、selection 和 parent delivery；失败分母保持为1，不重开旧槽。
 4. 扩展通用 producer material/SeedManifest 的多文件接线，使 OpenEvolve/Shinka 输出也

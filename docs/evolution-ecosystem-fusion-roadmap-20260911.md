@@ -15,11 +15,20 @@ run 墙钟传播和取消竞态，以及公开 transport status 和 persisted/ef
 和[141验证](../specs/141-native-multifile-cli-budget/validation.md)。12步是Feature 139拟登记的
 显式值，不是产品默认值；本轮没有新的真实效果证据。
 
-Feature 139 已有 native receipt mapping 和离线 harness，仍不具备登记条件。下一步依[预登记审计](../specs/139-real-multifile-closure/preregistration-audit.md)
-修复六类 gate：请求阶段绑定、ledger与manifest预算绑定、首次关闭原因/时间不可变及全阶段
-墙钟、manifest seal、unknown holdout不得成功，以及真实worker/supervision/文件inventory。
-这些门槛通过后才能固定并推送新登记、使用唯一新槽；不能把native映射或聚焦测试通过当作
-139完成。外部producer多文件接线、全链路预算、运行中取消编排和detached仍未完成。
+截至2026-09-20，Feature 139 的原生六阶段证据链、registration/inventory、worker/supervision
+和实际 retained summary 已完成离线集成；[预登记独立复核](../specs/139-real-multifile-closure/preregistration-audit.md)
+已关闭 B001–B011 与请求/阶段时间关联漏洞。原生 CLI 夹具仅替换 HTTP 响应，完成5次请求、
+2个 completed candidates、8项holdout和父任务完整交付；363项专项测试已在全量内全部通过。
+T007双阶段回归为当前8409 passed/1 skipped/24 deselected（668.93秒）、固定历史24 passed
+（22.92秒），overall exit0，静态检查及历史字节核验通过。全量启动后的登记清单窄改动另经
+18项registration_store、静态及最终清单核验通过，不声称全量重新加载了该改动。下一步提交
+推送，再固定具体manifest并核验唯一未用槽；本次离线实现检查点尚未登记或真实运行。
+之后以`measurement/manifest.json`和只读启动检查为准，T008证据保存在忽略的本地路径；
+离线闭环不代表139真实验收完成。
+外部producer多文件接线、产品全链路预算、运行中取消编排和detached仍未完成；139的固定
+测量预算不替代通用产品能力。
+[Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 的spec/plan/tasks/validation四份
+SDD已写，产品全流程预算与取消编排实现尚未开始，23项任务待完成。
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目

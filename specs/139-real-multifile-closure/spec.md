@@ -1,7 +1,9 @@
 # Feature Specification: Real automatic multi-file closure acceptance
 
 **Created**: 2026-09-19
-**Status**: Offline harness in progress; preregistration audit has unresolved blockers
+**Status**: Offline implementation, retained-evidence integration, independent review and T007
+full regression complete; registration and the real attempt pending at this implementation checkpoint
+(2026-09-20)
 **Input**: Feature 134's preparation-only outcome, Feature 136/137 budget contracts, and
 Feature 138's status/recovery projection
 
@@ -147,6 +149,43 @@ string crosses the public boundary.
 The postrun report and independent audit are read-only over retained evidence. Summarization writes
 new report/evidence inventories once and never calls a provider or executes generated source.
 
+## Offline integration contract
+
+The requirements below have passed direct offline entrypoint validation and independent review
+as of 2026-09-20. The native CLI fixture uses substituted HTTP responses and retains 5 requests,
+2 completed candidates, all 8 holdouts, and verified parent delivery. This validates the harness;
+the completed T007 full regression does not replace concrete registration, launch preflight, or
+the real attempt. Current evidence and review scope are recorded in [validation.md](validation.md)
+and [preregistration-audit.md](preregistration-audit.md).
+
+Later registration status is determined by `measurement/manifest.json` and read-only launch checks,
+with T008 verification evidence kept under ignored local paths. This specification records the
+offline checkpoint and does not require amendment after its registration freeze.
+
+The campaign's actual `worker.main()` and `runner.summarize()` / `analysis.summarize()` entrypoints
+must be verified with repository-owned synthetic data before registration. Passing an in-memory
+`ClosureCampaign` fixture or testing a receipt mapper in isolation does not satisfy this contract.
+
+1. Retained Store generation events must enter the actual summary through the native receipt
+   verifier. Parser completion, event/run/task/budget/candidate identity, the registered tool-step
+   ceiling, and the retained source-bundle digest must agree. A delivery package or a later score
+   cannot substitute for a missing, failed, malformed, conflicting, or unbound generation event.
+   Such evidence cannot increment completed-candidate counts or yield primary/joint success.
+2. The actual summary must verify the six stages from retained native evidence and cross-check
+   their request, budget, source, input, execution, evaluation, selection, and delivery bindings.
+   Repository-owned temporary Store/workspace fixtures must cover a valid complete chain and
+   missing/tampered prerequisites. Inspection must preserve retained bytes, including SQLite/WAL,
+   and must never call a provider or execute a candidate/evaluator.
+3. `worker.main()` must capture the native CLI's ordinary text output as exclusive, UTF-8 JSON
+   evidence. An offline invocation that prints text must not fail because stdout is a binary
+   stream. Existing capture files must not be overwritten, and the native exit result and bounded
+   worker terminal record must remain inspectable on both successful and failed paths.
+4. `holdout_gate` is a recognized worker failure stage. If primary completion, valid output, or
+   source evidence is absent, the worker must retain that stage and execute no holdout. The actual
+   summary must accept and expose this bounded failure, preserve unknown fields, and keep primary
+   and joint success at `0/1`; it must not crash on an unknown-stage check or infer completion from
+   preparation alone.
+
 ## Boundaries and non-goals
 
 - This is one newly registered real local automatic run; no provider request is made while writing
@@ -174,3 +213,7 @@ new report/evidence inventories once and never calls a provider or executes gene
    stage gate; otherwise the result remains `0/1` with unknown fields preserved.
 5. Historical Feature 131/134 and WebAgent files are byte/SHA unchanged, and the final audit does
    not rerun a provider or generated source.
+6. Provider-free integration fixtures call the actual worker and summarization entrypoints and
+   satisfy every offline integration requirement above. Their retained native receipt and
+   holdout-gate negative cases pass before the final full/current and frozen-history regressions;
+   no isolated mapper result is reported as retained-evidence integration completion.
