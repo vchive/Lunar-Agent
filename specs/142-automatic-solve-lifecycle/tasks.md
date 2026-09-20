@@ -1,8 +1,8 @@
 # Tasks
 
-**Status**: Specification only. Implementation and implementation validation have not started.
-All implementation tasks below remain open. Phase C must not open automatic background execution
-before phase B cleanup acceptance passes.
+**Status**: Implementation in progress. T003 and T004 are complete; remaining implementation
+and acceptance tasks are open. Phase C must not open automatic background execution before phase B
+cleanup acceptance passes.
 
 ## Specification
 
@@ -13,9 +13,9 @@ before phase B cleanup acceptance passes.
 
 ## Phase A: Shared budget and foreground parent lifecycle
 
-- [ ] T003 Add early parser/mode/value validation for `--solve-wall-timeout` across solve,
+- [x] T003 Add early parser/mode/value validation for `--solve-wall-timeout` across solve,
       `solve --resume`, resume, and answer, before runtime and mutation side effects.
-- [ ] T004 Persist explicit solve policy and a lifecycle marker; restore exact values on
+- [x] T004 Persist explicit solve policy and a lifecycle marker; restore exact values on
       continuation, reject mismatches/legacy injection, and preserve omitted legacy behavior.
 - [ ] T005 Add one exclusive automatic execution owner and one shared process-local monotonic
       deadline; never reset it per phase, request, candidate, retry, or nested Controller call.

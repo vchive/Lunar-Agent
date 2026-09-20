@@ -159,6 +159,7 @@ def test_automatic_bundle_request_has_only_additive_mode_marker(extra):
         **old,
         "compile_evaluator": True,
         "bundle_mode": "compiled",
+        "automatic_lifecycle_version": 1,
         "evaluator_preparation_timeout": 900.0,
         "evaluator_preparation_wall_timeout": 1860.0,
         "timeout_source": "default",

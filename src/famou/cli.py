@@ -264,6 +264,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="total deadline for one automatic multi-file evaluator preparation attempt",
     )
     solve_parser.add_argument(
+        "--solve-wall-timeout",
+        type=float,
+        help="active execution deadline for one automatic multi-file solve continuation",
+    )
+    solve_parser.add_argument(
         "--candidate-generation-max-steps",
         type=int,
         help="candidate-generation tool-step ceiling for native automatic multi-file evolution",
@@ -318,6 +323,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--evaluator-preparation-wall-timeout",
         type=float,
         help="matching total deadline for one automatic evaluator preparation attempt",
+    )
+    resume_parser.add_argument(
+        "--solve-wall-timeout",
+        type=float,
+        help="matching active execution deadline for an automatic multi-file solve",
     )
     resume_parser.add_argument(
         "--candidate-generation-max-steps",
@@ -852,6 +862,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--evaluator-preparation-wall-timeout",
         type=float,
         help="matching total deadline for one automatic evaluator preparation attempt",
+    )
+    answer_parser.add_argument(
+        "--solve-wall-timeout",
+        type=float,
+        help="matching active execution deadline for an automatic multi-file solve",
     )
     answer_parser.add_argument(
         "--candidate-generation-max-steps",
@@ -2193,6 +2208,7 @@ def _validate_conversational_bundle_request(args, request) -> None:
             raise EvolutionError("solve_bundle_mode_invalid")
         _validate_automatic_bundle_options(args)
         _validate_preparation_request(request)
+        _validate_solve_wall_timeout_option(args, request)
         args.multi_file = True
         args.compile_evaluator = True
         return
@@ -2255,6 +2271,12 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         if not args.run_id:
             raise ValueError("--resume requires --run-id")
         preparation_request = _latest_evolution_request(Store(config.database), args.run_id)
+        if preparation_request is not None:
+            _validate_solve_wall_timeout_option(args, preparation_request)
+        elif getattr(args, "solve_wall_timeout", None) is not None:
+            _validate_solve_wall_timeout_option(
+                args, None, allow_unresolved_handoff=False,
+            )
         if preparation_request is None and getattr(args, "candidate_generation_max_steps", None) is not None and not args.evolve:
             raise ValueError(
                 "--candidate-generation-max-steps requires an automatic multi-file evolution handoff"
@@ -2392,6 +2414,7 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
     if getattr(args, "_bundle_profile_sha256", None) is not None:
         payload["bundle_profile_sha256"] = args._bundle_profile_sha256
     if getattr(args, "multi_file", False):
+        payload["automatic_lifecycle_version"] = _AUTOMATIC_LIFECYCLE_VERSION
         candidate_steps = getattr(args, "candidate_generation_max_steps", None)
         if candidate_steps is not None:
             _validate_candidate_generation_value(candidate_steps)
@@ -2412,12 +2435,18 @@ def _evolution_request_payload(args: argparse.Namespace) -> dict[str, object]:
         )
         for name in _PREPARATION_TIMEOUT_OPTIONS:
             payload[name + "_source"] = "explicit" if getattr(args, name, None) is not None else "default"
+        solve_wall_timeout = getattr(args, "solve_wall_timeout", None)
+        if solve_wall_timeout is not None:
+            _validate_solve_wall_timeout_value(solve_wall_timeout)
+            payload["solve_wall_timeout"] = solve_wall_timeout
+            payload["solve_wall_timeout_source"] = "explicit"
     return payload
 
 
 def _validate_evolution_cli_bounds(args: argparse.Namespace) -> None:
     """Validate option bounds before a handoff request is persisted in the intake ledger."""
     _validate_candidate_generation_option(args)
+    _validate_solve_wall_timeout_option(args, allow_unresolved_handoff=False)
     try:
         EvolutionConfig(
             strategy="population",
@@ -2469,6 +2498,7 @@ _PREPARATION_TIMEOUT_OPTIONS = (
     "evaluator_preparation_timeout",
     "evaluator_preparation_wall_timeout",
 )
+_AUTOMATIC_LIFECYCLE_VERSION = 1
 
 
 def _has_preparation_timeout(args: argparse.Namespace) -> bool:
@@ -2488,6 +2518,80 @@ def _validate_preparation_cli_timeouts(args: argparse.Namespace) -> None:
                 f"invalid --{name.replace('_', '-')}: "
                 "must be finite and between 0 and 86400 seconds"
             )
+
+
+def _validate_solve_wall_timeout_value(value: object, *, error_type=ValueError) -> None:
+    """Validate the active execution policy independently from stage ceilings."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not 0 < value <= 86400
+        or not math.isfinite(float(value))
+    ):
+        raise error_type(
+            "--solve-wall-timeout must be finite and between 0 and 86400 seconds"
+        )
+
+
+def _validate_solve_wall_timeout_option(
+    args: argparse.Namespace,
+    request: dict[str, object] | None = None,
+    *,
+    allow_unresolved_handoff: bool = True,
+) -> None:
+    """Validate a solve policy before runtime, Store, or answer-artifact side effects."""
+    supplied = getattr(args, "solve_wall_timeout", None)
+    if supplied is not None:
+        _validate_solve_wall_timeout_value(supplied)
+
+    if request is not None:
+        mode = request.get("bundle_mode")
+        if mode != "compiled":
+            if supplied is not None:
+                raise EvolutionError(
+                    "solve-wall-timeout requires an automatic multi-file evolution handoff"
+                )
+            return
+        marker = request.get("automatic_lifecycle_version")
+        if marker is not None and marker != _AUTOMATIC_LIFECYCLE_VERSION:
+            raise EvolutionError("solve evolution lifecycle marker is invalid")
+        stored = request.get("solve_wall_timeout")
+        source = request.get("solve_wall_timeout_source")
+        has_policy_fields = "solve_wall_timeout" in request or "solve_wall_timeout_source" in request
+        if has_policy_fields:
+            if marker is None:
+                raise EvolutionError(
+                    "solve evolution solve_wall_timeout requires the lifecycle marker"
+                )
+            if stored is None or source != "explicit":
+                raise EvolutionError("solve evolution solve_wall_timeout setting is invalid")
+            try:
+                _validate_solve_wall_timeout_value(stored, error_type=EvolutionError)
+            except EvolutionError:
+                raise EvolutionError("solve evolution solve_wall_timeout setting is invalid") from None
+        elif marker is not None and supplied is not None:
+            raise EvolutionError(
+                "solve evolution solve_wall_timeout cannot be added to an existing handoff"
+            )
+        elif marker is None and supplied is not None:
+            raise EvolutionError(
+                "solve evolution solve_wall_timeout cannot be added to a legacy handoff"
+            )
+        if supplied is not None and stored is not None and supplied != stored:
+            raise EvolutionError(
+                "solve evolution setting solve_wall_timeout does not match the existing handoff"
+            )
+        return
+
+    if supplied is None:
+        return
+    command = getattr(args, "command", None)
+    if allow_unresolved_handoff and command == "solve" and getattr(args, "resume", False):
+        return
+    if allow_unresolved_handoff and command in {"resume", "answer"}:
+        return
+    if command != "solve" or not getattr(args, "evolve", False) or not getattr(args, "multi_file", False):
+        raise ValueError("--solve-wall-timeout requires --evolve --multi-file")
 
 
 def _validate_preparation_request(request: dict[str, object]) -> None:
@@ -2550,6 +2654,7 @@ def _latest_evolution_request(store: Store, run_id: str) -> dict[str, object] | 
 def _validate_evolution_override(args: argparse.Namespace, request: dict[str, object]) -> None:
     """Reject explicit resume settings that differ from the persisted handoff request."""
     _validate_candidate_generation_option(args, request)
+    _validate_solve_wall_timeout_option(args, request)
     _validate_preparation_timeout_override(args, request)
     for name in (
         "strategy",
@@ -2606,6 +2711,7 @@ def _evolution_args(
         "evaluator_preparation_timeout",
         "evaluator_preparation_wall_timeout",
         "candidate_generation_max_steps",
+        "solve_wall_timeout",
     ):
         values.setdefault(name, None)
     for name in (
@@ -2638,6 +2744,7 @@ def _evolution_args(
         )
     values["compile_evaluator"] = bool(request.get("compile_evaluator", False))
     values["multi_file"] = request.get("bundle_mode") == "compiled"
+    values["solve_wall_timeout"] = request.get("solve_wall_timeout")
     return argparse.Namespace(**values)
 
 
@@ -4772,6 +4879,10 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if run is None:
         raise ValueError(f"unknown run: {args.run_id}")
     evolution_request = _latest_evolution_request(store, run.id)
+    if evolution_request is not None:
+        _validate_solve_wall_timeout_option(args, evolution_request)
+    elif getattr(args, "solve_wall_timeout", None) is not None:
+        _validate_solve_wall_timeout_option(args, None, allow_unresolved_handoff=False)
     if evolution_request is None and getattr(args, "candidate_generation_max_steps", None) is not None:
         raise ValueError(
             "--candidate-generation-max-steps requires an automatic multi-file evolution handoff"
@@ -5292,6 +5403,7 @@ def main(argv: list[str] | None = None) -> int:
         _reject_retired_cli_strategy(args)
         if args.command in {"solve", "answer", "resume"}:
             _validate_preparation_cli_timeouts(args)
+            _validate_solve_wall_timeout_option(args)
             _validate_candidate_generation_option(args)
             _prepare_conversational_bundle(args)
             if (args.command == "solve" and not args.resume
@@ -5465,6 +5577,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
         if args.command == "resume":
             evolution_request = _latest_evolution_request(Store(config.database), args.run_id)
+            _validate_solve_wall_timeout_option(
+                args, evolution_request, allow_unresolved_handoff=False,
+            )
             if evolution_request is not None:
                 _validate_candidate_generation_option(args, evolution_request)
             if _has_preparation_timeout(args):

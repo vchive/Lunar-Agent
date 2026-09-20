@@ -2,9 +2,10 @@
 
 ## Current status
 
-Specification-only checkpoint dated 2026-09-20. Product implementation has not started. No Feature
-142 product test or implementation acceptance criterion has been claimed as passing. The
-read-only inspection used to write this design is not runtime or regression evidence.
+Implementation checkpoint dated 2026-09-20. Phase A CLI policy validation and handoff persistence
+are implemented and verified by focused offline tests. Shared execution deadlines, parent
+orchestration, cancellation/process cleanup, and detached execution remain unimplemented and are
+not claimed by this checkpoint.
 
 Only `spec.md`, `plan.md`, `tasks.md`, and this validation record are in scope for this checkpoint.
 No `src` file, Feature 139 file, retained historical evidence, provider configuration, real
@@ -14,8 +15,8 @@ registration, or campaign root is changed or executed by this specification work
 
 - Specify prerequisites passed with `--require-tasks --include-tasks` for this feature directory.
 - The four expected Markdown files are present, and both local document links resolve.
-- The task list has two completed specification/read-only inspection items and 23 open
-  implementation/verification/completion items.
+- The task list has T001/T002 specification items and T003/T004 implementation items complete;
+  the remaining implementation and verification tasks are open.
 - `git diff --check` passed at the specification checkpoint.
 
 These are document checks only. They do not close any product acceptance row below.
@@ -24,8 +25,8 @@ These are document checks only. They do not close any product acceptance row bel
 
 | Area | Required offline evidence | Status |
 | --- | --- | --- |
-| CLI validation | Valid bounds; zero/negative/bool/non-finite/malformed/out-of-range rejection; all unsupported modes rejected before side effects | Not run |
-| Persistence | Explicit policy and lifecycle marker; exact restore/match; no legacy policy injection; secrets excluded | Not run |
+| CLI validation | Valid bounds; zero/negative/bool/non-finite/malformed/out-of-range rejection; all unsupported modes rejected before side effects | Focused pass |
+| Persistence | Explicit policy and lifecycle marker; exact restore/match; no legacy policy injection; secrets excluded | Focused pass |
 | Shared deadline | One deterministic clock across intake, preparation, generation, execution, scoring, selection, and delivery; tighter local ceilings honored | Not run |
 | Exhaustion | Before claim/request/process, after late result, and before publication; one terminal event; no new work on continuation | Not run |
 | Parent lifecycle | Parent remains active while child runs; only verified delivery completes orchestration; ordinary scheduler cannot claim control task | Not run |
@@ -75,6 +76,18 @@ SPECIFY_FEATURE_DIRECTORY=specs/142-automatic-solve-lifecycle \
 git diff --check
 .venv/bin/python tools/run_tests.py --junit-dir .lunar/test-results/feature142
 ```
+
+The first implementation checkpoint passed the focused command below (automatic handoff,
+preparation policy, and solve-wall policy suites):
+
+```sh
+.venv/bin/pytest -q tests/test_solve_wall_timeout_cli.py \
+  tests/test_conversational_automatic_bundle.py \
+  tests/test_preparation_wall_timeout_cli.py
+```
+
+Ruff passed for `src/famou/cli.py` and the new solve-wall policy tests. This is not a Phase A
+completion claim; deterministic shared-deadline and parent-lifecycle tests remain required.
 
 Also verify local Markdown links and compare historical inventories with the retained authorities.
 Record exact test counts, skips, elapsed time, report locations, and independent review findings

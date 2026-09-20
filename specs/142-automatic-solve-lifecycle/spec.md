@@ -2,7 +2,9 @@
 
 **Created**: 2026-09-20
 
-**Status**: Specification only; implementation has not started.
+**Status**: Implementation in progress. Phase A policy validation and handoff persistence are
+landed; shared deadline, parent lifecycle, cancellation cleanup, and detached execution remain
+open.
 
 **Input**: Continue product development using SDD; connect full automatic multi-file execution
 budgets, parent/child cancellation, and local background execution using existing product controls.

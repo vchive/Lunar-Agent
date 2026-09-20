@@ -30,6 +30,26 @@ compileall 和 diff 检查通过。全量回归除冻结 Feature 123 的 24 个 
 当前 worker 层仍是显式本地 API，不代表自动多文件已有统一 wall-clock、后台、取消编排，
 也不代表真实模型端到端闭环已成功。
 
+## Feature 142：自动多文件 solve 生命周期（2026-09-20，Phase A 策略层开始实现）
+
+不新开 SDD，继续沿用 `specs/142-automatic-solve-lifecycle/`。本阶段已把
+`--solve-wall-timeout` 接入 `solve`、`resume`、`answer`，限制为原生自动多文件流程，校验有限
+正数范围和模式，并在 runtime、Store mutation、preparation 或答案工件之前拒绝非法值。
+新的自动 handoff 持久化 `automatic_lifecycle_version=1`；显式策略才写入
+`solve_wall_timeout` 与 `solve_wall_timeout_source=explicit`。续跑恢复精确值并拒绝不匹配、
+legacy handoff 注入和损坏 marker；省略值保持无策略的旧行为。
+
+新增 focused 回归覆盖新鲜请求、续跑恢复、legacy 兼容、错误值和副作用前拒绝；自动 bundle
+与 preparation wall budget 回归保持通过。当前只完成 Feature 142 T003/T004。T005–T012 的
+共享活动 deadline、父编排 task、自动 answer 统一路径、阶段预算传播、预算终态和状态投影仍
+未完成；T013–T017 的父子取消与本地进程组清理仍未完成，automatic `--detach` 继续明确拒绝。
+Feature 143 的 Worker/WorkerAttempt 仅作为可复用控制面基础设施，不能替代 142 的父编排生命周期；
+143 T009 显式 delegation consumer 迁移不阻塞 142。
+
+本阶段没有 provider 请求、真实 campaign、WebAgent 重跑或历史测量改写。下一步按 142 Phase A
+继续实现一个独占 automatic execution owner 与共享 monotonic deadline，再补确定性 clock 和
+parent lifecycle 集成测试；Phase B 清理验收通过前不开放 automatic detached。
+
 ## Feature 141：原生自动多文件 CLI 显式候选预算（2026-09-19，离线完成）
 
 按 SDD 实现 `solve/resume/answer --candidate-generation-max-steps`，仅适用于原生自动

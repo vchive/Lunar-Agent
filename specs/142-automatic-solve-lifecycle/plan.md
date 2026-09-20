@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-20
 
-**Status**: Specification only; no product implementation has started.
+**Status**: Implementation in progress; T003 and T004 are landed and verified offline.
 
 **Spec**: [spec.md](spec.md)
 
@@ -12,6 +12,11 @@ Extend the existing solve orchestration and Controller boundaries. Do not replac
 cancellation, the Store terminal-state rules, Feature 133 preparation policy, Feature 137 request
 clipping, or existing frozen candidate/evaluator identities. Keep the feature limited to native
 automatic multi-file population solving.
+
+Feature 143 supplies an independent local Worker/WorkerAttempt control plane. This feature may
+reuse its ownership and process-observer primitives where a later detached or child worker needs
+them, but it does not reinterpret the ordinary task DAG as a worker tree. Feature 143 T009,
+explicit delegation consumer migration, is optional and does not block this lifecycle.
 
 ## Phase A: Foreground budget and parent lifecycle
 
