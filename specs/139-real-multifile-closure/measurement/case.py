@@ -43,10 +43,10 @@ GOAL = (
     "and population evolution. Generate the contract and evaluator automatically."
 )
 
-REGISTRATION_ID = "registration-139-real-multifile-closure"
-CAMPAIGN_ID = "campaign-139-real-multifile-closure-20260920"
+REGISTRATION_ID = "registration-139-real-multifile-closure-50min"
+CAMPAIGN_ID = "campaign-139-real-multifile-closure-20260920-50min"
 ATTEMPT_ID = "attempt-001"
-CAMPAIGN_ROOT = ".lunar/real-automatic-multifile-closure-20260920"
+CAMPAIGN_ROOT = ".lunar/real-automatic-multifile-closure-20260920-50min"
 PRODUCT_COMMIT = "87d86d9bc78171e7ce772dd9069e133249b81312"
 MODEL = "glm-5.2"
 TASK_BYTES = GOAL.encode("utf-8")

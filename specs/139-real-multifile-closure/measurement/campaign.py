@@ -137,7 +137,7 @@ def default_manifest() -> dict[str, Any]:
             "request_timeout_seconds": 600,
             "preparation_request_timeout_seconds": 900,
             "preparation_wall_seconds": 1860,
-            "wall_seconds": 2400,
+            "wall_seconds": 3000,
             "max_requests": 20,
             "observed_token_stop": 160000,
             "candidate_steps": 12,
@@ -213,7 +213,7 @@ class RequestLedger:
     """One-shot request accounting with no retry or post-slot admission."""
 
     max_requests: int = 20
-    wall_seconds: float = 2400
+    wall_seconds: float = 3000
     token_stop_threshold: int = 160000
     requests: list[dict[str, Any]] = field(default_factory=list)
     closed: bool = False

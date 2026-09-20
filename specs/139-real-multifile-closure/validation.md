@@ -1,5 +1,42 @@
 # Validation
 
+## Authorized 50-minute preregistration revision (2026-09-20)
+
+The user authorized the single real acceptance attempt and requested 50 minutes instead of
+40 minutes before launch. The prior active manifest was copied byte-for-byte to
+`measurement/registrations/unlaunched-40min.json` before its active-path removal. Archive size:
+30,853 bytes. Archive SHA-256: `26fb2d8b447fd5f5b848016a55e041c5f273903f610d4b7c39c0bf10613f19f9`.
+The bytes matched the committed active manifest at the time of archival. The old campaign root
+`.lunar/real-automatic-multifile-closure-20260920` was absent, including no symlink. There was no
+admission, worker, attempt, or provider request. The archived registration is **superseded before
+admission** and contributes neither a failed run nor a retry/replacement to the one-attempt count.
+
+The revised registration/campaign/root all use the `-50min` suffix and freeze a 3,000-second total
+wall limit; all other fixed conditions and the product pin stay unchanged. The active manifest
+will be recreated only after this revision is tested and committed/pushed. Worker and supervisor
+propagation, prior-manifest archive discovery, inventory coverage, and the complete Feature 139
+offline suite must pass before that fresh registration. The earlier full-regression numbers below
+remain the prior implementation checkpoint and are not claimed as a rerun of this revision.
+
+Revision validation results:
+
+- Complete Feature 139 offline suite: **369 passed**, exit 0; the collection contains the previous
+  363 tests plus 6 focused preregistration-revision tests. No whole-repository rerun is claimed.
+- The focused revision tests lock the archived bytes/hash, prove only the three identities and
+  total wall value changed in the fixed contract, and verify archived registration/campaign/root
+  reuse is rejected. The archive is discovered by both measurement inventory and prior manifests.
+- The actual worker receives a 3,000-second runtime guard and completes the native synthetic
+  5-request/2-candidate/8-holdout path. A deterministic supervisor fixture accepts work after
+  2,400 seconds and at 2,999 seconds, stops at 3,000 seconds, and performs bounded cleanup.
+- Ruff, compileall, Specify prerequisites and `git diff --check` passed. The Specify script's
+  temporary feature-pointer write was restored; no global pointer change is part of this revision.
+- All 80 product files and 36 tracked historical files pinned by the archived manifest still
+  match their exact byte sizes and SHA-256 values. Both old and new real campaign roots remain
+  absent, and the active manifest path remains absent pending fresh registration.
+
+No real provider request, production registration/admission, or worker/supervisor launch occurred
+during revision validation. Tests use temporary fixtures and substituted local provider transport.
+
 ## Status
 
 Offline harness, native mapping, registration, observer, worker, supervision, and retained-evidence

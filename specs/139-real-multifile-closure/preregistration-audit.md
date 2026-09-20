@@ -238,7 +238,7 @@ unknown；native/process 非零退出。匹配数量不能覆盖失败或未知�
    preparation、execution、score、selection、parent delivery 的 native receipts。每个
    必需阶段均有来源，每个请求均归属同一登记/槽，后续产物不能补造缺失前置证据。
 5. **证明全部预算真正生效。** 修复 B002–B004；固定的普通 600 秒、准备请求 900 秒、准备
-   总墙钟 1860 秒、全程 2400 秒、20 请求、160000 observed-token stop、12 candidate steps
+   总墙钟 1860 秒、全程 3000 秒（2026-09-20 用户在 admission 前修订为 50 分钟）、20 请求、160000 observed-token stop、12 candidate steps
    和 holdout 时间均通过实际配置、native receipt 和同一 monotonic timeline 验证。保留
    首次关闭原因/时间以及本地监督进程的 deadline/cleanup 证据。
 6. **从保留产物独立验证成功。** 只读检查原生 source bundle、registered input、execution
@@ -262,3 +262,11 @@ campaign-local evidence/ledger/success gate、真实 harness 入口与 T007 已�
 本次复核按 B001–B011 及时间关联负测逐项检查实现和实际入口，不以测试数量增长代替关闭
 判定。未来代码变更仍须复验；本次离线关闭不使正式 registration、唯一真实运行或真实闭环
 验收自动完成。
+
+## 2026-09-20 启动前时限修订
+
+用户明确授权唯一真实验收，并将全程时限改为 50 分钟。此前 40 分钟 manifest 已逐字节归档
+至 `measurement/registrations/unlaunched-40min.json`，旧 root 未创建且没有 admission/provider
+请求，状态是 superseded before admission，不是失败、retry 或替代已执行槽。新登记使用
+`-50min` 身份和 root；唯一变化是全程 3000 秒，其余固定条件保持。上文 B002/B003 中的
+2400 秒是原离线缺陷复现条件，不代表当前启动预算。新的登记与 launch preflight 必须重做。

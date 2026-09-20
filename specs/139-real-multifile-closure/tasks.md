@@ -9,6 +9,20 @@ This list records the offline implementation checkpoint, before a concrete regis
 Later T008 status is established by `measurement/manifest.json` and read-only launch checks;
 verification evidence remains under ignored local paths without rewriting frozen SDD files.
 
+## Pre-admission 50-minute revision (2026-09-20)
+
+The user authorized the real attempt with a 50-minute total limit. The original 40-minute
+registration had no root, admission, attempt, or provider request and is superseded before
+admission; it is not a failed attempt or retry. Earlier text above records the offline checkpoint.
+
+- [x] T008r1 Archive the original manifest without changing its bytes; record unused-root proof
+      and the user's 3,000-second authorization in the SDD. Keep historical Feature 131/134 intact.
+- [x] T008r2 Use new `-50min` registration/campaign/root identities and a 3,000-second whole-attempt
+      wall limit; include the archive in inventory/prior-identity checks; prove unchanged other
+      budgets/input/product pin and worker/supervisor timeout propagation in focused tests.
+- [ ] T008r3 Commit/push the revision, create/push the new active manifest, and repeat read-only
+      launch preflight. Admit only its sole `attempt-001`; do not run the archived registration.
+
 - [x] T005a Independently re-audit the implemented B001–B006 corrections: request-stage bindings,
       sealed registration/ledger policy, immutable closure reasons and timing, and holdout outcome
       gates. Confirm every documented negative regression before T008.

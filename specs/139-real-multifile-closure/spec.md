@@ -1,9 +1,9 @@
 # Feature Specification: Real automatic multi-file closure acceptance
 
 **Created**: 2026-09-19
-**Status**: Offline implementation, retained-evidence integration, independent review and T007
-full regression complete; registration and the real attempt pending at this implementation checkpoint
-(2026-09-20)
+**Status**: Offline implementation and T007 full regression complete. The user authorized the
+sole real attempt with a 50-minute wall limit on 2026-09-20; fresh registration and launch preflight
+are required after superseding the unused 40-minute registration.
 **Input**: Feature 134's preparation-only outcome, Feature 136/137 budget contracts, and
 Feature 138's status/recovery projection
 
@@ -53,6 +53,31 @@ campaign root, and a complete request ledger with no pending or silently discard
 The public report exposes bounded metadata, stage outcomes, scores/check results, and hashes. It
 does not expose prompts, provider response text, credentials, endpoint values, generated source,
 or arbitrary exception text. Feature 131/134 files and WebAgent history remain unchanged.
+
+## Authorized pre-admission revision (2026-09-20)
+
+The user explicitly authorized the real acceptance attempt and requested changing its total wall
+limit from 40 to 50 minutes before launch. The original 40-minute manifest is retained byte for
+byte at [measurement/registrations/unlaunched-40min.json](measurement/registrations/unlaunched-40min.json)
+(30,853 bytes; SHA-256 `26fb2d8b447fd5f5b848016a55e041c5f273903f610d4b7c39c0bf10613f19f9`).
+Its root `.lunar/real-automatic-multifile-closure-20260920` had not been created; no admission,
+attempt, worker, or provider request occurred. Its status is **superseded before admission**,
+not a failed run, retry, resumed attempt, or replacement of an executed slot.
+
+The active registration uses these new identities:
+
+- `registration_id=registration-139-real-multifile-closure-50min`
+- `campaign_id=campaign-139-real-multifile-closure-20260920-50min`
+- `campaign_root=.lunar/real-automatic-multifile-closure-20260920-50min`
+- `attempt_id=attempt-001`, with one attempt total after admission.
+
+Only the whole-attempt wall budget changes to 3,000 seconds. Product pin, input/task bytes,
+provider/model identity, population, ordinary/preparation request limits, preparation wall limit,
+request/token/step limits, holdouts, and all success/failure rules remain unchanged. The old
+manifest is included in the new measurement inventory and prior-identity/root checks; none of its
+identities or root may be reused. The new manifest must be freshly registered, committed/pushed,
+and verified before the single authorized launch. Failure after that admission remains `0/1`
+with no retry, resume, repair, or replacement. Feature 131/134 evidence remains untouched.
 
 ## Fixed registration and run-slot contract
 
@@ -106,7 +131,7 @@ launch. If preflight cannot prove that the implementation honors a value, the ru
 - Ordinary/provider request timeout: **600 seconds**.
 - Preparation request timeout: **900 seconds**.
 - Preparation wall-clock limit: **1,860 seconds**.
-- Whole-attempt wall-clock limit: **2,400 seconds**, shared across every stage.
+- Whole-attempt wall-clock limit: **3,000 seconds (50 minutes)**, shared across every stage.
 - Maximum provider requests: **20**; stop admission before request 21.
 - Observed-token stop threshold: **160,000**. This is local accounting, not a provider token cap.
 - Candidate generation: one island, one population member, one offspring/round, one round, and

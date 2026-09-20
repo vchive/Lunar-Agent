@@ -5,6 +5,22 @@
 **Status**: Offline implementation, retained integration, and independent review complete
 (2026-09-20); T007 full regression passed; registration and real attempt pending at this checkpoint
 
+## Authorized 50-minute revision before admission
+
+On 2026-09-20 the user authorized one real attempt and changed only its whole-attempt wall limit
+from 2,400 to 3,000 seconds. Archive the already registered 40-minute manifest byte-for-byte as
+`measurement/registrations/unlaunched-40min.json`; record it as superseded before admission. Its
+root was absent and no slot or provider request existed, so it does not contribute an attempt or
+a failure denominator. Allocate new registration/campaign/root identities ending in `-50min`.
+
+Preserve the product pin and every other fixed condition. Include the archive in measurement
+inventory and prior-manifest uniqueness checks. Run the complete Feature 139 offline suite and
+verify both the worker deadline and supervisor receive the 3,000-second policy. This narrow
+measurement revision does not require or claim a repeat of the already completed whole-repository
+regression. Then commit/push the revision, register/push a new active manifest, and repeat clean
+HEAD/provider/unused-root/one-slot preflight before the sole authorized launch. No real run is
+started while making or testing this revision.
+
 ## Scope
 
 This is a measurement and preregistration feature, not a product feature. The final product pin

@@ -568,7 +568,10 @@ def _tracked_historical_names(repo: Path) -> tuple[str, ...]:
 
 def _prior_manifest_names(repo: Path) -> tuple[str, ...]:
     output = subprocess.check_output(
-        ["git", "ls-files", "specs/*/measurement/manifest.json"],
+        [
+            "git", "ls-files", "specs/*/measurement/manifest.json",
+            "specs/*/measurement/registrations/*.json",
+        ],
         cwd=repo,
         text=True,
     )
