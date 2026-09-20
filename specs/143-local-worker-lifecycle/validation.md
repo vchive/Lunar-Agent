@@ -2,8 +2,9 @@
 
 **Current status, 2026-09-21**: Lifecycle hardening passed its final shared and complete two-stage
 local regressions: 260 shared; current 8708 passed, 1 skipped, 24 deselected; frozen123 24 passed.
-The close-before-spawn repair is included. Explicit consumer migration
-(T009) remains incomplete. Earlier implementation and counterexample history is retained below.
+The close-before-spawn repair is included. Final Linux CI also passed on Python 3.11, 3.12 and
+3.13 at commit `8e1e089`; details are recorded at the end. Explicit consumer migration (T009)
+remains incomplete. Earlier implementation and counterexample history is retained below.
 
 ## Initial implementation validation, 2026-09-20
 
@@ -219,5 +220,27 @@ the earlier worker regression failed locally.
 
 These later changes affect only CI setup, current regression fixtures and their documentation;
 they do not change the worker product validated by the 8708/24 report pair. Their focused suites,
-Ruff and diff checks passed. The next complete Linux matrix is the cross-platform acceptance;
-the earlier local full count is not relabeled as a rerun of these additional fixture cases.
+Ruff and diff checks passed. The final Linux matrix below supplies complete cross-platform
+acceptance; the earlier local full count is not relabeled as a rerun of the additional fixtures.
+
+
+## Final Linux matrix acceptance
+
+[GitHub Actions run 35526731156](https://github.com/vchive/Lunar-Agent/actions/runs/35526731156)
+verified commit `8e1e0896a9b71a4959962eaf6df72a12be5e68bd`. The jobs API was checked at
+2026-09-20 18:05:13 UTC (2026-09-21 02:05:13 Asia/Shanghai):
+
+| Python | Install | Complete split regression | Reports/annotations | Ruff |
+| --- | --- | --- | --- | --- |
+| 3.11 | success | success | success | success |
+| 3.12 | success | success | success | success |
+| 3.13 | success | success | success | success |
+
+All three jobs completed successfully. The split runner validates its expected current test set
+and the unchanged 24-node frozen123 phase before returning success. No new failure was reported.
+This closes the code regression/CI gate and the local worker hardening acceptance. T009, automatic
+background execution and real-model delivery acceptance remain separate, incomplete scopes.
+
+The follow-up commit only records these completed checks in documentation. Product source,
+tests, dependency declarations and CI configuration remain byte-identical to the verified commit; that
+record-only update does not require another full matrix.

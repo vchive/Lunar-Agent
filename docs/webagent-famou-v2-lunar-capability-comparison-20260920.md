@@ -77,8 +77,8 @@ WebAgent 持平，也不能把 Feature 139 描述为端到端成功。
 并在 evaluator receipt、候选身份和交付证据上走得更严格。下一步的高价值工作是新的真实
 前台闭环验收、Feature 142 Phase C 后台入口，以及提高严格最终响应协议在真实模型下产出
 可执行候选的成功率。Feature 143 本地生命周期已补修复，下一步验证实际 consumer 接线。
-跨平台验证已定位并修复正向执行 fixture 的符号链接路径问题，Linux 矩阵仍待完成，具体见[系统评估](system-readiness-20260916.md)；
-本表的本地能力覆盖不代表 CI 或真实任务验收均通过。
+跨平台回归也已完成：`8e1e089` 的 Linux/Python 3.11、3.12、3.13 完整双阶段测试和静态
+检查均通过，具体见[系统评估](system-readiness-20260916.md)。真实模型完整交付仍待新验收。
 
 如果目标是“兼容 WebAgent 的线上产品形态”，还需要另行建设 OpenCode 插件/审批、完整多
 worker 编排、远程 FamouClient、队列、GPU sandbox、项目归属、SSE/HTTP trace 和多租户服务；这些
