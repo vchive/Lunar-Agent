@@ -59,6 +59,11 @@ replace or block Feature 142's separate foreground automatic multi-file acceptan
 
 ## Guardrails
 
+Verification infrastructure first retains the unchanged split regression command's stdout and
+JUnit reports in CI, publishes bounded failure annotations, and runs all supported Python versions
+without matrix fail-fast. This addresses the inaccessible Linux failure diagnostics observed during
+the audit; it does not classify the root cause or relax any product/frozen-history check.
+
 No database migration is assumed until the record shape and compatibility fixtures are accepted.
 Do not use `tasks.parent_id` as a substitute for `parent_worker_id`; do not copy OpenCode HTTP or
 plugin code into Lunar; do not run a provider campaign as implementation validation.

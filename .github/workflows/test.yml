@@ -9,6 +9,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
@@ -21,6 +22,25 @@ jobs:
       - name: Install package and test dependencies
         run: python -m pip install -e '.[dev]'
       - name: Run tests
-        run: python tools/run_tests.py --junit-dir .lunar/test-results
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p .lunar/test-results
+          python tools/run_tests.py --junit-dir .lunar/test-results 2>&1 | tee .lunar/test-results/pytest.log
+      - name: Annotate test failures
+        if: ${{ always() }}
+        run: python tools/annotate_test_failures.py .lunar/test-results/current.xml .lunar/test-results/frozen123.xml
+      - name: Preserve test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-python-${{ matrix.python-version }}
+          path: |
+            .lunar/test-results/current.xml
+            .lunar/test-results/frozen123.xml
+            .lunar/test-results/pytest.log
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
       - name: Static checks
         run: python -m pip install 'ruff>=0.6' && ruff check src tests tools

@@ -69,6 +69,13 @@ has no worker tool integration. T009 remains deferred until T006/T007 and T011â€
 
 ## Required repair validation
 
+CI diagnostic preparation adds an annotation helper and always-retained narrow stdout/JUnit
+artifacts, with matrix fail-fast disabled. Four helper tests passed, covering failure/error node
+identity, annotation escaping, missing/malformed reports and the bounded cross-report count.
+Ruff and diff checks passed; the existing Phase B JUnit pair produced no false failures. The
+regression runner and historical pins are unchanged. This is diagnostic visibility work, not a
+repair or a successful rerun of the failing Linux product tests.
+
 Continue the existing SDD tasks; no new feature is needed. Convert the three counterexamples
 into permanent regressions, verify exact attempt handle release across cancel/resume, and add
 local subprocess fixtures for real process observer ownership and cleanup failures. Run focused
