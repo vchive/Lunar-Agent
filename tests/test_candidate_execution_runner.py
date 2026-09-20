@@ -28,7 +28,7 @@ def _setup(tmp_path: Path, script: bytes = b"#!/bin/sh\ncat \"$LUNAR_CANDIDATE_I
     (inputs / "in.txt").write_bytes(b"hello")
     digest = hashlib.sha256(script).hexdigest()
     bundle = CandidateSourceBundle("a" * 64, "run.sh", (CandidateSourceFile("run.sh", len(script), digest),))
-    plan = build_candidate_workspace_plan(bundle, command=("/bin/sh",), contract_sha256="a" * 64, timeout_seconds=2, max_output_bytes=1024)
+    plan = build_candidate_workspace_plan(bundle, command=(str(Path("/bin/sh").resolve(strict=True)),), contract_sha256="a" * 64, timeout_seconds=2, max_output_bytes=1024)
     item = CandidateExecutionInput("in.txt", "fixture", 5, hashlib.sha256(b"hello").hexdigest())
     budget = CandidateExecutionBudget(2, 1024, 1024, 1)
     admission = build_candidate_execution_admission(
@@ -73,7 +73,7 @@ def test_nonzero_and_timeout_are_bounded(tmp_path: Path):
     assert result.execution.error == "process_failed"
 
     admission, plan, workspace, inputs = _setup(tmp_path / "timeout", b"#!/bin/sh\nsleep 1\n")
-    short_plan = build_candidate_workspace_plan(plan.bundle, command=("/bin/sh",), contract_sha256="a" * 64, timeout_seconds=0.1, max_output_bytes=1024)
+    short_plan = build_candidate_workspace_plan(plan.bundle, command=plan.command, contract_sha256="a" * 64, timeout_seconds=0.1, max_output_bytes=1024)
     short_admission = build_candidate_execution_admission(
         short_plan, inputs=admission.inputs, dependency_sha256="b" * 64, environment_sha256="c" * 64,
         evaluator=admission.evaluator, budget=CandidateExecutionBudget(0.1, 1024, 1024, 1),
@@ -94,7 +94,7 @@ def test_output_overflow_is_detected_without_unbounded_capture(tmp_path: Path):
 def test_timeout_does_not_wait_for_background_descendant_pipe(tmp_path: Path):
     admission, plan, workspace, inputs = _setup(tmp_path, b"#!/bin/sh\nsleep 5 &\nwait\n")
     short_plan = build_candidate_workspace_plan(
-        plan.bundle, command=("/bin/sh",), contract_sha256="a" * 64,
+        plan.bundle, command=plan.command, contract_sha256="a" * 64,
         timeout_seconds=0.1, max_output_bytes=1024,
     )
     short_admission = build_candidate_execution_admission(

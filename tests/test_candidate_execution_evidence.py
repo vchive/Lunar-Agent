@@ -36,8 +36,9 @@ def fixture(tmp_path: Path, script: bytes | None = None):
         "a" * 64, "run.sh",
         (CandidateSourceFile("run.sh", len(script), hashlib.sha256(script).hexdigest()),),
     )
+    # Linux may alias both /bin and sh; admission names the actual executable identity.
     plan = build_candidate_workspace_plan(
-        bundle, command=("/bin/sh",), contract_sha256="a" * 64,
+        bundle, command=(str(Path("/bin/sh").resolve(strict=True)),), contract_sha256="a" * 64,
         timeout_seconds=0.2, max_output_bytes=1024,
     )
     item = CandidateExecutionInput("value", "fixture", len(b"evidence-fixture"), hashlib.sha256(b"evidence-fixture").hexdigest())

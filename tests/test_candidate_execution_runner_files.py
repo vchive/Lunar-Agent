@@ -23,7 +23,7 @@ from famou import (
 )
 
 
-def _fixture(tmp_path: Path, *, environment=None, max_processes: int = 1, command=("/bin/sh",)):
+def _fixture(tmp_path: Path, *, environment=None, max_processes: int = 1, command=None):
     tmp_path.mkdir(parents=True, exist_ok=True)
     workspace = tmp_path / "workspace"
     inputs = tmp_path / "inputs"
@@ -37,7 +37,8 @@ def _fixture(tmp_path: Path, *, environment=None, max_processes: int = 1, comman
         "a" * 64, "run.sh", (CandidateSourceFile("run.sh", len(script), hashlib.sha256(script).hexdigest()),)
     )
     plan = build_candidate_workspace_plan(
-        bundle, command=command, contract_sha256="a" * 64,
+        bundle, command=(str(Path("/bin/sh").resolve(strict=True)),) if command is None else command,
+        contract_sha256="a" * 64,
         timeout_seconds=2, max_output_bytes=1024, environment=environment,
     )
     item = CandidateExecutionInput("value", "fixture", 2, hashlib.sha256(b"ok").hexdigest())
@@ -154,7 +155,7 @@ def test_fifo_input_root_is_rejected(tmp_path: Path):
 
 
 def test_all_32_planned_command_items_are_executable(tmp_path: Path):
-    command = ("/bin/echo", *(f"value-{index}" for index in range(31)))
+    command = (str(Path("/bin/echo").resolve(strict=True)), *(f"value-{index}" for index in range(31)))
     admission, plan, workspace, inputs = _fixture(tmp_path, command=command)
     result = run_candidate_execution(admission, plan=plan, workspace_path=workspace, input_path=inputs)
     assert result.execution.status == "succeeded"

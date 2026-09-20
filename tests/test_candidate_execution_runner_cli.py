@@ -34,7 +34,7 @@ def _fixture(tmp_path: Path):
         "a" * 64, "run.sh", (CandidateSourceFile("run.sh", len(script), hashlib.sha256(script).hexdigest()),)
     )
     plan = build_candidate_workspace_plan(
-        bundle, command=("/bin/sh",), contract_sha256="a" * 64,
+        bundle, command=(str(Path("/bin/sh").resolve(strict=True)),), contract_sha256="a" * 64,
         timeout_seconds=2, max_output_bytes=1024,
     )
     admission = build_candidate_execution_admission(
