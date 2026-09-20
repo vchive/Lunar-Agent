@@ -8,6 +8,20 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## Feature 143：本地多 Agent worker 生命周期规格（2026-09-20，规格完成）
+
+已根据 WebAgent `famou-v2.5` 的 multiagent 实现完成 SDD 规格、方案、任务和验证边界，
+但尚未开始产品实现。WebAgent 的 subagent 是独立 worker session，具有
+`agent/send/list/wait/cancel`、父子 ownership、深度限制、双维 phase/outcome、结算复查、
+结果单出口、级联取消和重启 reconcile/lost；Lunar 现有 `AgentRegistry`、task DAG 和
+Controller 只覆盖角色路由、一次性同步委派、任务持久化和基础取消，不能宣称生命周期等价。
+
+Feature 143 的本地路线是新增独立 Worker/WorkerAttempt 层，复用现有 AgentRegistry、runtime
+和 process observer，但不把 `tasks.parent_id` 冒充 worker 树，也不复制 OpenCode plugin 或
+远程 FamouClient。先完成持久模型、纯结算规则和 Controller API，再接一个显式 delegation
+消费者；自动多文件和 detached 入口另由 Feature 142 控制。没有 provider 请求、WebAgent
+重跑或真实 campaign。详见 `specs/143-local-worker-lifecycle/`。
+
 ## Feature 141：原生自动多文件 CLI 显式候选预算（2026-09-19，离线完成）
 
 按 SDD 实现 `solve/resume/answer --candidate-generation-max-steps`，仅适用于原生自动
