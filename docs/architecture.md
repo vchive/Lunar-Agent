@@ -1,5 +1,8 @@
 # Lunar-Agent architecture
 
+For the current implementation snapshot, execution chains, operational boundaries, and verified
+Feature 139 status, see [Current architecture and execution flow](current-architecture-20260920.md).
+
 Lunar-Agent keeps the useful *effect layer* ideas from WebAgent v2.5 while remaining a single
 local process and an installable CLI. The model runtime is an adapter: Hermes-style sessions,
 OpenAI-compatible endpoints, a subprocess agent, and the deterministic mock runtime all use the

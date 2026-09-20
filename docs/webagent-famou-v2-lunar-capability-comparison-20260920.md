@@ -1,0 +1,75 @@
+# Lunar 与 WebAgent + famou-v2 能力对照
+
+日期：2026-09-20。
+
+本文将当前 Lunar 源码、离线验证和 Feature 139 的唯一真实多文件运行，与本地审计过的
+WebAgent v2.5 和 famou-v2 引擎做能力对照。这里的“覆盖”指 Lunar 具备对应的本地
+数据链或协议；它不等于已经在真实模型上取得相同成功率，也不等于复刻了对方的服务实现。
+
+## 结论
+
+Lunar 已经覆盖 WebAgent/famou-v2 最重要的本地求解与程序演化链：任务合同、工具循环、
+角色/DAG、候选生成、种群搜索、独立执行、独立评测、有效性优先选优、lineage、checkpoint、
+seed admission、证据收据和父任务交付。
+
+Lunar 没有覆盖 WebAgent 的 OpenCode 产品层和 famou-v2 的远程实验控制面：插件注册、持久
+审批门、完整 WorkerRegistry、`FamouClient`/`famou-ctl`、远程 GPU sandbox、project relay、
+SSE replay 和多租户服务。这些不是当前本地路线的默认依赖。
+
+## 能力矩阵
+
+状态含义：**已覆盖** = 有本地实现和协议；**部分覆盖** = 有相近实现但生命周期或语义不同；
+**未覆盖** = 当前没有对应能力，或按本地路线明确不迁移。
+
+| 能力域 | Lunar 当前状态 | 与参考仓库的关系 |
+| --- | --- | --- |
+| Agent 工具循环、模型适配、请求/工具/token 预算、transcript、取消 | **已覆盖**。`AgentLoopRuntime`、runtime adapters、usage ledger 和事件/会话记录均在本地。 | 对应 WebAgent 的普通 agent 执行层；不依赖 OpenCode。 |
+| 普通任务合同、计划、依赖 DAG、角色路由、验收和交付 | **已覆盖**。默认链路为 `data_discovery → formulate → solve → verify`，并支持显式 role DAG。 | 覆盖 WebAgent 的 Master/Build 的主要数据流；角色 prompt 和动态 specialist 派发不是原样复制。 |
+| 本地持久状态和基础恢复 | **已覆盖**。SQLite/WAL 保存 run/task/attempt/event/artifact/计划版本，普通任务支持恢复、取消和进程组登记。 | 覆盖持久化和基础 crash recovery；自动多文件的父子后台生命周期仍未统一。 |
+| Memory cards / 跨任务记忆核心 | **已覆盖**。`MemoryStore`、global/run scope、显式 recall/remember 和 transcript 已存在。 | 对应 WebAgent memory cards 的核心数据能力；没有 WebAgent 的远端产品级 user/project 服务。 |
+| Select → Generate → Evaluate → Judge 的演化抽象 | **已覆盖（本地等价链）**。`PopulationStrategy` 有 generation、parent lineage、archive、island、migration 和 checkpoint/resume。 | 覆盖 famou-v2 的核心演化思想，但不是其具体 `adaptive_cluster`、feature-vector clustering、`LLMJudge` 实现。 |
+| 候选生成和严格协议 | **已覆盖**。多文件候选必须通过严格 JSON/source-map 解析，Markdown fence、说明文字和字段类型错误会拒绝。 | 结果边界比“模型返回了代码”更严格；Feature 139 的真实响应证明拒绝逻辑实际生效。 |
+| 多文件候选隔离执行 | **已覆盖**。源码、输入、命令、依赖、环境、输出限制和执行身份先准入，再在独立 workspace/进程组执行。 | 覆盖 famou-v2 的候选执行层；不是远程容器或 GPU sandbox。 |
+| 独立 evaluator、exact receipt、validity-first 选优 | **已覆盖**。冻结 evaluator/auditor/profile，重新核验 launch-intent、result/completed、inode、digest 和输出快照，再进入 archive。 | 这是 Lunar 的主要强项；外部 producer 自报分数不能替代本地权威评测。 |
+| Seed admission、lineage、外部候选重验 | **已覆盖（本地化）**。OpenEvolve/Shinka/generic producer 材料带 fingerprint、source digest、依赖/环境身份，并重新走本地 evaluator。 | 对应 famou-v2 的 initial-program feasibility gate；没有接入其远程 experiment service。 |
+| OpenEvolve / Shinka | **部分覆盖**。handoff、seed manifest 和本地重新准入协议存在；原生自动多文件入口尚未直接启动外部 producer，真实框架效果也未验收。 | 能接“已完成候选材料”，还不是完整 producer 调度平台。 |
+| 失败分类、unknown、checkpoint/resume | **部分覆盖**。候选失败、timeout、unknown、run failure 和 preparation failure 有固定记录。 | 与 famou-v2 的 retry queue/正式 iteration 语义不同；不能宣称恢复语义完全相同。 |
+| 全链路 wall-clock、父子取消、后台自动多文件 | **未完成**。Feature 142 仍是 SDD，自动多文件入口当前不开放统一 `--detach`。 | 这是当前本地产品的主要生命周期缺口，不是 WebAgent 远端能力缺口。 |
+| WebAgent 持久 approval gate | **部分覆盖**。Lunar 有 policy、event ledger、recovery 和 cancel，但没有完整的 `pending/approved/failed/timed_out/abandoned/not_confirmed` 状态机、同会话阻断和 bypass 防护。 | 应吸收状态机和未知终态原则，不必复制 OpenCode hook。 |
+| WebAgent WorkerRegistry | **部分覆盖**。Lunar 有 controller task/attempt、AgentLoop、checkpoint/transcript 和恢复；没有完整持久 `send/list/wait/cancel`、父子级联、idle/error/abort、background notification 和 restart reconcile 语义。 | 这是多 Agent 生命周期差异，不是普通 DAG 缺失。 |
+| WebAgent `evolve_*` / `FamouClient` / `famou-ctl` | **未覆盖，且当前不迁移**。Lunar 默认使用本地 population 和本地 Store。 | 对方是远程实验控制面；Lunar 只保留 transport-neutral 的协议边界。 |
+| 远程 GPU、sandbox、upload/download、project relay | **未覆盖**。Lunar 当前是本地受控子进程和本地 workspace。 | 属于 WebAgent/famou-v2 服务部署能力，当前产品没有这个运行前提。 |
+| Provider HTTP trace、SSE stall replay、OpenCode plugin compatibility | **未覆盖等价实现**。Lunar 有 transcript、usage 和事件诊断，但没有 provider fetch hook 或 OpenCode 1.3.10 插件兼容层。 | 只能吸收脱敏、可审计和 unknown 不自动重试的原则。 |
+
+## 真实证据边界
+
+当前代码和离线夹具已经能走完“准备 → 生成 → 解析 → 隔离执行 → 独立评分 → 选择 → 父任务
+交付”的完整数据链，但 Feature 139 的唯一 50 分钟真实槽没有产出有效候选：
+
+- preparation：`1/1`；
+- 17 次请求均 HTTP 200，已知用量 `135344 tokens`；
+- 候选生成回执：`worker_failed`、`malformed_candidate`；
+- completed/evaluated/valid candidates：`0`；
+- primary/joint：`0/1`；
+- 没有候选执行、独立评分、选择、父任务交付或 holdout；
+- native/process exit 为 `1`，cleanup 通过。
+
+因此可以说 Lunar 已覆盖主要实现能力和证据边界，不能据此说它在真实模型效果上已经与
+WebAgent 持平，也不能把 Feature 139 描述为端到端成功。
+
+## 产品判断
+
+如果目标是“本地可验证的 Agent + 程序演化系统”，Lunar 已经覆盖参考仓库最值得迁移的核心，
+并在 evaluator receipt、候选身份和交付证据上走得更严格。下一步的高价值工作是 Feature 142
+的统一自动求解生命周期，以及提高严格最终响应协议在真实模型下产出可执行候选的成功率。
+
+如果目标是“兼容 WebAgent 的线上产品形态”，还需要另行建设 OpenCode 插件/审批、持久多
+worker、远程 FamouClient、队列、GPU sandbox、项目归属、SSE/HTTP trace 和多租户服务；这些
+不应被当前 Lunar 的本地能力表述为已经完成。
+
+参考审计：
+
+- [WebAgent v2.5 迁移矩阵](webagent-v25-lunar-capability-matrix-20260911.md)
+- [famou-v2 引擎审查](famou-v2-engine-review-20260911.md)
+- [当前架构快照](current-architecture-20260920.md)
+- [Feature 139 真实运行报告](../specs/139-real-multifile-closure/postrun/report.md)

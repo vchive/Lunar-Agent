@@ -19,12 +19,11 @@ run 墙钟传播和取消竞态，以及公开 transport status 和 persisted/ef
 和实际 retained summary 已完成离线集成；[预登记独立复核](../specs/139-real-multifile-closure/preregistration-audit.md)
 已关闭 B001–B011 与请求/阶段时间关联漏洞。原生 CLI 夹具仅替换 HTTP 响应，完成5次请求、
 2个 completed candidates、8项holdout和父任务完整交付；363项专项测试已在全量内全部通过。
-T007双阶段回归为当前8409 passed/1 skipped/24 deselected（668.93秒）、固定历史24 passed
-（22.92秒），overall exit0，静态检查及历史字节核验通过。全量启动后的登记清单窄改动另经
-18项registration_store、静态及最终清单核验通过，不声称全量重新加载了该改动。下一步提交
-推送，再固定具体manifest并核验唯一未用槽；本次离线实现检查点尚未登记或真实运行。
-之后以`measurement/manifest.json`和只读启动检查为准，T008证据保存在忽略的本地路径；
-离线闭环不代表139真实验收完成。
+随后唯一真实 `attempt-001` 已完成：17 次请求全部 HTTP 200，135344 tokens，preparation `1/1`，
+两个候选生成回执为 `worker_failed` 与 `malformed_candidate`，没有 completed candidate、
+执行、评分、选择、交付或 holdout，primary/joint 为 `0/1`。真实结果不是预算耗尽，完整报告见
+`../specs/139-real-multifile-closure/postrun/report.md`。T007 双阶段回归、静态检查和历史字节
+核验仍保持通过；真实槽不重开、不修复、不追加请求。
 外部producer多文件接线、产品全链路预算、运行中取消编排和detached仍未完成；139的固定
 测量预算不替代通用产品能力。
 [Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 的spec/plan/tasks/validation四份
@@ -32,8 +31,9 @@ SDD已写，产品全流程预算与取消编排实现尚未开始，23项任务
 下文按日期保留实现过程，旧条目中的“下一步”以该评估和最新 HANDOFF 为准。
 
 本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
-信息核对于 2026-09-11；没有执行外部框架、模型、provider、远端服务、候选评测或真实
-campaign。普通流程效果只参考已有 Lunar 历史分数，不再安排 WebAgent 重跑或深度演化对比。
+信息核对于 2026-09-11；没有执行外部框架、远端服务或新的 WebAgent 对比；Feature 139 的
+模型 provider 真实槽仅验证了准备和失败诊断。普通流程效果只参考已有 Lunar 历史分数，不再
+安排 WebAgent 重跑或深度演化对比。
 当前 Feature 084/085 建立 verified seed、population-first 和协议边界，Feature
 086 又把已完成的远端 material observation 接到同一 exact-harness admission；仓库同时具备
 OpenEvolve 的有界本地 subprocess producer 接线、ShinkaEvolve 的只读离线结果 exporter，以及

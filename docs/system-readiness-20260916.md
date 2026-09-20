@@ -5,7 +5,8 @@
 当时全量当前 8166 项和历史固定 24 项通过（当前 1 skipped）。Feature 139 的原生证据链、
 worker 和只读 summary 已完成离线集成及独立复核；363 项专项测试在本轮全量中全部通过。
 完整双阶段为当前 8409 passed / 1 skipped / 24 deselected、固定历史 24 passed，overall exit0。
-本次离线实现检查点尚未登记或真实运行，当前仍没有通过真实自动多文件完整交付验收。
+Feature 139 的唯一真实 `attempt-001` 已完成，但未通过自动多文件完整交付验收：
+preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或父任务交付。
 以下历史段落保留各次测量当时的判断，当前安排见“下一项实现需要解决的具体问题”。
 
 Feature 136 已为单文件和 bundle 候选生成加入显式、不可变的每候选 tool-step budget 与
@@ -241,17 +242,16 @@ event、run/task/budget/candidate identity 和源码 bundle digest；瞬态 diag
 [140 validation](../specs/140-candidate-generation-receipt/validation.md) 和
 [141 validation](../specs/141-native-multifile-cli-budget/validation.md)。这些均不是新真实测量。
 
-Feature 139 已完成原生六阶段证据链、worker/supervision、注册 inventory 与实际 retained
-summary 的离线集成。[预登记独立复核](../specs/139-real-multifile-closure/preregistration-audit.md)
-已关闭 B001–B011 和请求/阶段时间关联缺口。仅替换 HTTP 响应的原生 CLI 夹具完成 5 次请求、
-2 个 completed candidates、8 项 holdout 及父任务交付，质量 3/3；缺失证据、超预算及
-holdout_gate 失败均不得获得成功。363 项专项测试在全量内全部通过；T007 双阶段验证为
-当前 8409 passed / 1 skipped / 24 deselected（668.93 秒）及固定历史 24 passed（22.92 秒），
-overall exit0。静态检查和历史字节核验通过；全量开始后登记清单的窄范围补充另经 18 项
-registration_store、静态及最终清单核验通过，未声称全量重新加载该补充。随后仍须提交推送、
-固定具体 manifest 并核验唯一未用槽；本次离线实现检查点尚未登记或真实运行。后续登记以
-`measurement/manifest.json` 和只读启动检查为准，T008 核验保存在忽略的本地证据中。
-离线夹具不能替代真实结果。
+Feature 139 已完成原生六阶段证据链、worker/supervision、注册 inventory、实际 retained
+summary 与唯一真实槽。[预登记独立复核](../specs/139-real-multifile-closure/preregistration-audit.md)
+已关闭 B001–B011 和请求/阶段时间关联缺口。离线 CLI 夹具完成 5 次请求、2 个 completed
+candidates、8 项 holdout 及父任务交付，质量 3/3；缺失证据、超预算及 holdout_gate 失败均
+不得获得成功。随后真实 `attempt-001` 在 3000 秒登记上限内用时 811.740448 秒，17 次请求均
+HTTP 200，已知用量 135344 tokens；preparation `1/1`，两个候选生成回执为 `worker_failed`
+与 `malformed_candidate`，completed/evaluated/valid candidates 均为 0，primary/joint 均
+为 `0/1`，未进入执行、独立评分、选择、交付或 holdout。native/process exit 均为 1，cleanup
+通过。结果不是预算耗尽，也不证明当前模型的自动多文件交付成功；完整报告见
+`../specs/139-real-multifile-closure/postrun/report.md`。
 
 [Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 的四份 SDD 已写，产品全流程
 预算与取消编排实现尚未开始，23 项任务待完成。
@@ -267,16 +267,16 @@ registration_store、静态及最终清单核验通过，未声称全量重新�
    投影并完成新的唯一真实槽：准备1/1、8/8holdout，但primary/joint仍0/1。只读证据确认
    三次生成都被max_steps=4工具预算阻断；136/137 已离线完成候选预算、完成诊断、run
    墙钟传播和取消竞态，不改变旧guard语义。138 已完成状态投影/恢复契约和离线验证，
-   下一次真实运行仍须独立登记；不预设新预算数值。
+   Feature 139 的唯一真实槽已完成且为 `0/1`；任何后续真实运行都须另行独立登记，不能
+   重开或修复旧槽。
    历史远端耗时原因仍未知；
    不补旧槽、不改失败分母，也不把本地协议验证当成模型成功率或质量已提高。
 2. 父任务交付、artifact 预算和 output journal 恢复已接通；自动模式恢复只需完整任务
    workspace/Store，不需外部 profile 路径。显式 profile 模式仍须提供匹配资源。运行中取消
    和全链路总时长编排继续待补，未知现场不自动重跑，终态恢复不增加候选或交付副本。
-3. Feature 140/141 已补持久生成回执、CLI 预算并完成验证推送；Feature 139 的原生闭环、
-   worker/summary 离线集成、独立复核和全量回归已通过。先完成提交推送与具体 manifest/
-   启动 preflight，再独立登记一次真实多文件闭环，至少保留一个 completed candidate、
-   execution、independent score、selection 和 parent delivery；失败分母保持为1，不重开旧槽。
+3. Feature 140/141 已补持久生成回执、CLI 预算并完成验证推送；Feature 139 的真实槽已
+   完成但没有 completed candidate 或交付。下一项产品工作应另立 SDD，优先提高严格最终
+   响应协议的可完成性并保留 typed worker failure；失败分母保持为1，不重开旧槽。
 4. 扩展通用 producer material/SeedManifest 的多文件接线，使 OpenEvolve/Shinka 输出也
    进入同一完整源码路径，再用独立登记的小规模任务验证当前模型和真实 producer 效果。
 

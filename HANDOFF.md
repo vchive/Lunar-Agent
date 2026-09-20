@@ -27,12 +27,12 @@ Feature 140 的持久生成 receipt 已由 `741900a` 推送，Feature 141 产品
 通过。Feature 140 遗留的历史固定版本验证也已收尾。具体验证记录见 `specs/141-native-multifile-cli-budget/validation.md`。
 没有 provider 请求、真实 campaign、历史生成源码执行或 WebAgent 重跑。
 
-Feature 139 的登记前证据链、registration/inventory、worker/observer/supervision、实际
-retained summary、文本 stdout 捕获及 holdout_gate 失败投影已完成离线集成和独立复核。
+以下是 Feature 139 真实运行前的离线检查点，保留作历史上下文。其登记前证据链、
+registration/inventory、worker/observer/supervision、实际 retained summary、文本 stdout
+捕获及 holdout_gate 失败投影已完成离线集成和独立复核。
 B001–B011 与请求/阶段时间关联漏洞均已修复；本轮完整双阶段回归通过。范围见
 [139 预登记审计](specs/139-real-multifile-closure/preregistration-audit.md)。
-离线测试通过不代表已登记；本次离线实现检查点没有 Feature 139 manifest 或真实运行。139 离线产品引用
-已改为 `87d86d9`，还须在 T008 封存完整 inventory；不能把该引用当作正式登记。
+当时离线测试通过不代表已登记；后续真实登记和运行结果以本节下面的 Feature 139 最终记录为准。
 
 ## Feature 138：公开状态投影与 preparation 恢复契约（2026-09-19，离线完成）
 
@@ -51,22 +51,24 @@ malformed-stage 回归；状态投影测试 4 项通过。Ruff、compileall、Sp
 SHA 均与 evidence 一致；没有 provider 请求、campaign 恢复、evaluator 调用或生成源码执行。
 规格与验证边界见 `specs/138-status-projection-recovery/`。
 
-下一步是 Feature 139 的 specification-first 新立项，随后才可冻结新的 registration 并贯通
-preparation → parser-gated completed candidate → execution → independent scoring → selection
-→ parent delivery；至少一个 completed candidate 才能算 primary/joint 成功。Feature 139 当前
-没有 registration、provider 请求或真实运行；不能追加 Feature 131/134，也不安排 WebAgent 对比。
+Feature 139 的唯一真实槽已经完成：preparation `1/1`，primary/joint `0/1`。17 次请求均
+HTTP 200，已知用量 135344 tokens；两个候选生成回执分别为 `worker_failed` 和
+`malformed_candidate`，没有 completed candidate、执行、独立评分、选择、父任务交付或
+holdout。不能追加旧槽、改写 Feature 131/134，或安排 WebAgent 对比。详见
+`specs/139-real-multifile-closure/postrun/report.md`。
 
-## Feature 139：真实自动多文件闭环验收（2026-09-20，离线集成与独立复核通过）
+## Feature 139：真实自动多文件闭环验收（2026-09-20，唯一真实槽完成，闭环 0/1）
 
-已新建 `specs/139-real-multifile-closure/` 的 spec/plan/tasks/validation。它只定义下一次
-新的 registration、campaign、`attempt-001` 和未使用 root，要求推送后 `HEAD == origin/main`、
-唯一运行槽和一次性分母。阶段证据必须按 preparation、候选 parser-gated completed、隔离执行、
-独立评分、有效性优先选择、父任务交付严格串联；缺失或冲突的前置 receipt 不能由后续结果补齐。
+唯一登记为 `registration-139-real-multifile-closure-50min`，campaign root 为
+`.lunar/real-automatic-multifile-closure-20260920-50min`，产品固定为 `87d86d9`，登记提交为
+`60efead`，manifest SHA-256 为 `12c62065...f0d7`。阶段证据按 preparation、候选
+parser-gated completed、隔离执行、独立评分、有效性优先选择、父任务交付严格串联；缺失或
+冲突的前置 receipt 不能由后续结果补齐。
 
-建议固定普通请求 600 秒、preparation 请求 900 秒与 wall 1860 秒、全程 wall 2400 秒、最多
-20 次请求、160000 observed tokens、每候选 12 tool steps 和 8 个 holdout。失败保留 `0/1`，
-不允许 retry/resume/repair/replacement；Feature 131/134、WebAgent 和外部 producer 均不重开或
-比较。先完成离线 registration/阶段链/审计 fixture 与全量回归，再决定是否登记并运行唯一真实槽。
+实际注册条件为普通请求 600 秒、preparation 请求 900 秒与 wall 1860 秒、全程 wall 3000 秒、
+最多 20 次请求、160000 observed tokens、每候选 12 tool steps 和 8 个 holdout。一次性槽已
+结束，不允许 retry/resume/repair/replacement；Feature 131/134、WebAgent 和外部 producer 均
+不重开或比较。
 
 离线 campaign/ledger、registration/trust-root/inventory、worker、observer、runner、supervision
 和 retained summary 已完成实现与独立复核。B001–B011、请求 effective timeout 越界、准备
@@ -86,10 +88,12 @@ holdout 且可正常汇总；只读分析不调用 provider、候选或 evaluato
 
 全量启动后，登记清单另补 Feature 113 runtime guard 和 Feature 134 合成测试 fixture 的
 覆盖；该窄改动经 18 项 registration_store、静态与最终清单核验通过，不声称全量重新加载。
-T007 已完成。本次离线实现检查点尚未登记、创建真实 campaign root 或发出 provider 请求。
-下一步提交推送，再完成 T008 具体 manifest/inventory、已推送状态和唯一未用槽启动检查；
-后续登记以 `measurement/manifest.json` 及只读启动检查为准，T008 核验保存在忽略的本地
-证据中，避免登记后改写冻结的 139 文档。离线成功不是新的真实效果结果，131/134 分母不变。
+T007 离线验证、T008 登记与 preflight、T009 唯一真实运行、T010 单次 summary/独立审计均已
+完成；结果为 preparation `1/1`、primary/joint `0/1`，监督耗时 811.740448 秒，native/process
+exit 均为 1，cleanup 通过。真实结果与限制见 `specs/139-real-multifile-closure/postrun/`；
+后续产品工作应另立 SDD，保留 strict parser，并补 typed worker failure 与更可靠的候选最终
+响应协议。Feature 142 的全流程 wall timeout、父子取消传播、进程组清理和自动多文件 detached
+仍未实现。
 
 [Feature 142](specs/142-automatic-solve-lifecycle/spec.md) 的 spec/plan/tasks/validation
 四份 SDD 已写，产品全流程预算与取消编排实现尚未开始，23 项任务待完成。
