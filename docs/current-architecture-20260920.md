@@ -1,9 +1,9 @@
 # Lunar Evolution：当前架构与执行链路
 
-创建日期：2026-09-20；2026-09-21 更新包含已完成本地验收的 143 修复。142 的已推送历史基线为
-`65d9ae2`。Feature 142 Phase A 前台生命周期和
-Phase B 进程登记/取消清理已经完成离线验收，Phase C 自动多文件后台入口尚未开放。Feature
-143 已补本地 worker 的并发隔离、精确进程清理与 owner 活性恢复；实际 consumer 仍待接入。
+创建日期：2026-09-20；2026-09-21 更新包含 Feature 142 Phase C 与已完成本地验收的 143 修复。
+142 Phase A/B 的已推送历史基线为 `65d9ae2`。Phase C 自动多文件后台入口现已实现，真实
+本机子进程与回环 HTTP 夹具已通过；本次完整三阶段回归已通过，不代表当前版本已通过 Linux。
+Feature 143 已补本地 worker 的并发隔离、精确进程清理与 owner 活性恢复；T009 实际 consumer 仍待接入。
 下文分别说明已经实现的路径和仍待验收的边界。
 
 ## 1. 系统定位
@@ -52,7 +52,7 @@ flowchart TD
 | --- | --- | --- |
 | 入口与编排 | 命令、模式校验、输入导入、继续运行、普通/演化分流 | `cli.py` |
 | 控制层 | 创建/领取任务、并发、预算检查、结果登记、取消、父子交付 | `controller.py` |
-| 自动求解生命周期 | 活动执行排他、共享截止时间、阶段检查、父任务编排、状态投影 | `automatic_solve_lifecycle.py`、`cli.py`、`controller.py` |
+| 自动求解生命周期 | 活动执行排他、后台所有权交接、共享截止时间、阶段检查、父任务编排、状态投影 | `automatic_solve_lifecycle.py`、`automatic_solve_worker.py`、`cli.py`、`controller.py` |
 | 显式 worker 控制面 | 独立 attempt 执行、owner 活性锁、等待、原子消息续跑、精确进程清理及结果持久化 | `workers.py`、`worker_ownership.py`、`store.py` |
 | 状态层 | run/task/attempt、事件、产物索引、计划版本、进程归属 | `store.py`、`models.py` |
 | 计划与角色 | 任务合同、依赖图、领域与能力选择、恢复建议 | `conversational.py`、`algorithm.py`、`policy.py`、`routing.py`、`profiles.py`、`recovery.py` |
@@ -99,7 +99,9 @@ Store migration 8 增加可空 service owner 和独立进程表；服务持有�
 
 ## 4. 原生自动多文件演化怎样执行
 
-入口为 `solve --evolve --multi-file`。当前只接原生 population 策略，自动准备 evaluator；外部 producer 和后台模式尚未接到这个入口。
+入口为 `solve --evolve --multi-file`。当前只接原生 population 策略，自动准备 evaluator；
+外部 producer 尚未接入。新生命周期任务已支持 `--detach`，以及 `solve --resume --detach`、
+`resume --detach`、`answer --detach`，前后台进入同一自动执行路径。
 
 ```mermaid
 flowchart TD
@@ -126,6 +128,7 @@ flowchart TD
 
 ```text
 CLI solve / resume / answer
+  → 可选后台启动：继承执行锁 → 登记 PID/PGID → 放行本地 worker
   → 自动活动执行入口：排他锁、SolveExecutionControl、父编排任务
   → 合同编译 → prepare_automatic_solve_bundle → evaluator compiler / auditor / probes
   → LocalController.run_evolution → EvolutionContext → PopulationStrategy
@@ -159,7 +162,7 @@ CLI solve / resume / answer
 | `Task` | run 内可调度的工作单元，带依赖、验收规则、输入问题和结果路径 |
 | `Attempt` | 一个 task 的一次执行，记录运行时、进程、开始/结束和错误 |
 | `Worker / WorkerAttempt` | 显式本地 Agent 会话及一次执行，与 task 依赖图分开管理 |
-| 自动 `execution_id` | 一次前台或未来后台活动执行的身份；共享截止时间不跨人工等待累计 |
+| 自动 `execution_id` | 一次前台或后台活动执行的身份；共享截止时间不跨人工等待累计 |
 | `PlanDocument` | 有版本的任务图和问题合同，调整计划需留下版本与事件 |
 | `Artifact` | 产物文件的路径、大小、内容摘要和归属 |
 | `Candidate / Receipt` | 候选源码与生成、执行、评价身份的绑定关系 |
@@ -179,13 +182,21 @@ CLI solve / resume / answer
 任务增加持久编排节点：父任务在 preparation、child 搜索和 delivery 期间保持运行，只有核验
 交付后才成功。旧任务保持历史恢复语义，不会自动补写新生命周期标记。
 
+后台启动返回原父任务 ID、当前状态与 `detached: true`、`launch_status: accepted`。接受启动
+与执行结果分开表达：若上次 preparation 可恢复失败仍是最近诊断，返回值保留该事实；已接受
+且父任务非终态的启动以成功退出码返回。答案先在同一执行锁下接受一次，启动失败保留答案，
+由用户显式续跑。终态及仍待用户回答的 resume 不创建后台进程。
+
 ## 6. 预算与取消的当前边界
 
 当前已经有多层预算：普通 Controller 活动执行时间、运行时单次超时、模型 profile 的调用限制、Agent 工具次数、每候选显式工具预算、preparation 单次请求与总时长、自动 solve 活动执行总时限，以及产物大小等限制。
 
 普通 Controller 的活动预算从每次 `resume()` / `run_agent()` 开始计时，不是跨合同编译、用户等待和多次恢复累积的持久总时限。Feature 142 已实现的 `--solve-wall-timeout` 也限制一次活动执行；人工答复后的新执行沿用原策略，但已观察到总预算耗尽的终态不能靠 resume 补时。
 
-普通 `run --detach` 和普通 `solve --detach` 已有本地后台进程与 PID/进程组登记；未完成的是自动多文件等路径的统一后台编排，并非整个系统完全不能后台运行。
+普通 `run --detach` 和普通 `solve --detach` 保留原有后台路径。自动多文件后台启动由
+`automatic_solve_worker.py` 复用已有执行锁：父进程持锁登记后才放行子进程，子进程取得执行权
+后开始活动预算，并在退出时仅清除自己的 PID/PGID。到达 `awaiting_input` 后进程退出；
+恢复必须先确认旧协调进程退出、清理已登记工作，不能仅凭锁空闲就替换仍活着的执行者。
 
 新自动多文件任务已由同一个单调时钟截止时间贯穿“合同 → 准备 → 全部候选 → 评分 → 父任务
 交付”。每个阶段只能取得原上限与剩余时间的较小值，不能重置总时限。策略、输入、评测器和
@@ -194,9 +205,10 @@ CLI solve / resume / answer
 Phase B 已完成父 run 到已验证 child 的停止传播、candidate/evaluator/probe 的实际 PID/PGID
 登记、拥有者释放、失败清理和取消/截止时间竞态保护。清理失败会保留未释放登记并终止当前
 活动阶段，避免新进程覆盖旧拥有者；清理顺序先处理候选/评测等工作组，再处理协调进程。
-这些结论来自本地 fixture 和进程组回归，不代表远端 provider 已停止计算。Phase C 的自动多文件
-`--detach` 仍保持拒绝，直到后台编排另行实现并通过验收。Feature 143 的 worker API 有独立
-隔离/恢复缺口，也没有成为这条流程的后台执行器；142 不依赖 T009 consumer 迁移。
+这些结论来自本地 fixture 和进程组回归，不代表远端 provider 已停止计算。Phase C 已通过
+本机真实子进程验收，覆盖前后台交付一致性、等待输入退出、取消独立候选进程组、异常退出恢复
+和并发续跑争用；完整回归也已通过，精确结果见 142 validation。Feature 143 的 worker 隔离与恢复缺陷已修复，其
+T009 consumer 尚未接入；它没有成为这条流程的后台执行器，142 不依赖该迁移。
 
 Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽已结束。新产品可以明确设置
 `--solve-wall-timeout 3000`。新的真实验收仍使用新登记和目录，区分产品活动预算与验收监督预算。
@@ -221,13 +233,13 @@ Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽�
 
 当前最有价值的基础是：状态不依赖模型记忆，产物可定位，生成、执行和评分有独立记录，外部候选可以沿同一套核验流程接入。这些基础让失败诊断和后续接入新生成器有实际落点。
 
-主要负担在编排层。`cli.py`、`controller.py`、`evolution.py` 已承担很多入口、兼容和状态转换职责；普通、单文件演化、多文件演化各自形成了生命周期分支。自动多文件的时间、父编排、本地取消和进程清理已经统一；自动后台所有权仍属于 Phase C，后续抽取编排模块应以这些验收覆盖为基础。
+主要负担在编排层。`cli.py`、`controller.py`、`evolution.py` 已承担很多入口、兼容和状态转换职责；普通、单文件演化、多文件演化各自形成了生命周期分支。自动多文件的时间、父编排、本地取消和进程清理已经统一；Phase C 将后台所有权交接放入独立 worker 模块，后续抽取编排模块应以这些验收覆盖为基础。
 
 建议按以下顺序继续，不把大重构作为可用性的前置条件：
 
-1. Phase B 产品已经推送，先定位当前 Linux CI 的测试失败并补齐支持版本验证，详见[系统评估](system-readiness-20260916.md)。随后补齐新的 50 分钟前台真实验收实现、登记与启动前检查；候选最终响应可靠性改动须先有明确规格并离线验证，不能运行中修代码。
-2. 按 Feature 142 Phase C 完成后台启动、认领和退出协议，再接 solve/resume/answer 与失败恢复，验证前后台一致性。
-3. 独立修复 143 的 worker 并发隔离、恢复与取消防启动缺口，再迁移一个实际 delegation consumer；它不阻塞 142 前台验收。
+1. Phase C 当前代码的完整三阶段回归和独立复核已经通过；提交后验证当前 Linux CI。历史版本 `8e1e089` 的跨平台结果不代替本轮验收，详见[系统评估](system-readiness-20260916.md)。
+2. 补齐新的 50 分钟真实验收实现、登记与启动前检查；候选最终响应可靠性改动须先有明确规格并离线验证，不能运行中修代码。
+3. 在 143 已修复的独立 worker 生命周期上迁移一个实际 delegation consumer；T009 不阻塞 142 生命周期实现和前台验收。
 4. 后续将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收，再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力。
 
 ## 9. 阅读源码的入口
@@ -242,7 +254,8 @@ Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽�
 - [独立候选评分](../src/lunar_evolution/candidate_evaluation.py)：`evaluate_candidate_execution`、`inspect_candidate_evaluation`。
 - [父任务交付](../src/lunar_evolution/bundle_parent_delivery.py)：`finish_bundle_parent_delivery`、`inspect_bundle_parent_delivery`。
 - [自动生命周期](../src/lunar_evolution/automatic_solve_lifecycle.py)：`SolveExecutionControl`、`own_automatic_solve` 和状态投影。
+- [自动后台协调进程](../src/lunar_evolution/automatic_solve_worker.py)：锁交接、登记放行、退出清理与显式恢复。
 - [显式 worker](../src/lunar_evolution/workers.py)：worker 会话、消息、等待、取消及重启处理。
-- [Feature 142 规格](../specs/142-automatic-solve-lifecycle/spec.md)：Phase A/B 已实现并离线验收，Phase C 尚未开放。
+- [Feature 142 规格](../specs/142-automatic-solve-lifecycle/spec.md)：Phase A/B 已验收；Phase C 已实现并通过本机夹具，完整回归已通过。
 
 本文区分源码已实现、离线验收、真实运行和规划四种状态。当前真实运行结果由 Feature 139 的独立报告记录，架构存在一条执行路径并不自动意味着该路径对所有真实模型任务都已成功。

@@ -197,6 +197,17 @@ class AutomaticSolveExecutionOwner:
             raise ValueError("parent_id must be a non-empty string")
         self.parent_id = parent_id
         self._held = False
+        self._lock_fd: int | None = None
+
+    @property
+    def lock_fd(self) -> int | None:
+        """The workspace lock descriptor, available only while this owner is held.
+
+        A detached launcher may pass this descriptor through ``Popen(pass_fds=...)``.
+        The parent closes its copy without unlocking, so the child retains the same
+        exclusive open-file-description until its own execution exits.
+        """
+        return self._lock_fd
 
     def acquire(self) -> Self:
         with self._registry_lock:
@@ -224,29 +235,52 @@ class AutomaticSolveExecutionOwner:
 
 @contextmanager
 def own_automatic_solve(
-    parent_id: str, workspace: Path | None = None,
+    parent_id: str, workspace: Path | None = None, *, inherited_fd: int | None = None,
 ) -> Iterator[AutomaticSolveExecutionOwner]:
-    """Acquire and reliably release an active solve owner."""
-    owner = AutomaticSolveExecutionOwner(parent_id)
-    with owner:
-        if workspace is None:
-            yield owner
-            return
-        path = Path(workspace) / ".automatic-solve.lock"
-        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-        try:
+    """Acquire an owner or adopt its workspace descriptor across a detached launch.
+
+    A valid inherited descriptor is owned by this context even if admission fails.
+    Closing either process's copy must never explicitly unlock the shared descriptor.
+    """
+    if inherited_fd is not None and (type(inherited_fd) is not int or inherited_fd <= 2):
+        raise ValueError("inherited automatic solve descriptor must be an integer above 2")
+    fd = inherited_fd
+    owner: AutomaticSolveExecutionOwner | None = None
+    try:
+        owner = AutomaticSolveExecutionOwner(parent_id)
+        with owner:
+            if workspace is None:
+                if inherited_fd is not None:
+                    raise ValueError("inherited automatic solve ownership requires a workspace")
+                yield owner
+                return
+            path = Path(workspace) / ".automatic-solve.lock"
+            if fd is None:
+                fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            # Only the explicitly detached coordinator may inherit ownership. Candidate and
+            # evaluator subprocesses must not keep the solve alive after that coordinator exits.
+            os.set_inheritable(fd, False)
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError("invalid automatic solve ownership file")
+            named = path.lstat()
+            if (info.st_dev, info.st_ino) != (named.st_dev, named.st_ino):
+                raise ValueError("automatic solve ownership file changed")
             try:
+                # flock is associated with the open-file-description: this succeeds for a
+                # correctly inherited lock while rejecting a separately opened competing FD.
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise AutomaticSolveAlreadyRunning("automatic solve already has an active execution owner") from None
             named = path.lstat()
             if (info.st_dev, info.st_ino) != (named.st_dev, named.st_ino):
                 raise ValueError("automatic solve ownership file changed")
+            owner._lock_fd = fd
             yield owner
-        finally:
+    finally:
+        if owner is not None:
+            owner._lock_fd = None
+        if fd is not None:
             os.close(fd)
 
 

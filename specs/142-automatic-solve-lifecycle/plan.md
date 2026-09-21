@@ -2,9 +2,9 @@
 
 **Date**: 2026-09-20
 
-**Status**: Phase A foreground implementation and Phase B cancellation/process cleanup are
-complete and pass final two-stage offline verification. Phase C detached entry points remain
-open; automatic `--detach` remains rejected.
+**Status**: Phase A/B/C are complete and pass offline subprocess acceptance, independent review
+and full three-stage regression. Product push/Linux CI closeout and exact checkpoints are recorded
+in [validation.md](validation.md).
 
 **Spec**: [spec.md](spec.md)
 
@@ -77,15 +77,15 @@ Phase B acceptance is complete: 146 focused regressions pass, including parent/c
 real local process-group cleanup, ownership races, failed-cleanup retention and coordinator cleanup
 ordering. The final current suite recorded **8636 passed, 1 skipped, 24 deselected** and the frozen
 Feature 123 stage **24 passed**, with zero failures or errors. Reports are retained at
-`.lunar/test-results/feature142-phase-b-20260921/{current,frozen123}.xml`. Phase C is now the only
+`.lunar/test-results/feature142-phase-b-20260921/{current,frozen123}.xml`. At that checkpoint, Phase C was the only
 remaining implementation phase: detached routing, exact policy propagation, worker ownership,
 launch/exit recovery and foreground/background equivalence.
 
 ## Phase C: Detached automatic entry points
 
 1. Phase B's cleanup prerequisite has passed. Keep the current automatic `--detach` rejection
-   until Phase C itself is implemented and validated. Reuse `_detach_solve` and the same execution
-   owner/continuation path; do not create a second lifecycle.
+   until Phase C itself is implemented and validated. Reuse the existing launch contract and the
+   same execution owner/continuation path; keep ordinary `_detach_solve` behavior compatible.
 2. Add detach routing for fresh solve, `solve --resume`, generic resume, and answer. For answer,
    validate the policy first, durably accept the existing pending answer once, then launch a
    continuation of the same parent. A launch failure must not silently discard the accepted
@@ -93,7 +93,7 @@ launch/exit recovery and foreground/background equivalence.
 3. Propagate/restore multi-file mode, all preparation policy, candidate step policy, the solve
    policy, and runtime identity. Credentials retain the existing environment-based propagation;
    they never enter argv or bounded lifecycle events.
-4. Return the parent handle before model work. Prevent concurrent foreground/background owners,
+4. Return the parent handle without waiting for model work. Prevent concurrent foreground/background owners,
    reject stale ownership substitutions, and clear only the exiting worker's ownership. Exiting
    for awaiting input releases ownership and stops the worker until an explicit answer/continue.
 5. Verify equivalence of foreground/background outcomes and all launch/exit cleanup paths with
@@ -115,12 +115,38 @@ The 2026-09-21 code audit confirms the remaining implementation order for T018â€
   foreground/background contention, live cancellation and owned-group cleanup before removing
   the automatic detach gate. No Phase C implementation or acceptance is claimed by this audit.
 
+### Phase C implementation refinement (2026-09-21)
+
+The existing workspace flock is the launch reservation. Expose its descriptor only to a local
+worker through `pass_fds`; the parent keeps its ownership until launch returns. A private pipe
+gates execution: the parent atomically registers PID/PGID only for a nonterminal run with empty
+runner fields, then releases the gate. The child validates the inherited lock against the named
+workspace file, checks its exact persisted runner identity, and uses the shared continuation.
+Closing a descriptor releases only that process's reference; neither side explicitly unlocks
+the shared open file description. EOF before permission starts no model work. The child marks
+inherited descriptors non-inheritable before invoking any runtime and conditionally clears only
+its own PID/PGID on all exits. No new database column or public capability token is required.
+
+The internal worker entry wraps CLI parsing and runtime validation as well as execution, so an
+invalid continuation cannot strand its registration. Persisted `_evolution_args` remains the
+only evolution-policy authority; the launcher forwards runtime identity and runtime options.
+An available workspace lock alone never authorizes replacing a live runner. Under that lock,
+explicit recovery must prove the old runner exited, clean its registered local work, and verify
+all owned registrations are released before a new worker can be admitted. Unknown process
+liveness or incomplete cleanup refuses continuation. Accepted answers survive launch failure;
+no automatic retry or terminal cancellation is introduced.
+
+The automatic launcher lives in `automatic_solve_worker.py`; it reuses the ordinary subprocess
+and log contract while adding the ownership handshake. This small separate boundary keeps the
+ordinary launcher unchanged and wraps the entire child CLI validation and exit path. The shared
+`_resume_automatic_solve` remains the only automatic execution lifecycle.
+
 ## Expected code touch points
 
 | Area | Existing attachment point |
 | --- | --- |
 | CLI policy and routing | `src/lunar_evolution/cli.py`: parsers, `_validate_automatic_bundle_options`, `_evolution_request_payload`, `_evolution_args`, `_solve`, `_answer`, resume dispatch |
-| Detached worker | `src/lunar_evolution/cli.py`: `_detach_solve`, runner setup and handle projection |
+| Detached worker | `src/lunar_evolution/automatic_solve_worker.py`: launch gate, runner claim, recovery and exit; CLI runtime arguments and handle projection |
 | Shared execution control | Small product helper used by automatic orchestration; no measurement-module dependency |
 | Parent lifecycle and cancellation | `src/lunar_evolution/controller.py`: conversational intake, `run_evolution`, `deliver_bundle_to_parent`, `cancel`, existing budget/cleanup helpers |
 | Durable state | `src/lunar_evolution/store.py`: existing task, event, fail-budget, cancellation, and runner/process ownership operations |
@@ -153,7 +179,8 @@ it; an implementation must not silently re-label old authority as a new profile.
 Use deterministic clocks, fake provider transports, and fresh repository-owned local candidate/
 evaluator/probe programs. After each phase, run focused tests and shared compatibility tests.
 Enable phase C only after phase B is green. Before any product completion claim, run the full
-two-stage regression, Ruff, compileall, Specify prerequisites, diff/link checks, and independent
+three-stage regression (current product, fixed archived history and frozen registration), Ruff,
+compileall, Specify prerequisites, diff/link checks, and independent
 historical inventory verification. Record results in [validation.md](validation.md).
 
 No Feature 139 source/evidence changes, provider call, real campaign registration/launch, or

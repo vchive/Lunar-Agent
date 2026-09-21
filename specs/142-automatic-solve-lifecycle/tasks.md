@@ -1,8 +1,8 @@
 # Tasks
 
-**Status**: Phase A foreground implementation and Phase B owned-process cancellation/cleanup
-implementation are complete and pass the final two-stage offline verification. Phase C remains
-closed. Automatic background execution must not open before its own implementation and acceptance.
+**Status**: Phase A/B/C are implemented and pass focused offline subprocess acceptance,
+independent review and full three-stage regression. Product push/Linux CI closeout remains the
+final release task below.
 
 ## Specification
 
@@ -54,18 +54,18 @@ Phase B evidence: 146 focused cancellation, process-ownership, deadline-integrat
 regressions pass. The final current regression recorded **8636 passed, 1 skipped, 24 deselected**;
 the frozen Feature 123 registration stage recorded **24 passed**, with no failures or errors.
 Reports are retained at `.lunar/test-results/feature142-phase-b-20260921/{current,frozen123}.xml`.
-Phase C remains the boundary for detached solve/resume/answer routing, worker ownership and
-foreground/background equivalence; automatic `--detach` remains rejected.
+At that Phase B checkpoint, detached solve/resume/answer routing, worker ownership and
+foreground/background equivalence remained outside acceptance; Phase C below closes that boundary.
 
 ## Phase C: Detached automatic execution
 
-- [ ] T018 Reuse `_detach_solve` for new and continued lifecycle-enabled automatic solves; support
+- [x] T018 Reuse the existing launch contract for new and continued lifecycle-enabled automatic solves; support
       solve/resume/answer detach routing only after T017 passes.
-- [ ] T019 Propagate/restore runtime, multi-file, preparation, candidate-step, and solve policies
+- [x] T019 Propagate/restore runtime, multi-file, preparation, candidate-step, and solve policies
       exactly without secrets in argv or public state. Keep legacy detach rejection explicit.
-- [ ] T020 Preserve once-only answer acceptance and parent ID on background continuation; prevent
+- [x] T020 Preserve once-only answer acceptance and parent ID on background continuation; prevent
       duplicate live workers and release only the exiting worker's ownership on every exit path.
-- [ ] T021 Verify foreground/background equivalence, useful status handles, no waiting worker
+- [x] T021 Verify foreground/background equivalence, useful status handles, no waiting worker
       during human input, live cancel, launch failure, stale worker recovery, and process cleanup.
 
 ## Completion
@@ -79,3 +79,12 @@ foreground/background equivalence; automatic `--detach` remains rejected.
 - [x] T025 Commit and push the verified Phase B product implementation. Do not claim detached
       availability or real-provider end-to-end success from an offline implementation. Phase C
       remains a separate future delivery.
+
+## Phase C release verification
+
+- [x] T026 Run the new real-subprocess offline quickstart, shared compatibility tests, full current /
+      archived / frozen registration regressions, static checks and SDD/link checks.
+- [x] T027 Independently review launch/recovery/exit ownership and verify retained 131/134/139
+      evidence inventories without modifying or executing their contents.
+- [ ] T028 Record exact Phase C results and remaining real-delivery / worker-consumer limits;
+      commit and push the verified changes and inspect the Linux matrix.

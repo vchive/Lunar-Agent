@@ -858,6 +858,24 @@ class Store:
             ).rowcount
         return changed == 1
 
+    def claim_runner_process(self, run_id: str, pid: int, pgid: int) -> bool:
+        """Register one admitted detached runner without replacing another owner.
+
+        Callers hold the run's workspace execution lock and first resolve any stale
+        process registrations. This conditional write also rejects cancellation or a
+        terminal/waiting transition that won the race with process launch.
+        """
+        if any(type(value) is not int or value <= 1 for value in (pid, pgid)):
+            raise ValueError("runner PID and PGID must be integers above 1")
+        with self._connect() as connection:
+            changed = connection.execute(
+                "UPDATE runs SET runner_pid = ?, runner_pgid = ?, updated_at = ? "
+                "WHERE id = ? AND runner_pid IS NULL AND runner_pgid IS NULL "
+                "AND status IN (?, ?)",
+                (pid, pgid, utc_now(), run_id, RunStatus.PENDING.value, RunStatus.RUNNING.value),
+            ).rowcount
+        return changed == 1
+
     def clear_runner_process(
         self, run_id: str, pid: int | None = None, pgid: int | None = None,
     ) -> bool:
@@ -1406,13 +1424,17 @@ class Store:
         return changed == 1
 
     def list_attempt_processes(self, run_id: str) -> list[dict[str, object]]:
-        """Return active attempt process registrations for one run before cancellation."""
+        """Return retained process registrations, including incomplete identities.
+
+        Recovery must see partial registrations so it can refuse unsafe admission;
+        cancellation callers still require a complete verified identity before signalling.
+        """
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT attempts.id, attempts.task_id, attempts.pid, attempts.pgid "
                 "FROM attempts JOIN tasks ON tasks.id = attempts.task_id "
                 "WHERE tasks.run_id = ? "
-                "AND attempts.pid IS NOT NULL AND attempts.pgid IS NOT NULL "
+                "AND (attempts.pid IS NOT NULL OR attempts.pgid IS NOT NULL) "
                 "ORDER BY attempts.started_at, attempts.id",
                 (run_id,),
             ).fetchall()

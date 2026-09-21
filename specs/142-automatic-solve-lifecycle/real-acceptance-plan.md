@@ -52,10 +52,11 @@ Feature 142 Phase C are separate release work; this acceptance remains a foregro
 No provider request may occur until every gate below has a retained, inspectable result.
 
 1. **Offline product gate.** The focused lifecycle suites, shared compatibility suites, full
-   two-stage regression, lint/compile checks, SDD prerequisite checks, and local link/diff checks
+   three-stage regression (current, archived historical and frozen registration), lint/compile
+   checks, SDD prerequisite checks, and local link/diff checks
    pass on the candidate product. The regression evidence is retained separately from the real
-   campaign evidence. The remaining Phase C item does not get silently counted as implemented by
-   this plan.
+   campaign evidence. Phase C implementation and validation are recorded separately; this plan
+   does not supply its acceptance evidence.
 2. **Immutable checkout gate.** The product commit is fixed, the worktree is clean, and the
    checkout is verified to equal the pushed `origin/main` revision. The exact commit value is
    written into the manifest at launch preparation; this document deliberately does not invent
@@ -113,7 +114,7 @@ The solve budget does not accumulate over human waiting or across explicit conti
 `awaiting_input` answer or admissible nonterminal recovery uses the same persisted policy but gets
 a new execution identity and a new active execution. Observed solve-budget exhaustion is terminal
 and cannot be repaired by `resume`, `answer`, detached relaunch, or an automatic retry. The run
-does not use detached mode; automatic `--detach` remains rejected while Phase C is open.
+does not use detached mode; Phase C availability does not change this foreground measurement protocol.
 
 ## Evidence chain and stage gates
 

@@ -2,9 +2,8 @@
 
 **Created**: 2026-09-20
 
-**Status**: Phase A foreground shared budget and parent lifecycle plus Phase B cancellation/process
-cleanup are implemented and offline-verified. Phase C detached entry points remain open; automatic
-`--detach` remains rejected.
+**Status**: Phase A/B/C are implemented and pass offline acceptance, independent review and the
+full three-stage regression. Product push/Linux CI closeout is recorded in [validation.md](validation.md).
 
 **Input**: Continue product development using SDD; connect full automatic multi-file execution
 budgets, parent/child cancellation, and local background execution using existing product controls.
@@ -22,8 +21,8 @@ its child is still working, making cancellation through the parent ID ineffectiv
 Controller cancellation handles run/task transitions, active runtimes, and runner process groups;
 the missing work is orchestration and propagation between these existing boundaries.
 
-Automatic `--multi-file` currently rejects `--detach`. The ordinary detached-solve launcher is
-reusable, but its argument propagation and cleanup do not yet cover this pipeline. Local candidate
+Before this feature, automatic `--multi-file` rejected `--detach`. The ordinary detached-solve launch
+contract is reusable, but its argument propagation and cleanup did not cover this pipeline. Local candidate
 and evaluator processes use their own process groups, so terminating only the detached controller
 group is insufficient.
 
@@ -68,6 +67,12 @@ After phase 3, `solve --detach`, `solve --resume --detach`, `resume --detach`, a
 may use this automatic pipeline. They return the existing parent run ID, status, workspace, and
 `detached` indication. Ordinary `status`, `events`, and `cancel` continue to operate on that ID.
 No background thread or process remains waiting for an answer after `awaiting_input` is reached.
+
+A successful launch adds `launch_status: accepted`. A still-nonterminal accepted run returns exit
+code zero even if its existing `status` and preparation diagnosis briefly retain the previous
+recoverable failure projection. An already observed terminal outcome uses the existing outcome
+exit code. Launch acceptance is not completion. A terminal continuation returns its existing
+handle without `detached` or launch acceptance and creates no worker.
 
 ## Budget lifetime: one active execution, not accumulated lifetime
 

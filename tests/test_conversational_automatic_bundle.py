@@ -129,7 +129,6 @@ def automatic_setup(tmp_path, monkeypatch, *, clarify=False):
 
 @pytest.mark.parametrize("arguments", [
     ["--multi-file"],
-    ["--evolve", "--multi-file", "--detach"],
     ["--evolve", "--multi-file", "--bundle-profile", "missing.json"],
     ["--evolve", "--multi-file", "--evaluator-command", "/not-used"],
     ["--evolve", "--multi-file", "--openevolve-command", "/not-used"],

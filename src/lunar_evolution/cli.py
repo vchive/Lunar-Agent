@@ -322,6 +322,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     resume_parser = subparsers.add_parser("resume", help="recover and continue a run")
     resume_parser.add_argument("run_id")
+    resume_parser.add_argument(
+        "--detach", action="store_true", help="continue an automatic multi-file solve in the background"
+    )
     resume_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a conversational multi-file evolution run")
     resume_parser.add_argument("--multi-file", action="store_true", help="continue an automatically prepared multi-file solve")
     resume_parser.add_argument(
@@ -861,6 +864,9 @@ def build_parser() -> argparse.ArgumentParser:
     answer_parser = subparsers.add_parser("answer", help="answer a pending agent question and resume")
     answer_parser.add_argument("run_id")
     answer_parser.add_argument("answer", nargs="?", help="answer text, or '-' to read stdin")
+    answer_parser.add_argument(
+        "--detach", action="store_true", help="accept the answer and continue an automatic multi-file solve in the background"
+    )
     answer_parser.add_argument("--bundle-profile", type=Path, help="matching profile for a pending multi-file evolution handoff")
     answer_parser.add_argument("--multi-file", action="store_true", help="continue an automatically prepared multi-file solve")
     answer_parser.add_argument(
@@ -2122,13 +2128,28 @@ def _prepare_conversational_bundle(args: argparse.Namespace) -> None:
 def _validate_automatic_bundle_options(args) -> None:
     if args.command == "solve" and not (args.evolve or args.resume):
         raise ValueError("--multi-file requires --evolve")
-    if getattr(args, "detach", False):
-        raise ValueError("--multi-file does not support --detach")
     if (getattr(args, "bundle_profile", None) is not None
             or getattr(args, "evaluator_command", None)
             or getattr(args, "openevolve_command", None)
             or getattr(args, "strategy", None) not in {None, "population"}):
         raise ValueError("--multi-file requires native population and its automatically compiled evaluator")
+
+
+def _validate_automatic_detach(args, request: dict | None) -> None:
+    """Admit background continuation only for the explicitly versioned automatic lifecycle."""
+    worker = getattr(args, "_automatic_owner", None) is not None
+    if not getattr(args, "detach", False) and not worker:
+        return
+    if (not worker and args.command == "solve" and not getattr(args, "resume", False)):
+        # Existing ordinary fresh solves retain their separate launcher.
+        return
+    if not (
+        isinstance(request, dict)
+        and request.get("bundle_mode") == "compiled"
+        and type(request.get("automatic_lifecycle_version")) is int
+        and request["automatic_lifecycle_version"] == _AUTOMATIC_LIFECYCLE_VERSION
+    ):
+        raise ValueError("--detach requires a lifecycle-enabled automatic multi-file solve")
 
 
 def _validate_candidate_generation_value(value: object, *, error_type=ValueError) -> None:
@@ -2282,6 +2303,7 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
         if not args.run_id:
             raise ValueError("--resume requires --run-id")
         preparation_request = _latest_evolution_request(Store(config.database), args.run_id)
+        _validate_automatic_detach(args, preparation_request)
         if preparation_request is not None:
             _validate_solve_wall_timeout_option(args, preparation_request)
         elif getattr(args, "solve_wall_timeout", None) is not None:
@@ -2354,14 +2376,15 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             "bundle_profile_sha256" in evolution_request or "bundle_mode" in evolution_request
         ):
             _validate_evolution_override(args, evolution_request)
+        if _lifecycle_enabled(evolution_request) and run.status.value in {"failed", "cancelled"}:
+            return _solve_payload(controller, run)
         _validate_conversational_bundle_link(args, controller.store, run)
-        _stage_input_files(run, controller.store, args.input_files)
-        _bind_conversational_bundle_inputs(args, controller.store, run)
         if _lifecycle_enabled(evolution_request):
-            settled = _resume_automatic_solve(
+            return _continue_automatic_solve(
                 config, _evolution_args(args, evolution_request), controller, run, manifest,
             )
-            return _solve_payload(controller, settled)
+        _stage_input_files(run, controller.store, args.input_files)
+        _bind_conversational_bundle_inputs(args, controller.store, run)
         settled = controller.resume_conversational(
             run.id,
             RuntimeContractCompiler(runtime),
@@ -2388,15 +2411,15 @@ def _solve(config: Config, args: argparse.Namespace) -> dict[str, object]:
             evolution_request,
             event_id="event-evolution-request-" + hashlib.sha256(run.id.encode()).hexdigest(),
         )
+    if _lifecycle_enabled(evolution_request):
+        run.workspace.mkdir(parents=True, exist_ok=True)
+        return _continue_automatic_solve(
+            config, _evolution_args(args, evolution_request), controller, run,
+        )
     _stage_input_files(run, controller.store, args.input_files)
     _bind_conversational_bundle_inputs(args, controller.store, run)
     if args.detach:
         return _detach_solve(config, args, run)
-    if _lifecycle_enabled(evolution_request):
-        settled = _resume_automatic_solve(
-            config, _evolution_args(args, evolution_request), controller, run,
-        )
-        return _solve_payload(controller, settled)
     settled = controller.resume_conversational(
         run.id,
         RuntimeContractCompiler(runtime),
@@ -2443,6 +2466,37 @@ def _automatic_solve_child(controller: LocalController, parent: Run) -> Run | No
     if scope is None or not scope.verified or scope.child_id is None:
         return None
     return controller.store.get_run(scope.child_id)
+
+
+def _continue_automatic_solve(config, args, controller, run, manifest=None) -> dict[str, object]:
+    """Reserve one execution before staging inputs or starting a foreground/background owner."""
+    if run.status.value in {"succeeded", "failed", "cancelled"} or controller.store.pending_input(run.id) is not None:
+        return _solve_payload(controller, run)
+    from .automatic_solve_worker import launch_automatic_solve, prepare_automatic_continuation
+
+    inherited_owner = getattr(args, "_automatic_owner", None)
+    ownership = (
+        nullcontext(inherited_owner) if inherited_owner is not None
+        else own_automatic_solve(run.id, Path(run.workspace))
+    )
+    with ownership as owner:
+        run = controller.store.get_run(run.id) or run
+        if run.status.value in {"succeeded", "failed", "cancelled"} or controller.store.pending_input(run.id) is not None:
+            return _solve_payload(controller, run)
+        prepare_automatic_continuation(controller, run)
+        run = controller.store.get_run(run.id) or run
+        if run.status.value in {"succeeded", "failed", "cancelled"} or controller.store.pending_input(run.id) is not None:
+            return _solve_payload(controller, run)
+        _stage_input_files(run, controller.store, getattr(args, "input_files", []))
+        _bind_conversational_bundle_inputs(args, controller.store, run)
+        if getattr(args, "detach", False):
+            launch_automatic_solve(config, args, controller, run, owner)
+            payload = _solve_payload(controller, controller.store.get_run(run.id) or run)
+            return {**payload, "detached": True, "launch_status": "accepted"}
+        settled = _resume_automatic_solve(
+            config, args, controller, run, manifest, owner_held=True,
+        )
+        return _solve_payload(controller, settled)
 
 
 def _resume_automatic_solve(config, args, controller, run, manifest=None, *, owner_held=False) -> Run:
@@ -3629,6 +3683,31 @@ def _solve_payload(controller: LocalController, run: Run) -> dict[str, object]:
     if (execution_status := solve_execution_status(controller.store, run)) is not None:
         payload["solve_execution"] = execution_status
     return payload
+
+
+def _automatic_runtime_command(config: Config, args: argparse.Namespace, run: Run) -> list[str]:
+    """Resume one recorded automatic handoff; evolution policy is restored by the child."""
+    command = [
+        "solve", "--resume", "--run-id", run.id, "--runtime", args.runtime,
+        "--home", str(config.home), "--json",
+    ]
+    for option, name in (
+        ("--command", "runtime_command"), ("--endpoint", "endpoint"),
+        ("--model", "model"), ("--model-profile", "model_profile"),
+        ("--workers", "workers"),
+    ):
+        value = getattr(args, name, None)
+        if value is not None:
+            command.extend((option, str(value)))
+    if getattr(args, "agent_loop", False):
+        command.extend(("--agent-loop", "--max-steps", str(args.max_steps)))
+    for option, name in (
+        ("--allow-exec", "allow_exec"), ("--memory", "memory"),
+        ("--session-history", "session_history"), ("--role-dag", "role_dag"),
+    ):
+        if getattr(args, name, False):
+            command.append(option)
+    return command
 
 
 def _detach_solve(config: Config, args: argparse.Namespace, run: Run) -> dict[str, object]:
@@ -5136,6 +5215,7 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
     if run is None:
         raise ValueError(f"unknown run: {args.run_id}")
     evolution_request = _latest_evolution_request(store, run.id)
+    _validate_automatic_detach(args, evolution_request)
     if evolution_request is not None:
         _validate_solve_wall_timeout_option(args, evolution_request)
     elif getattr(args, "solve_wall_timeout", None) is not None:
@@ -5150,7 +5230,12 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         _validate_preparation_timeout_override(args, evolution_request)
     _validate_conversational_bundle_request(args, evolution_request)
     _validate_conversational_bundle_link(args, store, run)
-    _bind_conversational_bundle_inputs(args, store, run)
+    if evolution_request is not None:
+        compiled = bool(evolution_request.get("compile_evaluator", False))
+        if getattr(args, "compile_evaluator", False) and not compiled:
+            raise EvolutionError("solve evolution did not configure a compiled evaluator")
+        if getattr(args, "evaluator_command", None) and compiled:
+            raise EvolutionError("compiled evaluator and evaluator command are mutually exclusive")
     current_plan = store.get_current_plan(run.id)
     if current_plan is not None and current_plan.algorithm_problem is not None:
         current_contract = AlgorithmProblemContract.from_dict(current_plan.algorithm_problem)
@@ -5163,8 +5248,9 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         event["type"] == "conversation_started" for event in store.list_events(run.id)
     )
     manifest = _conversation_manifest(run) if conversation else None
+    controller = _controller(args, config)
     if conversation:
-        current_fingerprint = _compiler_fingerprint(_controller(args, config).runtime)
+        current_fingerprint = _compiler_fingerprint(controller.runtime)
         if manifest is not None and manifest.get("runtime_fingerprint") not in {
             None,
             current_fingerprint,
@@ -5172,9 +5258,14 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
             raise ValueError("answer compiler runtime does not match the existing conversational run")
     automatic_answer = conversation and _lifecycle_enabled(evolution_request)
     ownership = own_automatic_solve(run.id, Path(run.workspace)) if automatic_answer else nullcontext()
-    with ownership:
+    with ownership as owner:
+        if automatic_answer:
+            from .automatic_solve_worker import prepare_automatic_continuation
+
+            prepare_automatic_continuation(controller, run)
         if store.pending_input(run.id) != pending:
             raise ValueError("input request changed concurrently; inspect status")
+        _bind_conversational_bundle_inputs(args, store, run)
         artifacts = ArtifactStore(run.workspace, store, run.id)
         answer_path = artifacts.write_text(
             f"tasks/{pending['task_id']}/input-answer.json",
@@ -5186,22 +5277,23 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
         task_id = store.answer_input(run.id, relative_answer)
         if task_id is None:
             raise ValueError("input request was answered concurrently; inspect status")
-        controller = _controller(args, config)
         evolution_request = _latest_evolution_request(store, run.id)
-        if evolution_request is not None:
-            compiled = bool(evolution_request.get("compile_evaluator", False))
-            if getattr(args, "compile_evaluator", False) and not compiled:
-                raise EvolutionError("solve evolution did not configure a compiled evaluator")
-            if getattr(args, "evaluator_command", None) and compiled:
-                raise EvolutionError(
-                    "compiled evaluator and evaluator command are mutually exclusive"
-                )
         automatic_continuation = conversation and _lifecycle_enabled(evolution_request)
+        detached = False
         if automatic_continuation:
-            resumed = _resume_automatic_solve(
-                config, _evolution_args(args, evolution_request), controller,
-                controller.store.get_run(run.id) or run, manifest, owner_held=True,
-            )
+            effective_args = _evolution_args(args, evolution_request)
+            resumed = controller.store.get_run(run.id) or run
+            if getattr(args, "detach", False):
+                from .automatic_solve_worker import launch_automatic_solve
+
+                if resumed.status.value not in {"succeeded", "failed", "cancelled"} and store.pending_input(run.id) is None:
+                    launch_automatic_solve(config, effective_args, controller, resumed, owner)
+                    detached = True
+                resumed = controller.store.get_run(run.id) or resumed
+            else:
+                resumed = _resume_automatic_solve(
+                    config, effective_args, controller, resumed, manifest, owner_held=True,
+                )
         elif conversation and (run.current_plan_id is None or evolution_request is not None):
             resumed = controller.resume_conversational(
                 run.id,
@@ -5249,6 +5341,7 @@ def _answer(config: Config, args: argparse.Namespace) -> dict[str, object]:
             "input_request": solved_payload["input_request"],
             "algorithm_outputs": solved_payload.get("algorithm_outputs", []),
             "evolution": solved_payload.get("evolution"),
+            **({"detached": True, "launch_status": "accepted"} if detached else {}),
             **({"solve_execution": solved_payload["solve_execution"]} if "solve_execution" in solved_payload else {}),
         }
         if solved_payload.get("error") == LOOP_STRATEGY_RETIRED:
@@ -5667,9 +5760,18 @@ def _candidate_bundle_inspect_evaluation(args: argparse.Namespace) -> dict[str, 
     return {**result.to_dict(), "evaluation_path": str(result.evaluation_path)}
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, _automatic_owner=None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if _automatic_owner is not None:
+            if not (
+                args.command == "solve" and args.resume
+                and args.run_id == _automatic_owner.parent_id
+                and not args.detach
+            ):
+                raise ValueError("invalid automatic solve worker continuation")
+            args._automatic_owner = _automatic_owner
+            args._solve_owner_held = True
         _reject_retired_cli_strategy(args)
         if args.command in {"solve", "answer", "resume"}:
             _validate_preparation_cli_timeouts(args)
@@ -5801,6 +5903,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "solve":
             payload = _solve(config, args)
             _emit(payload, args.json)
+            if payload.get("detached") is True and payload.get("run_status") in {"pending", "running", "awaiting_input"}:
+                return 0
             success = payload["status"] in {"succeeded", "awaiting_input", "pending", "running"}
             evolution = payload.get("evolution")
             if isinstance(evolution, dict):
@@ -5847,6 +5951,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
         if args.command == "resume":
             evolution_request = _latest_evolution_request(Store(config.database), args.run_id)
+            _validate_automatic_detach(args, evolution_request)
             _validate_solve_wall_timeout_option(
                 args, evolution_request, allow_unresolved_handoff=False,
             )
@@ -5866,6 +5971,8 @@ def main(argv: list[str] | None = None) -> int:
                 values.update(command="solve", resume=True)
                 payload = _solve(config, argparse.Namespace(**values))
                 _emit(payload, args.json)
+                if payload.get("detached") is True and payload.get("run_status") in {"pending", "running", "awaiting_input"}:
+                    return 0
                 success = payload["status"] in {"succeeded", "awaiting_input", "pending", "running"}
                 evolution = payload.get("evolution")
                 if isinstance(evolution, dict):
@@ -5897,6 +6004,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "answer":
             payload = _answer(config, args)
             _emit(payload, args.json)
+            if payload.get("detached") is True and payload.get("run_status") in {"pending", "running", "awaiting_input"}:
+                return 0
             success = payload["status"] == "succeeded"
             evolution = payload.get("evolution")
             if isinstance(evolution, dict):

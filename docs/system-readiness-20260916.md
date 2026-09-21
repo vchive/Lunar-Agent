@@ -1,5 +1,13 @@
 # Lunar Evolution 当前能力、剩余工作与终态验收
 
+2026-09-21 最新增量：142 Phase C 的自动后台 solve/resume/answer 已实现，实际本地子进程
+验收覆盖同父任务交付、待答退出、取消、强杀恢复和并发排他。启动成功单独报告
+`launch_status: accepted`，策略仍从原任务恢复，接受过的答案不会因启动失败丢失。
+本轮完整三阶段回归已通过：当前 6684 passed / 1 existing skipped、历史 2294 passed、
+原始注册 24 passed，独立审查通过；提交和 Linux CI 尚待收尾。精确结果见
+[142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。以下历史提交的计数
+不替代本次验收；真实模型完整交付和 143 T009 consumer 仍是剩余重点。
+
 评估创建于 2026-09-16，2026-09-21 更新补充候选响应可靠性（144）与统一命名（145）。
 当前产品统一使用 Lunar Evolution；包/命令、用户配置、默认 home 与后台入口同步迁移，
 无旧身份兼容别名。历史封存资料和原测量测试改由[固定归档索引](history-archive.md)定位，
@@ -36,7 +44,7 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 | --- | --- | --- |
 | P0：前台自动多文件验收 | 当前产品的真实完整交付；新验收只有计划，还没有新登记、执行证据或结果 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：真实候选完成率 | 144 已补明确响应协议、消除通用总结指令冲突并保留细分失败诊断；真实成功率仍未确认 | 在新的固定条件验收中检验；保留严格解析和失败分母，不把离线 fixture 通过当作真实可靠性提升 |
-| P1：包含自动后台的发布 | 142 Phase C T018–T021 | solve/resume/answer 后台入口、启动认领与退出释放、答案只接收一次、前后台一致性、取消与恢复均通过验收 |
+| P1：包含自动后台的发布 | 142 Phase C 本机完整验收与独立审查已通过，提交及 Linux CI 收尾中 | solve/resume/answer 后台入口、启动认领与退出释放、答案只接收一次、前后台一致性、取消与恢复；最终结果见 142 validation |
 | P1：包含并发多 Agent 的发布 | 143 T009 consumer 接线；本地生命周期修复已通过完整回归 | 将一个实际 delegation 入口接入已隔离的 worker API，验证用户操作、结果回流、取消和恢复 |
 | 后续能力 | OpenEvolve/Shinka 多文件接入、Shinka 启动调度及真实框架验收 | 外部候选走同一执行/评分/交付链，在新独立登记中验证；不重跑 WebAgent |
 | 后续扩展 | 更复杂输入、跨文件依赖、通用仓库/workflow 与远端运行 | 明确支持范围和代表性验收，不从一个双文件样例外推 |
@@ -78,7 +86,7 @@ Feature 144 延续候选生成链路，给多文件请求增加本次调用专�
 这些改动不增加真实模型样本，139 的 preparation 1/1、primary/joint 0/1 不变。
 
 当前 CLI `delegate` 仍走同步 `run_agent()`，142 前台自动多文件也不依赖该 WorkerService；
-这些 worker 修复不改变 142 Phase A/B 的验收。真实前台验收准备、Phase C 和 143 集成可分轨推进，
+这些 worker 修复不改变 142 Phase A/B 的验收。142 Phase C 已接通独立后台协调进程；真实前台验收准备和 143 集成可分轨推进，
 但在新真实验收登记时必须固定产品，不能运行途中换代码。143 T009 不阻塞 142。
 
 本轮包含 worker 产品修复、永久回归与 CI 诊断；没有 provider 请求或新增真实效果结果。
@@ -98,7 +106,7 @@ child 与 verified delivery 完成前保持运行。跨进程 `flock` 与进程�
 并行继续，answer 在写入前取得锁。预算、取消和先有终态按 Store winner 收口，晚到成功或新
 输出发布不能覆盖终态。`solve_execution` 只读公开 execution ID、策略及来源、固定阶段、状态
 和 stopping reason，不报告实时 monotonic 剩余量或猜测远端 provider 状态。automatic
-`--detach` 仍拒绝；本轮没有 provider 请求或真实 campaign，Feature 139 的 `0/1` 不变。
+`--detach` 现通过继承锁与启动闸门接入同一执行入口；没有新增真实 campaign，Feature 139 的 `0/1` 不变。
 
 Phase B 已完成严格父子链接上的取消传播，candidate/evaluator/probe/runtime 的实际 PID/PGID
 登记，工作进程组优先清理，以及失败保留 ownership 和迟到响应拦截。详细证据见
@@ -355,9 +363,9 @@ HTTP 200，已知用量 135344 tokens；preparation `1/1`，两个候选生成�
 [Feature 142](../specs/142-automatic-solve-lifecycle/spec.md) 已继续既有 SDD 完成 Phase A/B：
 共享 active-execution deadline、durable parent orchestration、统一 continuation、终态处理、
 只读 `solve_execution` 和实际进程取消/ownership 清理。定向与最终双阶段全量回归已通过，
-产品 `65d9ae2` 已推送。下一步为新的真实前台验收和 Phase C automatic detach；预算不是跨
-resume 累计的任务 lifetime 上限。Phase C 应先实现启动/认领/退出，再接后台入口，最后验收
-answer 启动失败后的恢复与并发争抢，不能只删除 detach 拒绝检查。
+产品 `65d9ae2` 已推送。该历史检查点之后，Phase C 已实现启动/认领/退出和后台入口，
+answer 启动失败恢复与并发争抢也已通过定向验收，当前完整验证状态见本文顶部。
+新的真实前台验收仍待完成；预算不是跨 resume 累计的任务 lifetime 上限。
 
 1. 113/115/117/120 各自为0/2。118/119已修复合同兼容和支持范围内的源码检查，
    121/122补齐生成协议和传输观测；123小型准备诊断收到响应后本地失败，为独立0/1。

@@ -8,6 +8,37 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## 2026-09-21 自动多文件后台执行（Feature 142 Phase C，本机完整验收通过）
+
+继续原 SDD，实现 `solve --evolve --multi-file --detach`、`solve --resume --detach`、
+`resume --detach` 和 `answer --detach`，都返回同一父任务。后台子进程继承已有 workspace 锁，
+父进程先原子登记 PID/PGID，再允许子进程工作；没有启动与认领之间的空窗，也没有快速退出后
+父进程晚写登记。策略从原 `evolution_requested` 恢复，凭据只通过环境传递。
+
+答案在锁内只接收一次，启动失败保留答案供显式 resume；等待用户输入会退出后台进程。
+可恢复 preparation 的旧失败诊断保留，`launch_status: accepted` 单独表达本次启动成功。
+终态继续不创建 worker。强杀后的显式恢复需先确认旧协调进程退出，清理所登记的工作组后
+才能恢复 intake；不确认存活状态或清理失败就拒绝启动。
+
+已通过 10 项实际 Python 子进程/本地 HTTP fixture 验收、28 项新 CLI 边界测试，以及
+87/220/101 项相关兼容回归。实际进程覆盖前后台同等交付、待答退出、两类 resume、取消、
+强杀恢复、候选独立进程组回收和并发排他。另有 35 项锁/登记、20 项 worker 恢复/释放和
+7 项启动故障测试；新增共 100 项。独立审查及完整三阶段回归通过：当前 **6684 passed、
+1 existing skipped**，历史 **2294 passed**，原始注册 **24 passed**，整体 exit 0。
+本轮提交和 Linux CI 尚待收尾，精确记录见
+[142 validation](specs/142-automatic-solve-lifecycle/validation.md)，使用方式见
+[quickstart](specs/142-automatic-solve-lifecycle/quickstart.md)。
+
+131/134/139 的 188 个文件、781341 字节和全部 SHA-256 再次复核一致；没有真实 provider
+请求、历史生成代码执行、新 campaign 或 WebAgent 重跑。真实完整交付验收和 143 T009
+实际 worker consumer 接线仍未完成，139 的 preparation 1/1、primary/joint 0/1 不变。
+
+后续 143 T009 建议延续原 SDD，先收敛到显式选择的前台 CLI `delegate` 单任务消费路径。
+实施前需补清 run/task/worker 持久关联、输入与产物交接、活动预算与等待超时、父取消和中断
+恢复。不能只将 `run_agent()` 替换成 `dispatch()`：当前 worker 使用独立 workspace，结果
+仅保存 text/outcome，尚不完整承接 `AgentResult.artifacts/metadata`；registry 也应在 Controller
+构造时传入，避免 WorkerService 保留旧对象。本轮只做了只读盘点，没有实现这条消费路径。
+
 ## 2026-09-21 项目统一命名（Feature 145）
 
 用户要求当前仓库统一使用 **Lunar Evolution**。本轮沿 SDD 新增

@@ -1,5 +1,76 @@
 # Validation
 
+## Phase C detached execution (2026-09-21)
+
+The current implementation adds automatic background fresh solve, both resume entry points and
+answer. The private coordinator adopts the existing workspace lock, waits for the parent's
+registration gate, and executes the shared automatic continuation. Credentials travel only in
+the environment. Policies are restored from the original request, and accepted answers remain
+available after a launch failure. The ordinary detached launcher retains its previous behavior.
+
+Actual Python subprocesses against a loopback-only HTTP fixture verify foreground/background
+delivery equivalence, exact policy restoration, waiting-input exit, once-only answer acceptance,
+contract cancellation, cancellation during a candidate's independent process group, SIGKILL
+recovery during intake, terminal idempotency and competing foreground/background continuations.
+The ten integration scenarios passed together in the final **37-test** worker/integration run.
+The runnable entry is [quickstart.md](quickstart.md).
+
+The new CLI suite passed **28 tests**; ordinary CLI/explicit-profile compatibility passed **87**,
+automatic policy/preparation/conversation compatibility passed **220**, and lifecycle/cancel/
+deadline/status/propagation compatibility passed **101**. New descriptor/runner ownership tests
+cover real exec inheritance, malformed descriptor rejection, concurrent registration and stale
+finalizer exclusion. The final **63-test** CLI/descriptor run and **37-test** worker/integration
+run passed: **100 new tests**, with the single obsolete blanket-detach-rejection parameter removed.
+The worker run includes **20** recovery/finalizer cases and **7** independent launch-fault cases.
+Reports are `focused-cli-ownership.xml` and `focused-worker.xml` in the Phase C results directory.
+Independent review passed. The complete three-stage runner returned **exit 0** against frozen
+product/test bytes, inventoried in `product-test-bytes.json` in that directory:
+
+| Phase | Revision / scope | Result |
+| --- | --- | --- |
+| Current product | Working tree based on `dfd3faf`; all 293 inventoried product/test/tool files unchanged during verification | **6684 passed, 1 existing skipped**, 0 failures/errors, 862.40s |
+| Archived historical | `c6947fdfbf43d84e83cc29cc215e7bc0250db83a`; exact collection and file inventories | **2294 passed**, 24 registration nodes deferred, 0 failures/errors, 403.34s |
+| Original registration | `5560eb9f67463badc31fed17e309bb5dc1dabf8f`, original product/manifest pins | **24 passed**, 0 failures/errors, 18.74s |
+
+Full reports are `current.xml`, `archived.xml`, `frozen123.xml` and `full-run.log` in
+`.lunar-evolution/test-results/feature142-phase-c-20260921/`. The first full run passed without a
+rerun, retry or historical source change. The new current collection is **6685** nodes: the prior
+6586 plus 100 new cases minus one obsolete negative parameter. Historical denominators are unchanged.
+The product commit and its Linux matrix are recorded at release closeout; this local checkpoint
+does not yet claim a remote CI result.
+
+Initial integration exposed missing workspace creation before the new lock acquisition; the
+fresh-run branch now creates its workspace before locking while input staging remains inside
+ownership. Failure-first CLI tests additionally exposed launch success inheriting an old
+preparation failure exit code and cancelled continuation failing during link preparation.
+Accepted launches now have `launch_status: accepted` while retaining the prior diagnosis, and
+failed/cancelled terminal continuations return their existing handle without new work. The new
+28-test CLI suite also fails in its entirety against the previous `dfd3faf` CLI implementation.
+
+Final independent review tightened three failure boundaries before the full regression: private
+continuations must match the owner's home and parent; exiting coordinators freeze their cleanup
+targets and recheck their own exact runner identity before each signal; launcher database failures
+and process-exit races still reap only the newly launched child and retain any unconfirmed
+registration. Recovery also refuses malformed/partial process identities. The Store process query
+now exposes either non-null PID or PGID so incomplete cleanup responsibility cannot disappear
+from recovery checks. No database schema or historical identity changed.
+
+Two independent reviews covered CLI policy/routing and worker launch/recovery/exit boundaries.
+README and quickstart command parsing passed for **91** examples without runtime side effects.
+Ruff for `src`, `tests` and `tools`, compileall, offline lock validation, SDD prerequisites and
+whitespace checks pass. Publication scanning found **zero** retired-name matches across **1144**
+tracked/new files and paths; all **230** final changed-document local links resolve. Product/test
+byte verification remained unchanged after all test stages.
+
+Read-only verification of the relocated 131/134/139 inventories again matched **188 files /
+781341 bytes**, all sizes and SHA-256 values, with no missing or extra files. The report is
+`.lunar-evolution/test-results/feature142-phase-c-20260921/evidence-integrity.json`.
+The same inventory was rechecked after all three regression stages with identical results in
+`evidence-integrity-final.json` in that directory.
+No real provider request, historical candidate execution, campaign or WebAgent rerun occurred.
+Feature 139 remains preparation **1/1**, primary/joint **0/1**. Real-model complete delivery and
+Feature 143 T009 consumer integration remain separate unfinished work.
+
 ## Cancellation cleanup race found during Feature 145 regression
 
 2026-09-21: the completed current-product regression identified an intermittent failure in

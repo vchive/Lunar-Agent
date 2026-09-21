@@ -1396,7 +1396,7 @@ answer/resume infer this mode and reuse those files without another evaluator co
 Ordinary `deliver` also verifies the preparation evidence. The solver receives inputs and independent
 feedback; evaluator source and probes are not staged in its context.
 
-Feature [142](specs/142-automatic-solve-lifecycle/spec.md) adds a shared foreground execution
+Feature [142](specs/142-automatic-solve-lifecycle/spec.md) adds a shared active-execution
 budget for this automatic native multi-file path:
 
 ```bash
@@ -1435,11 +1435,23 @@ same lock before recording the answer. `solve`, `answer` and read-only `status` 
 `solve_execution` object with execution ID, policy and origin, phase, state and stopping reason.
 It does not report a live monotonic remainder or infer whether a remote request finished.
 
-Phase A foreground behavior and Phase B owned-process cancellation/cleanup have passed offline
-acceptance. Parent cancellation follows the verified child link, and local candidate, evaluator,
-probe and runtime processes register their process groups for cleanup. Failed cleanup retains its
-ownership record and blocks later stages. Automatic `--detach` remains rejected until Phase C is
-implemented and validated. Offline coverage does not establish real-model delivery success;
+Add `--detach` to a new automatic solve, `solve --resume`, `resume`, or `answer` to run it in the
+background. The command returns the same parent handle with `launch_status: accepted`; this means
+the worker was admitted, while `status` continues to report durable progress and any previous
+preparation diagnosis. Persisted evolution and budget policies are restored exactly. A worker
+exits when input is needed, and an explicit answer starts a new execution. If launching fails
+after an answer was accepted, the answer remains saved for explicit resume.
+
+The launcher transfers the workspace lock to the child and records its process identity before
+allowing work. Duplicate continuations are refused; registration is cleared only while the recorded
+PID/PGID still match.
+Parent cancellation follows the verified child link, and local candidate, evaluator, probe and
+runtime processes register their process groups for cleanup. Failed cleanup retains its ownership
+record and blocks later stages. See the [background quickstart](specs/142-automatic-solve-lifecycle/quickstart.md)
+for commands and the offline test scenario using actual subprocesses. Legacy automatic runs
+without a lifecycle marker remain outside background mode.
+
+Offline coverage does not establish real-model delivery success;
 Feature 139's real automatic multi-file result remains `0/1`. See the current
 [release assessment](docs/system-readiness-20260916.md) for the remaining work.
 
