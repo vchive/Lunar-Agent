@@ -8,7 +8,7 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
-## 2026-09-21 自动多文件后台执行（Feature 142 Phase C，本机完整验收通过）
+## 2026-09-21 自动多文件后台执行（Feature 142 Phase C，发布验收完成）
 
 继续原 SDD，实现 `solve --evolve --multi-file --detach`、`solve --resume --detach`、
 `resume --detach` 和 `answer --detach`，都返回同一父任务。后台子进程继承已有 workspace 锁，
@@ -26,10 +26,14 @@
 7 项启动故障测试；新增共 100 项。独立审查及完整三阶段回归通过：当前 **6684 passed、
 1 existing skipped**，历史 **2294 passed**，原始注册 **24 passed**，整体 exit 0。
 产品 `ff1edcb` 已推送到 `origin/main`，[Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35568522333)
-的 Python 3.12/3.13 全部通过；3.11 在一项既有 attestation 正例失败，正在修复其测试连接
-生命周期。受控 GC 已复现源 SQLite 自发 checkpoint 被严格快照正确拒绝，产品校验不放宽。
+的 Python 3.12/3.13 全部通过；3.11 在一项既有 attestation 正例失败。受控 GC 已复现源
+SQLite 自发 checkpoint 被严格快照正确拒绝，但未捕获首次 CI 的具体交错，产品校验不放宽。
 测试现显式保持连接，新增两个 GC 时点，3.11/3.13 各 86 项定向通过，独立审查通过。
-首次 CI 失败完整保留，后续完整 CI 复验待收尾。精确记录见
+首次 CI 失败完整保留；测试补丁 `ad89b50` 已推送，
+[后续完整 CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35570899139) 已于
+2026-09-21 07:24:13 UTC 核验 Python 3.11、3.12、3.13 的安装、完整三阶段回归、报告保存
+和静态检查全部通过，142 T028 已关闭。产品和 tools 字节仍与 `ff1edcb` 完全一致；新增的
+两个 GC 参数令当前收集为 6687 项，不改写上面的本机 6685 项检查点。精确记录见
 [142 validation](specs/142-automatic-solve-lifecycle/validation.md)，使用方式见
 [quickstart](specs/142-automatic-solve-lifecycle/quickstart.md)。
 

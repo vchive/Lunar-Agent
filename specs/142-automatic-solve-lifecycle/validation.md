@@ -64,6 +64,25 @@ and eight real-source-change refusal cases), with no failure, error or skip. Rep
 The two additional GC parameters bring current collection to **6687** nodes. The prior complete
 local run remains its original 6685-node checkpoint; unchanged product/archive stages were not
 needlessly repeated. The follow-up CI runs all three complete stages against the test fix.
+The test-only fix is **`ad89b50e5e95377c496c38e765998f2649b40be9`**, pushed to `origin/main`.
+Its [follow-up matrix](https://github.com/vchive/Lunar-Evolution/actions/runs/35570899139) completed
+successfully. Public API metadata and job pages were independently checked at **2026-09-21
+07:24:13 UTC** against that exact SHA. Python **3.11, 3.12 and 3.13** each passed installation,
+the complete three-stage test runner, failure annotation, report preservation and static checks.
+Job IDs are respectively **106242131308**, **106242130982** and **106242131330**. This closes T028;
+the initial failed matrix remains recorded separately above.
+
+Final public evidence is retained under
+`.lunar-evolution/test-results/feature142-phase-c-20260921/ci-ad89b50-35570899139/`:
+`linux-ci-final.json`, `run-final.json`, `run-final.html` and the three final job pages.
+All `src/` and `tools/` bytes remain identical to the verified product `ff1edcb`; tests and CI
+configuration remain at `ad89b50` during documentation closeout. The new 6687-node collection is
+distinct from the earlier 6685-node full local run. No additional local full run is needed for
+this documentation-only closeout; the final complete matrix validates the test fixture change.
+Closeout checks cover nine changed Markdown files and **123** resolving local links, with zero
+retired-name matches across **1144** publication files. Product/test/CI byte checks, Specify
+prerequisites and diff whitespace checks pass; `documentation-closeout-check.json` retains the
+separate closeout scope without replacing the earlier publication checkpoint.
 
 Initial integration exposed missing workspace creation before the new lock acquisition; the
 fresh-run branch now creates its workspace before locking while input staging remains inside

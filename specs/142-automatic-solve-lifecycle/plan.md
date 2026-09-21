@@ -2,9 +2,9 @@
 
 **Date**: 2026-09-20
 
-**Status**: Phase A/B/C are complete and pass offline subprocess acceptance, independent review
-and full three-stage regression. Product push/Linux CI closeout and exact checkpoints are recorded
-in [validation.md](validation.md).
+**Status**: Phase A/B/C are complete, pushed and pass offline subprocess acceptance, independent
+review, full local three-stage regression and Linux/Python 3.11–3.13 CI. Release closeout and exact
+checkpoints are recorded in [validation.md](validation.md).
 
 **Spec**: [spec.md](spec.md)
 

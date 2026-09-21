@@ -82,11 +82,11 @@ WebAgent 持平，也不能把 Feature 139 描述为端到端成功。
 
 如果目标是“本地可验证的 Agent + 程序演化系统”，Lunar 已经覆盖参考仓库最值得迁移的核心，
 并在 evaluator receipt、候选身份和交付证据上走得更严格。下一步的高价值工作是新的真实
-闭环验收、Feature 142 Phase C 完整回归与当前平台验证，以及提高严格最终响应协议在真实模型下产出
-可执行候选的成功率。Feature 143 本地生命周期已补修复，下一步验证实际 consumer 接线。
-历史版本 `8e1e089` 的 Linux/Python 3.11、3.12、3.13 完整双阶段测试和静态检查均通过；
-这不表示当前 Phase C 改动已通过 Linux。具体见[系统评估](system-readiness-20260916.md)。
-真实模型完整交付仍待新验收。
+闭环验收，以及提高严格最终响应协议在真实模型下产出可执行候选的成功率。Feature 143
+本地生命周期已补修复，下一步验证实际 consumer 接线。Feature 142 Phase C 已完成本机
+三阶段回归，`ad89b50` 的 Linux/Python 3.11、3.12、3.13 安装、完整三阶段回归、报告保存和
+静态检查均通过；首次 CI 失败及修复范围见 [142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。
+具体剩余工作见[系统评估](system-readiness-20260916.md)，真实模型完整交付仍待新验收。
 
 如果目标是“兼容 WebAgent 的线上产品形态”，还需要另行建设 OpenCode 插件/审批、完整多
 worker 编排、远程 外部实验服务客户端、队列、GPU sandbox、项目归属、SSE/HTTP trace 和多租户服务；这些

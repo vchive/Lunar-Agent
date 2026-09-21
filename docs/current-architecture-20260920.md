@@ -2,7 +2,8 @@
 
 创建日期：2026-09-20；2026-09-21 更新包含 Feature 142 Phase C 与已完成本地验收的 143 修复。
 142 Phase A/B 的已推送历史基线为 `65d9ae2`。Phase C 自动多文件后台入口现已实现，真实
-本机子进程与回环 HTTP 夹具已通过；本次完整三阶段回归已通过，不代表当前版本已通过 Linux。
+本机子进程与回环 HTTP 夹具、完整三阶段回归及 `ad89b50` 的 Linux/Python 3.11–3.13 CI
+均已通过，具体检查点见 [142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。
 Feature 143 已补本地 worker 的并发隔离、精确进程清理与 owner 活性恢复；T009 实际 consumer 仍待接入。
 下文分别说明已经实现的路径和仍待验收的边界。
 
@@ -235,12 +236,13 @@ Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽�
 
 主要负担在编排层。`cli.py`、`controller.py`、`evolution.py` 已承担很多入口、兼容和状态转换职责；普通、单文件演化、多文件演化各自形成了生命周期分支。自动多文件的时间、父编排、本地取消和进程清理已经统一；Phase C 将后台所有权交接放入独立 worker 模块，后续抽取编排模块应以这些验收覆盖为基础。
 
+Phase C 的本机完整三阶段回归、独立复核和 `ad89b50` 的 Linux 三版本 CI 已全部通过，
+发布验收已收尾。具体结果和剩余范围见[系统评估](system-readiness-20260916.md)。
 建议按以下顺序继续，不把大重构作为可用性的前置条件：
 
-1. Phase C 当前代码的完整三阶段回归和独立复核已经通过；提交后验证当前 Linux CI。历史版本 `8e1e089` 的跨平台结果不代替本轮验收，详见[系统评估](system-readiness-20260916.md)。
-2. 补齐新的 50 分钟真实验收实现、登记与启动前检查；候选最终响应可靠性改动须先有明确规格并离线验证，不能运行中修代码。
-3. 在 143 已修复的独立 worker 生命周期上迁移一个实际 delegation consumer；T009 不阻塞 142 生命周期实现和前台验收。
-4. 后续将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收，再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力。
+1. 补齐新的 50 分钟真实验收实现、登记与启动前检查；将 144 已离线验证的候选响应协议纳入固定产品，不能运行中修代码。
+2. 在 143 已修复的独立 worker 生命周期上迁移一个实际 delegation consumer；T009 不阻塞 142 生命周期实现和前台验收。
+3. 后续将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收，再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力。
 
 ## 9. 阅读源码的入口
 
@@ -256,6 +258,6 @@ Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽�
 - [自动生命周期](../src/lunar_evolution/automatic_solve_lifecycle.py)：`SolveExecutionControl`、`own_automatic_solve` 和状态投影。
 - [自动后台协调进程](../src/lunar_evolution/automatic_solve_worker.py)：锁交接、登记放行、退出清理与显式恢复。
 - [显式 worker](../src/lunar_evolution/workers.py)：worker 会话、消息、等待、取消及重启处理。
-- [Feature 142 规格](../specs/142-automatic-solve-lifecycle/spec.md)：Phase A/B 已验收；Phase C 已实现并通过本机夹具，完整回归已通过。
+- [Feature 142 规格](../specs/142-automatic-solve-lifecycle/spec.md)：Phase A/B/C 已验收；本机完整三阶段回归与当前 Linux 三版本 CI 均通过。
 
 本文区分源码已实现、离线验收、真实运行和规划四种状态。当前真实运行结果由 Feature 139 的独立报告记录，架构存在一条执行路径并不自动意味着该路径对所有真实模型任务都已成功。

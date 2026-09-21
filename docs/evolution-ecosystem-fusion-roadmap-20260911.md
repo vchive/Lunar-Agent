@@ -9,7 +9,9 @@ Phase B 定向回归 146 项通过；最终双阶段回归为当前 `8636 passed
 Phase C 自动后台执行现已实现：新 solve、两种 resume 和 answer 共用执行锁与原策略，
 后台进程认领后开始预算，等待用户时退出，启动失败保留已接受答案。本机真实子进程与回环
 HTTP 夹具已通过前后台交付、取消、异常恢复及并发争用；当前完整三阶段回归已通过，
-本轮尚无 Linux 验收结论。上述 Phase B 历史计数不代替本次验证。新的 50 分钟真实模型验收只有
+产品 `ff1edcb` 与测试修复 `ad89b50` 已推送，后者的 Linux/Python 3.11–3.13 完整 CI 全部通过，
+精确结果见 [142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。上述 Phase B 历史计数
+不代替本次验证。新的 50 分钟真实模型验收只有
 [计划](../specs/142-automatic-solve-lifecycle/real-acceptance-plan.md)，尚无新登记或运行；
 Feature 139 的 preparation `1/1`、primary/joint `0/1` 保持不变。
 
@@ -46,7 +48,7 @@ run 墙钟传播和取消竞态，以及公开 transport status 和 persisted/ef
 核验仍保持通过；真实槽不重开、不修复、不追加请求。
 Feature 139 的固定测量预算不替代通用产品能力；随后 Feature 142 Phase A/B 已补齐前台
 活动执行预算、父编排、运行中本地取消和清理。Phase C 已接通自动后台执行并通过本机夹具，
-当前等待提交及 Linux CI 收尾；外部 producer 多文件接线、143 T009 consumer 及真实效果验收仍在后续范围。
+提交及 Linux CI 已收尾；外部 producer 多文件接线、143 T009 consumer 及真实效果验收仍在后续范围。
 
 本文记录 Lunar Evolution 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、远端服务或新的 WebAgent 对比；Feature 139 的

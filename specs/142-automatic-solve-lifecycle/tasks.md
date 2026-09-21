@@ -1,8 +1,8 @@
 # Tasks
 
-**Status**: Phase A/B/C are implemented and pass focused offline subprocess acceptance,
-independent review and full three-stage regression. Product push/Linux CI closeout remains the
-final release task below.
+**Status**: Phase A/B/C are implemented, pushed and pass focused offline subprocess acceptance,
+independent review, full local three-stage regression and the Linux/Python 3.11–3.13 matrix.
+Exact product/test checkpoints and remaining real-delivery limits are in [validation.md](validation.md).
 
 ## Specification
 
@@ -86,5 +86,5 @@ foreground/background equivalence remained outside acceptance; Phase C below clo
       archived / frozen registration regressions, static checks and SDD/link checks.
 - [x] T027 Independently review launch/recovery/exit ownership and verify retained 131/134/139
       evidence inventories without modifying or executing their contents.
-- [ ] T028 Record exact Phase C results and remaining real-delivery / worker-consumer limits;
+- [x] T028 Record exact Phase C results and remaining real-delivery / worker-consumer limits;
       commit and push the verified changes and inspect the Linux matrix.

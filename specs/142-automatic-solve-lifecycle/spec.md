@@ -2,8 +2,9 @@
 
 **Created**: 2026-09-20
 
-**Status**: Phase A/B/C are implemented and pass offline acceptance, independent review and the
-full three-stage regression. Product push/Linux CI closeout is recorded in [validation.md](validation.md).
+**Status**: Phase A/B/C are implemented, pushed and pass offline acceptance, independent review,
+full local three-stage regression and Linux/Python 3.11–3.13 CI. Exact checkpoints and release
+closeout are recorded in [validation.md](validation.md).
 
 **Input**: Continue product development using SDD; connect full automatic multi-file execution
 budgets, parent/child cancellation, and local background execution using existing product controls.
