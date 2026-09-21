@@ -26,6 +26,8 @@ runtime 仅在本次请求副本中应用；普通调用、自定义约束和持
 完整双阶段当前 8848 passed、1 skipped、24 deselected，冻结 123 阶段另有 24 passed，exit 0。
 最终小幅防御性改动有 100 项复验；完整回归的代码检查点、CI 和证据范围见
 [144 validation](specs/144-candidate-response-reliability/validation.md)。
+最终产品 `c6947fd` 的 [Linux CI](https://github.com/vchive/Lunar-Agent/actions/runs/35556293182)
+也已确认 Python 3.11、3.12、3.13 完整测试和静态检查全部通过。
 本轮没有 provider 请求或新 campaign，也不修复或重放历史生成代码；131/134/139 冻结结果不变。
 下一步是新固定条件下的真实候选完成与前台完整交付验收。142 Phase C 自动后台入口和
 143 T009 实际 worker consumer 接线仍未完成；不能把这轮离线通过描述成真实成功率提升。

@@ -64,6 +64,7 @@ Feature 144 延续候选生成链路，给多文件请求增加本次调用专�
 异常类型的模型原因，修复三种运行时失败名称无法入库的问题；解析失败保留已观察的预算
 消耗，旧调用诊断和外部自报原因不能冒充本次证据。离线有效样例实际执行并独立评分，
 失败样例不进入下游；最终回归和证据范围见 [144 validation](../specs/144-candidate-response-reliability/validation.md)。
+最终产品 `c6947fd` 的 Linux/Python 3.11、3.12、3.13 完整 CI 也已通过。
 这些改动不增加真实模型样本，139 的 preparation 1/1、primary/joint 0/1 不变。
 
 当前 CLI `delegate` 仍走同步 `run_agent()`，142 前台自动多文件也不依赖该 WorkerService；

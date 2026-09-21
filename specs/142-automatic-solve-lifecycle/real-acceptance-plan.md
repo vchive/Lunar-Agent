@@ -23,6 +23,30 @@ Feature 139 is a closed historical slot. Its evidence, registration, campaign ro
 `0/1` primary and joint outcomes remain unchanged. Feature 131 and Feature 134 evidence also
 remain byte-for-byte immutable.
 
+### Current preparation checklist, 2026-09-21
+
+Feature 144 supplies the next candidate-response product checkpoint: invocation-local bundle
+instructions, unchanged strict parsing, and canonical failed receipts with optional `phase` and
+`failure_cause`. This does not register or launch the next real attempt. Before the manifest gate,
+the new acceptance implementation still needs the following work:
+
+1. Reuse the supported task and budget values below in a fresh measurement identity and directory.
+   Build new measurement code against the selected, fully verified product; do not edit or invoke
+   Feature 139's closed campaign helpers as a way to reopen its slot.
+2. Bind the current lifecycle-enabled parent orchestration task, its execution identity, reciprocal
+   child link and final delivery receipt. Do not reuse the historical interpretation where an
+   intake-only parent could already be succeeded while the child was still running.
+3. Verify canonical generation receipts with the current parser/Store contract. Preserve bounded
+   failure phase/cause when present, and absence when unknown; neither field nor any later artifact
+   can establish parser completion. Cover this observer with offline success, failure and tamper
+   fixtures before preregistration.
+4. Retain fresh preflight, supervision, read-only status and six-stage summary evidence, with an
+   independent inventory/audit path. Freeze the actual product/measurement commits and all launch
+   conditions only after this implementation's own offline checks pass.
+
+The limits, one-slot denominator and no-repair rules below remain unchanged. Feature 143 T009 and
+Feature 142 Phase C are separate release work; this acceptance remains a foreground attempt.
+
 ## Admission gates
 
 No provider request may occur until every gate below has a retained, inspectable result.

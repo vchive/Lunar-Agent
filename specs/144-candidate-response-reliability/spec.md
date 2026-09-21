@@ -1,7 +1,7 @@
 # Feature 144: Candidate response protocol and failure diagnostics
 
 **Created**: 2026-09-21
-**Status**: Specification before implementation; continuation of Features 110/136/140/141
+**Status**: Implemented and verified offline; continuation of Features 110/136/140/141
 
 ## Problem and scope
 
