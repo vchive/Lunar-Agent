@@ -8,6 +8,23 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## 2026-09-22 T009 交付中断与 CI 修复
+
+`873d985` 已推送；进一步独立审查发现观察超时锁未释放、恢复重复登记、取消遗留 staging、
+输出提升未计预算等边界，已在后续工作树修正。交付独占锁贯穿暂存到提交，等待另一观察者
+时不持控制器锁；恢复前清理本 attempt 的部分批次，输出写入前登记精确归属，取消后清理
+遗留文件和账本。新增 9 项故障回归均通过；最终三阶段回归通过：当前 **6722 passed、1 skipped**，
+归档 **2294 passed**，冻结注册 **24 passed**，整体 exit 0。
+
+前一提交 `9213f01` 的 Linux CI 失败是真实保留结果：两版本因 `<0.30s` 断言过紧，
+3.12 因 0.05 秒预算可能在 runtime 启动前耗尽。现改为进程 release 握手与受控时钟，
+验证事件顺序而不依赖机器启动速度。`873d985` 的 CI 当时仍在运行，不能用旧提交的
+绿色 CI 替代新提交验证。
+
+系统仍未全部完成：Feature 139 真实完整交付仍为 preparation 1/1、primary/joint 0/1；
+AgentLoop worker 工具、自动 solve 接入 WorkerService、递归 worker、外部 producer 的完整
+调度和真实框架验收仍未完成。本轮没有 provider/campaign/WebAgent 执行。
+
 ## 2026-09-21 自动多文件后台执行（Feature 142 Phase C，发布验收完成）
 
 继续原 SDD，实现 `solve --evolve --multi-file --detach`、`solve --resume --detach`、

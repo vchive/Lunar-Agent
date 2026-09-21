@@ -231,9 +231,7 @@ def test_cancellation_first_discards_result_returned_after_wall_budget(
     controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     run = controller.store.create_run(
         "cancel before the wall budget",
-        # Leave enough startup headroom for hosted CI; the test advances past the
-        # deadline only after the runtime has signalled that it started.
-        route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=1.0)),
+        route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=0.05)),
     )
     settled: list[object] = []
     worker = Thread(target=lambda: settled.append(controller.resume(run.id)))

@@ -53,3 +53,9 @@ This is the typed local API. The foreground CLI `lunar-evolution delegate` now u
 worker binding and result-delivery path described in the Feature 143 specification. AgentLoop
 worker tools, recursive workers, and automatic solve integration remain outside this bounded
 consumer; automatic multi-file background execution is Feature 142 Phase C.
+
+A second `delegate --run-id` observation reuses an active binding. If another process is delivering
+the result, `wait_timeout` still bounds the observation. After a delivery owner exits, an explicit
+later observation can recover its reservation once it is stale (1–30 seconds, based on the original
+active timeout), using the stored envelope without running the worker again. Missing/unsafe lock
+evidence keeps the outcome unresolved. Cancellation cleans the exact abandoned staging batch.

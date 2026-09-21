@@ -5101,7 +5101,7 @@ def _delegate_result_projection(
     if task is None:
         bindings = store.list_worker_bindings(run.id)
         binding = next(
-            (item for item in reversed(bindings) if item.status in {"active", "settled", "discarded", "lost"}),
+            (item for item in reversed(bindings) if item.status in {"active", "delivering", "settled", "discarded", "lost"}),
             None,
         )
         if binding is not None:
@@ -5146,7 +5146,10 @@ def _delegate_wait_timeout(config: Config, args: argparse.Namespace, run: Run) -
     # A later invocation with ``--run-id`` must attach to the existing durable runner.  The
     # runner PID is written immediately after spawn; the binding may appear a little later while
     # the child imports the application and claims its task.
-    active = store.list_worker_bindings(run.id, status="active")
+    active = [
+        item for item in store.list_worker_bindings(run.id)
+        if item.status in {"active", "delivering"}
+    ]
     runner_pid = run.runner_pid
     if not active and not (isinstance(runner_pid, int) and runner_pid > 1):
         _detach_delegate(config, args, run)
@@ -5163,14 +5166,16 @@ def _delegate_wait_timeout(config: Config, args: argparse.Namespace, run: Run) -
             raise ValueError(f"run disappeared while observing worker: {run.id}")
         if current.status.value in terminal:
             return _delegate_result_projection(store, args, current)
-        active = store.list_worker_bindings(run.id, status="active")
+        active = [
+            item for item in store.list_worker_bindings(run.id)
+            if item.status in {"active", "delivering"}
+        ]
         if not active and time.monotonic() < startup_deadline:
             time.sleep(0.01)
             continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            bindings = store.list_worker_bindings(run.id)
-            binding = next((item for item in reversed(bindings) if item.status == "active"), None)
+            binding = active[-1] if active else None
             tasks = store.list_tasks(run.id)
             task_id = binding.task_id if binding is not None else (args.task_id or (tasks[0].id if tasks else None))
             return {

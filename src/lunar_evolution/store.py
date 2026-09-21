@@ -1630,8 +1630,10 @@ class Store:
         sha256: str,
         size: int,
         kind: str = "result",
+        *,
+        artifact_id: str | None = None,
     ) -> str:
-        artifact_id = f"artifact-{uuid.uuid4().hex}"
+        artifact_id = artifact_id or f"artifact-{uuid.uuid4().hex}"
         with self._connect() as connection:
             connection.execute(
                 "INSERT INTO artifacts(id, run_id, task_id, path, sha256, size, kind, created_at) "

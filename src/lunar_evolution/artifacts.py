@@ -34,7 +34,9 @@ class ArtifactStore:
         self.record(path, task_id, kind)
         return path
 
-    def record(self, path: str | Path, task_id: str, kind: str = "result") -> str:
+    def record(
+        self, path: str | Path, task_id: str, kind: str = "result", *, artifact_id: str | None = None,
+    ) -> str:
         path = Path(path).resolve(strict=False)
         try:
             relative = path.relative_to(self.root)
@@ -43,6 +45,7 @@ class ArtifactStore:
         if not path.is_file():
             raise ArtifactError(f"artifact is not a file: {path}")
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        identity = {"artifact_id": artifact_id} if artifact_id is not None else {}
         return self.store.add_artifact(
             self.run_id,
             task_id,
@@ -50,4 +53,5 @@ class ArtifactStore:
             digest,
             path.stat().st_size,
             kind,
+            **identity,
         )

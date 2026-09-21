@@ -1,12 +1,22 @@
 # Validation: Local multi-agent worker lifecycle
 
-**Current status, 2026-09-21**: T009 foreground `delegate` consumer is implemented and its
-provider-free acceptance is complete. Focused worker/controller/CLI regression: **46 passed**;
-Ruff, compileall and `git diff --check` passed. The broader lifecycle hardening remains covered by
-260 shared tests; the last complete two-stage baseline was current 8708 passed, 1 skipped,
-24 deselected, frozen123 24 passed. Final Linux CI also passed on Python 3.11, 3.12 and 3.13 at
-commit `8e1e089`; details are recorded at the end. No provider request, campaign, or WebAgent run
-was made. Earlier implementation and counterexample history is retained below.
+**Current status, 2026-09-22**: T009 is implemented; delivery interruption hardening passed nine
+new fault regressions. The final three-phase regression passed: current **6722 passed, 1 skipped**,
+archived **2294 passed**, frozen123 **24 passed**, overall exit 0.
+The earlier `9213f01` Linux run [failed](https://github.com/vchive/Lunar-Evolution/actions/runs/35612594545):
+Python 3.11/3.13 failed the narrow CLI elapsed-time assertion and 3.12 exhausted a 0.05-second
+fixture budget before runtime admission. Those fixtures now use an explicit worker release handshake
+and a controlled controller clock. Earlier green CI checkpoints below are historical, not evidence
+for this follow-up. The current-tree run used the working tree at `873d985` plus the uncommitted
+changes now being prepared for the follow-up push. No provider request, campaign, or WebAgent run was made.
+
+### Delivery fault acceptance
+
+The new controller fixtures interrupt evaluation and terminal delivery, and both sides of output
+ledger publication. Recovery produces one result/runtime/output batch from the existing envelope.
+Cancellation removes the exact batch, including a file whose artifact row was never committed.
+A live delivery cannot be stolen even with a stale timestamp; peer timeout releases local locks
+and respects the observation budget. Output promotion is included in artifact-budget enforcement.
 
 ## T009 foreground consumer validation
 
@@ -27,8 +37,8 @@ Acceptance fixtures cover success, typed failure, bind failure before adapter in
 task rejection, artifact traversal/symlink/tamper rejection, cancellation and delivery races,
 duplicate-observer idempotent delivery, active binding reuse, lost recovery, registry isolation,
 and detached CLI timeout/settlement. The command
-path remains intentionally bounded to one foreground task; AgentLoop, automatic solve, recursive
-workers and detached delegation remain outside this feature slice.
+path remains bounded to one delegated task, observed in the foreground or hosted in its durable
+child. AgentLoop, automatic solve and recursive workers remain outside this feature slice.
 
 ## Initial implementation validation, 2026-09-20
 

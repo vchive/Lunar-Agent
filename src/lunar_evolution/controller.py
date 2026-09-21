@@ -3763,6 +3763,10 @@ class LocalController:
             with self._active_lock:
                 self._active_agents.pop(attempt.id, None)
 
+    def _worker_delivery_lock(self, worker_id: str, *, create: bool = False):
+        owner = "worker-owner-" + hashlib.sha256(worker_id.encode("utf-8")).hexdigest()[:32]
+        return WorkerOwnerLock.acquire(self.store.database, owner, create=create)
+
     def run_worker_agent(
         self,
         run_id: str,
@@ -3843,10 +3847,6 @@ class LocalController:
         delivery_lock_held = False
         delivery_owner_lock = None
 
-        def acquire_delivery_owner_lock(worker_id: str):
-            owner = "worker-owner-" + hashlib.sha256(worker_id.encode("utf-8")).hexdigest()[:32]
-            return WorkerOwnerLock.acquire(self.store.database, owner, create=True)
-
         def active_bound_worker_id() -> str | None:
             """Find a binding created before worker dispatch returned to this caller."""
             for candidate in self.store.list_worker_bindings(run.id, status="active"):
@@ -3891,107 +3891,74 @@ class LocalController:
             observed = self.workers.wait(run.id, worker.id, timeout=wait_timeout)
             if observed.phase.value == "running":
                 raise WorkerObservationTimeout(worker.id)
-            # Cancellation and result materialization share one controller boundary.  The
-            # durable Store guard below remains authoritative across processes; this lock keeps
-            # local cancellation from interleaving with staged output promotion.
-            self._active_lock.acquire()
-            delivery_lock_held = True
-            self.store.append_event(
-                run.id, "worker_finished_observed", {"attempt_id": attempt.id}, task_id=task.id,
+            # Do not hold the controller lock while another delivery owner is active:
+            # observation may time out, and cancellation must remain available to other threads.
+            observation_deadline = (
+                started + wait_timeout if wait_timeout is not None else
+                time.monotonic() + max(1.0, min(active_timeout or 30.0, 30.0))
             )
-            # Re-read the binding after waiting.  ``existing_binding`` is only the admission
-            # snapshot; another observer/controller may have settled or discarded it while this
-            # caller was waiting.  Using the stale snapshot here would stage duplicate result
-            # and output artifacts before discovering that delivery lost the Store race.
-            binding = self.store.get_worker_binding(worker.id)
-            if binding is None or binding.task_attempt_id != attempt.id:
-                raise AgentInvocationError("worker binding is missing or mismatched")
-            if binding.status == "settled":
-                envelope = self.store.get_worker_result(
-                    worker.id, binding.worker_attempt_id, owner_id=run.id,
-                )
-                if envelope is None:
-                    raise AgentInvocationError("settled worker result envelope is missing")
-                settled = self.store.get_run(run.id)
-                if settled is None:
-                    raise ValueError(f"run disappeared while delegating: {run.id}")
-                self._active_lock.release()
-                delivery_lock_held = False
-                return settled, envelope.to_agent_result()
-            if binding.status == "delivering":
-                # Another controller owns result materialization.  The stable delivery lock
-                # distinguishes a live owner from a crashed owner before reopening a stale
-                # reservation; a live reservation is never stolen by a second observer.
-                candidate_lock = acquire_delivery_owner_lock(worker.id)
-                if candidate_lock is not None:
-                    recovered = self.store.recover_worker_binding_delivery(
-                        worker_id=worker.id,
-                        worker_attempt_id=binding.worker_attempt_id,
-                        stale_after=max(1.0, min(binding.active_timeout or 30.0, 30.0)),
-                    )
-                    if recovered:
-                        delivery_owner_lock = candidate_lock
-                        binding = self.store.get_worker_binding(worker.id)
-                        if binding is None or binding.status != "active":
-                            delivery_owner_lock.close()
-                            delivery_owner_lock = None
-                        else:
-                            # Continue through the normal active reservation path.
-                            pass
-                    else:
-                        candidate_lock.close()
-                if binding.status != "active":
-                    # A live owner will publish the result; wait for its durable transition.
-                    # Never stage duplicate result/runtime artifacts here.
-                    deadline = time.monotonic() + max(
-                        1.0, min(binding.active_timeout or 30.0, 30.0)
-                    )
-                    while time.monotonic() < deadline:
-                        time.sleep(0.01)
-                        current = self.store.get_worker_binding(worker.id)
-                        if current is None or current.status == "delivering":
-                            continue
-                        if current.status == "settled":
-                            envelope = self.store.get_worker_result(
-                                worker.id, current.worker_attempt_id, owner_id=run.id,
-                            )
-                            if envelope is None:
-                                raise AgentInvocationError("settled worker result envelope is missing")
-                            settled = self.store.get_run(run.id)
-                            if settled is None:
-                                raise ValueError(f"run disappeared while delegating: {run.id}")
-                            self._active_lock.release()
-                            delivery_lock_held = False
-                            return settled, envelope.to_agent_result()
-                        raise AgentInvocationError("worker binding is no longer active")
-                    raise WorkerObservationTimeout(worker.id)
-            if binding.status != "active":
-                raise AgentInvocationError("worker binding is no longer active")
-            if delivery_owner_lock is None:
-                delivery_owner_lock = acquire_delivery_owner_lock(worker.id)
-                if delivery_owner_lock is None:
-                    raise WorkerObservationTimeout(worker.id)
-            if not self.store.claim_worker_binding_delivery(
-                worker_id=worker.id,
-                worker_attempt_id=binding.worker_attempt_id,
-                run_id=run.id,
-                task_id=task.id,
-                task_attempt_id=attempt.id,
-            ):
-                current = self.store.get_worker_binding(worker.id)
-                if current is not None and current.status == "settled":
+            while True:
+                binding = self.store.get_worker_binding(worker.id)
+                if binding is None or binding.task_attempt_id != attempt.id:
+                    raise AgentInvocationError("worker binding is missing or mismatched")
+                if binding.status == "settled":
                     envelope = self.store.get_worker_result(
-                        worker.id, current.worker_attempt_id, owner_id=run.id,
+                        worker.id, binding.worker_attempt_id, owner_id=run.id,
                     )
                     if envelope is None:
-                        raise AgentInvocationError("settled worker result envelope is missing")
+                        # This observer owns no staging and must not clean the committed result.
+                        raise WorkerObservationTimeout(worker.id)
                     settled = self.store.get_run(run.id)
                     if settled is None:
                         raise ValueError(f"run disappeared while delegating: {run.id}")
-                    self._active_lock.release()
-                    delivery_lock_held = False
                     return settled, envelope.to_agent_result()
-                raise AgentInvocationError("worker binding is no longer active")
+                if binding.status not in {"active", "delivering"}:
+                    raise AgentInvocationError("worker binding is no longer active")
+                try:
+                    delivery_owner_lock = self._worker_delivery_lock(
+                        worker.id, create=binding.status == "active",
+                    )
+                except (OSError, ValueError):
+                    # Missing or unsafe liveness evidence cannot authorize cleanup or takeover.
+                    raise WorkerObservationTimeout(worker.id) from None
+                if delivery_owner_lock is not None:
+                    # The status read before taking the OS lock may already be stale. Never
+                    # stage or discard anything based on that snapshot.
+                    binding = self.store.get_worker_binding(worker.id)
+                    if binding is not None and binding.status == "delivering":
+                        self.store.recover_worker_binding_delivery(
+                            worker_id=worker.id, worker_attempt_id=binding.worker_attempt_id,
+                            stale_after=max(1.0, min(binding.active_timeout or 30.0, 30.0)),
+                        )
+                        binding = self.store.get_worker_binding(worker.id)
+                    if binding is not None and binding.status == "active":
+                        self._active_lock.acquire()
+                        delivery_lock_held = True
+                        claimed = self.store.claim_worker_binding_delivery(
+                            worker_id=worker.id, worker_attempt_id=binding.worker_attempt_id,
+                            run_id=run.id, task_id=task.id, task_attempt_id=attempt.id,
+                        )
+                        if claimed:
+                            # A crashed materializer may have written only part of its batch.
+                            # This exact attempt is still uncommitted and its owner lock is held;
+                            # remove staging before reconstructing it from the durable envelope.
+                            self._discard_late_result(
+                                run.id, task.id, attempt.id, record_event=False,
+                            )
+                            break
+                        self._active_lock.release()
+                        delivery_lock_held = False
+                    delivery_owner_lock.close()
+                    delivery_owner_lock = None
+                    if binding is not None and binding.status not in {"active", "delivering"}:
+                        continue
+                remaining = observation_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise WorkerObservationTimeout(worker.id)
+                time.sleep(min(0.01, remaining))
+            self.store.append_event(
+                run.id, "worker_finished_observed", {"attempt_id": attempt.id}, task_id=task.id,
+            )
             envelope = self.store.get_worker_result(
                 worker.id, binding.worker_attempt_id, owner_id=run.id,
             )
@@ -4055,7 +4022,9 @@ class LocalController:
                 completion = "failed"
                 completion_error = result.error
             elif evaluation.passed:
-                self._promote_algorithm_outputs(run, task, task_root, attempt_id=attempt.id)
+                self._promote_algorithm_outputs(
+                    run, task, task_root, attempt_id=attempt.id, worker_delivery=True,
+                )
                 completion = "succeeded"
                 completion_error = None
             elif self._can_retry(task.attempts + 1):
@@ -4064,6 +4033,7 @@ class LocalController:
             else:
                 completion = "failed"
                 completion_error = evaluation.reason
+            self._check_budget(run.id, budget, started)
             delivered = self.store.complete_worker_binding(
                 worker_id=worker.id,
                 worker_attempt_id=binding.worker_attempt_id,
@@ -4127,6 +4097,12 @@ class LocalController:
             if delivery_lock_held:
                 self._active_lock.release()
                 delivery_lock_held = False
+            if existing_binding is not None and delivery_owner_lock is None:
+                # An attaching observer never owns the other controller's staging.
+                raise
+            current = self.store.get_worker_binding(worker.id) if worker is not None else None
+            if current is not None and current.status == "settled":
+                raise
             error = self._sanitize_error(exc)
             worker_id = worker.id if worker is not None else active_bound_worker_id()
             if worker_id is not None:
@@ -4145,6 +4121,8 @@ class LocalController:
             self.store.settle_run(run.id)
             raise
         finally:
+            if delivery_lock_held:
+                self._active_lock.release()
             if delivery_owner_lock is not None:
                 delivery_owner_lock.close()
 
@@ -4591,6 +4569,19 @@ class LocalController:
             if scope.child_id is not None:
                 self.store.cancel_run(scope.child_id)
             self.cleanup_automatic_solve(run_id)
+        for binding in self.store.list_worker_bindings(run_id, status="discarded"):
+            try:
+                lock = self._worker_delivery_lock(binding.worker_id)
+            except (OSError, ValueError):
+                continue
+            if lock is None:
+                continue  # The live delivery owner will discard before releasing its lock.
+            try:
+                self._discard_late_result(
+                    run_id, binding.task_id, binding.task_attempt_id, record_event=False,
+                )
+            finally:
+                lock.close()
         return cancelled
 
     def _automatic_cancel_targets(self, parent_id: str) -> _AutomaticCancelDecision | None:
@@ -4925,7 +4916,8 @@ class LocalController:
         return resolved
 
     def _promote_algorithm_outputs(
-        self, run: Run, task: Any, task_root: Path, *, attempt_id: str | None = None
+        self, run: Run, task: Any, task_root: Path, *, attempt_id: str | None = None,
+        worker_delivery: bool = False,
     ) -> tuple[dict[str, Any], ...]:
         """Copy verified Solver data files to stable run-level output paths and hash them.
 
@@ -4954,12 +4946,26 @@ class LocalController:
                 raise ArtifactError(
                     f"algorithm output exceeds {MAX_ARTIFACT_BYTES} bytes: {output.path}"
                 )
+            artifact_id = None
+            if worker_delivery:
+                identity = json.dumps([run.id, task.id, attempt_id, output.path]).encode("utf-8")
+                artifact_id = "artifact-worker-output-" + hashlib.sha256(identity).hexdigest()
+                # Persist exact output ownership before the first filesystem write. Recovery
+                # can clean even a crash between replacing the file and recording its ledger.
+                self.store.append_event(
+                    run.id, "worker_delivery_output_prepared",
+                    {"attempt_id": attempt_id, "path": output.path, "artifact_id": artifact_id},
+                    task_id=task.id, event_id="event-" + artifact_id,
+                )
             target = self._confined_output_target(root, output.path)
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary = target.with_name(f".{target.name}.tmp")
             temporary.write_bytes(source.read_bytes())
             temporary.replace(target)
-            artifact_id = artifacts.record(target, task.id, kind="output")
+            if worker_delivery:
+                artifact_id = artifacts.record(target, task.id, kind="output", artifact_id=artifact_id)
+            else:
+                artifact_id = artifacts.record(target, task.id, kind="output")
             promoted.append(
                 {
                     "artifact_id": artifact_id,
@@ -5088,16 +5094,24 @@ class LocalController:
         raise BudgetExceeded(limit, actual, maximum)
 
     def _discard_late_result(
-        self, run_id: str, task_id: str, attempt_id: str, error: str | None = None
+        self, run_id: str, task_id: str, attempt_id: str, error: str | None = None,
+        *, record_event: bool = True,
     ) -> None:
         run = self.store.get_run(run_id)
         if run is not None:
             output_artifact_ids = []
+            prepared_paths = []
             for event in self.store.list_events(run_id):
-                if event.get("type") != "algorithm_outputs_promoted" or event.get("task_id") != task_id:
+                if (event.get("type") not in {"algorithm_outputs_promoted", "worker_delivery_output_prepared"}
+                        or event.get("task_id") != task_id):
                     continue
                 payload = event.get("payload")
                 if not isinstance(payload, dict) or payload.get("attempt_id") != attempt_id:
+                    continue
+                if event["type"] == "worker_delivery_output_prepared":
+                    if isinstance(payload.get("artifact_id"), str) and isinstance(payload.get("path"), str):
+                        output_artifact_ids.append(payload["artifact_id"])
+                        prepared_paths.append(payload["path"])
                     continue
                 outputs = payload.get("outputs")
                 if isinstance(outputs, list):
@@ -5105,9 +5119,17 @@ class LocalController:
                         item["artifact_id"] for item in outputs
                         if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
                     )
-            for relative_path in self.store.discard_attempt_outputs(
+            discarded_paths = self.store.discard_attempt_outputs(
                 run_id, task_id, attempt_id, tuple(dict.fromkeys(output_artifact_ids))
-            ):
+            )
+            for relative_path in prepared_paths:
+                try:
+                    target = self._confined_output_target(Path(run.workspace), relative_path)
+                    target.unlink(missing_ok=True)
+                    target.with_name(f".{target.name}.tmp").unlink(missing_ok=True)
+                except (OSError, ValueError):
+                    pass
+            for relative_path in discarded_paths:
                 path = (Path(run.workspace) / relative_path).resolve(strict=False)
                 try:
                     path.relative_to(Path(run.workspace).resolve())
@@ -5115,6 +5137,8 @@ class LocalController:
                 except (OSError, ValueError):
                     # The ledger is authoritative; a file disappearing concurrently is harmless.
                     pass
+        if not record_event:
+            return
         self.store.append_event(
             run_id,
             "task_result_discarded",

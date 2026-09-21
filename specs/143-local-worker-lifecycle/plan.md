@@ -69,7 +69,7 @@ Phase C consumer migration; do not treat the existing APIs as completed integrat
    and authoritative task state immediately before delivery; late or cancelled results are
    discarded and cannot settle a task or run. Parent cancellation and explicit recovery resolve
    the exact binding, cancel/reconcile only that worker, and remain idempotent.
-5. Keep ordinary synchronous `run_agent`, detached delegation, AgentLoop, automatic solve and
+5. Keep ordinary synchronous `run_agent`, AgentLoop, automatic solve and
    recursive workers unchanged. Add local command fixtures for success, typed failure, timeout,
    cancellation, artifact traversal/tampering, binding crash windows, registry isolation and
    recovery. No provider request or campaign is part of this slice.
@@ -101,7 +101,7 @@ initialization. No missing owner or lock is treated as proof of interruption.
 - Registration failures stop the exact adapter even if a legacy runtime swallows observer errors.
   Unconfirmed cleanup retains process ownership and blocks continuation until verified cleanup.
 - The runnable provider-free example is [quickstart.md](quickstart.md). T009 is separate from this
-  local API acceptance and remains deferred.
+  local API acceptance and is now implemented through the bounded CLI consumer.
 
 ## Complexity tracking
 
@@ -112,3 +112,17 @@ single process field cannot safely represent those states. No new dependency or 
 
 Do not use `tasks.parent_id` as a substitute for `parent_worker_id`; do not copy OpenCode HTTP or
 plugin code into Lunar; do not run a provider campaign as implementation validation.
+
+## Delivery interruption hardening, 2026-09-22
+
+Continue T009 with a per-worker OS lock and the durable `delivering` reservation. Every lock is
+released on timeout, exception, and process interruption. Polling another owner uses the remaining
+observation budget without holding the controller lock. After verified stale-owner recovery, clean
+only the bound attempt's partial batch and rebuild from its existing envelope. Persist exact output
+identity before publication to cover both file-before-ledger and ledger-before-event crash windows.
+Cancellation revisits discarded bindings after process cleanup, but never removes a live peer's
+staging. Check artifact budgets again after output promotion and before the terminal transaction.
+
+CI timing tests use worker release handshakes and a controlled controller clock. Re-run current,
+archived, and frozen registration phases; retain the failed `9213f01` CI result and identify every
+subsequent run by its own commit. No historical or real-model evidence is rewritten.

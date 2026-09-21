@@ -18,7 +18,7 @@ the CLI integration.
 - [x] T007 Complete owner-scoped restart reconciliation and `lost` acceptance after T012.
 - [x] T008 Add initial focused worker lifecycle fixtures and run shared regressions/inventory checks.
 - [x] T009 Migrate one explicit delegation consumer after T006, T007, and T011–T015 passed.
-      The bounded scope is one foreground single-task `delegate` path; detached delegation,
+      The bounded scope is one single-task `delegate` path, including its durable child host;
       AgentLoop, automatic solve and recursive workers remain unchanged.
 - [x] T010 Review, update HANDOFF, commit, and push the initial implementation.
 
@@ -53,7 +53,7 @@ the CLI integration.
 - [x] T018 Construct the worker service with the selected delegation registry and persist a bounded
       result envelope containing AgentResult identity, status/error, metadata, text and artifacts.
 - [x] T019 Route foreground `delegate` through claim → bind → start → wait, with an independent
-      observation timeout; keep ordinary `run_agent`, detached delegation and AgentLoop unchanged.
+      observation timeout and a durable CLI child host; keep ordinary `run_agent` and AgentLoop unchanged.
 - [x] T020 Materialize and verify worker result artifacts in the bound task-attempt workspace,
       then reuse existing evaluation/settlement. Reject traversal, symlink escape, missing or
       tampered artifacts and late results without overwriting terminal state.
@@ -62,3 +62,12 @@ the CLI integration.
       registry isolation and idempotent result delivery.
 - [x] T022 Run focused T009, shared worker/controller/CLI regressions, static checks, SDD/link
       checks and retained-evidence inventory; only then mark T009 complete and push.
+
+## Delivery interruption audit, 2026-09-22
+
+- [x] T023 Reserve delivery under a stable owner lock and test duplicate observers and stale recovery.
+- [x] T024 Release observation locks on every exit, bound peer waits, and preserve committed evidence.
+- [x] T025 Recover partial result/runtime/output batches without duplication; clean cancelled batches
+      even when publication stopped between a file write, artifact row, and promotion event.
+- [x] T026 Count promoted output bytes in the artifact budget and make CI ordering fixtures deterministic.
+- [ ] T027 Complete the three regression phases, update verification records, push, and inspect Linux CI.

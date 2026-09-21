@@ -12,11 +12,13 @@ from typing import ClassVar, Self
 
 import pytest
 
+from lunar_evolution.agents import AgentResult
 from lunar_evolution.algorithm import AlgorithmProblemContract
 from lunar_evolution.cli import (
     _adapter_fingerprint,
     _compiler_fingerprint,
     _controller,
+    _delegate_result_projection,
     _load_model_profile,
     _portfolio_fingerprint,
     _runtime_fingerprint,
@@ -24,6 +26,7 @@ from lunar_evolution.cli import (
     main,
 )
 from lunar_evolution.config import Config
+from lunar_evolution.models import Run, WorkerBinding, WorkerOutcome
 from lunar_evolution.profiles import ModelProfile
 from lunar_evolution.store import Store
 
@@ -490,6 +493,92 @@ def test_cli_delegate_wait_timeout_returns_before_worker_host_finishes(tmp_path:
     else:
         pytest.fail("detached delegate worker did not settle")
     assert finished_marker.exists()
+
+
+def _bound_delegate_run(tmp_path: Path, binding_status: str) -> tuple[Config, Store, Run, WorkerBinding]:
+    config = Config(tmp_path / "home")
+    store = Store(config.database)
+    store.initialize()
+    run = store.create_run(
+        "write two answers",
+        tasks=[
+            {"id": "first", "title": "First", "prompt": "first answer"},
+            {"id": "delegated", "title": "Delegated", "prompt": "delegated answer"},
+        ],
+    )
+    tasks = store.list_tasks(run.id)
+    first, delegated = tasks[0], tasks[1]
+    first_attempt = store.claim_task(first.id, "fixture")
+    assert first_attempt is not None
+    assert store.finish_task(first.id, first_attempt.id, True)
+    task_attempt = store.claim_task(delegated.id, "fixture")
+    assert task_attempt is not None
+    worker = store.create_worker(run.id, "solver", "delegated answer", agent_type="fixture")
+    worker_attempt = store.start_worker_attempt(
+        worker.id, run.id, "delegated answer", service_owner_id="fixture-owner",
+    )
+    binding = store.bind_worker(
+        worker_id=worker.id, worker_attempt_id=worker_attempt.id, run_id=run.id,
+        task_id=delegated.id, task_attempt_id=task_attempt.id,
+        service_owner_id="fixture-owner", active_timeout=30,
+    )
+    store.persist_worker_result(
+        worker.id, worker_attempt.id,
+        AgentResult("fixture", "solver", "delegated answer", metadata={"source": "worker"}),
+    )
+    store.settle_worker(worker.id, worker_attempt.id, WorkerOutcome.SUCCESS)
+    if binding_status == "delivering":
+        assert store.claim_worker_binding_delivery(
+            worker_id=worker.id, worker_attempt_id=worker_attempt.id, run_id=run.id,
+            task_id=delegated.id, task_attempt_id=task_attempt.id,
+        )
+    current = store.get_run(run.id)
+    assert current is not None and current.runner_pid is None
+    return config, store, current, binding
+
+
+@pytest.mark.parametrize("binding_status", ["active", "delivering"])
+def test_cli_delegate_wait_timeout_attaches_to_existing_binding(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, binding_status: str,
+) -> None:
+    config, store, run, binding = _bound_delegate_run(tmp_path, binding_status)
+
+    def unexpected_detach(*args, **kwargs):
+        pytest.fail("an existing worker binding must not start another host")
+
+    monkeypatch.setattr("lunar_evolution.cli._detach_delegate", unexpected_detach)
+
+    assert main([
+        "delegate", "--run-id", run.id,
+        "--agent-command", shlex.join((sys.executable, "-c", "print('unused')")),
+        "--agent-name", "fixture", "--wait-timeout", "0", "--json",
+        "--home", str(config.home),
+    ]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "running"
+    assert payload["task_id"] == binding.task_id
+    assert payload["worker_id"] == binding.worker_id
+    assert store.get_worker_binding(binding.worker_id).status == binding_status
+    assert len(store.list_worker_bindings(run.id)) == 1
+
+
+@pytest.mark.parametrize("binding_status", ["active", "delivering"])
+def test_delegate_result_projection_selects_bound_task_before_first_task(
+    tmp_path: Path, binding_status: str,
+) -> None:
+    config, store, run, binding = _bound_delegate_run(tmp_path, binding_status)
+    args = build_parser().parse_args([
+        "delegate", "--run-id", run.id, "--agent-command", sys.executable,
+        "--agent-name", "fixture", "--home", str(config.home),
+    ])
+
+    payload = _delegate_result_projection(store, args, run)
+
+    assert payload["task_id"] == binding.task_id
+    assert payload["worker_id"] == binding.worker_id
+    assert payload["text"] == "delegated answer"
+    assert payload["metadata"] == {"source": "worker"}
 
 
 def test_cli_evolve_population_uses_sqlite_authority_and_resume_metadata(tmp_path: Path, capsys) -> None:

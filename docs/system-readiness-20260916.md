@@ -95,7 +95,7 @@ Feature 144 延续候选生成链路，给多文件请求增加本次调用专�
 
 当前 CLI `delegate` 已走 durable worker lifecycle；普通任务的 `run_agent()`、142 前台自动多文件仍不依赖该 WorkerService；
 这些 worker 修复不改变 142 Phase A/B 的验收。142 Phase C 已接通独立后台协调进程；真实前台验收准备与 143 consumer
-验收已分轨完成，
+验收分轨推进，
 但在新真实验收登记时必须固定产品，不能运行途中换代码。143 T009 不阻塞 142。
 
 本轮包含 worker 产品修复、永久回归与 CI 诊断；没有 provider 请求或新增真实效果结果。

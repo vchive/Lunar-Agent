@@ -1,8 +1,8 @@
 # Feature Specification: Local multi-agent worker lifecycle
 
 **Created**: 2026-09-20
-**Status**: Local lifecycle hardening validated on 2026-09-21; T009 explicit delegation
-migration is in progress under the bounded single-task scope below
+**Status**: T009 is implemented; 2026-09-22 crash-window and observation-timeout hardening
+is undergoing final regression under the same bounded scope
 **Input**: WebAgent reference-engine-v2.5 multiagent review and Lunar capability comparison
 
 ## Problem
@@ -171,9 +171,9 @@ See [quickstart.md](quickstart.md) for the explicit local API and recovery limit
 ## T009 bounded consumer: explicit foreground `delegate`
 
 The first consumer is deliberately one foreground CLI path: `lunar-evolution delegate`. It is
-opt-in and single-task. Ordinary `run_agent`, AgentLoop, automatic multi-file solve, detached
-delegation, recursive worker creation, and model-facing worker tools remain unchanged until a
-later acceptance expands this scope.
+opt-in and single-task. CLI `--wait-timeout` uses a durable child host, and existing `--detach`
+launches that same consumer. Ordinary `run_agent`, AgentLoop, automatic multi-file solve,
+recursive worker creation, and model-facing worker tools retain their separate execution paths.
 
 Before a worker starts, the controller claims one ready task and durably binds the worker to the
 parent run, task, and task attempt in one binding record. A crash before the binding is committed
@@ -190,7 +190,13 @@ authority: a worker success alone never marks a task successful. Result material
 the binding as `delivering`. The owner holds a stable per-worker liveness lock through artifact
 staging, evaluation, and commit. A second observer waits while that lock is live; it may reopen
 `delivering` only after the timestamp is stale and the owner lock is available, so a live delivery
-is never reset by a later observer.
+is never reset by a later observer. The stale interval is the active execution timeout clamped
+between 1 and 30 seconds. Missing or unsafe lock evidence does not authorize takeover. Recovery
+cleans the interrupted attempt's partial artifact batch under that lock before re-materializing the
+already persisted result; it never invokes the adapter again. Output ownership is recorded before
+filesystem publication so cancellation can clean a file even if its ledger write was interrupted.
+Observation waits share the caller's `wait_timeout`, release controller locks on every exit, and do
+not cancel or discard another observer's delivery. Artifact budget checks include promoted outputs.
 
 Parent cancellation and budget exhaustion look up the exact binding and cancel only its worker
 tree. A late worker result is recorded as discarded when the task is no longer running and cannot
