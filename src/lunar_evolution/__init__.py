@@ -225,7 +225,15 @@ from .evolution import (
     stage_candidate_inputs,
 )
 from .model_profile import UsageLedger, UsageSnapshot
-from .models import Worker, WorkerAttempt, WorkerOutcome, WorkerPhase, WorkerStopReason
+from .models import (
+    Worker,
+    WorkerAttempt,
+    WorkerBinding,
+    WorkerOutcome,
+    WorkerPhase,
+    WorkerResultEnvelope,
+    WorkerStopReason,
+)
 from .openevolve_handoff import (
     OpenEvolveHandoffError,
     admit_openevolve_result,
@@ -485,8 +493,10 @@ __all__ = [
     "VerifiedCandidateWorkspace",
     "Worker",
     "WorkerAttempt",
+    "WorkerBinding",
     "WorkerOutcome",
     "WorkerPhase",
+    "WorkerResultEnvelope",
     "WorkerService",
     "WorkerStopReason",
     "WorkflowCheckpoint",

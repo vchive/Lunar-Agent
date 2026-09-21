@@ -12,13 +12,13 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
 from .agents import AgentAdapter, AgentRegistry, AgentRequest, AgentResult
-from .models import Worker, WorkerOutcome, WorkerPhase, WorkerStopReason
+from .models import Worker, WorkerAttempt, WorkerOutcome, WorkerPhase, WorkerStopReason
 from .process_ownership import ProcessCleanupStatus, RegisteredProcess, cleanup_registered_processes
 from .store import Store
 from .worker_ownership import WorkerOwnerLock
@@ -115,6 +115,7 @@ class WorkerService:
         required_capabilities: Sequence[str] = (),
         preferred_adapter: str | None = None,
         timeout: float | None = None,
+        before_start: Callable[[Worker, WorkerAttempt], None] | None = None,
     ) -> Worker:
         with self._lock:
             self._ensure_open()
@@ -123,7 +124,10 @@ class WorkerService:
                 owner_id, role, description or prompt[:512], parent_worker_id=parent_worker_id,
                 agent_type=adapter.name, max_depth=self.max_depth,
             )
-            return self._start(worker, owner_id, prompt, required_capabilities, adapter, timeout)
+            return self._start(
+                worker, owner_id, prompt, required_capabilities, adapter, timeout,
+                before_start=before_start,
+            )
 
     def send(self, owner_id: str, worker_id: str, content: str) -> Worker:
         worker = self._owned(owner_id, worker_id)
@@ -256,6 +260,16 @@ class WorkerService:
             raise ValueError("worker result artifact integrity check failed")
         return raw.decode("utf-8")
 
+    def read_result_envelope(self, owner_id: str, worker_id: str) -> AgentResult:
+        """Read the complete durable ``AgentResult`` for an idle owned worker."""
+        worker = self._owned(owner_id, worker_id)
+        if worker.phase is WorkerPhase.RUNNING:
+            raise ValueError("worker result is not settled")
+        envelope = self.store.get_worker_result(worker_id, owner_id=owner_id)
+        if envelope is None:
+            raise ValueError("worker result envelope is missing")
+        return envelope.to_agent_result()
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
@@ -289,6 +303,7 @@ class WorkerService:
         timeout: float | None,
         *,
         input_ids: Sequence[str] = (),
+        before_start: Callable[[Worker, WorkerAttempt], None] | None = None,
     ) -> Worker:
         with self._lock:
             self._ensure_open()
@@ -306,6 +321,8 @@ class WorkerService:
                 )
                 execution = _Execution(worker, attempt.id, adapter)
                 self._active[attempt.id] = execution
+                if before_start is not None:
+                    before_start(worker, attempt)
                 self._futures[attempt.id] = self._executor.submit(
                     self._execute, execution, prompt, required_capabilities, timeout
                 )
@@ -390,6 +407,12 @@ class WorkerService:
             if len(encoded_result) > _MAX_INLINE_RESULT_BYTES:
                 (root / "result.txt").write_bytes(encoded_result)
                 result_ref = f"worker-result-{attempt_id}-{hashlib.sha256(encoded_result).hexdigest()}"
+            self.store.persist_worker_result(
+                worker.id,
+                attempt_id,
+                result,
+                artifact_manifest=self._artifact_manifest(root, result.artifacts),
+            )
             with self._condition:
                 delivery = "waiter" if self._waiters.get(worker.id, 0) else "notification"
                 self.store.settle_worker(
@@ -402,6 +425,17 @@ class WorkerService:
                 WorkerStopReason.PROCESS_CLEANUP if execution.cleanup_failed else _failure_reason(exc)
             )
             outcome = WorkerOutcome.STOPPED if reason is WorkerStopReason.CANCELLED else WorkerOutcome.FAILURE
+            fallback = AgentResult(
+                adapter_name=adapter.name,
+                role=worker.role,
+                status="cancelled" if outcome is WorkerOutcome.STOPPED else "failed",
+                text="",
+                error=reason.value,
+            )
+            try:
+                self.store.persist_worker_result(worker.id, attempt_id, fallback)
+            except Exception:  # noqa: BLE001, S110 - terminal settlement remains authoritative
+                pass
             self.store.settle_worker(worker.id, attempt_id, outcome, reason=reason)
         finally:
             try:
@@ -451,6 +485,30 @@ class WorkerService:
         except Exception:  # noqa: BLE001 - a later inspection cannot fabricate confirmed cleanup
             return False
         return not any(identity is None or (reg.pid, reg.pgid) == identity for reg in remaining)
+
+    @staticmethod
+    def _artifact_manifest(root: Path, artifacts: Sequence[str]) -> tuple[dict[str, object], ...]:
+        """Capture bounded file observations without making result persistence depend on files."""
+        manifest: list[dict[str, object]] = []
+        for relative in artifacts:
+            path = root / relative
+            item: dict[str, object] = {"path": relative}
+            try:
+                resolved = path.resolve(strict=False)
+                resolved.relative_to(root.resolve(strict=False))
+                info = path.stat()
+                if path.is_symlink() or not path.is_file() or info.st_size > _MAX_ARTIFACT_READ_BYTES:
+                    raise ValueError("artifact is not a bounded regular file")
+                content = path.read_bytes()
+                item["size"] = len(content)
+                item["sha256"] = hashlib.sha256(content).hexdigest()
+            except (OSError, ValueError):
+                # The envelope remains durable; the consumer's materialization step rejects
+                # missing, escaped, symlinked, or changed files using this manifest.
+                item["size"] = None
+                item["sha256"] = None
+            manifest.append(item)
+        return tuple(manifest)
 
     def _ensure_open(self) -> None:
         if self._closed:

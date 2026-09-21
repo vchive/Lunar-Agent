@@ -101,6 +101,65 @@ class WorkerProcess:
 
 
 @dataclass(frozen=True)
+class WorkerBinding:
+    """Durable association between one worker attempt and one scheduler task attempt."""
+
+    worker_id: str
+    worker_attempt_id: str
+    run_id: str
+    task_id: str
+    task_attempt_id: str
+    service_owner_id: str
+    status: str
+    active_timeout: float | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class WorkerResultEnvelope:
+    """Versioned, integrity-checked projection of one worker ``AgentResult``.
+
+    The raw JSON is kept in the Store so a result can be reconstructed after a process restart.
+    ``artifact_manifest`` is deliberately separate from ``AgentResult.artifacts``: it records
+    the bounded file observations made by the worker service without changing the adapter API.
+    """
+
+    worker_id: str
+    worker_attempt_id: str
+    schema_version: str
+    adapter_name: str
+    role: str
+    status: str
+    text: str
+    error: str | None
+    metadata: dict[str, object]
+    artifacts: tuple[str, ...]
+    artifact_manifest: tuple[dict[str, object], ...]
+    sha256: str
+    size: int
+    created_at: str
+
+    def to_agent_result(self):
+        """Rebuild an ``AgentResult`` while keeping the model module dependency-light."""
+        from .agents import AgentResult
+
+        return AgentResult(
+            adapter_name=self.adapter_name,
+            role=self.role,
+            status=self.status,
+            text=self.text,
+            error=self.error,
+            metadata=dict(self.metadata),
+            artifacts=tuple(self.artifacts),
+        )
+
+    @property
+    def result(self):
+        return self.to_agent_result()
+
+
+@dataclass(frozen=True)
 class Run:
     id: str
     goal: str

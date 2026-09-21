@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .agents import AgentResult
 from .algorithm import MAX_OUTPUTS, OutputSpec
 from .budget import BudgetSpec
 from .evaluator import validate_acceptance
@@ -29,9 +30,11 @@ from .models import (
     TaskStatus,
     Worker,
     WorkerAttempt,
+    WorkerBinding,
     WorkerOutcome,
     WorkerPhase,
     WorkerProcess,
+    WorkerResultEnvelope,
     WorkerStopReason,
 )
 from .policy import (
@@ -43,6 +46,10 @@ from .policy import (
     validate_reason,
 )
 from .routing import RouteDecision
+
+_WORKER_RESULT_SCHEMA_VERSION = "lunar-worker-result-v1"
+_MAX_WORKER_RESULT_ENVELOPE_BYTES = 2 * 1024 * 1024
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -174,6 +181,35 @@ CREATE TABLE IF NOT EXISTS worker_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS worker_events_idx ON worker_events(worker_id, created_at);
+CREATE TABLE IF NOT EXISTS worker_bindings (
+    worker_id TEXT PRIMARY KEY REFERENCES workers(id),
+    worker_attempt_id TEXT NOT NULL REFERENCES worker_attempts(id),
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    task_attempt_id TEXT NOT NULL REFERENCES attempts(id),
+    service_owner_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    active_timeout REAL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS worker_bindings_attempt_idx
+    ON worker_bindings(worker_attempt_id);
+CREATE UNIQUE INDEX IF NOT EXISTS worker_bindings_task_attempt_idx
+    ON worker_bindings(task_attempt_id);
+CREATE INDEX IF NOT EXISTS worker_bindings_task_idx
+    ON worker_bindings(run_id, task_id, status);
+CREATE TABLE IF NOT EXISTS worker_attempt_results (
+    worker_attempt_id TEXT PRIMARY KEY REFERENCES worker_attempts(id),
+    worker_id TEXT NOT NULL REFERENCES workers(id),
+    schema_version TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS worker_attempt_results_worker_idx
+    ON worker_attempt_results(worker_id, created_at);
 CREATE TABLE IF NOT EXISTS plan_revisions (
     plan_id TEXT NOT NULL,
     run_id TEXT NOT NULL REFERENCES runs(id),
@@ -295,6 +331,14 @@ class Store:
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                 (8, utc_now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (9, utc_now()),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                (10, utc_now()),
             )
 
     @staticmethod
@@ -3211,6 +3255,206 @@ class Store:
             row = connection.execute("SELECT * FROM workers WHERE id = ?", (worker_id,)).fetchone()
         return self._worker_from_row(row) if row else None
 
+    def bind_worker(
+        self,
+        *,
+        worker_id: str,
+        worker_attempt_id: str,
+        run_id: str,
+        task_id: str,
+        task_attempt_id: str,
+        service_owner_id: str,
+        active_timeout: float | None = None,
+    ) -> WorkerBinding:
+        """Atomically bind a started worker attempt to one claimed scheduler attempt.
+
+        The worker executor must not be released until this operation succeeds.  The checks are
+        repeated inside one SQLite transaction so a caller cannot bind a worker to a different
+        run, task, or attempt after it has been claimed.
+        """
+        if not all(isinstance(value, str) and value.strip() for value in (
+            worker_id, worker_attempt_id, run_id, task_id, task_attempt_id, service_owner_id,
+        )):
+            raise ValueError("worker binding identities must be non-empty strings")
+        if active_timeout is not None:
+            if isinstance(active_timeout, bool) or not isinstance(active_timeout, (int, float)):
+                raise ValueError("active timeout must be numeric")
+            if not math.isfinite(active_timeout) or active_timeout <= 0 or active_timeout > 24 * 60 * 60:
+                raise ValueError("active timeout must be between 0 and 86400 seconds")
+        timestamp = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute(
+                "SELECT 1 FROM worker_bindings WHERE worker_id = ?", (worker_id,),
+            ).fetchone() is not None:
+                raise ValueError("worker already has a binding")
+            worker = connection.execute(
+                "SELECT id FROM workers WHERE id = ?", (worker_id,),
+            ).fetchone()
+            attempt = connection.execute(
+                "SELECT id, worker_id, service_owner_id, status FROM worker_attempts WHERE id = ?",
+                (worker_attempt_id,),
+            ).fetchone()
+            task = connection.execute(
+                "SELECT id, run_id, state FROM tasks WHERE id = ?", (task_id,),
+            ).fetchone()
+            task_attempt = connection.execute(
+                "SELECT id, task_id, status FROM attempts WHERE id = ?", (task_attempt_id,),
+            ).fetchone()
+            run = connection.execute(
+                "SELECT id FROM runs WHERE id = ?", (run_id,),
+            ).fetchone()
+            if worker is None or attempt is None or task is None or task_attempt is None or run is None:
+                raise ValueError("worker binding references an unknown record")
+            if (
+                attempt["worker_id"] != worker_id
+                or attempt["service_owner_id"] != service_owner_id
+                or attempt["status"] != "running"
+                or task["run_id"] != run_id
+                or task["state"] != TaskStatus.RUNNING.value
+                or task_attempt["task_id"] != task_id
+                or task_attempt["status"] != "running"
+            ):
+                raise ValueError("worker binding records are not an active reciprocal pair")
+            connection.execute(
+                "INSERT INTO worker_bindings(worker_id, worker_attempt_id, run_id, task_id, task_attempt_id, "
+                "service_owner_id, status, active_timeout, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (worker_id, worker_attempt_id, run_id, task_id, task_attempt_id, service_owner_id,
+                 "active", active_timeout, timestamp, timestamp),
+            )
+            row = connection.execute(
+                "SELECT * FROM worker_bindings WHERE worker_id = ?", (worker_id,),
+            ).fetchone()
+        return self._worker_binding_from_row(row)  # type: ignore[arg-type]
+
+    def get_worker_binding(self, worker_id: str) -> WorkerBinding | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM worker_bindings WHERE worker_id = ?", (worker_id,),
+            ).fetchone()
+        return self._worker_binding_from_row(row) if row else None
+
+    def list_worker_bindings(self, run_id: str | None = None, *, status: str | None = None) -> list[WorkerBinding]:
+        query = "SELECT * FROM worker_bindings WHERE 1 = 1"
+        args: list[object] = []
+        if run_id is not None:
+            query += " AND run_id = ?"
+            args.append(run_id)
+        if status is not None:
+            query += " AND status = ?"
+            args.append(status)
+        query += " ORDER BY created_at, worker_id"
+        with self._connect() as connection:
+            rows = connection.execute(query, args).fetchall()
+        return [self._worker_binding_from_row(row) for row in rows]
+
+    def settle_worker_binding(self, worker_id: str, status: str) -> bool:
+        if status not in {"active", "settled", "discarded", "lost"}:
+            raise ValueError("invalid worker binding status")
+        with self._connect() as connection:
+            changed = connection.execute(
+                "UPDATE worker_bindings SET status = ?, updated_at = ? WHERE worker_id = ? AND status = ?",
+                (status, utc_now(), worker_id, "active"),
+            ).rowcount
+        return changed == 1
+
+    def persist_worker_result(
+        self,
+        worker_id: str,
+        worker_attempt_id: str,
+        result: AgentResult,
+        *,
+        artifact_manifest: Sequence[Mapping[str, object]] = (),
+    ) -> WorkerResultEnvelope:
+        """Persist one complete adapter result with a canonical JSON integrity digest.
+
+        The operation is idempotent for the same attempt.  A different result for an already
+        persisted attempt is rejected, so a late callback cannot replace the durable envelope.
+        """
+        if not isinstance(result, AgentResult):
+            raise TypeError("worker result must be an AgentResult")
+        payload = self._worker_result_payload(result, artifact_manifest)
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > _MAX_WORKER_RESULT_ENVELOPE_BYTES:
+            raise ValueError("worker result envelope exceeds the size limit")
+        digest = hashlib.sha256(encoded).hexdigest()
+        timestamp = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            attempt = connection.execute(
+                "SELECT worker_id FROM worker_attempts WHERE id = ?", (worker_attempt_id,),
+            ).fetchone()
+            if attempt is None or attempt["worker_id"] != worker_id:
+                raise ValueError("worker result references an unknown attempt")
+            existing = connection.execute(
+                "SELECT * FROM worker_attempt_results WHERE worker_attempt_id = ?",
+                (worker_attempt_id,),
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    "INSERT INTO worker_attempt_results(worker_attempt_id, worker_id, schema_version, payload, sha256, size, created_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?)",
+                    (worker_attempt_id, worker_id, _WORKER_RESULT_SCHEMA_VERSION,
+                     encoded.decode("utf-8"), digest, len(encoded), timestamp),
+                )
+                self._append_worker_event(
+                    connection,
+                    worker_id,
+                    "worker_result_persisted",
+                    {"sha256": digest, "size": len(encoded)},
+                    worker_attempt_id,
+                )
+            elif existing["sha256"] != digest or existing["payload"] != encoded.decode("utf-8"):
+                raise ValueError("worker result envelope already exists with different content")
+            row = connection.execute(
+                "SELECT * FROM worker_attempt_results WHERE worker_attempt_id = ?",
+                (worker_attempt_id,),
+            ).fetchone()
+        return self._worker_result_from_row(row)  # type: ignore[arg-type]
+
+    def get_worker_result(
+        self,
+        worker_id: str,
+        worker_attempt_id: str | None = None,
+        *,
+        owner_id: str | None = None,
+    ) -> WorkerResultEnvelope | None:
+        """Read and verify a durable result envelope for an owned worker attempt."""
+        query = (
+            "SELECT r.* FROM worker_attempt_results r JOIN workers w ON w.id = r.worker_id "
+            "WHERE r.worker_id = ?"
+        )
+        args: list[object] = [worker_id]
+        if worker_attempt_id is not None:
+            query += " AND r.worker_attempt_id = ?"
+            args.append(worker_attempt_id)
+        if owner_id is not None:
+            query += " AND w.owner_id = ?"
+            args.append(owner_id)
+        query += " ORDER BY r.created_at DESC LIMIT 1"
+        with self._connect() as connection:
+            row = connection.execute(query, args).fetchone()
+        return self._worker_result_from_row(row) if row else None
+
+    def list_worker_results(
+        self,
+        worker_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> list[WorkerResultEnvelope]:
+        query = (
+            "SELECT r.* FROM worker_attempt_results r JOIN workers w ON w.id = r.worker_id "
+            "WHERE r.worker_id = ?"
+        )
+        args: list[object] = [worker_id]
+        if owner_id is not None:
+            query += " AND w.owner_id = ?"
+            args.append(owner_id)
+        query += " ORDER BY r.created_at, r.worker_attempt_id"
+        with self._connect() as connection:
+            rows = connection.execute(query, args).fetchall()
+        return [self._worker_result_from_row(row) for row in rows]
+
     def list_workers(self, owner_id: str, *, phase: WorkerPhase | None = None) -> list[Worker]:
         query = "SELECT * FROM workers WHERE owner_id = ?"
         args: list[object] = [owner_id]
@@ -3643,6 +3887,115 @@ class Store:
             outcome=WorkerOutcome(row["outcome"]) if row["outcome"] else None,
             result=row["result"], error=row["error"],
             service_owner_id=row["service_owner_id"],
+        )
+
+    @staticmethod
+    def _worker_binding_from_row(row: sqlite3.Row) -> WorkerBinding:
+        return WorkerBinding(
+            worker_id=row["worker_id"], worker_attempt_id=row["worker_attempt_id"],
+            run_id=row["run_id"], task_id=row["task_id"], task_attempt_id=row["task_attempt_id"],
+            service_owner_id=row["service_owner_id"], status=row["status"],
+            active_timeout=row["active_timeout"], created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _worker_result_payload(
+        result: AgentResult,
+        artifact_manifest: Sequence[Mapping[str, object]],
+    ) -> dict[str, object]:
+        if isinstance(artifact_manifest, (str, bytes)):
+            raise TypeError("artifact manifest must be a sequence of objects")
+        supplied = tuple(artifact_manifest)
+        if not supplied and result.artifacts:
+            supplied = tuple({"path": path} for path in result.artifacts)
+        manifest: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for item in supplied:
+            if not isinstance(item, Mapping):
+                raise TypeError("artifact manifest entries must be objects")
+            if set(item) - {"path", "size", "sha256"}:
+                raise ValueError("artifact manifest contains unsupported fields")
+            path = item.get("path")
+            size = item.get("size")
+            digest = item.get("sha256")
+            if not isinstance(path, str) or not path or path in seen:
+                raise ValueError("artifact manifest contains an invalid or duplicate path")
+            if "\\" in path or Path(path).is_absolute() or any(part in {".", ".."} for part in Path(path).parts):
+                raise ValueError("artifact manifest paths must be run-relative")
+            if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
+                raise ValueError("artifact manifest size is invalid")
+            if digest is not None and (not isinstance(digest, str) or _SHA256.fullmatch(digest) is None):
+                raise ValueError("artifact manifest digest is invalid")
+            seen.add(path)
+            entry: dict[str, object] = {"path": path}
+            if size is not None:
+                entry["size"] = size
+            if digest is not None:
+                entry["sha256"] = digest
+            manifest.append(entry)
+        if tuple(item["path"] for item in manifest) != result.artifacts:
+            raise ValueError("artifact manifest must match declared result artifacts")
+        return {
+            "schema_version": _WORKER_RESULT_SCHEMA_VERSION,
+            "adapter_name": result.adapter_name,
+            "role": result.role,
+            "status": result.status,
+            "text": result.text,
+            "error": result.error,
+            "metadata": dict(result.metadata),
+            "artifacts": list(result.artifacts),
+            "artifact_manifest": manifest,
+        }
+
+    @staticmethod
+    def _worker_result_from_row(row: sqlite3.Row) -> WorkerResultEnvelope:
+        payload = row["payload"]
+        if (
+            not isinstance(payload, str)
+            or row["schema_version"] != _WORKER_RESULT_SCHEMA_VERSION
+            or not isinstance(row["sha256"], str)
+            or _SHA256.fullmatch(row["sha256"]) is None
+            or not isinstance(row["size"], int)
+            or row["size"] < 0
+            or row["size"] != len(payload.encode("utf-8"))
+            or row["size"] > _MAX_WORKER_RESULT_ENVELOPE_BYTES
+            or hashlib.sha256(payload.encode("utf-8")).hexdigest() != row["sha256"]
+        ):
+            raise ValueError("worker result envelope integrity check failed")
+        try:
+            value = json.loads(payload)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("worker result envelope is not valid JSON") from exc
+        if not isinstance(value, dict) or value.get("schema_version") != _WORKER_RESULT_SCHEMA_VERSION:
+            raise ValueError("worker result envelope schema is invalid")
+        artifacts = value.get("artifacts")
+        manifest = value.get("artifact_manifest")
+        if not isinstance(artifacts, list) or any(not isinstance(item, str) for item in artifacts):
+            raise ValueError("worker result envelope artifacts are invalid")
+        if not isinstance(manifest, list) or any(not isinstance(item, dict) for item in manifest):
+            raise ValueError("worker result envelope manifest is invalid")
+        if tuple(item.get("path") for item in manifest) != tuple(artifacts):
+            raise ValueError("worker result envelope manifest does not match artifacts")
+        # AgentResult performs the full bounded identity, metadata, path, and status checks.
+        try:
+            result = AgentResult(
+                adapter_name=value["adapter_name"], role=value["role"], status=value["status"],
+                text=value["text"], error=value.get("error"), metadata=value.get("metadata", {}),
+                artifacts=tuple(artifacts),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("worker result envelope result is invalid") from exc
+        normalized_payload = Store._worker_result_payload(result, manifest)
+        normalized = json.dumps(normalized_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if normalized != payload:
+            raise ValueError("worker result envelope JSON is not canonical")
+        return WorkerResultEnvelope(
+            worker_id=row["worker_id"], worker_attempt_id=row["worker_attempt_id"],
+            schema_version=row["schema_version"], adapter_name=result.adapter_name, role=result.role,
+            status=result.status, text=result.text, error=result.error, metadata=dict(result.metadata),
+            artifacts=result.artifacts, artifact_manifest=tuple(dict(item) for item in manifest),
+            sha256=row["sha256"], size=row["size"], created_at=row["created_at"],
         )
 
     @staticmethod
