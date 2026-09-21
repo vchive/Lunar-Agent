@@ -70,4 +70,6 @@ the CLI integration.
 - [x] T025 Recover partial result/runtime/output batches without duplication; clean cancelled batches
       even when publication stopped between a file write, artifact row, and promotion event.
 - [x] T026 Count promoted output bytes in the artifact budget and make CI ordering fixtures deterministic.
-- [ ] T027 Complete the three regression phases, update verification records, push, and inspect Linux CI.
+- [x] T027 Complete the three regression phases, update verification records, push, and inspect Linux CI.
+      Current 6722 passed/1 skipped, archived 2294 passed, frozen123 24 passed; `0adb637` Linux CI
+      passed on Python 3.11, 3.12, and 3.13.

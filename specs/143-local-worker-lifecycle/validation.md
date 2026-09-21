@@ -2,13 +2,14 @@
 
 **Current status, 2026-09-22**: T009 is implemented; delivery interruption hardening passed nine
 new fault regressions. The final three-phase regression passed: current **6722 passed, 1 skipped**,
-archived **2294 passed**, frozen123 **24 passed**, overall exit 0.
-The earlier `9213f01` Linux run [failed](https://github.com/vchive/Lunar-Evolution/actions/runs/35612594545):
+archived **2294 passed**, frozen123 **24 passed**, overall exit 0. Product commit `0adb637` passed
+[Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35634053012) on Python 3.11, 3.12,
+and 3.13. The earlier `9213f01` Linux run [failed](https://github.com/vchive/Lunar-Evolution/actions/runs/35612594545):
 Python 3.11/3.13 failed the narrow CLI elapsed-time assertion and 3.12 exhausted a 0.05-second
 fixture budget before runtime admission. Those fixtures now use an explicit worker release handshake
 and a controlled controller clock. Earlier green CI checkpoints below are historical, not evidence
-for this follow-up. The current-tree run used the working tree at `873d985` plus the uncommitted
-changes now being prepared for the follow-up push. No provider request, campaign, or WebAgent run was made.
+for this follow-up. The current-tree run used the working tree at `873d985` plus the changes committed
+in `0adb637`. No provider request, campaign, or WebAgent run was made.
 
 ### Delivery fault acceptance
 

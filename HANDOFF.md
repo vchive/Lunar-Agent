@@ -18,8 +18,9 @@
 
 前一提交 `9213f01` 的 Linux CI 失败是真实保留结果：两版本因 `<0.30s` 断言过紧，
 3.12 因 0.05 秒预算可能在 runtime 启动前耗尽。现改为进程 release 握手与受控时钟，
-验证事件顺序而不依赖机器启动速度。`873d985` 的 CI 当时仍在运行，不能用旧提交的
-绿色 CI 替代新提交验证。
+验证事件顺序而不依赖机器启动速度。修复已提交为 `0adb637` 并推送；其
+[Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35634053012) 已确认
+Python 3.11、3.12、3.13 全部通过。
 
 系统仍未全部完成：Feature 139 真实完整交付仍为 preparation 1/1、primary/joint 0/1；
 AgentLoop worker 工具、自动 solve 接入 WorkerService、递归 worker、外部 producer 的完整
