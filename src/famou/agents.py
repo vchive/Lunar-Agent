@@ -23,7 +23,13 @@ from pathlib import Path
 from time import monotonic
 from typing import Protocol, runtime_checkable
 
-from .runtime import Runtime, RuntimeResult
+from .runtime import (
+    MODEL_FAILURE_REASONS,
+    ModelFailureEvidence,
+    ModelRequestFailure,
+    Runtime,
+    RuntimeResult,
+)
 
 MAX_PROMPT_BYTES = 64 * 1024
 MAX_TEXT_BYTES = 1024 * 1024
@@ -33,6 +39,8 @@ MAX_ARTIFACTS = 64
 MAX_ARTIFACT_PATH_BYTES = 512
 MAX_TIMEOUT_SECONDS = 24 * 60 * 60
 MAX_CANDIDATE_TOOL_STEPS = 200
+BUNDLE_RESPONSE_PROTOCOL = "lunar-agent-bundle-generation-v1"
+CANDIDATE_DIAGNOSTIC_PHASES = frozenset({"model_turn", "tool", "tool_batch", "response", "run"})
 DEFAULT_RUNTIME_CAPABILITIES = (
     "read_files",
     "write_files",
@@ -116,6 +124,7 @@ class CandidateGenerationDiagnostic:
     outcome: str | None = None
     elapsed_ms: int | None = None
     timeout_ms: int | None = None
+    failure_cause: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "budget_id", _bounded_text(self.budget_id, "budget_id", 256, allow_empty=False))
@@ -152,11 +161,16 @@ class CandidateGenerationDiagnostic:
             isinstance(self.timeout_ms, bool) or not isinstance(self.timeout_ms, int) or self.timeout_ms <= 0
         ):
             raise ValueError("invalid candidate diagnostic timeout_ms")
-        if not isinstance(self.phase, str) or not self.phase or len(self.phase) > 64:
+        if type(self.phase) is not str or self.phase not in CANDIDATE_DIAGNOSTIC_PHASES:
             raise ValueError("invalid candidate diagnostic phase")
+        if self.failure_cause is not None and (
+            type(self.failure_cause) is not str or self.failure_cause not in MODEL_FAILURE_REASONS
+            or self.completion or self.reason == "running"
+        ):
+            raise ValueError("invalid candidate diagnostic failure_cause")
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "budget_id": self.budget_id,
             "stage": self.stage,
@@ -171,6 +185,9 @@ class CandidateGenerationDiagnostic:
             "elapsed_ms": self.elapsed_ms,
             "timeout_ms": self.timeout_ms,
         }
+        if self.failure_cause is not None:
+            value["failure_cause"] = self.failure_cause
+        return value
 
 
 def _candidate_outcome(reason: str) -> str:
@@ -181,14 +198,24 @@ def _candidate_outcome(reason: str) -> str:
     }.get(reason, reason)
 
 
+def candidate_model_failure_cause(error: object) -> str | None:
+    """Project only the direct, repository-owned failure's fixed model cause."""
+    if type(error) is not ModelRequestFailure:
+        return None
+    evidence = getattr(error, "evidence", None)
+    if type(evidence) is not ModelFailureEvidence:
+        return None
+    reason = getattr(evidence, "reason", None)
+    return reason if type(reason) is str and reason in MODEL_FAILURE_REASONS else None
+
+
 def candidate_failure_reason(error: BaseException) -> str:
     """Classify only typed/local failure boundaries; never inspect arbitrary prose."""
     if isinstance(error, TimeoutError):
         return "timeout"
     if type(error).__name__ in {"CancelledError", "CancellationError"}:
         return "cancelled"
-    evidence = getattr(error, "evidence", None)
-    if getattr(evidence, "reason", None) == "transport_timeout":
+    if candidate_model_failure_cause(error) == "transport_timeout":
         return "timeout"
     return "worker_failed"
 
@@ -290,6 +317,7 @@ class AgentRequest:
     workspace: Path = field(default_factory=Path.cwd)
     timeout: float | None = None
     candidate_budget: CandidateGenerationBudget | None = None
+    response_protocol: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _bounded_text(self.run_id, "run_id", 256, allow_empty=False))
@@ -314,6 +342,10 @@ class AgentRequest:
             self.candidate_budget, CandidateGenerationBudget
         ):
             raise TypeError("candidate_budget must be a CandidateGenerationBudget or None")
+        if self.response_protocol is not None and (
+            type(self.response_protocol) is not str or self.response_protocol != BUNDLE_RESPONSE_PROTOCOL
+        ):
+            raise ValueError("unsupported Agent response_protocol")
 
     def to_dict(self) -> dict[str, object]:
         value = {
@@ -327,6 +359,8 @@ class AgentRequest:
         }
         if self.candidate_budget is not None:
             value["candidate_budget"] = self.candidate_budget.to_dict()
+        if self.response_protocol is not None:
+            value["response_protocol"] = self.response_protocol
         return value
 
 
@@ -458,13 +492,22 @@ class RuntimeAgentAdapter:
         if not isinstance(request, AgentRequest):
             raise TypeError("request must be an AgentRequest")
         self._check_continuation()
+        previous_diagnostic = (
+            self._runtime_candidate_diagnostic() if request.candidate_budget is not None else None
+        )
+        invocation_diagnostic: dict[str, object] | None = None
         set_runtime_event_sink = getattr(self.runtime, "set_event_sink", None)
         runtime_event_sink: Callable[[str, dict[str, object]], None] | None = None
         runtime_event_emitted = False
         if callable(set_runtime_event_sink):
             def forward_runtime_event(event_type: str, payload: dict[str, object]) -> None:
-                nonlocal runtime_event_emitted
+                nonlocal runtime_event_emitted, invocation_diagnostic
                 runtime_event_emitted = True
+                if event_type == "agent_candidate_generation" and request.candidate_budget is not None:
+                    # Runtime completion is not parser acceptance. Hold observations until the
+                    # invocation ends; failure emits once and success only supplies result metadata.
+                    invocation_diagnostic = dict(payload) if isinstance(payload, Mapping) else None
+                    return
                 self._forward_event(request, event_type, payload)
 
             runtime_event_sink = forward_runtime_event
@@ -486,11 +529,12 @@ class RuntimeAgentAdapter:
                 )
             runtime_run = self.runtime.run
             kwargs: dict[str, object] = {}
-            if budget is not None:
+            if budget is not None or request.response_protocol is not None:
                 try:
                     parameters = inspect.signature(runtime_run).parameters
                 except (TypeError, ValueError):
                     parameters = {}
+            if budget is not None:
                 accepts_kwargs = any(
                     parameter.kind is inspect.Parameter.VAR_KEYWORD
                     for parameter in parameters.values()
@@ -501,14 +545,36 @@ class RuntimeAgentAdapter:
                     )
                 kwargs["max_tool_steps"] = budget.max_tool_steps
                 kwargs["budget_id"] = budget.budget_id
+            if request.response_protocol is not None:
+                parameter = parameters.get("response_protocol")
+                if parameter is not None and parameter.kind in {
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY,
+                }:
+                    kwargs["response_protocol"] = request.response_protocol
             self._check_continuation()
             result = runtime_run(request.prompt, request.workspace, runtime_timeout, **kwargs)
             self._check_continuation()
         except Exception as exc:
-            diagnostic = getattr(self.runtime, "last_candidate_diagnostic", None)
-            if callable(diagnostic):
-                diagnostic = diagnostic()
-            if isinstance(diagnostic, Mapping):
+            diagnostic = self._invocation_candidate_diagnostic(
+                request, invocation_diagnostic, previous_diagnostic, completed=False,
+            )
+            if diagnostic is None and request.candidate_budget is not None:
+                reason = candidate_failure_reason(exc)
+                diagnostic = {
+                    "schema_version": "1", "stage": "candidate_generation",
+                    "budget_id": request.candidate_budget.budget_id,
+                    "max_tool_steps": request.candidate_budget.max_tool_steps,
+                    "tool_steps_used": None, "tool_steps_remaining": None,
+                    "attempted_tool_calls": None, "completion": False,
+                    "reason": reason, "outcome": _candidate_outcome(reason), "phase": "run",
+                }
+            if diagnostic is not None:
+                # External diagnostic mappings can describe counts/phases, but only the
+                # direct owned exception can establish a typed model failure cause.
+                cause = candidate_model_failure_cause(exc)
+                diagnostic.pop("failure_cause", None)
+                if cause is not None:
+                    diagnostic["failure_cause"] = cause
                 self._forward_event(request, "agent_candidate_generation", diagnostic)
             if not runtime_event_emitted:
                 self._forward_event(
@@ -517,10 +583,11 @@ class RuntimeAgentAdapter:
                     {"phase": "run", "error": _safe_event_error(exc)},
                 )
             if isinstance(exc, AgentError):
+                if diagnostic is not None:
+                    exc.candidate_diagnostic = dict(diagnostic)
                 raise
-            candidate_diagnostic = diagnostic if isinstance(diagnostic, Mapping) else None
             raise AgentInvocationError(
-                _bounded_error(str(exc)), candidate_diagnostic=candidate_diagnostic,
+                _bounded_error(str(exc)), candidate_diagnostic=diagnostic,
             ) from exc
         finally:
             if runtime_event_sink is not None:
@@ -546,10 +613,10 @@ class RuntimeAgentAdapter:
                     if relative.as_posix() not in declared_artifacts:
                         declared_artifacts.append(relative.as_posix())
             metadata = {**result.metadata, "runtime": self.name}
-            diagnostic = getattr(self.runtime, "last_candidate_diagnostic", None)
-            if callable(diagnostic):
-                diagnostic = diagnostic()
-            if isinstance(diagnostic, Mapping):
+            diagnostic = self._invocation_candidate_diagnostic(
+                request, invocation_diagnostic, previous_diagnostic, completed=True,
+            )
+            if diagnostic is not None:
                 for key, value in diagnostic.items():
                     if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
                         metadata[f"candidate_{key}"] = str(value).lower() if isinstance(value, bool) else str(value)
@@ -562,6 +629,44 @@ class RuntimeAgentAdapter:
             )
         except (TypeError, ValueError) as exc:
             raise AgentInvocationError(_bounded_error(str(exc))) from exc
+
+    def _runtime_candidate_diagnostic(self) -> dict[str, object] | None:
+        """Snapshot optional observations without letting a diagnostic getter mask execution."""
+        try:
+            diagnostic = getattr(self.runtime, "last_candidate_diagnostic", None)
+            if callable(diagnostic):
+                diagnostic = diagnostic()
+            return dict(diagnostic) if isinstance(diagnostic, Mapping) else None
+        except Exception:  # noqa: BLE001 - diagnostics are never execution authority
+            return None
+
+    def _invocation_candidate_diagnostic(
+        self, request: AgentRequest, emitted: dict[str, object] | None,
+        previous: dict[str, object] | None, *, completed: bool,
+    ) -> dict[str, object] | None:
+        budget = request.candidate_budget
+        if budget is None:
+            return None
+        observed = emitted
+        if observed is None:
+            observed = self._runtime_candidate_diagnostic()
+            if observed == previous:
+                return None
+        try:
+            diagnostic = CandidateGenerationDiagnostic(**observed)
+            if (
+                diagnostic.budget_id != budget.budget_id
+                or diagnostic.completion is not completed
+                or diagnostic.outcome != _candidate_outcome(diagnostic.reason)
+                or diagnostic.reason == "running"
+                or (diagnostic.reason == "completed") is not completed
+                or diagnostic.max_tool_steps > budget.max_tool_steps
+                or diagnostic.tool_steps_used + diagnostic.tool_steps_remaining != diagnostic.max_tool_steps
+            ):
+                return None
+            return diagnostic.to_dict()
+        except (TypeError, ValueError):
+            return None
 
     def _forward_event(
         self, request: AgentRequest, event_type: str, payload: Mapping[str, object]

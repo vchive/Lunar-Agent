@@ -8,6 +8,28 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## 2026-09-21 候选响应协议与失败诊断（Feature 144）
+
+按现有候选生成架构继续 SDD，新增 `specs/144-candidate-response-reliability/`，修复多文件
+JSON 输出要求与通用助手最终总结指令之间的冲突。bundle request 显式携带响应协议，支持的
+runtime 仅在本次请求副本中应用；普通调用、自定义约束和持久 history 不被改写。旧 runtime
+继续从完整 prompt 接收约定；不新增请求、重试、工具或预算。prompt 提供两个可被现有 parser
+接受的格式示例，明确 `change_tags` / `target_metrics` 是数组且整个 experiment 可省略。
+
+严格 parser 和独立评测未放宽，scratch 源码不能替代最终响应。解析拒绝现在保留已观察的
+预算消耗；失败回执保存有界 phase，以及仅从仓库已验证异常类型投影的 `failure_cause`。
+三个运行时旧失败名称规范化后可以正常入库；旧调用的诊断、未完成的 running 观察或外部
+自报原因不能冒充本次失败事实。runtime 完成只补 metadata，仍须 parser 接受才发成功回执；
+同一次失败只发一条回执。旧 schema 1 的成功字段、事件身份和无新字段的历史 payload 不变。
+
+新增专项 100 项和共享回归 297 项通过，独立审查发现的重复回执/外部原因伪造已修复。
+完整双阶段当前 8848 passed、1 skipped、24 deselected，冻结 123 阶段另有 24 passed，exit 0。
+最终小幅防御性改动有 100 项复验；完整回归的代码检查点、CI 和证据范围见
+[144 validation](specs/144-candidate-response-reliability/validation.md)。
+本轮没有 provider 请求或新 campaign，也不修复或重放历史生成代码；131/134/139 冻结结果不变。
+下一步是新固定条件下的真实候选完成与前台完整交付验收。142 Phase C 自动后台入口和
+143 T009 实际 worker consumer 接线仍未完成；不能把这轮离线通过描述成真实成功率提升。
+
 ## 2026-09-21 worker 修复与发布验证
 
 继续现有 143 SDD，已完成独立执行 adapter/runtime、精确 attempt 取消/释放、排队取消准入、

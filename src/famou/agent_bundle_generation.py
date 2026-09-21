@@ -7,7 +7,15 @@ import os
 
 from . import _benchmark_files as files
 from ._candidate_workspace_io import DirectoryChain, PrivateTree
-from .agents import MAX_TEXT_BYTES, AgentInvocationError, AgentRequest, AgentResult
+from .agents import (
+    BUNDLE_RESPONSE_PROTOCOL,
+    MAX_TEXT_BYTES,
+    AgentError,
+    AgentRequest,
+    AgentResult,
+    candidate_failure_reason,
+    candidate_model_failure_cause,
+)
 from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract
 from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .bundle_evolution import read_candidate_source_files, validate_candidate_bundle_evidence
@@ -28,7 +36,7 @@ from .evolution import (
     _validate_ordinary_metadata,
 )
 
-_PROTOCOL = "lunar-agent-bundle-generation-v1"
+_PROTOCOL = BUNDLE_RESPONSE_PROTOCOL
 _MAX_CONTEXT_BYTES = 2 * 1024 * 1024
 _MAX_MAP_BYTES = MAX_CANDIDATE_TOTAL_SOURCE_BYTES * 6 + 128 * 1024
 
@@ -252,12 +260,21 @@ def _prompt(context, context_bytes):
         "have no authority. Its identity and verified score summaries are provided, not its private implementation. "
         "Use experiment_memory, search_directive and algorithm_playbook to choose an attributable improvement. "
         "Return only one strict JSON object with required entrypoint and files (a complete path-to-source-string "
-        "map including the entrypoint), optional scalar metadata, and optional experiment with schema_version='1', "
-        "hypothesis, change_tags and target_metrics (objects with metric and direction='increase' or 'decrease'). "
-        "Include algorithm_playbook.family_tag in change_tags when present. "
+        "map including the entrypoint), optional metadata with scalar values, and optional experiment. "
+        "An experiment has schema_version='1', a nonempty hypothesis string, change_tags as a nonempty array "
+        "of unique strings, and target_metrics as a nonempty array of objects with unique metric strings "
+        "and direction='increase' or 'decrease'. The entire experiment may be omitted. "
+        "When providing an experiment, include algorithm_playbook.family_tag in change_tags when present. "
         "Return the complete revised source map, including unchanged helpers; do not return patches, markdown, "
         "plain source, success claims or an evaluation report. The entire response must fit 1 MiB UTF-8. "
         "Candidate paths, counts and total source sizes remain bounded by the source bundle contract.\n\n"
+        "The following examples demonstrate response shape only; they are not task solutions or score claims. "
+        "Your complete source must still satisfy the task and output contract.\n"
+        'Minimal response example:\n{"entrypoint":"main.py","files":{"main.py":"pass\\n"}}\n'
+        'Optional experiment example:\n{"entrypoint":"main.py","files":{"main.py":"pass\\n",'
+        '"helper.py":"value = 1\\n"},"metadata":{"family":"example"},"experiment":'
+        '{"schema_version":"1","hypothesis":"A helper change may improve quality.",'
+        '"change_tags":["helper"],"target_metrics":[{"metric":"quality","direction":"increase"}]}}\n\n'
         "Generation context:\n"
     )
     inline = context
@@ -345,20 +362,27 @@ def generate_bundle_candidate(generator, request):
                 prompt=prompt, required_capabilities=generator.required_capabilities,
                 workspace=destination, timeout=timeout,
                 candidate_budget=generator._request_budget(request, timeout=timeout),
+                response_protocol=_PROTOCOL,
             )
             try:
                 result = generator.adapter.run(agent_request)
                 generator._effective_timeout("candidate_generation")
             except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
                 raise
-            except AgentInvocationError as exc:
+            except AgentError as exc:
                 generator._effective_timeout("candidate_generation")
                 if not getattr(exc, "candidate_diagnostic", None):
-                    generator._emit_generation_diagnostic(agent_request, reason="worker_failed")
+                    generator._emit_generation_diagnostic(
+                        agent_request, reason=candidate_failure_reason(exc), phase="run",
+                        failure_cause=candidate_model_failure_cause(exc),
+                    )
                 _fail("worker_failed")
-            except Exception:  # noqa: BLE001 - an external Agent failure has one fixed boundary
+            except Exception as exc:  # noqa: BLE001 - an external Agent failure has one fixed boundary
                 generator._effective_timeout("candidate_generation")
-                generator._emit_generation_diagnostic(agent_request, reason="worker_failed")
+                generator._emit_generation_diagnostic(
+                    agent_request, reason=candidate_failure_reason(exc), phase="run",
+                    failure_cause=candidate_model_failure_cause(exc),
+                )
                 _fail("worker_failed")
             if (not isinstance(result, AgentResult) or result.status != "succeeded"
                     or result.adapter_name != generator.adapter.name or result.role != generator.role):
@@ -367,6 +391,7 @@ def generate_bundle_candidate(generator, request):
                     reason=("cancelled" if isinstance(result, AgentResult) and result.status == "cancelled"
                             else "worker_failed"),
                     result=result if isinstance(result, AgentResult) else None,
+                    phase="run",
                 )
                 _fail("worker_failed")
             for snapshot in [*observed, *staged]:
@@ -376,7 +401,9 @@ def generate_bundle_candidate(generator, request):
             try:
                 draft = generator._draft(result.text)
             except EvolutionError:
-                generator._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
+                generator._emit_generation_diagnostic(
+                    agent_request, reason="malformed_candidate", result=result,
+                )
                 raise
             generator._effective_timeout("candidate_generation")
             generator._emit_generation_diagnostic(

@@ -18,6 +18,8 @@ from .agents import (
     AgentRequest,
     AgentResult,
     CandidateGenerationBudget,
+    candidate_failure_reason,
+    candidate_model_failure_cause,
 )
 from .algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract, EvaluationReport
 from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
@@ -337,14 +339,20 @@ class AgentCandidateGenerator:
         except AgentError as exc:
             self._effective_timeout("candidate_generation")
             if not getattr(exc, "candidate_diagnostic", None):
-                self._emit_generation_diagnostic(agent_request, reason="worker_failed")
+                self._emit_generation_diagnostic(
+                    agent_request, reason=candidate_failure_reason(exc), phase="run",
+                    failure_cause=candidate_model_failure_cause(exc),
+                )
             raise EvolutionError(f"agent candidate generation failed: {_bounded_error(exc)}") from exc
         except Exception as exc:
             self._effective_timeout("candidate_generation")
-            self._emit_generation_diagnostic(agent_request, reason="worker_failed")
+            self._emit_generation_diagnostic(
+                agent_request, reason=candidate_failure_reason(exc), phase="run",
+                failure_cause=candidate_model_failure_cause(exc),
+            )
             raise EvolutionError(f"agent candidate generation failed: {_bounded_error(exc)}") from exc
         if not isinstance(result, AgentResult):
-            self._emit_generation_diagnostic(agent_request, reason="worker_failed")
+            self._emit_generation_diagnostic(agent_request, reason="worker_failed", phase="run")
             raise EvolutionError("agent candidate generation returned an invalid result")
         if result.status != "succeeded":
             self._emit_generation_diagnostic(
@@ -360,7 +368,7 @@ class AgentCandidateGenerator:
         try:
             draft = self._draft(result.text)
         except EvolutionError:
-            self._emit_generation_diagnostic(agent_request, reason="malformed_candidate")
+            self._emit_generation_diagnostic(agent_request, reason="malformed_candidate", result=result)
             raise
         self._effective_timeout("candidate_generation")
         self._emit_generation_diagnostic(
@@ -406,6 +414,8 @@ class AgentCandidateGenerator:
         result: AgentResult | None = None,
         candidate_id: str | None = None,
         source_bundle_sha256: str | None = None,
+        phase: str = "response",
+        failure_cause: str | None = None,
     ) -> None:
         if self._observer is None or request.candidate_budget is None:
             return
@@ -457,8 +467,10 @@ class AgentCandidateGenerator:
             "attempted_tool_calls": attempted,
             "completion": reason == "completed",
             "reason": reason,
-            "phase": "response",
+            "phase": phase,
         }
+        if failure_cause is not None:
+            payload["failure_cause"] = failure_cause
         if reason == "completed" and candidate_id is not None and source_bundle_sha256 is not None:
             payload["candidate_id"] = candidate_id
             payload["source_bundle_sha256"] = source_bundle_sha256

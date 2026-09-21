@@ -12,6 +12,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from .runtime import MODEL_FAILURE_REASONS
+
 SCHEMA_VERSION = "1"
 STAGE = "candidate_generation"
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -22,12 +24,17 @@ _REASONS = frozenset({
     "tool_step_limit_reached", "timed_out", "empty_final_response", "candidate_failed",
     "unknown", "running",
 })
+_REASON_ALIASES = {
+    "timeout": "timed_out", "tool_failed": "tool_execution_failed",
+    "empty_response": "empty_final_response",
+}
+_FAILURE_PHASES = frozenset({"model_turn", "tool", "tool_batch", "response", "run"})
 _PRIVATE = re.compile(r"(?i)(prompt|response|credential|secret|token|endpoint|url|exception|traceback)")
 _ALLOWED_INPUT_KEYS = frozenset({
     "schema_version", "stage", "outcome", "reason", "completion", "budget_id",
     "max_tool_steps", "tool_steps_used", "tool_steps_remaining", "attempted_tool_calls",
     "candidate_id", "source_bundle_sha256", "phase", "elapsed_ms", "timeout_ms",
-    "run_id", "task_id",
+    "run_id", "task_id", "failure_cause",
 })
 
 
@@ -90,6 +97,10 @@ def build_candidate_generation_receipt(
         raise CandidateGenerationReceiptError("task_identity_mismatch")
     raw_outcome = payload.get("outcome")
     reason = payload.get("reason", raw_outcome)
+    if type(raw_outcome) is not str or type(reason) is not str:
+        raise CandidateGenerationReceiptError("invalid_outcome")
+    raw_outcome = _REASON_ALIASES.get(raw_outcome, raw_outcome)
+    reason = _REASON_ALIASES.get(reason, reason)
     if raw_outcome not in _OUTCOMES | _REASONS or reason not in _REASONS:
         raise CandidateGenerationReceiptError("invalid_outcome")
     if raw_outcome == "completed":
@@ -115,6 +126,8 @@ def build_candidate_generation_receipt(
             raise CandidateGenerationReceiptError("invalid_tool_budget")
         candidate_id = _safe_id(payload.get("candidate_id"), "candidate_id")
         source_sha = _digest(payload.get("source_bundle_sha256"), "source_bundle_sha256")
+        if "failure_cause" in payload:
+            raise CandidateGenerationReceiptError("completed_receipt_contains_failure_cause")
     else:
         if "candidate_id" in payload or "source_bundle_sha256" in payload:
             raise CandidateGenerationReceiptError("failed_receipt_contains_candidate_identity")
@@ -137,6 +150,17 @@ def build_candidate_generation_receipt(
     if outcome == "completed":
         receipt["candidate_id"] = candidate_id
         receipt["source_bundle_sha256"] = source_sha
+    else:
+        if "phase" in payload:
+            phase = payload["phase"]
+            if type(phase) is not str or phase not in _FAILURE_PHASES:
+                raise CandidateGenerationReceiptError("invalid_failure_phase")
+            receipt["phase"] = phase
+        if "failure_cause" in payload:
+            cause = payload["failure_cause"]
+            if type(cause) is not str or cause not in MODEL_FAILURE_REASONS:
+                raise CandidateGenerationReceiptError("invalid_failure_cause")
+            receipt["failure_cause"] = cause
     return receipt
 
 
@@ -160,6 +184,8 @@ def inspect_candidate_generation_events(
             continue
         payload = event.get("payload")
         receipt = build_candidate_generation_receipt(payload, run_id=run_id, task_id=task_id)
+        if payload != receipt:
+            raise CandidateGenerationReceiptError("noncanonical_generation_receipt")
         if event.get("id") != generation_event_id(receipt):
             raise CandidateGenerationReceiptError("event_identity_mismatch")
         receipts.append(receipt)

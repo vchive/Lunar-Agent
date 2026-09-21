@@ -16,7 +16,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
 
-from .agents import CandidateGenerationDiagnostic, candidate_failure_reason
+from .agents import (
+    BUNDLE_RESPONSE_PROTOCOL,
+    CandidateGenerationDiagnostic,
+    candidate_failure_reason,
+    candidate_model_failure_cause,
+)
 from .automatic_solve_lifecycle import SolveExecutionCancelled
 from .memory import MemoryStore
 from .model_profile import BudgetFailureEvidence, ProfileBudgetExceeded, UsageLedger
@@ -36,6 +41,21 @@ concise, reusable facts or decisions.
 ISOLATED_SYSTEM_PROMPT = """You are executing one stateless Lunar-Agent protocol step. Follow the
 user message exactly, return only its requested machine-readable response, and do not use tools,
 memory, session history, or unstated external context.
+"""
+BUNDLE_SYSTEM_PROMPT = """You are Lunar-Agent, generating one complete candidate source bundle.
+Use the available tools to inspect and change files and run explicitly permitted commands.
+Work only inside the supplied task workspace and follow its declared constraints. Be honest about
+what you actually did. Memory remains available only through explicitly configured memory tools.
+"""
+BUNDLE_FINAL_RESPONSE_INSTRUCTION = """For this invocation only, the final response protocol is
+lunar-agent-bundle-generation-v1. This final-format instruction replaces any instruction to give
+a prose summary, list changed files or report checks in the final answer; all other workspace,
+permission and task constraints still apply. Tools remain available within the existing budget.
+Return only one strict JSON object containing entrypoint and the complete files source map,
+with optional metadata and experiment as specified by the current generation request. Do not
+include surrounding prose, Markdown fences or a separate report. An experiment may be omitted;
+when supplied, change_tags and target_metrics must be arrays. Scratch files and tool results do
+not replace the final JSON response. This instruction grants no extra request or tool allowance.
 """
 
 # Compatibility alias for callers that imported the earlier experimental name.
@@ -238,7 +258,12 @@ class AgentLoopRuntime:
         stage_boundary: Callable[[InvocationDiagnostics], bool] | None = None,
         max_tool_steps: int | None = None,
         budget_id: str | None = None,
+        response_protocol: str | None = None,
     ) -> RuntimeResult:
+        if response_protocol is not None and (
+            type(response_protocol) is not str or response_protocol != BUNDLE_RESPONSE_PROTOCOL
+        ):
+            raise ValueError("unsupported Agent response_protocol")
         self._cancelled.clear()
         self._check_continuation()
         effective_timeout = self._profile_timeout(timeout)
@@ -282,6 +307,17 @@ class AgentLoopRuntime:
             usage_complete=ledger.usage_complete if ledger is not None else False,
         )
         messages = self._initial_messages(prompt)
+        if response_protocol == BUNDLE_RESPONSE_PROTOCOL:
+            # The durable transcript retains its ordinary system instructions. Only this
+            # invocation's request copies get the candidate final-response contract.
+            messages = [
+                {**message, "content": (
+                    BUNDLE_SYSTEM_PROMPT if message.get("content") == HERMES_SYSTEM_PROMPT
+                    else str(message.get("content") or "")
+                ) + "\n\n" + BUNDLE_FINAL_RESPONSE_INSTRUCTION}
+                if message.get("role") == "system" else message
+                for message in messages
+            ]
         # Memory is exposed through explicit model tool calls. We do not inject local notes into a
         # request implicitly: sending durable user context to a configured endpoint must remain an
         # intentional, per-run choice.
@@ -335,6 +371,7 @@ class AgentLoopRuntime:
                     self._set_candidate_diagnostic(
                         budget_id, effective_max_steps, tool_steps, 0, False,
                         candidate_failure_reason(exc), "model_turn",
+                        failure_cause=candidate_model_failure_cause(exc),
                     )
                 self._emit(
                     "agent_runtime_failure",
@@ -555,6 +592,7 @@ class AgentLoopRuntime:
     def _set_candidate_diagnostic(
         self, budget_id: str | None, max_steps: int, tool_steps: int,
         attempted_tool_calls: int, completion: bool, reason: str, phase: str,
+        *, failure_cause: str | None = None,
     ) -> None:
         if budget_id is None:
             return
@@ -567,6 +605,7 @@ class AgentLoopRuntime:
             completion=completion,
             reason=reason,
             phase=phase,
+            failure_cause=failure_cause,
         ).to_dict()
 
     def run_isolated(
