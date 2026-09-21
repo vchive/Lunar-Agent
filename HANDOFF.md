@@ -25,7 +25,11 @@
 强杀恢复、候选独立进程组回收和并发排他。另有 35 项锁/登记、20 项 worker 恢复/释放和
 7 项启动故障测试；新增共 100 项。独立审查及完整三阶段回归通过：当前 **6684 passed、
 1 existing skipped**，历史 **2294 passed**，原始注册 **24 passed**，整体 exit 0。
-本轮提交和 Linux CI 尚待收尾，精确记录见
+产品 `ff1edcb` 已推送到 `origin/main`，[Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35568522333)
+的 Python 3.12/3.13 全部通过；3.11 在一项既有 attestation 正例失败，正在修复其测试连接
+生命周期。受控 GC 已复现源 SQLite 自发 checkpoint 被严格快照正确拒绝，产品校验不放宽。
+测试现显式保持连接，新增两个 GC 时点，3.11/3.13 各 86 项定向通过，独立审查通过。
+首次 CI 失败完整保留，后续完整 CI 复验待收尾。精确记录见
 [142 validation](specs/142-automatic-solve-lifecycle/validation.md)，使用方式见
 [quickstart](specs/142-automatic-solve-lifecycle/quickstart.md)。
 

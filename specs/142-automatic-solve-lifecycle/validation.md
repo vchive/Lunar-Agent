@@ -36,8 +36,34 @@ Full reports are `current.xml`, `archived.xml`, `frozen123.xml` and `full-run.lo
 `.lunar-evolution/test-results/feature142-phase-c-20260921/`. The first full run passed without a
 rerun, retry or historical source change. The new current collection is **6685** nodes: the prior
 6586 plus 100 new cases minus one obsolete negative parameter. Historical denominators are unchanged.
-The product commit and its Linux matrix are recorded at release closeout; this local checkpoint
-does not yet claim a remote CI result.
+Product **`ff1edcb6f7d58f5a28511184837b65948036517a`** is pushed to `origin/main` with exactly the
+verified product/test bytes. Its first
+[Linux matrix](https://github.com/vchive/Lunar-Evolution/actions/runs/35568522333) passed all steps
+on Python **3.12 and 3.13**. Python **3.11** failed the current test
+`test_materialization_attestation.py::test_cli_preflights_and_returns_only_registration_metadata`
+(CLI returned 2 instead of 0); its static check was skipped. The original failure is retained in
+`linux-ci-initial-failure.json` and the public job HTML. Public API quota exhaustion required using
+the public workflow/job pages; those pages expose the exact commit and step conclusions.
+
+The unchanged 76-test attestation suite passes locally under Python 3.11. A separate controlled
+reproduction exposes a pre-existing fixture race: collecting unclosed source SQLite connections
+after snapshot copying checkpoints the database (4096 to 217088 bytes) and removes its 1281352-byte
+WAL, so strict snapshot validation correctly rejects registration. Holding a live source connection
+through the same forced collection preserves the files and succeeds. This matches the earlier
+fixture-lifecycle issue already handled by the adjacent receipt-immutability test, but does not
+prove the exact CI interleaving: its public annotation lacks the captured snapshot error.
+The remedy is restricted to the current positive test fixture and a deterministic GC regression;
+product guards, frozen evidence, archive source and original registration tests remain unchanged.
+The fixture now explicitly keeps and closes a source connection across both successful CLI calls.
+Three parameters cover normal GC, forced collection before validation and forced collection after
+validation. Both forced paths run the real snapshot context and its unchanged-source guards;
+neither disables GC, mocks a guard, catches failure for retry nor changes a product check.
+Independent review passed. Python **3.11.15 and 3.13.12 each passed 86 tests** (78 attestation tests
+and eight real-source-change refusal cases), with no failure, error or skip. Reports are
+`attestation311-gc-fixed.xml`, `attestation313-gc-fixed.xml` and `ci311-gc-reproduction.json`.
+The two additional GC parameters bring current collection to **6687** nodes. The prior complete
+local run remains its original 6685-node checkpoint; unchanged product/archive stages were not
+needlessly repeated. The follow-up CI runs all three complete stages against the test fix.
 
 Initial integration exposed missing workspace creation before the new lock acquisition; the
 fresh-run branch now creates its workspace before locking while input staging remains inside

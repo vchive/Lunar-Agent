@@ -292,18 +292,37 @@ def test_retained_attestation_cannot_be_downgraded_or_replaced(tmp_path, monkeyp
             publication.recover_materialization_execution(controller.store, parent, child, _identity(child))
 
 
-def test_cli_preflights_and_returns_only_registration_metadata(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("collect_at", [None, "before_validation", "after_validation"])
+def test_cli_preflights_and_returns_only_registration_metadata(tmp_path, monkeypatch, capsys, collect_at):
     fixture = _raw(tmp_path, monkeypatch)
     controller, parent, child, result, receipt = fixture
+    original_snapshot = attestation._snapshot_store
+    collections = []
+
+    @contextmanager
+    def collect_during_preflight(database):
+        with original_snapshot(database) as copied:
+            if collect_at == "before_validation":
+                collections.append(gc.collect())
+            yield copied
+            if collect_at == "after_validation":
+                collections.append(gc.collect())
+
+    monkeypatch.setattr(attestation, "_snapshot_store", collect_during_preflight)
     def forbidden(*args, **kwargs):
         pytest.fail("CLI initialized normal configuration or controller")
     monkeypatch.setattr(cli, "_config", forbidden)
     args = ["attest-materialization-execution", parent.id, child.id, "--receipt", str(receipt), "--home", str(controller.config.home), "--json"]
-    for _ in range(2):
-        assert cli.main(args) == 0
-        payload = json.loads(capsys.readouterr().out)
-        assert payload == {"status": "registered", "parent_run_id": parent.id, "evolution_run_id": child.id,
-                           "task_id": _identity(child)["task_id"], "receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest()}
+    # SQLite's transaction context does not close its connection. Keep the fixture's
+    # WAL alive across both preflights so GC cannot checkpoint the source mid-snapshot.
+    # The production snapshot guard remains strict about real source changes.
+    with closing(controller.store._connect()):
+        for _ in range(2):
+            assert cli.main(args) == 0
+            payload = json.loads(capsys.readouterr().out)
+            assert payload == {"status": "registered", "parent_run_id": parent.id, "evolution_run_id": child.id,
+                               "task_id": _identity(child)["task_id"], "receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest()}
+    assert len(collections) == (0 if collect_at is None else 2)
     _assert_registered_once(controller, child, result)
 
 
