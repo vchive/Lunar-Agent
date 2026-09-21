@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_evolution import AgentCandidateGenerator
-from famou.agents import AgentResult
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.evolution import (
+from lunar_evolution.agent_evolution import AgentCandidateGenerator
+from lunar_evolution.agents import AgentResult
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.evolution import (
     Candidate,
     CandidateArchive,
     EvolutionConfig,

@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from test_candidate_evaluation import fixture
 
-from famou import cli
-from famou.candidate_evaluation_spec import MAX_CANDIDATE_EVALUATION_SPEC_BYTES
+from lunar_evolution import cli
+from lunar_evolution.candidate_evaluation_spec import MAX_CANDIDATE_EVALUATION_SPEC_BYTES
 
 
 def command(tmp_path):
@@ -170,7 +170,7 @@ def test_cli_inspection_rejects_incomplete_evidence_without_repair(tmp_path, mon
 
 def test_installed_cli_evaluates_then_inspects_relative_paths(tmp_path):
     request, _paths, evaluate = command(tmp_path)
-    launcher = Path(sys.executable).parent / "lunar-agent"
+    launcher = Path(sys.executable).parent / "lunar-evolution"
     if not launcher.is_file():
         pytest.skip("installed CLI unavailable")
     before = workspace_bytes(request)

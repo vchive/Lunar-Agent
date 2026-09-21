@@ -10,8 +10,8 @@ from test_frozen_evaluator_bundle import EVALUATOR_SOURCE, _contract, _envelope
 from test_snapshot_evaluator_bundle import SNAPSHOT_SOURCE
 from test_source_check_contract import source_contract
 
-from famou import evaluator_bundle as bundle
-from famou.candidate_evaluation_spec import parse_candidate_evaluation_report
+from lunar_evolution import evaluator_bundle as bundle
+from lunar_evolution.candidate_evaluation_spec import parse_candidate_evaluation_report
 
 RESPONSE_HEADER = "Response shape (replace every placeholder with task-specific values):\n"
 REPORT_HEADER = "Report shape examples (illustrative values, not task scores):\n"

@@ -2,9 +2,9 @@ import json
 import sqlite3
 from pathlib import Path
 
-from famou.models import TaskStatus
-from famou.policy import PlanDocument, PlanTask
-from famou.store import Store
+from lunar_evolution.models import TaskStatus
+from lunar_evolution.policy import PlanDocument, PlanTask
+from lunar_evolution.store import Store
 
 
 def test_running_task_is_recovered_and_events_are_idempotent(tmp_path: Path) -> None:

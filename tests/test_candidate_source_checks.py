@@ -9,9 +9,12 @@ from types import SimpleNamespace
 import pytest
 import test_candidate_evaluation as integration
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.candidate_evaluation import evaluate_candidate_execution, inspect_candidate_evaluation
-from famou.candidate_evaluation_spec import CandidateEvaluationError, canonical_json
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.candidate_evaluation import (
+    evaluate_candidate_execution,
+    inspect_candidate_evaluation,
+)
+from lunar_evolution.candidate_evaluation_spec import CandidateEvaluationError, canonical_json
 
 
 def _constraint(minimum=2, **changes):

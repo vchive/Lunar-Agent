@@ -3,7 +3,7 @@
 Run any native conversational evolution with at least two rounds:
 
 ```bash
-lunar-agent solve "optimize routes and write output/routes.csv" \
+lunar-evolution solve "optimize routes and write output/routes.csv" \
   --input ./orders.csv --runtime openai-compatible \
   --endpoint http://127.0.0.1:11434/v1 --model local-model \
   --evolve --strategy loop --max-rounds 3 --json --home .lunar

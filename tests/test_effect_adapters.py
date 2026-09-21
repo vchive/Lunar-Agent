@@ -10,17 +10,17 @@ from urllib.error import HTTPError
 
 import pytest
 
-from famou.cli import main
-from famou.effect_adapters import (
+from lunar_evolution.cli import main
+from lunar_evolution.effect_adapters import (
     EffectAdapterError,
+    benchmark_case_content_digest,
     convert_fm_eval_baseline,
-    famou_case_content_digest,
     run_harness_adapter,
     run_subject_adapter,
 )
-from famou.effect_trial import EffectTrialConfig, EffectTrialRunner, TrialBaseline
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, RuntimeExecutionError, RuntimeResult, ToolCall
+from lunar_evolution.effect_trial import EffectTrialConfig, EffectTrialRunner, TrialBaseline
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, RuntimeResult, ToolCall
 
 
 @pytest.mark.parametrize("mode", ["normal", "deep_evolution"])
@@ -86,8 +86,8 @@ def test_subject_failures_leave_bound_safe_diagnostics(
 def test_subject_diagnostic_classifies_additional_failure_boundaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
 ) -> None:
-    from famou.agent_loop import AgentLoopRuntime
-    from famou.tools import LocalToolRegistry
+    from lunar_evolution.agent_loop import AgentLoopRuntime
+    from lunar_evolution.tools import LocalToolRegistry
 
     request = _subject_request(tmp_path / "subject")
     secret = "SECRET-PRIVATE-ERROR-SENTINEL"
@@ -122,7 +122,7 @@ def test_subject_diagnostic_classifies_additional_failure_boundaries(
 def test_diagnostic_failure_preserves_original_subject_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
 ) -> None:
-    import famou.subject_diagnostics as diagnostics
+    import lunar_evolution.subject_diagnostics as diagnostics
 
     request = _subject_request(tmp_path / "subject")
     original = RuntimeError("original private failure")
@@ -162,12 +162,12 @@ def _make_suite(case_source: Path, case_root: Path, *, version: str = "1.10.6") 
     return {
         "schema_version": "1",
         "benchmark": {
-            "name": "famou-bench",
+            "name": "reference-benchmark",
             "release_version": version,
             "publication_digest": "sha256:" + "1" * 64,
         },
         "evaluation_profile": {
-            "name": "famou-agentco-default",
+            "name": "lunar-evolution-reference-default",
             "revision": 1,
             "digest": "sha256:" + "2" * 64,
         },
@@ -175,7 +175,7 @@ def _make_suite(case_source: Path, case_root: Path, *, version: str = "1.10.6") 
             {
                 "key": "case-a",
                 "revision_id": "fmcase-rev-a",
-                "digest": famou_case_content_digest(case_root),
+                "digest": benchmark_case_content_digest(case_root),
                 "entrypoint": "instruction.md",
                 "public_files": [
                     {
@@ -231,7 +231,7 @@ print(json.dumps({'status':'success','notes':'normalized'}))
 from pathlib import Path
 p=argparse.ArgumentParser(); p.add_argument('--data-dir'); p.add_argument('--submission-dir'); a=p.parse_args()
 assert 'EXTRACTOR_SECRET' not in os.environ
-assert 'FAMOU_API_KEY' not in os.environ
+assert 'LUNAR_EVOLUTION_API_KEY' not in os.environ
 answer=json.loads((Path(a.submission_dir)/'solution.json').read_text())['answer']
 score=0.81 if answer == 42 else 0.0
 print(json.dumps({'overall_score':score,'validity_score':float(answer == 42),'quality_score':score,'objective':42}))
@@ -297,7 +297,7 @@ def _subject_request(subject_root: Path) -> Path:
             "schema_version": "1",
             "mode": "normal",
             "benchmark": {
-                "name": "famou-bench",
+                "name": "reference-benchmark",
                 "release_version": "1.10.6",
                 "publication_digest": "sha256:" + "1" * 64,
             },
@@ -503,7 +503,7 @@ def test_builtin_harness_runs_exact_extractor_then_credential_free_evaluator(tmp
         request,
         private,
         python_bin=sys.executable,
-        extractor_environment={"EXTRACTOR_SECRET": "extractor-only", "FAMOU_API_KEY": "hidden"},
+        extractor_environment={"EXTRACTOR_SECRET": "extractor-only", "LUNAR_EVOLUTION_API_KEY": "hidden"},
     )
 
     assert receipt["extraction_status"] == "completed"
@@ -920,7 +920,7 @@ def test_effect_trial_accepts_nullable_subject_usage(tmp_path: Path) -> None:
             requested_model="gpt-5.6-sol",
             subject_command=(str(subject),),
             harness_command=(
-                str(Path(sys.executable).parent / "lunar-agent"),
+                str(Path(sys.executable).parent / "lunar-evolution"),
                 "effect-harness",
                 "--case-root",
                 str(private),
@@ -1026,7 +1026,7 @@ def test_all_builtin_adapters_complete_effect_trial_end_to_end(tmp_path: Path) -
         effective_model="openai/gpt-5.6-sol",
         model_evidence="not_observable",
     )
-    lunar = Path(sys.executable).parent / "lunar-agent"
+    lunar = Path(sys.executable).parent / "lunar-evolution"
 
     with EffectModelServer() as server:
         report = EffectTrialRunner(
@@ -1090,7 +1090,7 @@ def test_profile_failure_preserves_candidate_without_receipt_harness_or_score(tm
     profile_path = _write_json(tmp_path / "profile.json", profile.to_dict())
     harness_marker = tmp_path / "harness-was-invoked"
     trial = tmp_path / "trial-preserved-candidate"
-    lunar = Path(sys.executable).parent / "lunar-agent"
+    lunar = Path(sys.executable).parent / "lunar-evolution"
 
     # The HTTP fixture writes candidate files using 12 tokens, then returns a final response
     # costing another 12. A retained candidate cannot authorize scoring after that overshoot.

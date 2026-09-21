@@ -4,7 +4,7 @@
   The deterministic open substitution and oversize-before-read checks reproduce actual old gaps;
   the read-time mutation test exercises the new descriptor-read path.
 - Legacy 099/100 golden receipt ID/digest values were recorded from `d81145f` and remain unchanged.
-- Installed `lunar-agent` CLI smoke: valid caller pin + plan + receipt + evidence accepted; changing
+- Installed `lunar-evolution` CLI smoke: valid caller pin + plan + receipt + evidence accepted; changing
   a benchmark release with the receipt retained was rejected with a fixed mismatch code; home absent.
 - Independent review initially reproduced mutated task DTO path/size bypasses; strict DTO replay
   now rejects both before file opens. The review reran the cases and found no remaining blocker.

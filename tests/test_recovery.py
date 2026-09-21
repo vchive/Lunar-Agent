@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 
-from famou.agent_loop import AgentInputRequired
-from famou.budget import BudgetSpec
-from famou.config import Config
-from famou.controller import LocalController
-from famou.policy import PlanDocument, PlanTask
-from famou.runtime import MockRuntime, RuntimeExecutionError, RuntimeResult
+from lunar_evolution.agent_loop import AgentInputRequired
+from lunar_evolution.budget import BudgetSpec
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.policy import PlanDocument, PlanTask
+from lunar_evolution.runtime import MockRuntime, RuntimeExecutionError, RuntimeResult
 
 
 class InputRuntime:
@@ -60,7 +60,7 @@ def _acceptance_document() -> PlanDocument:
 
 
 def test_failed_acceptance_proposes_patch_and_is_idempotently_audited(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou", max_retries=1), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", max_retries=1), MockRuntime())
     run = controller.start_plan(_acceptance_document())
     before = controller.store.get_current_plan(run.id)
 
@@ -91,7 +91,7 @@ def test_failed_acceptance_proposes_patch_and_is_idempotently_audited(tmp_path: 
 
 
 def test_waiting_input_proposes_ask_user_without_executing_a_new_attempt(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), InputRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), InputRuntime())
     run = controller.start("need a decision")
     task = controller.store.list_tasks(run.id)[0]
 
@@ -106,7 +106,7 @@ def test_waiting_input_proposes_ask_user_without_executing_a_new_attempt(tmp_pat
 
 def test_configuration_failure_requests_explicit_configuration_without_copying_error(tmp_path: Path) -> None:
     controller = LocalController(
-        Config(tmp_path / ".famou", max_retries=1), ConfigurationFailureRuntime()
+        Config(tmp_path / ".lunar-evolution", max_retries=1), ConfigurationFailureRuntime()
     )
     run = controller.start("run the external agent")
 
@@ -123,7 +123,7 @@ def test_configuration_failure_requests_explicit_configuration_without_copying_e
 
 
 def test_budget_failure_proposes_replan_without_relaxing_the_budget(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     document = PlanDocument(
         goal="two bounded tasks",
         plan_id="budget-recovery-plan",
@@ -144,7 +144,7 @@ def test_budget_failure_proposes_replan_without_relaxing_the_budget(tmp_path: Pa
 
 def test_unclassified_runtime_failure_after_retries_proposes_replan(tmp_path: Path) -> None:
     controller = LocalController(
-        Config(tmp_path / ".famou", max_retries=1), UnclassifiedFailureRuntime()
+        Config(tmp_path / ".lunar-evolution", max_retries=1), UnclassifiedFailureRuntime()
     )
     run = controller.start_plan(
         PlanDocument(
@@ -162,7 +162,7 @@ def test_unclassified_runtime_failure_after_retries_proposes_replan(tmp_path: Pa
 
 
 def test_active_uncertain_work_proposes_retry_and_terminal_runs_are_noops(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     pending = controller.create("recover interrupted work")
     task = controller.store.list_tasks(pending.id)[0]
     controller.store.claim_task(task.id, "fixture")

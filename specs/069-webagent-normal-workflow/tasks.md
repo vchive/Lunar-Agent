@@ -26,7 +26,7 @@ and the trial gate with a fixture harness. No real provider, WebAgent, or privat
 Real measurement results and a measured claim about solution quality remain pending.
 
 Verification on 2026-09-10: 828 full-suite tests passed (30.94 seconds), including 101 staged-focused
-cases; `ruff check src/famou tests` and `git diff --check` passed. The command uses
+cases; `ruff check src/lunar_evolution tests` and `git diff --check` passed. The command uses
 `pytest -o addopts='' -q` so the terminal summary retains the explicit pass count.
 
 T069-06 completed on 2026-09-10: see `measurement/README.md`, frozen `manifest.json`,

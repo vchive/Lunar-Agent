@@ -3,7 +3,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from famou.cli import main
+from lunar_evolution.cli import main
 
 
 def test_cli_solve_role_dag_selects_five_stage_plan(tmp_path: Path, capsys) -> None:

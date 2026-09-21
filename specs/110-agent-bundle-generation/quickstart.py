@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from famou import CandidateEvaluationSpec, inspect_bundle_delivery
+from lunar_evolution import CandidateEvaluationSpec, inspect_bundle_delivery
 
 
 def digest(content: bytes) -> str:
@@ -18,7 +18,7 @@ def digest(content: bytes) -> str:
 
 
 def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="lunar-agent-bundle110-")).resolve()
+    root = Path(tempfile.mkdtemp(prefix="lunar-evolution-bundle110-")).resolve()
     for name in ("inputs", "deliveries"):
         (root / name).mkdir()
     (root / "inputs/limit.txt").write_bytes(b"10")
@@ -99,7 +99,7 @@ print(json.dumps({"entrypoint": "solve/main.py", "files": {
 '''
     (root / "worker.py").write_text(worker)
     command = [
-        sys.executable, "-m", "famou", "evolve-bundle", str(root / "contract.json"),
+        sys.executable, "-m", "lunar_evolution", "evolve-bundle", str(root / "contract.json"),
         "--profile", str(root / "profile.json"), "--workspace", str(root / "run"),
         "--home", str(root / "home"), "--agent-runtime", "subprocess",
         "--agent-runtime-command", shlex.join((python, str(root / "worker.py"))),

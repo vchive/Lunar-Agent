@@ -3,14 +3,14 @@ import json
 
 from test_staged_effect_adapter import StagedSubject, _config, _profile, _request
 
-from famou.cli import main
+from lunar_evolution.cli import main
 
 
 def test_effect_subject_cli_round_trips_frozen_staged_config(tmp_path, monkeypatch, capsys):
     profile = _profile()
     request = _request(tmp_path / "subject", profile)
     model = StagedSubject()
-    monkeypatch.setattr("famou.effect_adapters.OpenAICompatibleRuntime", lambda **kwargs: model)
+    monkeypatch.setattr("lunar_evolution.effect_adapters.OpenAICompatibleRuntime", lambda **kwargs: model)
     profile_path = tmp_path / "profile.json"
     profile_path.write_text(json.dumps(profile.to_dict()))
     config = _config(request, profile)

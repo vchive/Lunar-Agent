@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from famou.runtime import ModelRequestFailure, OpenAICompatibleRuntime
+from lunar_evolution.runtime import ModelRequestFailure, OpenAICompatibleRuntime
 
 
 @pytest.fixture(scope="module")

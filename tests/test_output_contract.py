@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from famou import evaluator
-from famou.algorithm import OutputSpec
+from lunar_evolution import evaluator
+from lunar_evolution.algorithm import OutputSpec
 
 
 def test_output_contract_validates_all_32_declarations_and_last_failure(tmp_path: Path) -> None:

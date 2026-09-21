@@ -4,9 +4,12 @@ import json
 
 import pytest
 
-from famou import cli
-from famou.benchmark_comparison import parse_benchmark_comparison_plan
-from famou.benchmark_result import BenchmarkComparisonResult, parse_benchmark_comparison_result
+from lunar_evolution import cli
+from lunar_evolution.benchmark_comparison import parse_benchmark_comparison_plan
+from lunar_evolution.benchmark_result import (
+    BenchmarkComparisonResult,
+    parse_benchmark_comparison_result,
+)
 from tests.test_benchmark_evidence_cli import _cli_files
 
 

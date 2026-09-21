@@ -4,12 +4,12 @@ from copy import deepcopy
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime, ProfileBudgetFailure, StageBoundary
-from famou.model_profile import UsageLedger
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
-from famou.tools import LocalToolRegistry
-from famou.transcript import SessionTranscript
+from lunar_evolution.agent_loop import AgentLoopRuntime, ProfileBudgetFailure, StageBoundary
+from lunar_evolution.model_profile import UsageLedger
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
+from lunar_evolution.transcript import SessionTranscript
 
 
 def usage(input_tokens=2, output_tokens=1):
@@ -147,7 +147,7 @@ def test_missing_or_malformed_response_usage_cannot_be_recovered_by_later_sample
 
 def test_response_arriving_after_deadline_is_still_accounted(tmp_path, monkeypatch):
     now = [0.0]
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", lambda: now[0])
 
     def late_response():
         now[0] = 11.0
@@ -167,7 +167,7 @@ def test_response_arriving_after_deadline_is_still_accounted(tmp_path, monkeypat
 
 def test_tool_overrun_counts_side_effect_and_persists_result_before_wall_check(tmp_path, monkeypatch):
     now = [0.0]
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", lambda: now[0])
 
     class SlowTools(LocalToolRegistry):
         def execute(self, name, arguments, workspace):
@@ -367,7 +367,7 @@ def test_confined_transcript_temporary_file_is_exclusive_and_nofollow(tmp_path, 
     external.write_text("unchanged")
     temporary = workspace / ".session.jsonl.fixed.tmp"
     temporary.symlink_to(external)
-    monkeypatch.setattr("famou.transcript.uuid.uuid4", lambda: SimpleNamespace(hex="fixed"))
+    monkeypatch.setattr("lunar_evolution.transcript.uuid.uuid4", lambda: SimpleNamespace(hex="fixed"))
     with pytest.raises(FileExistsError):
         transcript.append({"role": "user", "content": "must not escape"})
     assert external.read_text() == "unchanged"

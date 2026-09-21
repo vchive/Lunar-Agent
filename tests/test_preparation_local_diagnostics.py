@@ -9,13 +9,13 @@ import pytest
 from test_conversational_automatic_bundle import automatic_setup
 from test_preparation_recovery_cli import followup, observations, run_cli, runtime_calls, snapshot
 
-from famou import automatic_solve_bundle as automatic
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.evaluator_bundle import EvaluatorPreparationError
-from famou.evaluator_diagnostics import EvaluatorPreparationDiagnostic
-from famou.runtime import RuntimeResult
-from famou.store import Store
+from lunar_evolution import automatic_solve_bundle as automatic
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.evaluator_bundle import EvaluatorPreparationError
+from lunar_evolution.evaluator_diagnostics import EvaluatorPreparationDiagnostic
+from lunar_evolution.runtime import RuntimeResult
+from lunar_evolution.store import Store
 
 PRIVATE = "fresh-private-generated-probe-or-provider-content"
 DETAIL_KEYS = {"schema_version", "stage", "reason", "probe_index", "input_index", "order_index"}

@@ -1,4 +1,4 @@
-# Research: Standalone Local Famou Agent
+# Research: Standalone Local Lunar Evolution Agent
 
 ## Decision 1: Keep the controller independent from Hermes
 
@@ -50,7 +50,7 @@ conditional state updates prevent duplicate terminal results when resume is call
 
 ## Decision 4: CLI first, no local web server in P1
 
-**Decision**: Expose `run`, `resume`, `status`, `events`, and `cancel` through `python -m famou`.
+**Decision**: Expose `run`, `resume`, `status`, `events`, and `cancel` through `python -m lunar_evolution`.
 
 **Rationale**: A CLI is easy to bootstrap, script, test, and inspect over SSH. A TUI or localhost UI
 can be added after the state contract is stable.

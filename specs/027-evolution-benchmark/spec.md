@@ -7,7 +7,7 @@
 
 ## Context and scope
 
-Lunar-Agent now has runtime-neutral `loop`, `population`, and optional `openevolve` seams. The
+Lunar Evolution now has runtime-neutral `loop`, `population`, and optional `openevolve` seams. The
 project needs a local benchmark harness before claiming effect parity with WebAgent: one contract,
 one generator/evaluator definition, and one budget must be applied to independently isolated runs.
 The first release compares native strategies through the existing `EvolutionContext`; external

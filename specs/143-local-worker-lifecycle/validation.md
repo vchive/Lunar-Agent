@@ -162,7 +162,7 @@ checkpoint is retained separately and never replaces this final report pair.
 
 Diagnostic commit `c22bd37` retained narrow stdout/JUnit artifacts, emitted bounded public failure
 annotations and disabled matrix fail-fast without changing the split runner or historical guards.
-[Run 35523896293](https://github.com/vchive/Lunar-Agent/actions/runs/35523896293) completed with
+[Run 35523896293](https://github.com/vchive/Lunar-Evolution/actions/runs/35523896293) completed with
 96 reported failures on each supported Python version. Bounded annotations identified
 `candidate_execution_evidence_runner_failed` cases; full diagnostic artifacts were uploaded.
 A controlled local reproduction confirmed that an executable named through a symlink produces
@@ -176,7 +176,7 @@ are unchanged. Seven directly affected/shared fixture modules passed **164 tests
 Ruff and diff checks passed. The fix was pushed independently to start its Linux matrix while
 worker regression proceeds. That matrix must confirm whether all 96 failures share this cause;
 no complete cross-platform pass is inferred from the local reproduction. The new
-[run 35525074826](https://github.com/vchive/Lunar-Agent/actions/runs/35525074826) is in progress.
+[run 35525074826](https://github.com/vchive/Lunar-Evolution/actions/runs/35525074826) is in progress.
 
 T009 remains deferred: CLI `delegate` and AgentLoop do not yet consume these worker APIs.
 Feature 142 Phase C automatic background execution and new real-model foreground acceptance
@@ -226,7 +226,7 @@ acceptance; the earlier local full count is not relabeled as a rerun of the addi
 
 ## Final Linux matrix acceptance
 
-[GitHub Actions run 35526731156](https://github.com/vchive/Lunar-Agent/actions/runs/35526731156)
+[GitHub Actions run 35526731156](https://github.com/vchive/Lunar-Evolution/actions/runs/35526731156)
 verified commit `8e1e0896a9b71a4959962eaf6df72a12be5e68bd`. The jobs API was checked at
 2026-09-20 18:05:13 UTC (2026-09-21 02:05:13 Asia/Shanghai):
 

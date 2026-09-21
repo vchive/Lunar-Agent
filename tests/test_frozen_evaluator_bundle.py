@@ -5,17 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.cli import main
-from famou.evaluator_bundle import (
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.cli import main
+from lunar_evolution.evaluator_bundle import (
     EvaluatorBundleError,
     SolverScoringContract,
     compile_evaluator_bundle,
     load_evaluator_bundle,
 )
-from famou.evolution import CandidateInputArtifact
-from famou.runtime import RuntimeResult
-from famou.store import Store
+from lunar_evolution.evolution import CandidateInputArtifact
+from lunar_evolution.runtime import RuntimeResult
+from lunar_evolution.store import Store
 
 
 def _contract() -> AlgorithmProblemContract:
@@ -445,7 +445,7 @@ def test_solve_uses_and_resumes_one_frozen_evaluator_bundle(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = BundleRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     orders = tmp_path / "orders.csv"
     orders.write_text("id\nreal-order-must-not-be-in-bundle\n", encoding="utf-8")
     home = tmp_path / "home"
@@ -580,7 +580,7 @@ def test_compile_evaluator_cli_rejects_conflicting_or_non_native_modes(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = BundleRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     fake = tmp_path / "evaluator"
     fake.write_text("#!/bin/sh\n", encoding="utf-8")
     fake.chmod(0o755)
@@ -625,7 +625,7 @@ def test_detached_solve_propagates_compiled_evaluator_marker(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = BundleRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     captured: dict[str, object] = {}
 
     class Process:
@@ -636,8 +636,8 @@ def test_detached_solve_propagates_compiled_evaluator_marker(
         captured["env"] = kwargs.get("env")
         return Process()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
-    monkeypatch.setattr("famou.cli.os.getpgid", lambda pid: pid)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.os.getpgid", lambda pid: pid)
 
     assert main(
         [
@@ -655,4 +655,4 @@ def test_detached_solve_propagates_compiled_evaluator_marker(
     ) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "pending"
     assert "--compile-evaluator" in captured["command"]
-    assert "FAMOU_API_KEY" not in (captured["env"] or {})
+    assert "LUNAR_EVOLUTION_API_KEY" not in (captured["env"] or {})

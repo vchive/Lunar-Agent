@@ -1,8 +1,11 @@
-"""The split runner executes historical registration tests against their actual product."""
+"""Current naming and historical evidence use separate, complete regression phases."""
 from __future__ import annotations
 
-import ast
+import copy
+import hashlib
 import importlib.util
+import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -14,12 +17,73 @@ SPEC.loader.exec_module(runner)
 
 
 @pytest.fixture(scope="module")
-def frozen():
-    with runner._frozen_snapshot(REPO) as snapshot:
+def archive():
+    with runner._snapshot(REPO, runner.ARCHIVE_COMMIT, "history") as snapshot:
         yield snapshot
 
 
-def test_frozen_snapshot_verifies_every_registered_file_and_original_product_tree(frozen, monkeypatch):
+@pytest.fixture(scope="module")
+def frozen():
+    with runner._snapshot(REPO, runner.FROZEN_COMMIT, "registration") as snapshot:
+        yield snapshot
+
+
+@pytest.fixture(scope="module")
+def archive_python(archive):
+    return runner._archive_python(archive)
+
+
+@pytest.fixture(scope="module")
+def original_selection(frozen):
+    return runner._registration_selection(frozen, runner._verify_frozen(frozen))
+
+
+@pytest.fixture(scope="module")
+def archive_nodes(archive):
+    return runner._collect(archive, runner._load_index(REPO)["test_files"])
+
+
+def test_archive_index_verifies_complete_original_file_set_and_bytes(archive):
+    index = runner._load_index(REPO)
+    runner._verify_archive(archive, index)
+    assert len(index["files"]) == 844
+    assert len(index["rootdirs"]) == 35
+    assert len(index["test_files"]) == 73
+    assert len(index["support_files"]) == 3
+    assert not archive.is_relative_to(REPO)
+
+
+@pytest.mark.parametrize("damage", ["omission", "changed"])
+def test_archive_inventory_rejects_missing_or_modified_originals(archive, monkeypatch, damage):
+    index = copy.deepcopy(runner._load_index(REPO))
+    relative = next(iter(index["files"]))
+    if damage == "omission":
+        index["files"].pop(relative)
+    else:
+        original = Path.read_bytes
+        monkeypatch.setattr(Path, "read_bytes", lambda path: (
+            original(path) + b"changed" if path == archive / relative else original(path)
+        ))
+    with pytest.raises(runner.RegressionError, match="file set changed|archived file changed"):
+        runner._verify_archive(archive, index)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("archive_commit", "0" * 40), ("file_count", 843),
+    ("archived_tests", {"collected": 2318, "executed": 2293}),
+    ("frozen_registration", {}),
+])
+def test_archive_index_cannot_change_fixed_identity_or_counts(tmp_path, field, value):
+    index = copy.deepcopy(runner._load_index(REPO))
+    index[field] = value
+    destination = tmp_path / runner.ARCHIVE_INDEX
+    destination.parent.mkdir(parents=True)
+    destination.write_text(json.dumps(index))
+    with pytest.raises(runner.RegressionError, match="archive index"):
+        runner._load_index(tmp_path)
+
+
+def test_frozen_snapshot_verifies_every_original_product_and_registration_pin(frozen, monkeypatch):
     observed = set()
     read_bytes = Path.read_bytes
 
@@ -29,15 +93,10 @@ def test_frozen_snapshot_verifies_every_registered_file_and_original_product_tre
 
     monkeypatch.setattr(Path, "read_bytes", record)
     manifest = runner._verify_frozen(frozen)
-    assert {group: len(manifest[group]) for group in runner.PIN_COUNTS} == {
-        "product_files": 77, "measurement_files": 14, "historical_files": 69,
-    }
+    assert {group: len(manifest[group]) for group in runner.PIN_COUNTS} == runner.PIN_COUNTS
     expected = {name for group in runner.PIN_COUNTS for name in manifest[group]}
     assert observed == expected | {runner.MANIFEST_PATH}
     assert runner._git(frozen, "rev-parse", "HEAD") == runner.FROZEN_COMMIT
-    assert runner._git(
-        frozen, "diff", "--name-only", runner.PRODUCT_COMMIT, "HEAD", "--", "src", "pyproject.toml",
-    ) == ""
 
 
 @pytest.mark.parametrize("group", ["product_files", "measurement_files", "historical_files"])
@@ -57,92 +116,154 @@ def test_registered_byte_drift_is_rejected_without_editing_historical_files(froz
 
 def test_manifest_identity_is_checked_before_its_file_pins(frozen, monkeypatch):
     read_bytes = Path.read_bytes
-
-    def drift(path):
-        content = read_bytes(path)
-        return content + b"\n" if path == frozen / runner.MANIFEST_PATH else content
-
-    monkeypatch.setattr(Path, "read_bytes", drift)
+    monkeypatch.setattr(Path, "read_bytes", lambda path: (
+        read_bytes(path) + b"\n" if path == frozen / runner.MANIFEST_PATH else read_bytes(path)
+    ))
     with pytest.raises(runner.RegressionError, match="immutable Feature 123 manifest changed"):
         runner._verify_frozen(frozen)
 
 
-def test_frozen_imports_override_inherited_current_checkout_and_pytest_filters(frozen, monkeypatch):
+@pytest.mark.parametrize("name", ["../outside", "/outside", "folder/../inside", "folder//file"])
+def test_registered_files_reject_noncanonical_and_escaping_paths(tmp_path, name):
+    with pytest.raises(runner.RegressionError, match="invalid registered file"):
+        runner._regular_file(tmp_path, name)
+
+
+def test_registered_files_reject_symlinked_parents(tmp_path):
+    (tmp_path / "actual").mkdir()
+    (tmp_path / "actual/file").write_bytes(b"original")
+    (tmp_path / "linked").symlink_to(tmp_path / "actual", target_is_directory=True)
+    with pytest.raises(runner.RegressionError, match="invalid registered file"):
+        runner._regular_file(tmp_path, "linked/file")
+
+
+def test_archive_has_real_isolated_console_and_import_identity(archive, archive_python, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", str(REPO / "src"))
     monkeypatch.setenv("PYTEST_ADDOPTS", "-k nonexistent")
     monkeypatch.setenv("PYTEST_PLUGINS", "unwanted_plugin")
-    environment = runner._environment(frozen)
-    assert environment["PYTHONPATH"] == str(frozen / "src")
+    environment = runner._environment(archive)
+    assert environment["PYTHONPATH"] == str(archive / "src")
     assert environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
     assert "PYTEST_ADDOPTS" not in environment and "PYTEST_PLUGINS" not in environment
-    assert [Path(path).resolve() for path in runner._verify_imports(frozen)] == [
-        (frozen / "src/famou/__init__.py").resolve(),
-        (frozen / "src/famou/evaluator_bundle.py").resolve(),
-    ]
+    package = runner._archived_package(archive)
+    origins = runner._verify_imports(archive, python=archive_python, package=package)
+    assert all(Path(path).is_relative_to(archive / "src" / package) for path in origins)
+    script = archive / "specs/082-http-deadline-measurement/measurement/runtime_identity.py"
+    spec = importlib.util.spec_from_file_location("original_runtime_identity", script)
+    identity = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(identity)
+    captured = identity.capture(archive)
+    assert captured["interpreter"]["path"] == str(archive_python)
+    assert all(Path(row["path"]).is_relative_to(archive / "src")
+               for row in captured["modules"].values())
 
 
-def test_fixed_nodes_are_exactly_original_tests_requiring_registration_fixture(frozen):
-    source = (frozen / runner.REGISTRATION_TEST).read_text()
-    parsed = ast.parse(source)
-    registered_functions = {
-        item.name for item in parsed.body if isinstance(item, ast.FunctionDef)
-        and item.name.startswith("test_") and any(argument.arg == "registered" for argument in item.args.args)
-    }
-    all_nodes = runner._collect(frozen, (runner.REGISTRATION_TEST,))
-    expected = {node for node in all_nodes if node.split("::", 1)[1].split("[", 1)[0] in registered_functions}
-    assert len(expected) == 24
-    assert set(runner.BOUND_NODES) == expected
-    assert set(runner._collect(frozen, runner.BOUND_NODES)) == expected
-    assert runner._current_selection(all_nodes) == len(all_nodes) - 24
+def test_offline_environment_creation_uses_fixed_installer_and_current_pytest(tmp_path, monkeypatch):
+    calls = []
+
+    def capture(command, root, **kwargs):
+        calls.append((command, root, kwargs))
+        return "uv 0.11.8" if command == ["uv", "--version"] else ""
+
+    monkeypatch.setattr(runner, "_capture", capture)
+    python = runner._archive_python(tmp_path)
+    assert python == tmp_path / ".venv/bin/python"
+    assert len(calls) == 3
+    assert all("--offline" in command for command, _, _ in calls[1:])
+    assert "--no-python-downloads" in calls[1][0]
+    assert any(item.startswith("pytest==") for item in calls[2][0])
+    assert "-e" in calls[2][0] and f"{tmp_path}[dev]" in calls[2][0]
 
 
-@pytest.mark.parametrize("mutation", ["omission", "prefix_collision", "extra_bound_node"])
-def test_current_deselection_cannot_silently_drop_or_omit_tests(monkeypatch, mutation):
-    nodes = (*runner.BOUND_NODES, "tests/test_current.py::test_current")
+def test_incompatible_installer_cannot_change_the_historical_launcher(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "_capture", lambda *_args, **_kwargs: "uv 0.12.0")
+    with pytest.raises(runner.RegressionError, match="requires uv 0.11.8"):
+        runner._archive_python(tmp_path)
+
+
+def test_fixed_historical_collections_preserve_all_2318_tests(archive_nodes, original_selection):
+    path, bound = original_selection
+    assert path.endswith("_registration.py")
+    assert len(bound) == 24
+    assert runner._archive_selection(archive_nodes, bound) == 2294
+    assert len(archive_nodes) == 2294 + 24
+
+
+@pytest.mark.parametrize("mutation", ["omission", "prefix_collision", "changed_bound", "duplicate_bound"])
+def test_historical_selection_cannot_silently_drop_tests(archive_nodes, original_selection, mutation):
+    _, bound = original_selection
+    nodes = archive_nodes
     if mutation == "omission":
         nodes = nodes[1:]
     elif mutation == "prefix_collision":
-        nodes = (*nodes, runner.BOUND_NODES[0] + "_additional")
+        nodes = (*nodes, bound[0] + "_additional")
+    elif mutation == "changed_bound":
+        bound = (*bound[:-1], "tests/test_missing.py::test_missing")
     else:
-        monkeypatch.setattr(runner, "BOUND_NODES", (*runner.BOUND_NODES, nodes[-1]))
-    with pytest.raises(runner.RegressionError, match="24"):
-        runner._current_selection(nodes)
+        bound = (*bound[:-1], bound[0])
+    with pytest.raises(runner.RegressionError, match="collection|24"):
+        runner._archive_selection(nodes, bound)
 
 
 def test_detached_worktree_is_removed_when_body_raises():
     before = runner._git(REPO, "worktree", "list", "--porcelain")
-    with pytest.raises(runner.RegressionError, match="fixture failure"), runner._frozen_snapshot(REPO) as snapshot:
+    with (pytest.raises(runner.RegressionError, match="fixture failure"),
+          runner._snapshot(REPO, runner.ARCHIVE_COMMIT, "cleanup") as snapshot):
         assert snapshot.is_dir()
         raise runner.RegressionError("fixture failure")
     assert not snapshot.exists()
     assert runner._git(REPO, "worktree", "list", "--porcelain") == before
 
 
-@pytest.mark.parametrize("current_exit,frozen_exit", [(1, 0), (0, 3), (0, 0)])
-def test_both_phase_results_propagate_and_cleanup_after_pytest_failure(
-    tmp_path, monkeypatch, current_exit, frozen_exit,
-):
-    phases = []
+@pytest.mark.parametrize("exit_codes", [(1, 0, 0), (0, 2, 0), (0, 0, 3), (0, 0, 0)])
+def test_all_three_phase_results_propagate_with_distinct_versions(tmp_path, monkeypatch, exit_codes):
+    current, history, frozen = (tmp_path / name for name in ("current", "history", "frozen"))
+    for directory in (current, history, frozen):
+        directory.mkdir()
+    registration = "tests/test_original_registration.py"
+    (history / "tests").mkdir()
+    (history / registration).write_bytes(b"original tests")
+    manifest = {"measurement_files": {registration: hashlib.sha256(b"original tests").hexdigest()}}
+    index = {"test_files": [registration], "support_files": []}
+    bound = tuple(f"{registration}::test_case[{i}]" for i in range(24))
+    phases, closed, verifications = [], [], []
 
-    def collect(root, selections):
-        return (*runner.BOUND_NODES, "tests/test_current.py::test_current") if root == REPO else runner.BOUND_NODES
+    @contextmanager
+    def snapshot(_repo, commit, _label):
+        directory = history if commit == runner.ARCHIVE_COMMIT else frozen
+        try:
+            yield directory
+        finally:
+            closed.append(directory)
 
-    def phase(root, selections, report, *, expected_count, frozen=False):
-        phases.append((root, selections, report, expected_count, frozen))
-        return {"exit_code": frozen_exit if frozen else current_exit}
+    def phase(root, selections, report, **kwargs):
+        phases.append((root, selections, report, kwargs))
+        return {"exit_code": exit_codes[len(phases) - 1]}
 
-    monkeypatch.setattr(runner, "_collect", collect)
+    monkeypatch.setattr(runner, "_snapshot", snapshot)
+    monkeypatch.setattr(runner, "_load_index", lambda _repo: index)
+    monkeypatch.setattr(runner, "_verify_archive", lambda *_: verifications.append("archive"))
+    monkeypatch.setattr(runner, "_verify_frozen", lambda *_: (verifications.append("frozen") or manifest))
+    monkeypatch.setattr(runner, "_archive_python", lambda root: root / ".venv/bin/python")
+    monkeypatch.setattr(runner, "_verify_imports", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(runner, "_archived_package", lambda _: "archived_product")
+    monkeypatch.setattr(runner, "_registration_selection", lambda *_args, **_kwargs: (registration, bound))
+    monkeypatch.setattr(runner, "_collect", lambda root, *_args, **_kwargs: (
+        ("tests/test_current.py::test_current",) if root == current else bound
+    ))
+    monkeypatch.setattr(runner, "_archive_selection", lambda *_: 2294)
+    monkeypatch.setattr(runner, "_git", lambda *_: "current-revision")
     monkeypatch.setattr(runner, "_pytest_phase", phase)
-    before = runner._git(REPO, "worktree", "list", "--porcelain")
-    assert runner.run(REPO, tmp_path / "junit") == (current_exit or frozen_exit)
-    current, frozen = phases
-    assert current == (
-        REPO, ("tests", *(f"--deselect={node}" for node in runner.BOUND_NODES)),
-        (tmp_path / "junit/current.xml").resolve(), 1, False,
-    )
-    assert frozen[1:] == (runner.BOUND_NODES, (tmp_path / "junit/frozen123.xml").resolve(), 24, True)
-    assert not frozen[0].exists()
-    assert runner._git(REPO, "worktree", "list", "--porcelain") == before
+    assert runner.run(current, tmp_path / "junit") == next((code for code in exit_codes if code), 0)
+    assert [row[0] for row in phases] == [current, history, frozen]
+    assert [row[2].name for row in phases] == ["current.xml", "archived.xml", "frozen123.xml"]
+    assert [row[3]["expected_count"] for row in phases] == [1, 2294, 24]
+    assert phases[0][1] == ("tests",)
+    assert phases[1][1] == (registration, *(f"--deselect={node}" for node in bound))
+    assert phases[2][1] == bound
+    assert all(row[3]["frozen"] for row in phases[1:])
+    assert closed == [frozen, history]
+    assert verifications == ["archive", "frozen", "archive", "frozen"]
 
 
 @pytest.mark.parametrize("content,count,expected", [
@@ -151,7 +272,7 @@ def test_both_phase_results_propagate_and_cleanup_after_pytest_failure(
     ("import pytest\ndef test_one():\n    pytest.skip('fixture')\n", 1, 1),
     ("def test_one():\n    assert True\n", 2, 1),
 ])
-def test_real_pytest_phase_requires_expected_count_and_no_frozen_skips(tmp_path, content, count, expected):
+def test_real_pytest_phase_requires_exact_count_and_no_historical_skips(tmp_path, content, count, expected):
     tests = tmp_path / "tests"
     tests.mkdir()
     (tests / "test_fixture.py").write_text(content)

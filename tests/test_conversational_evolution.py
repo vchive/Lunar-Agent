@@ -3,14 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.artifacts import ArtifactError, ArtifactStore
-from famou.cli import _status_payload, main
-from famou.config import Config
-from famou.controller import LocalController
-from famou.conversational import build_algorithm_plan
-from famou.runtime import MockRuntime, RuntimeResult
-from famou.store import Store
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.artifacts import ArtifactError, ArtifactStore
+from lunar_evolution.cli import _status_payload, main
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.conversational import build_algorithm_plan
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.store import Store
 
 
 def _contract() -> AlgorithmProblemContract:
@@ -245,7 +245,7 @@ def test_answer_continues_a_persisted_evolution_request_after_clarification(
             return super().run(prompt, workspace, timeout)
 
     runtime = ClarifyingRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     home = tmp_path / "home"
     assert main(
         [

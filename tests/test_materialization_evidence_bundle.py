@@ -14,15 +14,15 @@ import pytest
 from test_materialization_diagnostics import _fixture
 from test_materialization_diagnostics import _materialize as _materialize_fixture
 
-from famou import cli
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import CommandCandidateRunner
-from famou.materialization_evidence_bundle import (
+from lunar_evolution import cli
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import CommandCandidateRunner
+from lunar_evolution.materialization_evidence_bundle import (
     MaterializationEvidenceExportError,
     export_materialization_evidence,
 )
-from famou.store import Store
+from lunar_evolution.store import Store
 
 SENSITIVE = "bundle-secret-goal-command-payload-DO-NOT-LEAK"
 
@@ -203,7 +203,7 @@ def test_cli_export_dispatches_before_config_and_emits_json(tmp_path: Path, monk
 
 
 def test_ledger_change_during_report_prevents_export(tmp_path: Path, monkeypatch) -> None:
-    import famou.materialization_diagnostics as diagnostics
+    import lunar_evolution.materialization_diagnostics as diagnostics
 
     controller, parent, child, result = _fixture(tmp_path)
     _materialize(controller, parent, child, result)

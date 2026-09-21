@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from famou import CandidateEvaluationSpec, inspect_bundle_delivery
+from lunar_evolution import CandidateEvaluationSpec, inspect_bundle_delivery
 
 
 def digest(content: bytes) -> str:
@@ -117,7 +117,7 @@ print(json.dumps({"entrypoint": "solve/main.py", "files": {
 
     def run(args):
         completed = subprocess.run(
-            [sys.executable, "-m", "famou", *args], capture_output=True, text=True, check=False,
+            [sys.executable, "-m", "lunar_evolution", *args], capture_output=True, text=True, check=False,
         )
         assert completed.returncode == 0, completed.stderr or completed.stdout
         return json.loads(completed.stdout)

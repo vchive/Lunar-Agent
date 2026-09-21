@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from famou import cli
-from famou.candidate_bundle import CandidateSourceBundle
-from famou.candidate_execution import CandidateExecutionInput
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution import cli
+from lunar_evolution.candidate_bundle import CandidateSourceBundle
+from lunar_evolution.candidate_execution import CandidateExecutionInput
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 
 CONTRACT = "a" * 64
 DEPENDENCY = "b" * 64
@@ -148,9 +148,9 @@ def test_cli_reports_changed_input_without_leaking_local_values(tmp_path, monkey
 
 def test_installed_cli_admits_without_home_or_entrypoint_side_effects(tmp_path):
     args, plan, descriptor, marker, home, _input_root = _fixture(tmp_path)
-    launcher = Path(sys.executable).parent / "lunar-agent"
+    launcher = Path(sys.executable).parent / "lunar-evolution"
     if not launcher.is_file():
-        pytest.skip("installed lunar-agent launcher is unavailable")
+        pytest.skip("installed lunar-evolution launcher is unavailable")
 
     completed = subprocess.run(
         [str(launcher), *args], cwd=tmp_path, capture_output=True, text=True, check=False,

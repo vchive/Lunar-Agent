@@ -8,17 +8,17 @@ from dataclasses import replace
 import pytest
 from test_frozen_evaluator_bundle import EVALUATOR_SOURCE, BundleRuntime, _contract, _envelope
 
-from famou.automatic_solve_bundle import (
+from lunar_evolution.automatic_solve_bundle import (
     prepare_automatic_solve_bundle,
     validate_automatic_solve_bundle,
 )
-from famou.budget import BudgetSpec
-from famou.bundle_evolution import load_bundle_pipeline
-from famou.config import Config
-from famou.controller import LocalController
-from famou.conversational import build_algorithm_plan
-from famou.evaluator_bundle import compile_evaluator_bundle
-from famou.evolution import (
+from lunar_evolution.budget import BudgetSpec
+from lunar_evolution.bundle_evolution import load_bundle_pipeline
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.conversational import build_algorithm_plan
+from lunar_evolution.evaluator_bundle import compile_evaluator_bundle
+from lunar_evolution.evolution import (
     CandidateDraft,
     CandidateInputArtifact,
     EvolutionConfig,
@@ -26,7 +26,7 @@ from famou.evolution import (
     EvolutionError,
     PopulationStrategy,
 )
-from famou.solve_bundle import bundle_pipeline_sha256
+from lunar_evolution.solve_bundle import bundle_pipeline_sha256
 
 SNAPSHOT_SOURCE = EVALUATOR_SOURCE.replace(
     '"evaluator_id": "frozen-exact-cost"', '"evaluator_id": "compiled-bundle"',
@@ -428,7 +428,7 @@ def test_interrupted_evidence_registration_recovers_without_recompiling(tmp_path
 def test_generic_delivery_rechecks_automatic_preparation_authority(tmp_path, monkeypatch, capsys, changed):
     from test_conversational_automatic_bundle import automatic_setup
 
-    from famou import cli
+    from lunar_evolution import cli
 
     runtime, args = automatic_setup(tmp_path, monkeypatch)
     assert cli.main(args) == 0

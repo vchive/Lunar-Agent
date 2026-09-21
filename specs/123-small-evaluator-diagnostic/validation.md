@@ -39,7 +39,7 @@ Registration034b1847eaf0cc043ac87e179ebd72de5fc1fb90 was pushed before the one a
 20831 known/total tokens (2688 input+18143 output), followed by local EvaluatorBundleError before
 auditor or freeze. Zero of8 holdouts executed. Supervisor244.044s, exit1, cleanup verified.
 The native transport returnedHTTP200; last retained milestone was response_headers_received,
-exchange1 at242766ms. Detailed facts and limits are in the [postrun report](postrun/report.md).
+exchange1 at242766ms. Detailed facts and limits are in the [postrun report](../../docs/history-archive.md).
 
 Independent postrun review matched all15 retained files,77 product/14 measurement/69 history pins,
 the actual compiler request SHA/12353bytes and full5365-byte parsed response SHA. The HTTP body's

@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-import famou.shinka_handoff as shinka_module
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.producer_handoff import (
+import lunar_evolution.shinka_handoff as shinka_module
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.producer_handoff import (
     MAX_PRODUCER_BUDGET_FIELDS,
     ProducerResultEnvelope,
     admit_producer_result,
 )
-from famou.shinka_handoff import (
+from lunar_evolution.shinka_handoff import (
     SHINKA_DATABASE_CODE_MISMATCH,
     SHINKA_DATABASE_MISSING,
     SHINKA_DATABASE_WAL_UNSUPPORTED,

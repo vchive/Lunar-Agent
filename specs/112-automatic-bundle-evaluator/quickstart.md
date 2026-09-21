@@ -21,13 +21,13 @@ network or external evolution framework and does not establish effectiveness on 
 For a configured model endpoint:
 
 ```sh
-lunar-agent solve 'Optimize the supplied orders and deliver a working Python project' \
+lunar-evolution solve 'Optimize the supplied orders and deliver a working Python project' \
   --evolve --multi-file --input ./orders.csv=orders.csv \
   --runtime openai-compatible --endpoint YOUR_ENDPOINT --model YOUR_MODEL --agent-loop \
   --workspace ./mission --json
-lunar-agent solve --resume --run-id RUN_ID \
+lunar-evolution solve --resume --run-id RUN_ID \
   --runtime openai-compatible --endpoint YOUR_ENDPOINT --model YOUR_MODEL --agent-loop --json
-lunar-agent deliver RUN_ID --json
+lunar-evolution deliver RUN_ID --json
 ```
 
 The remote example is a usage template, not part of validation. Supply credentials through the

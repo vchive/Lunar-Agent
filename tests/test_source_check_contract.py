@@ -7,9 +7,13 @@ import pytest
 from test_frozen_evaluator_bundle import EVALUATOR_SOURCE, BundleRuntime, _contract, _envelope
 from test_snapshot_evaluator_bundle import SNAPSHOT_SOURCE
 
-from famou.algorithm import AlgorithmProblemContract, ConstraintSpec, SourceCheckSpec
-from famou.conversational import ContractCompilationError, RuntimeContractCompiler, _parse_response
-from famou.evaluator_bundle import (
+from lunar_evolution.algorithm import AlgorithmProblemContract, ConstraintSpec, SourceCheckSpec
+from lunar_evolution.conversational import (
+    ContractCompilationError,
+    RuntimeContractCompiler,
+    _parse_response,
+)
+from lunar_evolution.evaluator_bundle import (
     EvaluatorBundleError,
     UnsupportedEvaluatorConstraintsError,
     _parse_envelope,
@@ -17,8 +21,8 @@ from famou.evaluator_bundle import (
     load_evaluator_bundle,
     validate_evaluator_capabilities,
 )
-from famou.evolution import CandidateInputArtifact
-from famou.source_constraints import source_constraints
+from lunar_evolution.evolution import CandidateInputArtifact
+from lunar_evolution.source_constraints import source_constraints
 
 
 def source_contract(minimum=2):
@@ -136,9 +140,9 @@ def test_incomplete_capability_still_stops_before_model_and_workspace(tmp_path, 
 
 
 def test_many_failed_source_requirements_keep_all_evidence_and_bounded_report():
-    from famou.algorithm import MAX_ERROR_INFO
-    from famou.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
-    from famou.source_constraints import source_check_evidence, source_failure_report
+    from lunar_evolution.algorithm import MAX_ERROR_INFO
+    from lunar_evolution.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
+    from lunar_evolution.source_constraints import source_check_evidence, source_failure_report
 
     base = source_contract()
     requirements = tuple(replace(base.hard_constraints[-1], id=f'count-{i}') for i in range(64))
@@ -153,8 +157,8 @@ def test_many_failed_source_requirements_keep_all_evidence_and_bounded_report():
 
 
 def test_pure_evidence_cannot_omit_unsupported_mixed_requirements():
-    from famou.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
-    from famou.source_constraints import source_check_evidence
+    from lunar_evolution.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
+    from lunar_evolution.source_constraints import source_check_evidence
 
     base = source_contract()
     unsupported = replace(base.hard_constraints[-1], id='behavior', source_check=None, verification_scope='execution')
@@ -165,9 +169,9 @@ def test_pure_evidence_cannot_omit_unsupported_mixed_requirements():
 
 
 def test_large_supported_evidence_has_its_own_bound_above_bundle_size():
-    from famou.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
-    from famou.candidate_evaluation_spec import canonical_json
-    from famou.source_constraints import (
+    from lunar_evolution.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
+    from lunar_evolution.candidate_evaluation_spec import canonical_json
+    from lunar_evolution.source_constraints import (
         MAX_SOURCE_CHECK_BYTES,
         parse_source_check_evidence,
         source_check_evidence,

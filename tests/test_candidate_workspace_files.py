@@ -8,8 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from famou.candidate_bundle import parse_candidate_source_bundle
-from famou.candidate_workspace import CandidateWorkspaceError, materialize_candidate_source_bundle
+from lunar_evolution.candidate_bundle import parse_candidate_source_bundle
+from lunar_evolution.candidate_workspace import (
+    CandidateWorkspaceError,
+    materialize_candidate_source_bundle,
+)
 
 CONTRACT = "a" * 64
 

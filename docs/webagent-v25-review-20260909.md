@@ -1,5 +1,10 @@
 # WebAgent 分支审查与 Lunar 移植决策
 
+本文分析外部参考项目；“参考引擎”、插件、角色、分支和 benchmark 的中性名称仅作描述，
+不是 Lunar Evolution 的组件名称，也不是声称上游已改名的实际路径。原始名称、源码路径
+及引用保留在[历史归档](history-archive.md)指向的固定迁移前版本；外部代码归属及其适用
+许可仍属于原作者。本次名称整理没有重新运行外部项目或模型测量。
+
 审查日期：2026-09-09。已执行 `git fetch origin`，不切换或修改 WebAgent 工作树，也未运行
 WebAgent、公司评测或真实模型调用。先盘点全部远端分支，再深入下面与 Lunar 有关的实现；
 不是对全部分支逐行审计。代码路径均相对于本机 WebAgent 仓库。
@@ -8,14 +13,14 @@ WebAgent、公司评测或真实模型调用。先盘点全部远端分支，再
 
 | 分支 | HEAD | 本轮关注点 |
 | --- | --- | --- |
-| `famou-v2.5/base` | `e24df25` | 当前合版；工具契约、预算指导、worker 生命周期、结果存储 |
+| v2.5 base（描述性标签） | `e24df25` | 当前合版；工具契约、预算指导、worker 生命周期、结果存储 |
 | `master` | `9ee31a0` | 9 月 8 日重新合入记忆卡片 |
 | `layered-compaction` | `5197081` | 9 月 7 日上下文压缩迁移 |
 | `memory_card` | `865a270` | 记忆检索隔离和结构化卡片 |
-| `famou-v2.5/master-agent` | `3795cdc` | 8 月 28 日角色/skill 合版历史 |
-| `famou-v2.5/evolve_tool` | `4ef5e0d` | 8 月 27 日演化工具拆分历史 |
+| v2.5 master-agent（描述性标签） | `3795cdc` | 8 月 28 日角色/skill 合版历史 |
+| v2.5 evolve_tool（描述性标签） | `4ef5e0d` | 8 月 27 日演化工具拆分历史 |
 | `feature/or-agent` | `565f536` | OR 求解角色和领域 skill 历史 |
-| `famou/memory` | `dd4f542` | 旧 shared-context 路径 |
+| 记忆分支（描述性标签） | `dd4f542` | 旧 shared-context 路径 |
 | `multi-round` | `79a8b2e` | 旧多轮实现，本轮只核对历史 |
 | `SkillERA` | `fb8174a` | 旧技能演化实现，本轮只核对历史 |
 
@@ -24,17 +29,17 @@ WebAgent、公司评测或真实模型调用。先盘点全部远端分支，再
 
 拉取前的 base 为 `465af9d`，拉取后为当天的 `e24df25`。新增变更包含演化默认配置简化、
 `evolve_create` 失败处理、CLI 入口防绕过和可视化规范拆分。最新 `base` 才有
-`opencode/tools/famou/shared/result.ts`、`tools/multiagent/lifecycle/settle.ts` 等路径；
+外部插件内的 `shared/result.ts`、`tools/multiagent/lifecycle/settle.ts` 等路径；
 不能把这些路径归给较旧的 `evolve_tool` HEAD。
 
 ## 2. 已吸收：工具参数说明必须出现在最终模型请求
 
-来源：`famou-v2.5/base` 的 `opencode/tools/famou/shared/param-description-fix.ts`。
+来源：v2.5 base（描述性标签） 的 外部插件内的 `shared/param-description-fix.ts`。
 `ee5d524` 记录的实际问题是 OpenCode 1.3.10 和插件使用不同 Zod 实例，导致参数类型与
 required 仍在，参数 description 丢失。修复从原 schema 取说明，借宿主实例重新包装，
 同时恢复原来的必填语义。
 
-Lunar 直接生成 JSON Schema，不需要这段 Zod 兼容代码。但 `src/famou/tools.py` 的参数
+Lunar 直接生成 JSON Schema，不需要这段 Zod 兼容代码。但 `src/lunar_evolution/tools.py` 的参数
 此前只有类型，缺少关键语义。本轮 Feature 063 在单一 schema 源补充说明，并通过真实
 AgentLoop → OpenAI-compatible → 本机 HTTP 请求抓取验证传输，覆盖 command/memory
 开启与关闭的四种组合。
@@ -47,7 +52,7 @@ AgentLoop → OpenAI-compatible → 本机 HTTP 请求抓取验证传输，覆�
 
 ## 3. 下一优先级：预算内保留已有求解产物
 
-来源：base 的 `opencode/skills/famou-runtime-budget/SKILL.md` 及
+来源：base 的 外部运行预算技能 `SKILL.md` 及
 `references/profiling_recipe.md`、`snippets.py`、`solver_time_control.md`。
 
 值得移植的机制是小样本计时、整个流程共用 monotonic deadline、增量原子落盘、保留已经
@@ -69,7 +74,7 @@ checkpoint 本身不能制造 completed receipt、授权 harness 或提供分数
 ## 4. 值得后续设计：上下文压缩与按需取回
 
 来源：`layered-compaction@5197081` 的
-`opencode/tools/famou/tools/lc/{assembler.ts,runtime.ts,checkpoint/,compact/,token/}`。
+外部插件内的 `tools/lc/{assembler.ts,runtime.ts,checkpoint/,compact/,token/}`。
 
 优点是保留原始会话存储，用 checkpoint message ID 标识已覆盖历史，再拼接水位之后的
 增量；水位丢失时保守回退。触发阈值去重、cooldown、重建后重新触发和中文 token 估算
@@ -120,5 +125,5 @@ Lunar 已有 global/run 作用域、受限召回和独立 evaluator 产生的实
    占分母，不覆盖 2026-09-08/09 的真实记录。
 4. 有长上下文的本地证据后，再设计归档/分页取回；有跨项目使用需求后再扩展记忆作用域。
 
-目标仍是独立、本地、能产出可验证算法结果的 Lunar Agent，并诚实测量完成率、有效性、
+目标仍是独立、本地、能产出可验证算法结果的 Lunar Evolution，并诚实测量完成率、有效性、
 质量和用量。WebAgent 的实现提供设计参考，不提供当前单 case 的同条件效果保证。

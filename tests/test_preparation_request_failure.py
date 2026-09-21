@@ -11,11 +11,15 @@ from test_conversational_automatic_bundle import automatic_setup
 from test_preparation_local_diagnostics import replace_payload
 from test_preparation_recovery_cli import followup, observations, run_cli, runtime_calls, snapshot
 
-from famou import automatic_solve_bundle as automatic
-from famou import cli
-from famou.http_transport import TransportObservation
-from famou.runtime import ModelFailureEvidence, ModelRequestFailure, ModelRequestObservation
-from famou.store import Store
+from lunar_evolution import automatic_solve_bundle as automatic
+from lunar_evolution import cli
+from lunar_evolution.http_transport import TransportObservation
+from lunar_evolution.runtime import (
+    ModelFailureEvidence,
+    ModelRequestFailure,
+    ModelRequestObservation,
+)
+from lunar_evolution.store import Store
 
 PRIVATE = "provider-private-response api_key=secret-132"
 ROLES = ("compiler", "auditor")

@@ -7,7 +7,7 @@
 
 ## Context and scope
 
-Lunar-Agent already archives candidates and validates a structured `EvaluationReport`, but an
+Lunar Evolution already archives candidates and validates a structured `EvaluationReport`, but an
 evaluator command or Agent can still report a score without exposing how the candidate was run. This
 feature adds a runtime-neutral candidate execution boundary. An explicitly configured local runner
 executes one candidate in its run-scoped workspace, records bounded evidence, and makes that
@@ -54,7 +54,7 @@ retained in the archive but cannot become best.
 
 ### User Story 3 - Preserve existing evolution and recovery (Priority: P1)
 
-As an existing Lunar-Agent user, I want command-only, Agent-backed, population, OpenEvolve, and
+As an existing Lunar Evolution user, I want command-only, Agent-backed, population, OpenEvolve, and
 detached runs to keep their current behavior while execution-backed evaluation is opt-in and
 resumable.
 

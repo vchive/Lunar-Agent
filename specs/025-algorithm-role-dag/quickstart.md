@@ -3,7 +3,7 @@
 Enable the five specialist stages for a conversational mission:
 
 ```bash
-lunar-agent solve "根据订单数据设计配送路线" \
+lunar-evolution solve "根据订单数据设计配送路线" \
   --runtime mock --role-dag --json --home .lunar
 ```
 

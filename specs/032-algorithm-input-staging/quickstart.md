@@ -3,7 +3,7 @@
 Start a mission with real local data:
 
 ```bash
-lunar-agent solve "根据订单和车辆数据设计配送路线" \
+lunar-evolution solve "根据订单和车辆数据设计配送路线" \
   --input ./orders.csv \
   --input ./vehicles.json=vehicles.json \
   --runtime openai-compatible --agent-loop \
@@ -19,6 +19,6 @@ For a detached run, stage inputs before the child starts; resuming with the same
 idempotent:
 
 ```bash
-lunar-agent solve "analyze orders.csv" --input orders.csv --detach --runtime mock --json
-lunar-agent solve --resume --run-id <run-id> --input orders.csv --runtime mock --json
+lunar-evolution solve "analyze orders.csv" --input orders.csv --detach --runtime mock --json
+lunar-evolution solve --resume --run-id <run-id> --input orders.csv --runtime mock --json
 ```

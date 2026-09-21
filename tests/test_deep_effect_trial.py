@@ -8,15 +8,19 @@ from pathlib import Path
 
 import pytest
 
-import famou.effect_trial as effect_trial_module
-from famou.deep_effect_trial import (
+import lunar_evolution.effect_trial as effect_trial_module
+from lunar_evolution.deep_effect_trial import (
     DeepEffectTrialConfig,
     DeepEffectTrialRunner,
     _failure_statistics,
 )
-from famou.effect_adapters import EffectAdapterError, famou_case_content_digest, run_subject_adapter
-from famou.effect_trial import EffectTrialConfig, EffectTrialError
-from famou.runtime import ModelTurn, ToolCall
+from lunar_evolution.effect_adapters import (
+    EffectAdapterError,
+    benchmark_case_content_digest,
+    run_subject_adapter,
+)
+from lunar_evolution.effect_trial import EffectTrialConfig, EffectTrialError
+from lunar_evolution.runtime import ModelTurn, ToolCall
 
 
 def _write_json(path: Path, value: object) -> Path:
@@ -70,7 +74,7 @@ def _deep_subject_request(root: Path, *, round_index: int = 1, previous=None) ->
             "schema_version": "1",
             "mode": "deep_evolution",
             "benchmark": {
-                "name": "famou-bench",
+                "name": "reference-benchmark",
                 "release_version": "content-test",
                 "publication_digest": "sha256:" + "1" * 64,
             },
@@ -149,12 +153,12 @@ def _make_case(tmp_path: Path) -> tuple[Path, dict]:
     suite = {
         "schema_version": "1",
         "benchmark": {
-            "name": "famou-bench",
+            "name": "reference-benchmark",
             "release_version": "content-test",
             "publication_digest": "sha256:" + "1" * 64,
         },
         "evaluation_profile": {
-            "name": "famou-agentco-default",
+            "name": "lunar-evolution-reference-default",
             "revision": 1,
             "digest": "sha256:" + "2" * 64,
         },
@@ -162,7 +166,7 @@ def _make_case(tmp_path: Path) -> tuple[Path, dict]:
             {
                 "key": "case-a",
                 "revision_id": "rev-a",
-                "digest": famou_case_content_digest(private),
+                "digest": benchmark_case_content_digest(private),
                 "entrypoint": "instruction.md",
                 "public_files": [
                     {"path": "instruction.md", "size": 14, "sha256": sha(public / "instruction.md")},
@@ -367,7 +371,7 @@ Path(r['receipt_path']).write_text(json.dumps({'schema_version':'1','status':'co
 
     case = report["cases"][0]
     assert report["mode"] == "deep_evolution"
-    assert report["protocol"] == "famou-bench-deep-evolution-v1"
+    assert report["protocol"] == "reference-benchmark-deep-evolution-v1"
     assert report["strategy"] == "loop"
     assert report["outer_rounds"] == 5
     assert case["lunar_best"] == 0.60

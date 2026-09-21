@@ -17,10 +17,10 @@ from test_synthetic_input_format import (
     _track_harness,
 )
 
-from famou import candidate_execution_runner as runner
-from famou import evaluator_bundle as bundle
-from famou.evaluator_diagnostics import EvaluatorPreparationDiagnostic as Diagnostic
-from famou.runtime import RuntimeResult
+from lunar_evolution import candidate_execution_runner as runner
+from lunar_evolution import evaluator_bundle as bundle
+from lunar_evolution.evaluator_diagnostics import EvaluatorPreparationDiagnostic as Diagnostic
+from lunar_evolution.runtime import RuntimeResult
 
 ROLES = ["compiler", "audit"]
 MODES = ["candidate", "snapshot"]

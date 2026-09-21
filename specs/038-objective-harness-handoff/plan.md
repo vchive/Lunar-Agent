@@ -17,7 +17,7 @@ the evaluator profile in durable resume validation.
 2. **Execution remains the first gate** — the existing `ExecutionAwareCandidateEvaluator` wraps
    the harness, so missing/malformed output never invokes the objective program.
 3. **Higher-is-better archive score** — domain harnesses normalize minimization objectives into
-   `combined_score`; Lunar-Agent does not guess scaling from prose.
+   `combined_score`; Lunar Evolution does not guess scaling from prose.
 4. **Explicit local authority** — the command is opt-in and no global executable is discovered.
 5. **Fingerprint, not command persistence** — state/events retain only SHA-256 identity and a
    configured flag. Resume and post-clarification continuation require the caller to resupply it.

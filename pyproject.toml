@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lunar-agent"
+name = "lunar-evolution"
 version = "0.1.0"
 description = "A standalone, local-first Hermes-inspired agent"
 readme = "README.md"
@@ -21,11 +21,11 @@ lint = [
 ]
 
 [project.scripts]
-famou = "famou.cli:main"
-lunar-agent = "famou.cli:main"
+lunar-evolution = "lunar_evolution.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["lunar_evolution", "lunar_evolution.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -13,7 +13,7 @@ temporary files. These example fingerprints do not authenticate an evaluator or 
 For your own serialized Feature 104 admission and Feature 103 plan:
 
 ```bash
-lunar-agent candidate-bundle stage-inputs admission.json \
+lunar-evolution candidate-bundle stage-inputs admission.json \
   --plan plan.json \
   --input-root ./inputs \
   --staging-root ./staging \
@@ -34,6 +34,6 @@ targets. Other output fields are `status`, `admission_sha256`, `plan_sha256`, `b
 cleanup. Inputs are not merged into candidate source files and no process or evaluator is started. Repeated calls
 produce separate directories; this operation has no automatic reuse or recovery behavior.
 
-The Python API exposes the same operation through `famou.stage_candidate_execution_inputs`.
+The Python API exposes the same operation through `lunar_evolution.stage_candidate_execution_inputs`.
 Its result has an `input_path` property; `to_dict()` excludes that local path. The staged bytes
 remain mutable and a future runner must recheck them when it starts execution.

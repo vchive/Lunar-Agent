@@ -6,7 +6,7 @@ Required fields:
 - `problem_type`: one canonical `AlgorithmProblemContract` problem type.
 - `mode`: the Feature 045 search mode.
 - `objective_direction`: `minimize` or `maximize`.
-- `family_tag`: one tag from Lunar-Agent's ordered repertoire for `problem_type`.
+- `family_tag`: one tag from Lunar Evolution's ordered repertoire for `problem_type`.
 - `alternative_families`: zero to four distinct repertoire tags excluding `family_tag`.
 - `selection_basis`: `untried_family`, `least_tried_family`, `target_family`, `parent_family`,
   `verified_improved_family`, `recombination_lineage`, or `repertoire_default`.

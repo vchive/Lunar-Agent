@@ -15,8 +15,8 @@ The Solver runtime writes these paths relative to its private attempt workspace.
 succeeds:
 
 ```bash
-lunar-agent status <run-id> --json
-lunar-agent deliver <run-id> --json
+lunar-evolution status <run-id> --json
+lunar-evolution deliver <run-id> --json
 ```
 
 The status payload lists `kind=output` artifacts. The delivered files are available at

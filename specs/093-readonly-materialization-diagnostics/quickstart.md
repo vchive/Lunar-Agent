@@ -1,7 +1,7 @@
 # Offline quickstart
 
 ```sh
-lunar-agent diagnose-materialization PARENT_RUN_ID EVOLUTION_RUN_ID --home .lunar --json
+lunar-evolution diagnose-materialization PARENT_RUN_ID EVOLUTION_RUN_ID --home .lunar --json
 .venv/bin/python -m pytest -o addopts='' -q tests/test_diagnostic_snapshot.py tests/test_materialization_diagnostics.py
 .venv/bin/python -m pytest -o addopts='' -q
 .venv/bin/ruff check src tests

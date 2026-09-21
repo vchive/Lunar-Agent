@@ -3,7 +3,7 @@
 Run the one-shot profile:
 
 ```bash
-lunar-agent benchmark contract.json --strategy loop --strategy population \
+lunar-evolution benchmark contract.json --strategy loop --strategy population \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
   --agent-runtime-model your-local-model \

@@ -3,7 +3,7 @@
 The static command copies a verified source bundle into a new private directory:
 
 ```bash
-lunar-agent candidate-bundle materialize MANIFEST \
+lunar-evolution candidate-bundle materialize MANIFEST \
   --source-root SOURCE_ROOT --contract CONTRACT --workspace-root WORKSPACE_ROOT --json
 ```
 

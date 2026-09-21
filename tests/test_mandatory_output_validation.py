@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evaluator import ContainsEvaluator
-from famou.policy import PlanDocument, PlanTask
-from famou.runtime import RuntimeResult
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evaluator import ContainsEvaluator
+from lunar_evolution.policy import PlanDocument, PlanTask
+from lunar_evolution.runtime import RuntimeResult
 
 VALID_CSV = "item_id,route_id\norder-1,route-a\n"
 INVALID_CSV = "item_id\norder-1\n"

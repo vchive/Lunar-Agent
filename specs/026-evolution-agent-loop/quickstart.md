@@ -3,7 +3,7 @@
 Point evolution at an explicit OpenAI-compatible local model and enable tools:
 
 ```bash
-lunar-agent evolve contract.json --strategy loop \
+lunar-evolution evolve contract.json --strategy loop \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
   --agent-runtime-model your-local-model \

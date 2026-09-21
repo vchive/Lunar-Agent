@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.data_profile import (
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.data_profile import (
     DataProfileError,
     build_private_input_profile,
     canonical_profile_json,
     profile_sha256,
 )
-from famou.evolution import CandidateInputArtifact
+from lunar_evolution.evolution import CandidateInputArtifact
 
 
 def _contract(path: str, format_name: str, fields: dict[str, str]) -> AlgorithmProblemContract:

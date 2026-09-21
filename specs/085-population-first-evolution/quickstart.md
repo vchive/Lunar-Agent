@@ -15,7 +15,7 @@ fingerprint survive resume. Do not continue Feature 085 verification if that gat
 Start a standalone evolution run from the admitted seed without `--strategy`:
 
 ```bash
-lunar-agent evolve contract.json \
+lunar-evolution evolve contract.json \
   --seed-manifest /absolute/path/to/seed-manifest.json \
   --seed-dependency-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --seed-environment-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
@@ -37,7 +37,7 @@ active-state mutation. The seed flags are not added to staged or benchmark comma
 Run `benchmark` without `--strategy` and confirm it creates exactly one population workspace:
 
 ```bash
-lunar-agent benchmark contract.json \
+lunar-evolution benchmark contract.json \
   --generator-command "/absolute/path/to/fake-generator" \
   --evaluator-command "/absolute/path/to/fake-exact-evaluator" \
   --max-rounds 2 --seed 7 --json --home /absolute/path/to/new-home
@@ -61,7 +61,7 @@ The fake wrapper may emit candidate source and an attractive external score. Sup
 evaluator explicitly:
 
 ```bash
-lunar-agent evolve contract.json \
+lunar-evolution evolve contract.json \
   --strategy openevolve \
   --openevolve-command "/absolute/path/to/fake-openevolve-wrapper" \
   --evaluator-command "/absolute/path/to/fake-exact-evaluator" \

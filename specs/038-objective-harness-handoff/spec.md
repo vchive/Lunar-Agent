@@ -72,7 +72,7 @@ separate clean-room execution.
 
 - **SC-3801**: A two-candidate conversational fixture whose model evaluator would prefer the wrong
   answer selects the lower real cost through an explicit local harness and delivers its data.
-- **SC-3802**: The harness observes verified inputs/outputs but cannot observe `FAMOU_API_KEY` or an
+- **SC-3802**: The harness observes verified inputs/outputs but cannot observe `LUNAR_EVOLUTION_API_KEY` or an
   unrelated parent environment sentinel.
 - **SC-3803**: Bad harness output and command drift fail closed; valid resume retains the same
   archive and fingerprint.

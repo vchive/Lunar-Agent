@@ -7,10 +7,10 @@
 
 ## Context and scope
 
-Lunar-Agent currently supports one independent evaluator Agent per evolution run. A single
+Lunar Evolution currently supports one independent evaluator Agent per evolution run. A single
 evaluator can make a false validity decision or score an edge case incorrectly. This feature adds a
 local evaluator ensemble: two or more explicitly configured evaluator Agents inspect the same
-candidate, and Lunar-Agent aggregates only schema-valid reports. Validity requires unanimous
+candidate, and Lunar Evolution aggregates only schema-valid reports. Validity requires unanimous
 agreement; disagreement or an evaluator failure is represented as an invalid report and cannot
 produce a best candidate. When all evaluators agree valid, numeric scores use a robust median and
 common detailed metrics are aggregated by median.

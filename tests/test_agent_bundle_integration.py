@@ -7,12 +7,12 @@ import json
 import pytest
 from test_bundle_population import HARNESS_SOURCE, MAIN_SOURCE, build_context, draft_for_score
 
-from famou.agent_evolution import MAX_GENERATION_PROMPT_BYTES, AgentCandidateGenerator
-from famou.agents import RuntimeAgentAdapter
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import CandidateArchive, EvolutionError, GenerationRequest
-from famou.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.agent_evolution import MAX_GENERATION_PROMPT_BYTES, AgentCandidateGenerator
+from lunar_evolution.agents import RuntimeAgentAdapter
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import CandidateArchive, EvolutionError, GenerationRequest
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
 
 
 class BundleFixtureRuntime:
@@ -25,7 +25,7 @@ class BundleFixtureRuntime:
     def run(self, prompt, workspace, timeout=None):
         context = json.loads((workspace / "context/context.json").read_bytes())
         assert len(prompt.encode("utf-8")) <= MAX_GENERATION_PROMPT_BYTES
-        assert context["protocol"] == "lunar-agent-bundle-generation-v1"
+        assert context["protocol"] == "lunar-evolution-bundle-generation-v1"
         assert context["execution"]["input_root_env"] == "LUNAR_CANDIDATE_INPUT_ROOT"
         assert context["execution"]["cwd"] == "."
         assert (workspace / context["inputs"][0]["context_path"]).read_bytes() == b"10"

@@ -5,7 +5,7 @@ All commands are local and require no Hermes, OpenCode, Codex, model server, or 
 ## Direct answer decision
 
 ```bash
-lunar-agent decide "What does SQLite WAL mode provide?" --json --home .lunar
+lunar-evolution decide "What does SQLite WAL mode provide?" --json --home .lunar
 ```
 
 Expected: `action` is `answer`, with no run or plan created.
@@ -23,21 +23,21 @@ cat > plan.json <<'JSON'
   "hard_constraints": ["keep files local"]
 }
 JSON
-lunar-agent plan plan.json --runtime mock --json --home .lunar
+lunar-evolution plan plan.json --runtime mock --json --home .lunar
 ```
 
 Inspect the durable revision and status:
 
 ```bash
-lunar-agent plan <run-id> --json --home .lunar
-lunar-agent status <run-id> --json --home .lunar
+lunar-evolution plan <run-id> --json --home .lunar
+lunar-evolution status <run-id> --json --home .lunar
 ```
 
 ## Patch and replan
 
 ```bash
-lunar-agent patch <run-id> patch.json --json --home .lunar
-lunar-agent replan <run-id> replacement-plan.json --json --home .lunar
+lunar-evolution patch <run-id> patch.json --json --home .lunar
+lunar-evolution replan <run-id> replacement-plan.json --json --home .lunar
 ```
 
 Both commands return the new plan version and preserve older versions. Reusing an old
@@ -46,7 +46,7 @@ Both commands return the new plan version and preserve older versions. Reusing a
 ## Verified delivery
 
 ```bash
-lunar-agent deliver <run-id> --json --home .lunar
+lunar-evolution deliver <run-id> --json --home .lunar
 ```
 
 Delivery succeeds only after the controller has a succeeded run, passing evaluator events, and

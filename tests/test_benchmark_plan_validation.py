@@ -5,15 +5,15 @@ from dataclasses import replace
 
 import pytest
 
-from famou import benchmark_comparison as module
-from famou.benchmark_comparison import (
+from lunar_evolution import benchmark_comparison as module
+from lunar_evolution.benchmark_comparison import (
     BenchmarkComparisonError,
     BenchmarkComparisonPlan,
     ComparisonArm,
     admit_benchmark_comparison_plan,
     validate_benchmark_comparison_plan,
 )
-from famou.benchmark_task import (
+from lunar_evolution.benchmark_task import (
     BenchmarkTaskError,
     PhysicalAttemptBudget,
     TaskInput,

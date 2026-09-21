@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.agents import AgentRequest, CommandAgentAdapter
+from lunar_evolution.agents import AgentRequest, CommandAgentAdapter
 
 
 def _invoke(tmp_path, response):

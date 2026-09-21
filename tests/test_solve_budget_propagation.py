@@ -10,16 +10,19 @@ from test_automatic_solve_bundle import _fixture
 from test_bundle_population import build_context, draft_for_score
 from test_candidate_execution_runner import _setup
 
-from famou.agent_evolution import AgentCandidateGenerator, AgentEvaluatorEnsemble
-from famou.automatic_solve_bundle import prepare_automatic_solve_bundle
-from famou.automatic_solve_lifecycle import (
+from lunar_evolution.agent_evolution import AgentCandidateGenerator, AgentEvaluatorEnsemble
+from lunar_evolution.automatic_solve_bundle import prepare_automatic_solve_bundle
+from lunar_evolution.automatic_solve_lifecycle import (
     SolveExecutionBudgetExceeded,
     SolveExecutionCancelled,
     SolveExecutionControl,
 )
-from famou.candidate_execution_evidence import run_candidate_execution_recorded
-from famou.candidate_execution_runner import CandidateExecutionRunnerError, run_candidate_execution
-from famou.evolution import (
+from lunar_evolution.candidate_execution_evidence import run_candidate_execution_recorded
+from lunar_evolution.candidate_execution_runner import (
+    CandidateExecutionRunnerError,
+    run_candidate_execution,
+)
+from lunar_evolution.evolution import (
     CandidateArchive,
     CommandCandidateRunner,
     GenerationRequest,
@@ -35,7 +38,7 @@ def control_fixture():
 @pytest.mark.parametrize("value", [True, "1", 0, -1, float("nan"), float("inf")])
 def test_operational_execution_timeout_rejects_invalid_values_before_launch(tmp_path, monkeypatch, value):
     admission, plan, workspace, inputs = _setup(tmp_path)
-    monkeypatch.setattr("famou.candidate_execution_runner._bounded_process", lambda *a, **k: pytest.fail("launch"))
+    monkeypatch.setattr("lunar_evolution.candidate_execution_runner._bounded_process", lambda *a, **k: pytest.fail("launch"))
     with pytest.raises(CandidateExecutionRunnerError):
         run_candidate_execution(admission, plan=plan, workspace_path=workspace,
                                 input_path=inputs, timeout_seconds=value)
@@ -51,7 +54,7 @@ def test_operational_execution_timeout_narrows_without_changing_pins(tmp_path, m
         observed.append(kwargs["timeout"])
         return "", "", "succeeded", 0, None
 
-    monkeypatch.setattr("famou.candidate_execution_runner._bounded_process", process)
+    monkeypatch.setattr("lunar_evolution.candidate_execution_runner._bounded_process", process)
     result = run_candidate_execution(admission, plan=plan, workspace_path=workspace,
                                      input_path=inputs, timeout_seconds=timeout)
     assert observed == [expected]
@@ -70,7 +73,7 @@ def test_execution_record_preserves_typed_stop(tmp_path, monkeypatch, stop):
     def stopped(*args, **kwargs):
         control.check("candidate_execution")
 
-    monkeypatch.setattr("famou.candidate_execution_evidence.run_candidate_execution", stopped)
+    monkeypatch.setattr("lunar_evolution.candidate_execution_evidence.run_candidate_execution", stopped)
     error = SolveExecutionBudgetExceeded if stop == "budget" else SolveExecutionCancelled
     with pytest.raises(error):
         run_candidate_execution_recorded(admission, plan=plan, workspace_path=workspace,
@@ -96,8 +99,8 @@ def test_single_file_runner_preserves_legacy_floor_but_never_enlarges_operationa
         def poll(self):
             return self.returncode
 
-    monkeypatch.setattr("famou.evolution.subprocess.Popen", lambda *a, **k: Process())
-    monkeypatch.setattr("famou.evolution._kill_candidate_process_group", lambda process: True)
+    monkeypatch.setattr("lunar_evolution.evolution.subprocess.Popen", lambda *a, **k: Process())
+    monkeypatch.setattr("lunar_evolution.evolution._kill_candidate_process_group", lambda process: True)
     runner = CommandCandidateRunner(("/bin/sh",), timeout_seconds=configured)
     assert runner.run(source, tmp_path, timeout=timeout).status == "succeeded"
     assert observed == [expected]
@@ -143,8 +146,8 @@ def test_late_generation_preserves_budget_failure_without_publishing_candidate(t
 
 
 def test_bundle_execution_and_scoring_use_remainder_without_changing_authority(tmp_path, monkeypatch):
-    import famou.candidate_evaluation as evaluation
-    import famou.candidate_execution_runner as execution
+    import lunar_evolution.candidate_evaluation as evaluation
+    import lunar_evolution.candidate_execution_runner as execution
 
     context = build_context(tmp_path, lambda _: draft_for_score(1))
     context = replace(context, config=replace(context.config, population_size=1, num_islands=1,
@@ -171,7 +174,7 @@ def test_bundle_execution_and_scoring_use_remainder_without_changing_authority(t
 
 
 def test_late_scoring_cannot_publish_evaluation_or_candidate(tmp_path, monkeypatch):
-    import famou.candidate_evaluation as evaluation
+    import lunar_evolution.candidate_evaluation as evaluation
 
     now, control = control_fixture()
     context = build_context(tmp_path, lambda _: draft_for_score(1))
@@ -243,7 +246,7 @@ def test_bundle_agent_checks_late_response_before_completed_receipt(tmp_path, ou
 
 @pytest.mark.parametrize("during", ["compiler", "preflight"])
 def test_preparation_propagates_solve_budget_as_terminal_authority(tmp_path, monkeypatch, during):
-    import famou.evaluator_bundle as bundle
+    import lunar_evolution.evaluator_bundle as bundle
 
     controller, parent, contract, _runtime = _fixture(tmp_path)
     now, control = control_fixture()
@@ -257,7 +260,7 @@ def test_preparation_propagates_solve_budget_as_terminal_authority(tmp_path, mon
 
         monkeypatch.setattr(bundle, "_run_isolated", run)
     else:
-        import famou.candidate_execution_runner as runner
+        import lunar_evolution.candidate_execution_runner as runner
 
         original = runner._bounded_process_bytes
 

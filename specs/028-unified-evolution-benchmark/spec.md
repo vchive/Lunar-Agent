@@ -8,7 +8,7 @@
 ## Context and scope
 
 Feature 027 compares native `loop` and `population` strategies under one bounded contract and
-budget. OpenEvolve remains separately invocable even though Lunar-Agent already has a strict
+budget. OpenEvolve remains separately invocable even though Lunar Evolution already has a strict
 subprocess/result adapter. This feature makes that adapter a third benchmark strategy without
 introducing package discovery, a service layer, or a second archive format.
 

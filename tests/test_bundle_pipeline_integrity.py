@@ -9,10 +9,15 @@ from dataclasses import replace
 import pytest
 from test_bundle_population import _files, build_context, draft_for_score
 
-import famou.bundle_evolution as bundles
-from famou import evolution
-from famou.candidate_evaluation import inspect_candidate_evaluation
-from famou.evolution import CandidateArchive, CandidateReceipt, EvolutionError, PopulationStrategy
+import lunar_evolution.bundle_evolution as bundles
+from lunar_evolution import evolution
+from lunar_evolution.candidate_evaluation import inspect_candidate_evaluation
+from lunar_evolution.evolution import (
+    CandidateArchive,
+    CandidateReceipt,
+    EvolutionError,
+    PopulationStrategy,
+)
 
 
 def _persist(strategy, score=3):

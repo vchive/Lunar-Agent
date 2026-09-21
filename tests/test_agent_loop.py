@@ -2,18 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import (
+from lunar_evolution.agent_loop import (
     AgentLoopRuntime,
     AgentLoopTimeout,
     AgentStepLimitEvidence,
     AgentStepLimitReached,
 )
-from famou.agents import candidate_failure_reason
-from famou.memory import MemoryStore
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
-from famou.tools import LocalToolRegistry
-from famou.transcript import SessionTranscript
+from lunar_evolution.agents import candidate_failure_reason
+from lunar_evolution.memory import MemoryStore
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
+from lunar_evolution.transcript import SessionTranscript
 
 
 class FixtureModel:
@@ -199,7 +199,7 @@ def test_candidate_local_timeout_updates_diagnostic(tmp_path: Path, monkeypatch:
     model = FixtureModel([ModelTurn("complete candidate")])
     runtime = AgentLoopRuntime(model)
     clock = iter((1.0, 2.0))
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", lambda: next(clock))
 
     with pytest.raises(AgentLoopTimeout):
         runtime.run(

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.cli import _model_profile_digest, main
-from famou.effect_trial import (
+from lunar_evolution.cli import _model_profile_digest, main
+from lunar_evolution.effect_trial import (
     MAX_COST_MICROS,
     MAX_TOKENS,
     EffectTrialConfig,
@@ -16,7 +16,7 @@ from famou.effect_trial import (
     EffectTrialRunner,
     TrialBaseline,
 )
-from famou.profiles import ModelProfile
+from lunar_evolution.profiles import ModelProfile
 
 HEX_A = "a" * 64
 HEX_B = "b" * 64
@@ -130,11 +130,11 @@ def _fixture(
         "harness": {"extractor_sha256": HEX_B, "evaluator_sha256": HEX_C},
     }
     benchmark = {
-        "name": "famou-bench",
+        "name": "reference-benchmark",
         "release_version": "1.10.6",
         "publication_digest": OBJECT_A,
     }
-    profile = {"name": "famou-agentco-default", "revision": 1, "digest": OBJECT_B}
+    profile = {"name": "lunar-evolution-reference-default", "revision": 1, "digest": OBJECT_B}
     suite = root / "suite.json"
     suite.write_text(
         json.dumps(
@@ -560,7 +560,7 @@ def test_effect_trial_cli_is_standalone_json_and_keeps_env_values_out_of_report(
     assert "subject-secret-value" not in persisted
     assert "harness-secret-value" not in persisted
     assert str(subject[1]) not in persisted
-    assert not (tmp_path / ".famou").exists()
+    assert not (tmp_path / ".lunar-evolution").exists()
 
 
 def test_effect_trial_cli_rejects_missing_env_and_malformed_case_source(

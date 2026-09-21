@@ -6,10 +6,15 @@ import json
 import pytest
 from test_bundle_population import build_context, draft_for_score
 
-from famou.agent_bundle_generation import PrivateTree
-from famou.agent_evolution import MAX_GENERATION_PROMPT_BYTES, AgentCandidateGenerator
-from famou.agents import MAX_TEXT_BYTES, AgentResult
-from famou.evolution import CandidateDraft, EvolutionError, GenerationRequest, PopulationStrategy
+from lunar_evolution.agent_bundle_generation import PrivateTree
+from lunar_evolution.agent_evolution import MAX_GENERATION_PROMPT_BYTES, AgentCandidateGenerator
+from lunar_evolution.agents import MAX_TEXT_BYTES, AgentResult
+from lunar_evolution.evolution import (
+    CandidateDraft,
+    EvolutionError,
+    GenerationRequest,
+    PopulationStrategy,
+)
 
 
 class BundleFixtureAgent:

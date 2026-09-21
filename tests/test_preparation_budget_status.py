@@ -10,9 +10,9 @@ from test_preparation_local_diagnostics import replace_payload
 from test_preparation_recovery_cli import run_cli, runtime_calls, snapshot
 from test_preparation_wall_budget import Clock
 
-from famou import automatic_solve_bundle as automatic
-from famou import cli
-from famou.store import Store
+from lunar_evolution import automatic_solve_bundle as automatic
+from lunar_evolution import cli
+from lunar_evolution.store import Store
 
 
 def test_budgets_visible_before_preparation_and_status_is_readonly(tmp_path, monkeypatch, capsys):

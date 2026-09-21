@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.candidate_bundle import (
+from lunar_evolution.candidate_bundle import (
     CandidateBundleError,
     CandidateSourceBundle,
     CandidateSourceFile,

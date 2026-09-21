@@ -5,7 +5,7 @@
 **Status**: Implemented
 **Input**: Build both WebAgent-style loop and explicit population search locally, with an optional
 OpenEvolve adapter. The project must remain standalone and must not require Hermes, OpenCode, Codex,
-Famou Workspace, a remote service, or machine-global agent state.
+the external reference workspace, a remote service, or machine-global agent state.
 
 ## Context and scope
 
@@ -14,7 +14,7 @@ and records `loop` or `population` as a future choice. This feature makes that c
 through one runtime-neutral strategy seam. `loop` is the default interactive path; `population` is
 an opt-in local search; `openevolve` is an opt-in integration that is only available when an
 explicit local OpenEvolve executable is supplied. The canonical run ledger and candidate archive
-remain owned by Lunar-Agent in every mode.
+remain owned by Lunar Evolution in every mode.
 
 ## User Scenarios & Testing
 
@@ -41,7 +41,7 @@ the final result is selected from the archive.
 ### User Story 3 - Use OpenEvolve without making it a dependency (Priority: P2)
 
 As a local owner, I want to delegate a run to an explicitly configured OpenEvolve command when it is
-installed, while the normal Lunar-Agent install remains usable when it is absent.
+installed, while the normal Lunar Evolution install remains usable when it is absent.
 
 **Independent Test**: A fake executable receives a generated config and writes a valid candidate
 result; the adapter imports it into the same archive. An absent or malformed executable fails with a
@@ -83,7 +83,7 @@ detached run can resume from the local workspace.
 - **FR-1308**: The OpenEvolve adapter MUST run only an explicit local command, in a run-relative
   working directory with a generated config; it MUST not discover or invoke a machine-global
   installation and MUST import only bounded, schema-validated result files.
-- **FR-1309**: The adapter MUST treat the Lunar-Agent run ledger and archive as canonical. External
+- **FR-1309**: The adapter MUST treat the Lunar Evolution run ledger and archive as canonical. External
   strategy logs or checkpoints are auxiliary and MUST NOT silently settle a run as successful.
 - **FR-1310**: Existing `plan`, `run`, `resume`, `status --json`, and parent-Agent JSON behavior
   MUST remain backward compatible. Evolution metadata is additive, and legacy plans without an
@@ -97,7 +97,7 @@ detached run can resume from the local workspace.
 ## Non-Goals
 
 - Reimplementing the WebAgent HTTP/SSE service, billing, queues, multi-tenancy, or remote Workspace.
-- Making a Hermes/OpenCode/Codex installation part of Lunar-Agent's runtime.
+- Making a Hermes/OpenCode/Codex installation part of Lunar Evolution's runtime.
 - Claiming statistical superiority of population or OpenEvolve without equal-budget experiments.
 - Providing a general-purpose arbitrary-code sandbox; solver/evaluator security remains bounded by
   the existing local workspace and runtime contracts.

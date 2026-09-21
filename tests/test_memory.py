@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from famou.memory import MemoryStore
+from lunar_evolution.memory import MemoryStore
 
 
 def test_memory_store_round_trip_and_scoped_recall(tmp_path: Path) -> None:

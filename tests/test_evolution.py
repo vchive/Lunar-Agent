@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-import famou.evolution as evolution_module
-from famou.algorithm import LOOP_STRATEGY_RETIRED_MESSAGE, AlgorithmProblemContract
-from famou.evolution import (
+import lunar_evolution.evolution as evolution_module
+from lunar_evolution.algorithm import LOOP_STRATEGY_RETIRED_MESSAGE, AlgorithmProblemContract
+from lunar_evolution.evolution import (
     Candidate,
     CandidateArchive,
     CandidateDraft,
@@ -30,11 +30,11 @@ from famou.evolution import (
     WorkerUnknownError,
     build_strategy,
 )
-from famou.openevolve_handoff import (
+from lunar_evolution.openevolve_handoff import (
     declared_protocol_environment_sha256,
     source_only_dependency_sha256,
 )
-from famou.seed_handoff import admit_seed_manifest
+from lunar_evolution.seed_handoff import admit_seed_manifest
 
 SEED_EVALUATOR_SHA = "a" * 64
 SEED_DEPENDENCY_SHA = "b" * 64

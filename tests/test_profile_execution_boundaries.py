@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.memory import MemoryStore
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
-from famou.tools import LocalToolRegistry
-from famou.transcript import SessionTranscript
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.memory import MemoryStore
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
+from lunar_evolution.transcript import SessionTranscript
 
 
 class FakeClock:
@@ -66,7 +66,7 @@ def test_profile_timeout_caps_each_entrypoint(
     explicit: float | None, expected: float,
 ) -> None:
     clock = FakeClock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
     model = ScriptedModel([ModelTurn("done", usage=usage(6))])
     runtime = AgentLoopRuntime(model, profile=bounded_profile("tokens"))
 
@@ -276,7 +276,7 @@ def test_overdue_response_is_rejected_before_acceptance_or_actions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, with_tools: bool,
 ) -> None:
     clock = FakeClock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
     transcript = SessionTranscript(tmp_path / "session.jsonl")
     model = ScriptedModel([
         ModelTurn("REJECTED_RESPONSE", (write_call(),) if with_tools else (), usage=usage(6)),
@@ -297,7 +297,7 @@ def test_deadline_is_checked_immediately_before_tool_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     clock = FakeClock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
     model = ScriptedModel([ModelTurn("", (write_call(),), usage=usage(6))])
     runtime = AgentLoopRuntime(model, profile=bounded_profile("tokens"))
 
@@ -319,7 +319,7 @@ def test_deadline_after_first_tool_prevents_second_tool_and_next_model_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     clock = FakeClock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
 
     class SlowTools(LocalToolRegistry):
         def execute(self, name, arguments, workspace):

@@ -14,7 +14,7 @@ It cannot provide outcome, validity, score, or delta fields.
 
 ## Outcome authority
 
-Lunar-Agent joins each candidate to `parent_id` in the same archive. It computes outcomes from
+Lunar Evolution joins each candidate to `parent_id` in the same archive. It computes outcomes from
 canonical `EvaluationReport` objects. Higher `combined_score` is always better. Raw detailed metric
 values use their declared `maximize`/`minimize` direction. Missing or direction-mismatched pairs are
 not compared.

@@ -6,11 +6,11 @@
 
 **Status**: Superseded by `003-hermes-inspired-local-agent`
 
-**Input**: User goal: first match the user-visible execution capabilities of Famou WebAgent while
+**Input**: User goal: first match the user-visible execution capabilities of WebAgent while
 remaining an independent local agent.
 
 > This draft captured a possible WebAgent-style stage machine. The product direction was changed:
-> Lunar-Agent is now Hermes-inspired at the session/runtime layer, with durable local memory and a
+> Lunar Evolution is now Hermes-inspired at the session/runtime layer, with durable local memory and a
 > scheduler for orchestration. It must not implement WebAgent's intake/clarify/build/verify/deliver
 > pipeline as its primary architecture. The reusable tool-loop and safety work is carried forward
 > into feature 003.
@@ -28,7 +28,7 @@ plan is validated, and settles only after evaluator-backed artifacts are present
 
 ### User Story 2 - Complete a Task Through Tools (Priority: P1)
 
-As a user, I can give Lunar-Agent a goal and let a configured model iteratively inspect files,
+As a user, I can give Lunar Evolution a goal and let a configured model iteratively inspect files,
 write files, and optionally run bounded commands until it returns a deliverable, rather than getting
 one opaque text completion.
 
@@ -56,7 +56,7 @@ is disabled unless explicitly enabled, and path traversal or malformed tool argu
 
 As a user, the model receives a stable build-oriented system contract: work from the persisted task
 prompt and dependency artifacts, validity before quality, incremental artifacts, and a concise final
-delivery summary. This is the local equivalent of Famou's Build Agent boundary; it does not import
+delivery summary. This is the local equivalent of WebAgent's Build Agent boundary; it does not import
 Hermes or expose implementation internals to the model.
 
 ## Functional Requirements

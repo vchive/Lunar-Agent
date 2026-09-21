@@ -32,7 +32,7 @@ From the isolated worktree:
 
 ```sh
 PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -m pytest -o addopts='' -q tests/test_master_plan_envelope.py tests/test_master_plan_envelope_integration.py
-/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/famou tests
+/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/lunar_evolution tests
 bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 git diff --check
 ```

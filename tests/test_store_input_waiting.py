@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.models import RunStatus, TaskStatus
-from famou.store import Store
+from lunar_evolution.models import RunStatus, TaskStatus
+from lunar_evolution.store import Store
 
 
 @pytest.fixture

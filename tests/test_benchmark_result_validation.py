@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.benchmark_result import (
+from lunar_evolution.benchmark_result import (
     BenchmarkResultError,
     bind_benchmark_comparison_result_evidence,
     parse_benchmark_comparison_result,

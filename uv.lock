@@ -21,7 +21,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lunar-agent"
+name = "lunar-evolution"
 version = "0.1.0"
 source = { editable = "." }
 

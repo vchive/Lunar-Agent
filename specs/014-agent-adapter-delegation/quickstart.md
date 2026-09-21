@@ -4,7 +4,7 @@ The base installation is standalone; no Hermes, OpenCode, OpenClaw, or Codex ins
 required. A worker is supplied explicitly as an absolute executable.
 
 ```bash
-uv run lunar-agent delegate "inspect the repository and summarize the failing tests" \
+uv run lunar-evolution delegate "inspect the repository and summarize the failing tests" \
   --agent-command "/absolute/path/to/my-agent-wrapper" \
   --agent-role solver \
   --capability read_files \
@@ -36,7 +36,7 @@ The response may be structured:
 }
 ```
 
-or bounded plain text. `answer.md` must be created below the supplied workspace. Lunar-Agent
+or bounded plain text. `answer.md` must be created below the supplied workspace. Lunar Evolution
 records and hashes it, evaluates the returned text, and settles the task in SQLite. A worker result
 alone cannot mark a run successful.
 

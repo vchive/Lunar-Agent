@@ -6,10 +6,13 @@ import json
 
 import pytest
 
-from famou import cli
-from famou.automatic_solve_lifecycle import SolveExecutionObservation, solve_execution_status
-from famou.models import RunStatus, TaskStatus
-from famou.store import Store
+from lunar_evolution import cli
+from lunar_evolution.automatic_solve_lifecycle import (
+    SolveExecutionObservation,
+    solve_execution_status,
+)
+from lunar_evolution.models import RunStatus, TaskStatus
+from lunar_evolution.store import Store
 
 FIELDS = {
     "schema_version", "execution_id", "scope", "policy_seconds", "policy_origin",

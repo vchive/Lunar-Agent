@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from famou import (
+from lunar_evolution import (
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
     CandidateExecutionInput,
@@ -50,7 +50,7 @@ def main() -> None:
         (root / "plan.json").write_text(json.dumps(plan.to_dict()), encoding="utf-8")
         (root / "admission.json").write_text(json.dumps(admission.to_dict()), encoding="utf-8")
         completed = subprocess.run([
-            str(Path(sys.executable).parent / "lunar-agent"), "candidate-bundle", "stage-inputs",
+            str(Path(sys.executable).parent / "lunar-evolution"), "candidate-bundle", "stage-inputs",
             str(root / "admission.json"), "--plan", str(root / "plan.json"),
             "--input-root", str(source), "--staging-root", str(staging),
             "--admission-sha256", admission.digest(), "--home", str(root / "unused-home"), "--json",

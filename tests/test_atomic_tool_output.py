@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.tools import LocalToolRegistry
+from lunar_evolution.tools import LocalToolRegistry
 
 
 @pytest.mark.parametrize("failure", ["fsync", "replace"])

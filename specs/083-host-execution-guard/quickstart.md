@@ -9,7 +9,7 @@ the existing path and native payload are unchanged. This option does not prevent
 Future fixed campaign code can use the same scope before dispatch:
 
 ```python
-from famou.host_session import host_execution
+from lunar_evolution.host_session import host_execution
 
 with host_execution(report_path):
     result = existing_operation()
@@ -27,7 +27,7 @@ Offline checks (no real effect trial):
 
 ```sh
 .venv/bin/python -m pytest -q tests/test_host_awake.py tests/test_host_session.py tests/test_host_execution_cli.py
-.venv/bin/ruff check src/famou/host_awake.py src/famou/host_session.py src/famou/cli.py tests/test_host_awake.py tests/test_host_session.py tests/test_host_execution_cli.py
+.venv/bin/ruff check src/lunar_evolution/host_awake.py src/lunar_evolution/host_session.py src/lunar_evolution/cli.py tests/test_host_awake.py tests/test_host_session.py tests/test_host_execution_cli.py
 bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 ```
 

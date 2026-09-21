@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.automatic_solve_lifecycle import SolveExecutionCancelled
-from famou.config import Config
-from famou.controller import LocalController
-from famou.models import RunStatus
-from famou.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
-from famou.runtime import MockRuntime
-from famou.store import Store
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.automatic_solve_lifecycle import SolveExecutionCancelled
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.models import RunStatus
+from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
+from lunar_evolution.runtime import MockRuntime
+from lunar_evolution.store import Store
 
 
 def _contract() -> AlgorithmProblemContract:
@@ -95,7 +95,7 @@ def test_verified_automatic_cancel_cancels_child_and_all_registered_attempts(tmp
     controller.store.set_attempt_process(child_attempt.id, 104, 204)
 
     cleaned: list[str] = []
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda regs: tuple(
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda regs: tuple(
         cleaned.append(reg.label) or _cleaned(reg) for reg in regs
     ))
     monkeypatch.setattr(controller, "_terminate_process_group", lambda *_args: pytest.fail("legacy path used"))
@@ -123,7 +123,7 @@ def test_automatic_cancel_before_child_link_cleans_parent_process(tmp_path, monk
     assert attempt is not None
     controller.store.set_attempt_process(attempt.id, 103, 203)
     cleaned = []
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda regs: tuple(
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda regs: tuple(
         cleaned.append(reg.label) or _cleaned(reg) for reg in regs
     ))
 
@@ -145,7 +145,7 @@ def test_automatic_cancel_cleans_attempts_before_their_controller_runners(tmp_pa
         controller.store.set_attempt_process(attempt.id, 100 + index, 200 + index)
         controller.store.set_runner_process(run.id, 300 + index, 400 + index)
     cleaned = []
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda regs: tuple(
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda regs: tuple(
         cleaned.append(reg.label) or _cleaned(reg) for reg in regs
     ))
 
@@ -203,7 +203,7 @@ def test_automatic_cancel_fails_closed_on_marker_link_or_contract_mismatch(
     controller.store.set_runner_process(child.id, 112, 212)
     terminated: list[tuple[int | None, int | None]] = []
     monkeypatch.setattr(controller, "_terminate_process_group", lambda pid, pgid: terminated.append((pid, pgid)))
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda _regs: pytest.fail("child cleanup granted"))
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda _regs: pytest.fail("child cleanup granted"))
 
     assert controller.cancel(parent.id)
     assert controller.store.get_run(parent.id).status is RunStatus.CANCELLED
@@ -238,7 +238,7 @@ def test_child_terminal_state_is_not_rewritten_by_parent_cancel(tmp_path, monkey
     controller, parent, child, _ = _automatic_pair(tmp_path)
     with controller.store._connect() as connection:
         connection.execute("UPDATE runs SET status = ? WHERE id = ?", (RunStatus.SUCCEEDED.value, child.id))
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda regs: tuple(_cleaned(reg) for reg in regs))
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda regs: tuple(_cleaned(reg) for reg in regs))
     monkeypatch.setattr(controller, "_terminate_process_group", lambda *_args: pytest.fail("legacy path used"))
     assert controller.cancel(parent.id)
     assert controller.store.get_run(child.id).status is RunStatus.SUCCEEDED
@@ -283,7 +283,7 @@ def test_single_inconsistent_link_cannot_grant_child_cancel_authority(
     with controller.store._connect() as connection:
         connection.execute("UPDATE events SET payload = ? WHERE id = ?", (json.dumps(payload), link["id"]))
     controller.store.set_runner_process(child.id, 112, 212)
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda _regs: pytest.fail("cleanup granted"))
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda _regs: pytest.fail("cleanup granted"))
 
     assert controller.cancel(parent.id)
     assert controller.store.get_run(parent.id).status is RunStatus.CANCELLED
@@ -303,7 +303,7 @@ def test_lifecycle_request_history_cannot_downgrade_into_legacy_cleanup(tmp_path
     controller.store.set_runner_process(child.id, 112, 212)
     monkeypatch.setattr(controller, "_terminate_process_group", lambda *_args: pytest.fail("legacy cleanup granted"))
     monkeypatch.setattr(controller, "_cancel_active_callbacks", lambda *_args: pytest.fail("runtime cancel granted"))
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda _regs: pytest.fail("cleanup granted"))
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda _regs: pytest.fail("cleanup granted"))
 
     assert controller.cancel(parent.id)
 
@@ -320,7 +320,7 @@ def test_process_registered_after_cancel_is_immediately_cleaned(tmp_path, monkey
     assert attempt is not None
     observe, release = controller.attempt_process_observers(parent.id, attempt.id)
     cleaned = []
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda regs: tuple(
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda regs: tuple(
         cleaned.append((reg.label, reg.pid, reg.pgid)) or _cleaned(reg) for reg in regs
     ))
     assert controller.cancel(parent.id)
@@ -340,7 +340,7 @@ def test_failed_cancel_cleanup_retains_registration_for_later_recovery(tmp_path,
     attempt = controller.store.claim_task(task.id, "fixture")
     assert attempt is not None
     controller.store.set_attempt_process(attempt.id, 501, 601)
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda regs: tuple(
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda regs: tuple(
         ProcessCleanupResult(reg.label, reg.pid, reg.pgid, ProcessCleanupStatus.KILL_FAILED, alive_after=True)
         for reg in regs
     ))
@@ -376,7 +376,7 @@ def test_budget_failure_cleans_retained_processes_after_attempt_state_changes(tm
     controller.store.set_attempt_process(attempt.id, 501, 601)
     assert controller.store.fail_budget(parent.id, "solve_wall_timeout", 10.0, 10.0, "deadline reached")
     cleaned = []
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", lambda regs: tuple(
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", lambda regs: tuple(
         cleaned.append(reg.label) or _cleaned(reg) for reg in regs
     ))
 
@@ -394,7 +394,7 @@ def test_automatic_cli_registers_probe_candidate_and_evaluator_on_owning_attempt
 
     from test_conversational_automatic_bundle import automatic_setup
 
-    from famou import candidate_evaluation, candidate_execution_runner, cli
+    from lunar_evolution import candidate_evaluation, candidate_execution_runner, cli
 
     _, args = automatic_setup(tmp_path, monkeypatch)
     original = candidate_execution_runner._bounded_process_bytes
@@ -448,7 +448,7 @@ def test_automatic_cli_registers_probe_candidate_and_evaluator_on_owning_attempt
 
 
 def test_parent_cancel_stops_real_registered_child_process(tmp_path):
-    from famou.candidate_execution_runner import _bounded_process_bytes
+    from lunar_evolution.candidate_execution_runner import _bounded_process_bytes
 
     controller, parent, child, _ = _automatic_pair(tmp_path)
     task = controller.store.list_tasks(child.id)[0]
@@ -574,7 +574,7 @@ def test_new_launch_cannot_replace_registration_retained_after_failed_cleanup(tm
             )
         return tuple(results)
 
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", cleanup)
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", cleanup)
 
     observe(502, 602)
 
@@ -609,7 +609,7 @@ def test_cleanup_guard_fails_owned_runs_and_preserves_unreleased_process(tmp_pat
             for registration in registrations
         )
 
-    monkeypatch.setattr("famou.controller.cleanup_registered_processes", cleanup)
+    monkeypatch.setattr("lunar_evolution.controller.cleanup_registered_processes", cleanup)
 
     with pytest.raises(SolveExecutionCancelled):
         controller.ensure_attempt_process_released(

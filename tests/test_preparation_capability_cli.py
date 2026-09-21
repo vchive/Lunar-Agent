@@ -8,9 +8,9 @@ import pytest
 from test_conversational_automatic_bundle import automatic_setup
 from test_preparation_recovery_cli import followup, observations, run_cli, runtime_calls, snapshot
 
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.store import Store
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.store import Store
 
 DETAILS = [
     {"id": "two-source-files", "verification_scope": "source"},

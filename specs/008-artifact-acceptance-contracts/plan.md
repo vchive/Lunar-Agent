@@ -46,7 +46,7 @@ Re-check after implementation: no exception or added dependency is expected.
 ## Project Structure
 
 ```text
-src/famou/
+src/lunar_evolution/
 ├── evaluator.py          # contract parser/interpreter and Evaluation details
 ├── controller.py         # combines base/profile and acceptance evidence
 ├── policy.py             # plan task validation boundary

@@ -16,8 +16,8 @@
 ## Structure
 
 ```text
-src/famou/agent_evolution.py  # AgentCandidateEvaluator
-src/famou/cli.py              # evaluator-agent CLI options
+src/lunar_evolution/agent_evolution.py  # AgentCandidateEvaluator
+src/lunar_evolution/cli.py              # evaluator-agent CLI options
 tests/test_agent_evolution.py # evaluator bridge tests
 tests/test_cli.py             # evaluator-agent CLI test
 ```

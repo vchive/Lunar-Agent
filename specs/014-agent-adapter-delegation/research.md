@@ -13,7 +13,7 @@ stable JSON exchange.
 
 ### Modify Hermes/OpenCode directly
 
-Rejected. It would make Lunar-Agent depend on a particular installation, configuration layout, and
+Rejected. It would make Lunar Evolution depend on a particular installation, configuration layout, and
 prompt/event protocol. It also makes recovery and testing depend on a user's global environment.
 
 ### Automatically discover CLIs from PATH or home directories

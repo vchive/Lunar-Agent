@@ -7,7 +7,7 @@
 
 ## Context and scope
 
-Lunar-Agent's conversational surface is useful for intake and progress, but an algorithm mission is
+Lunar Evolution's conversational surface is useful for intake and progress, but an algorithm mission is
 not complete when a model merely says that it found a solution. A mission needs a typed output
 contract, independent validation, and durable delivery metadata. This feature makes output files a
 first-class part of `AlgorithmProblemContract` while preserving contracts written before the field

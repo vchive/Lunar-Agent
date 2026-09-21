@@ -9,10 +9,10 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-import famou
-from famou import candidate_input_staging as staging
-from famou.candidate_bundle import CandidateSourceBundle
-from famou.candidate_execution import (
+import lunar_evolution
+from lunar_evolution import candidate_input_staging as staging
+from lunar_evolution.candidate_bundle import CandidateSourceBundle
+from lunar_evolution.candidate_execution import (
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
     CandidateExecutionError,
@@ -20,12 +20,12 @@ from famou.candidate_execution import (
     admit_candidate_execution,
     build_candidate_execution_admission,
 )
-from famou.candidate_input_staging import (
+from lunar_evolution.candidate_input_staging import (
     CandidateInputStagingError,
     StagedCandidateExecutionInputs,
     stage_candidate_execution_inputs,
 )
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 
 
 def _fixture(tmp_path):
@@ -195,7 +195,7 @@ def test_staging_never_executes_candidate_or_initializes_control_state(tmp_path,
     source, parent, plan, admission, content = _fixture(tmp_path)
     home = tmp_path / "unused-home"
     monkeypatch.setenv("LUNAR_HOME", str(home))
-    monkeypatch.setenv("FAMOU_HOME", str(home))
+    monkeypatch.setenv("LUNAR_EVOLUTION_HOME", str(home))
     monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_kw: pytest.fail("process started"))
     monkeypatch.setattr(os, "system", lambda *_a, **_kw: pytest.fail("shell started"))
     result = stage_candidate_execution_inputs(
@@ -264,6 +264,6 @@ def test_error_codes_never_include_unknown_caller_values(code):
 
 
 def test_staging_api_is_publicly_exported():
-    assert famou.stage_candidate_execution_inputs is stage_candidate_execution_inputs
-    assert famou.StagedCandidateExecutionInputs is StagedCandidateExecutionInputs
-    assert famou.CandidateInputStagingError is CandidateInputStagingError
+    assert lunar_evolution.stage_candidate_execution_inputs is stage_candidate_execution_inputs
+    assert lunar_evolution.StagedCandidateExecutionInputs is StagedCandidateExecutionInputs
+    assert lunar_evolution.CandidateInputStagingError is CandidateInputStagingError

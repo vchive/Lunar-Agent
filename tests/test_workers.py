@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from famou.agents import AgentRegistry, AgentResult
-from famou.models import WorkerOutcome, WorkerPhase
-from famou.store import Store
-from famou.workers import WorkerService
+from lunar_evolution.agents import AgentRegistry, AgentResult
+from lunar_evolution.models import WorkerOutcome, WorkerPhase
+from lunar_evolution.store import Store
+from lunar_evolution.workers import WorkerService
 
 
 class FixtureAdapter:

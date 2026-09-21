@@ -1,7 +1,7 @@
 # Feature 114 validation
 
 Product change: isolated contract compiler dispatch and explicit schema guidance in
-`src/famou/conversational.py`. Existing strict parsers, general Agent loop, runtime fingerprint,
+`src/lunar_evolution/conversational.py`. Existing strict parsers, general Agent loop, runtime fingerprint,
 Store schema and all frozen measurement code/results remain unchanged.
 
 ## Focused validation

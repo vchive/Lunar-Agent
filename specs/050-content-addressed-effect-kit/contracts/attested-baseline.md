@@ -3,7 +3,7 @@
 Invocation extension:
 
 ```text
-lunar-agent effect-baseline results.json suite.json baseline.json \
+lunar-evolution effect-baseline results.json suite.json baseline.json \
   --experiment-id fmexp-... --requested-model MODEL --effective-model MODEL \
   --model-evidence not_observable --owner-attested-content-equivalence
 ```

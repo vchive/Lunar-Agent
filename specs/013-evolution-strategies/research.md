@@ -38,11 +38,11 @@ needed to prove the lifecycle.
 ## Decision 3: OpenEvolve is an optional subprocess adapter
 
 **Decision**: OpenEvolve is invoked only through an explicit executable command supplied by the
-caller. Lunar-Agent creates an adapter directory and a bounded JSON config, runs the command with a
+caller. Lunar Evolution creates an adapter directory and a bounded JSON config, runs the command with a
 timeout, then imports only a validated result file. The base package has no OpenEvolve dependency.
 
 **Rationale**: This preserves standalone installation and avoids duplicate Python dependency trees.
-The subprocess boundary also gives cancellation and path confinement a clear owner. Lunar-Agent's
+The subprocess boundary also gives cancellation and path confinement a clear owner. Lunar Evolution's
 archive and SQLite ledger remain canonical, so an OpenEvolve checkpoint cannot silently mark a run
 successful.
 
@@ -50,7 +50,7 @@ successful.
 
 - Import `openevolve` as a mandatory Python module: rejected because users who only use loop do not
   need it, and provider/dependency conflicts would violate the local-first boundary.
-- Call Famou Workspace or `famou-ctl`: rejected because that recreates the service dependency the
+- Call the external reference workspace or its control CLI: rejected because that recreates the service dependency the
   project explicitly excludes.
 
 ## Decision 4: Filesystem archive plus atomic JSON state

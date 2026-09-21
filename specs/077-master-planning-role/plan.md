@@ -36,9 +36,9 @@ visible, and describe any real outcome as a future hypothesis test rather than p
 From the isolated worktree:
 
 ```sh
-PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import famou.staged_workflow as m; assert Path(m.__file__).resolve() == Path("src/famou/staged_workflow.py").resolve(); print(m.__file__)'
+PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import lunar_evolution.staged_workflow as m; assert Path(m.__file__).resolve() == Path("src/lunar_evolution/staged_workflow.py").resolve(); print(m.__file__)'
 PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -m pytest -o addopts='' -q tests/test_master_planning_role_integration.py tests/test_master_plan_envelope.py tests/test_master_plan_envelope_integration.py tests/test_master_plan_vocabulary.py tests/test_staged_workflow.py tests/test_staged_effect_adapter.py tests/test_effect_adapters.py
-/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/famou/staged_workflow.py tests/test_master_planning_role_integration.py
+/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/lunar_evolution/staged_workflow.py tests/test_master_planning_role_integration.py
 bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 git diff --check
 ```

@@ -21,7 +21,7 @@ cannot contain markdown, credentials, absolute paths, commands, evaluator replac
 
 ## Admission
 
-Lunar-Agent reconstructs each workspace, adds canonical successful `execution.json`, executes the
+Lunar Evolution reconstructs each workspace, adds canonical successful `execution.json`, executes the
 already compiled evaluator, and requires:
 
 - exact expected validity;

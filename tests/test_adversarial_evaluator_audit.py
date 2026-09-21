@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.algorithm import AlgorithmProblemContract
-from famou.cli import main
-from famou.evaluator_bundle import (
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.cli import main
+from lunar_evolution.evaluator_bundle import (
     EvaluatorBundleError,
     compile_evaluator_bundle,
     load_evaluator_bundle,
 )
-from famou.evolution import CandidateInputArtifact
-from famou.runtime import ModelTurn, RuntimeResult
-from famou.transcript import SessionTranscript
+from lunar_evolution.evolution import CandidateInputArtifact
+from lunar_evolution.runtime import ModelTurn, RuntimeResult
+from lunar_evolution.transcript import SessionTranscript
 
 
 def _contract() -> AlgorithmProblemContract:
@@ -352,7 +352,7 @@ def test_conversational_search_never_generates_when_audit_fails(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = AuditRuntime(source=WEAK_EVALUATOR)
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     orders = tmp_path / "orders.csv"
     orders.write_text("id\nprivate-real-order\n", encoding="utf-8")
 

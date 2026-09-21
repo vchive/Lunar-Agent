@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.seed_handoff import (
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.seed_handoff import (
     CONTRACT_MISMATCH,
     DEPENDENCY_MISMATCH,
     DUPLICATE_IDENTITY,

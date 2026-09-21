@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from famou.workflow_checkpoint import (
+from lunar_evolution.workflow_checkpoint import (
     AggregateUsage,
     WorkflowCheckpointError,
     WorkflowController,
@@ -403,7 +403,7 @@ def test_preexisting_temporary_symlink_is_not_followed_or_removed(
     destination = controller.workflow / "new.json"
     temporary = destination.with_name(".new.json.collision.tmp")
     temporary.symlink_to(outside)
-    monkeypatch.setattr("famou.workflow_checkpoint.uuid.uuid4", lambda: SimpleNamespace(hex="collision"))
+    monkeypatch.setattr("lunar_evolution.workflow_checkpoint.uuid.uuid4", lambda: SimpleNamespace(hex="collision"))
     with pytest.raises((OSError, WorkflowCheckpointError)):
         getattr(controller, operation)(destination, {"changed": True})
     assert outside.read_text() == "original"

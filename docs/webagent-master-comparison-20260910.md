@@ -1,7 +1,13 @@
 # WebAgent master semantics and Feature 069
 
+This is an external-source audit. Descriptive labels for the reference engine, plugin, roles,
+branches and benchmark are not Lunar Evolution components or literal replacement paths.
+The original names, source paths and citations are retained in the fixed pre-migration
+revision listed in the [historical archive](history-archive.md); source ownership and any
+upstream license obligations remain with their respective authors.
+
 Read-only comparison on 2026-09-10. WebAgent source is pinned to
-`e24df2530ca770f78ebcda170ac55cc1203e4447`, previously fetched at `origin/famou-v2.5/base`.
+`e24df2530ca770f78ebcda170ac55cc1203e4447`, the previously fetched v2.5 base (descriptive branch label).
 Lunar's measured product source remains `80f5af10f4a25dab5c5aa2ad767e3b78994f34a3`.
 No WebAgent, model, generated command or new benchmark attempt was executed for this review.
 
@@ -16,7 +22,7 @@ No WebAgent, model, generated command or new benchmark attempt was executed for 
 | Solver input | Original public task plus validated master plan | Specialist solver works from separate planning/data artifacts |
 
 The actual agent configuration matters more than the README's historical mention of a simple
-`famou-build` role. The pinned snapshot has master, data-discovery, data-cleaner, OR/ML/general
+external `build` role. The pinned snapshot has master, data-discovery, data-cleaner, OR/ML/general
 solver and evaluate roles. Importing that multiagent architecture wholesale would add substantial
 scope to Lunar and is not required to fix the observed UTF-8 preview defect.
 
@@ -24,17 +30,18 @@ scope to Lunar and is not required to fix the observed UTF-8 preview defect.
 
 The WebAgent repository is local at
 `/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/webagent`. Read the pinned blobs with
-`git show e24df2530ca770f78ebcda170ac55cc1203e4447:<path>`:
+`git show e24df2530ca770f78ebcda170ac55cc1203e4447:<path>`, using the original paths
+from the archived audit:
 
-- `agent_configs/opencode-v2.5-base/agents/famou-master.md`, lines 109–157: planning artifact and
+- The external master role definition, lines 109–157: planning artifact and
   task dispatch, with model role instructions to delegate data inspection and solver work.
 - `agent_configs/opencode-v2.5-base/opencode.jsonc`, lines 114–138: actual master tool permissions.
-- `agent_configs/opencode-v2.5-base/famou/tools/multiagent/config.ts`, line 62: default wait=300.
-- `agent_configs/opencode-v2.5-base/famou/tools/multiagent/tools/agent_wait.ts`, lines 41–70:
+- `tools/multiagent/config.ts` under the external plugin, line 62: default wait=300.
+- `tools/multiagent/tools/agent_wait.ts` under the external plugin, lines 41–70:
   bounded wait and still-running outcome.
-- `agent_configs/opencode-v2.5-base/agents/famou-or.md`, lines 13–24: solver responsibilities and
+- The external OR role definition, lines 13–24: solver responsibilities and
   foreground execution guidance.
-- Lunar `src/famou/staged_workflow.py`, lines 153–193 at the measured commit: the shared master
+- The historical product's `staged_workflow.py` module, lines 153–193 at the measured commit: the shared master
   tool loop, JSON plan contract and explicit master timeout before Build.
 
 ## What the real measurement supports

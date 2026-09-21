@@ -34,4 +34,4 @@ unknown-consumption timeouts. Workers exited 1; supervisor completed successfull
 Read-only evidence audit matched all 46 retained files (size/SHA), 77 product pins, 19 measurement
 pins and 46 historical pins. Two complete private response bodies are 3,817/6,626 bytes and match
 retained SHA256 metadata. No response text was published. Measured results, diagnostics and
-file inventory are retained in [postrun report](postrun/report.md); original registration unchanged.
+file inventory are retained in [postrun report](../../docs/history-archive.md); original registration unchanged.

@@ -7,18 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from famou.candidate_bundle import CandidateSourceBundle
-from famou.candidate_execution import (
+from lunar_evolution.candidate_bundle import CandidateSourceBundle
+from lunar_evolution.candidate_execution import (
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
     CandidateExecutionInput,
     build_candidate_execution_admission,
 )
-from famou.candidate_input_staging import (
+from lunar_evolution.candidate_input_staging import (
     CandidateInputStagingError,
     stage_candidate_execution_inputs,
 )
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 
 
 def _fixture(tmp_path: Path, *, contents=None):

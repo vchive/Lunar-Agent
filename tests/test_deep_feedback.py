@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.deep_feedback import (
+from lunar_evolution.deep_feedback import (
     FeedbackError,
     build_candidate_manifest,
     build_round_feedback,

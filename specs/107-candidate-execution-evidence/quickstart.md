@@ -3,9 +3,9 @@
 Use a new attempt directory for one recorded invocation of a prepared plan/admission:
 
 ```sh
-lunar-agent candidate-bundle run-recorded admission.json --plan plan.json \
+lunar-evolution candidate-bundle run-recorded admission.json --plan plan.json \
   --workspace ./workspace --input-root ./staged-inputs --attempt ./attempt-001 --json
-lunar-agent candidate-bundle inspect-execution admission.json --plan plan.json \
+lunar-evolution candidate-bundle inspect-execution admission.json --plan plan.json \
   --attempt ./attempt-001 --json
 ```
 
@@ -24,7 +24,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from famou import (
+from lunar_evolution import (
     CandidateEvaluatorPin, CandidateExecutionBudget, CandidateExecutionInput,
     CandidateSourceBundle, CandidateSourceFile, build_candidate_execution_admission,
     build_candidate_workspace_plan, inspect_candidate_execution_record,

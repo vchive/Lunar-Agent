@@ -8,7 +8,7 @@ fingerprint before returning objective or evaluator bytes.
 
 ## Agent workspace
 
-Before invoking a solver Agent, Lunar-Agent creates exactly these guidance files:
+Before invoking a solver Agent, Lunar Evolution creates exactly these guidance files:
 
 - `scoring/objective.md`
 - `scoring/evaluator.py`
@@ -28,5 +28,5 @@ paths, compiler/audit probes, input profile, raw input/output bytes, or credenti
 
 The solver should treat this as executable scoring documentation: first align required I/O and
 hard constraints, then improve the higher-is-better `combined_score`. It must not return an
-evaluation report or modify authoritative bundle files. Lunar-Agent independently executes the
+evaluation report or modify authoritative bundle files. Lunar Evolution independently executes the
 candidate and scores it with the parent frozen evaluator.

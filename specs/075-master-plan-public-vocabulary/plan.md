@@ -45,9 +45,9 @@ Run from this feature's isolated worktree. The root virtualenv is a development 
 `PYTHONPATH` explicitly selects the isolated source.
 
 ```sh
-PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import famou.workflow_checkpoint as m; assert Path(m.__file__).resolve() == Path("src/famou/workflow_checkpoint.py").resolve(); print(m.__file__)'
+PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import lunar_evolution.workflow_checkpoint as m; assert Path(m.__file__).resolve() == Path("src/lunar_evolution/workflow_checkpoint.py").resolve(); print(m.__file__)'
 PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -m pytest -o addopts='' -q tests/test_master_plan_vocabulary.py tests/test_workflow_checkpoint.py tests/test_master_plan_envelope.py tests/test_master_plan_envelope_integration.py tests/test_staged_workflow.py tests/test_staged_effect_adapter.py tests/test_effect_trial.py
-/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/famou/workflow_checkpoint.py src/famou/staged_workflow.py tests/test_workflow_checkpoint.py tests/test_master_plan_vocabulary.py tests/test_master_plan_envelope_integration.py
+/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/lunar_evolution/workflow_checkpoint.py src/lunar_evolution/staged_workflow.py tests/test_workflow_checkpoint.py tests/test_master_plan_vocabulary.py tests/test_master_plan_envelope_integration.py
 bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 git diff --check
 ```

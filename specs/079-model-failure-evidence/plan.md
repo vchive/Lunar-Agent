@@ -111,9 +111,9 @@ v1/v2 compatibility, budget-evidence and safe-publication tests.
 These implementation checks passed from this isolated worktree; tasks records the results:
 
 ```sh
-PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import famou.runtime as r; import famou.subject_diagnostics as d; assert Path(r.__file__).resolve() == Path("src/famou/runtime.py").resolve(); assert Path(d.__file__).resolve() == Path("src/famou/subject_diagnostics.py").resolve()'
+PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import lunar_evolution.runtime as r; import lunar_evolution.subject_diagnostics as d; assert Path(r.__file__).resolve() == Path("src/lunar_evolution/runtime.py").resolve(); assert Path(d.__file__).resolve() == Path("src/lunar_evolution/subject_diagnostics.py").resolve()'
 PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -m pytest -o addopts='' -q tests/test_model_failure_evidence.py tests/test_runtime.py tests/test_subject_diagnostics.py tests/test_budget_failure_evidence.py tests/test_effect_adapters.py tests/test_effect_trial.py tests/test_deep_effect_trial.py tests/test_staged_effect_adapter.py
-/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/famou/runtime.py src/famou/subject_diagnostics.py tests/test_model_failure_evidence.py
+/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/lunar_evolution/runtime.py src/lunar_evolution/subject_diagnostics.py tests/test_model_failure_evidence.py
 SPECIFY_FEATURE_DIRECTORY=specs/079-model-failure-evidence bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 git diff --check
 ```

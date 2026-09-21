@@ -4,7 +4,7 @@ Build a Feature 099 result with `evidence_path` and `evidence_size` for each arm
 against the frozen plan and the directory containing those files:
 
 ```bash
-lunar-agent benchmark-comparison validate-result plan.json result.json \
+lunar-evolution benchmark-comparison validate-result plan.json result.json \
   --contract contract.json --input-root ./public-input \
   --model-profile-sha256 "$MODEL_PROFILE_SHA256" \
   --evaluator-fingerprint "$EVALUATOR_SHA256" \

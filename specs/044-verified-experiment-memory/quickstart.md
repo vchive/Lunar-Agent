@@ -3,7 +3,7 @@
 Run either native strategy with an Agent-backed generator:
 
 ```bash
-lunar-agent solve "minimize route cost and write output/routes.csv" \
+lunar-evolution solve "minimize route cost and write output/routes.csv" \
   --input ./orders.csv --runtime openai-compatible \
   --endpoint http://127.0.0.1:11434/v1 --model local-model \
   --evolve --compile-evaluator --strategy loop --max-rounds 5 --json --home .lunar

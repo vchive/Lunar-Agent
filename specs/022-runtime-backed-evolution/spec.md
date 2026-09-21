@@ -3,7 +3,7 @@
 **Feature Branch**: `022-runtime-backed-evolution`
 **Created**: 2026-09-03
 **Status**: Implemented
-**Input**: Use Lunar-Agent's repository-owned runtime directly in algorithm evolution
+**Input**: Use Lunar Evolution's repository-owned runtime directly in algorithm evolution
 
 ## Context and scope
 

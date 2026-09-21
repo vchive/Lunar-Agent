@@ -3,10 +3,10 @@
 Invocation:
 
 ```text
-lunar-agent effect-kit <new-output-directory> \
+lunar-evolution effect-kit <new-output-directory> \
   --case KEY=/absolute/private-case-root [--case KEY=/absolute/private-case-root] \
-  [--benchmark-name famou-bench] \
-  [--profile-name famou-agentco-default] [--profile-revision 1] \
+  [--benchmark-name reference-benchmark] \
+  [--profile-name lunar-evolution-reference-default] [--profile-revision 1] \
   [--owner-attested-content-equivalence]
 ```
 

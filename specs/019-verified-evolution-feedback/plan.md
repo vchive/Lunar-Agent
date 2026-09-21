@@ -16,7 +16,7 @@
 ## Structure
 
 ```text
-src/famou/agent_evolution.py  # bounded report projection in generation context
+src/lunar_evolution/agent_evolution.py  # bounded report projection in generation context
 tests/test_agent_evolution.py # feedback and leakage tests
 README.md                     # Agent evolution feedback note
 docs/architecture.md         # generation/evaluation feedback seam

@@ -60,14 +60,14 @@ evaluator invocation; they do not map to an evolution strategy.
 
 ## Files and structure
 
-- `src/famou/algorithm.py`: new contract defaults and active-versus-legacy strategy validation.
-- `src/famou/evolution.py`: population admission integration, iteration outcomes, OpenEvolve local
+- `src/lunar_evolution/algorithm.py`: new contract defaults and active-versus-legacy strategy validation.
+- `src/lunar_evolution/evolution.py`: population admission integration, iteration outcomes, OpenEvolve local
   revalidation, legacy readers, and the importable non-mutating `LoopStrategy` stub.
-- `src/famou/conversational.py`, `src/famou/controller.py`, and `src/famou/cli.py`: population defaults,
+- `src/lunar_evolution/conversational.py`, `src/lunar_evolution/controller.py`, and `src/lunar_evolution/cli.py`: population defaults,
   early retired-strategy rejection, generic-evolve-only optional seed-manifest/identity wiring, and
   runtime-loop separation.
-- `src/famou/benchmark.py`: active strategy set and population-only default.
-- `src/famou/seed_handoff.py`: reused from Feature 084 without a parallel admission schema.
+- `src/lunar_evolution/benchmark.py`: active strategy set and population-only default.
+- `src/lunar_evolution/seed_handoff.py`: reused from Feature 084 without a parallel admission schema.
 - Focused tests in `tests/test_algorithm.py`, `tests/test_evolution.py`, `tests/test_cli.py`,
   `tests/test_conversational_evolution.py`, `tests/test_benchmark.py`, and existing Agent/runtime and
   sealed effect-trial regression suites.

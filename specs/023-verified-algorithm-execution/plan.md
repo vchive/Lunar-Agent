@@ -40,9 +40,9 @@ runtime dependency; preserve legacy evaluator behavior.
 ## Structure Decision
 
 ```text
-src/famou/evolution.py       # CandidateExecution, CandidateRunner, command runner/evaluator wrapper
-src/famou/cli.py             # --candidate-runner-command and detached propagation
-src/famou/controller.py      # execution artifact indexing where needed
+src/lunar_evolution/evolution.py       # CandidateExecution, CandidateRunner, command runner/evaluator wrapper
+src/lunar_evolution/cli.py             # --candidate-runner-command and detached propagation
+src/lunar_evolution/controller.py      # execution artifact indexing where needed
 tests/test_evolution.py      # runner unit/integration tests
 tests/test_cli.py            # CLI wiring, conflicts, detach, provenance
 specs/023-verified-algorithm-execution/

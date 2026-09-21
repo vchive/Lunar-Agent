@@ -7,11 +7,11 @@ import json
 
 import pytest
 
-from famou import data_profile
-from famou import evaluator_bundle as bundle
-from famou.algorithm import AlgorithmProblemContract
-from famou.evolution import CandidateInputArtifact
-from famou.runtime import RuntimeResult
+from lunar_evolution import data_profile
+from lunar_evolution import evaluator_bundle as bundle
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.evolution import CandidateInputArtifact
+from lunar_evolution.runtime import RuntimeResult
 
 ACCEPTED = [
     ("json", b'{"limit":3}'),

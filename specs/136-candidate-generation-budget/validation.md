@@ -30,8 +30,8 @@ resume, generated-source execution, or historical evidence rewrite was part of t
 PYTHONPATH=. .venv/bin/pytest -q tests/test_agent_loop.py tests/test_agents.py \
   tests/test_agent_evolution.py tests/test_agent_bundle_generation.py tests/test_controller.py \
   tests/test_budget_aware_tools.py
-.venv/bin/ruff check src/famou/agent_loop.py src/famou/agents.py \
-  src/famou/agent_evolution.py src/famou/agent_bundle_generation.py \
+.venv/bin/ruff check src/lunar_evolution/agent_loop.py src/lunar_evolution/agents.py \
+  src/lunar_evolution/agent_evolution.py src/lunar_evolution/agent_bundle_generation.py \
   tests/test_agent_loop.py tests/test_agents.py tests/test_agent_evolution.py
 .venv/bin/python -m compileall -q src tests
 bash .specify/scripts/bash/check-prerequisites.sh

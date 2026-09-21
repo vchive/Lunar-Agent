@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from famou.config import Config
-from famou.controller import LocalController
-from famou.policy import MasterPolicy, PlanDocument, PlanPatch, PlanTask, apply_patch
-from famou.runtime import MockRuntime
-from famou.store import Store
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.policy import MasterPolicy, PlanDocument, PlanPatch, PlanTask, apply_patch
+from lunar_evolution.runtime import MockRuntime
+from lunar_evolution.store import Store
 
 
 def _document() -> PlanDocument:
@@ -106,7 +106,7 @@ def test_stale_patch_is_atomic_and_current_plan_survives_restart(tmp_path: Path)
 
 
 def test_controller_delivers_only_verified_planned_results(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.start_plan(_document())
     decision = controller.deliver(run.id)
     assert run.status.value == "succeeded"
@@ -118,12 +118,12 @@ def test_delivery_rejects_a_failed_evaluation(tmp_path: Path) -> None:
     class RejectingEvaluator:
         def evaluate(self, result: str, workspace: Path):
             del result, workspace
-            from famou.evaluator import Evaluation
+            from lunar_evolution.evaluator import Evaluation
 
             return Evaluation(False, ("fixture rejection",), "rejected")
 
     controller = LocalController(
-        Config(tmp_path / ".famou", max_retries=1), MockRuntime(), evaluator=RejectingEvaluator()
+        Config(tmp_path / ".lunar-evolution", max_retries=1), MockRuntime(), evaluator=RejectingEvaluator()
     )
     run = controller.start_plan(_document())
     assert run.status.value == "failed"

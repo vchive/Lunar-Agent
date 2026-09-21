@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from famou import cli
-from famou.evolution import EvolutionError
+from lunar_evolution import cli
+from lunar_evolution.evolution import EvolutionError
 
 
 def automatic_request(*extra: str) -> dict[str, object]:

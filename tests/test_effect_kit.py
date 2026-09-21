@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-import famou.effect_kit as effect_kit_module
-from famou.cli import main
-from famou.effect_adapters import EffectAdapterError, convert_fm_eval_baseline
-from famou.effect_kit import EffectKitError, build_effect_kit
-from famou.effect_trial import EffectTrialConfig, EffectTrialRunner, TrialSuite
+import lunar_evolution.effect_kit as effect_kit_module
+from lunar_evolution.cli import main
+from lunar_evolution.effect_adapters import EffectAdapterError, convert_fm_eval_baseline
+from lunar_evolution.effect_kit import EffectKitError, build_effect_kit
+from lunar_evolution.effect_trial import EffectTrialConfig, EffectTrialRunner, TrialSuite
 
 
 def _write_json(path: Path, value: object) -> Path:

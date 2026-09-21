@@ -17,11 +17,11 @@ cat > "$state_dir/plan.json" <<'JSON'
 }
 JSON
 
-lunar-agent plan "$state_dir/plan.json" --runtime mock --home "$state_dir/home" --json
+lunar-evolution plan "$state_dir/plan.json" --runtime mock --home "$state_dir/home" --json
 # The mock result does not create report.json, so this plan exits non-zero after emitting its run ID.
 
-lunar-agent recover <run-id> --home "$state_dir/home" --json
-lunar-agent status <run-id> --home "$state_dir/home" --json
+lunar-evolution recover <run-id> --home "$state_dir/home" --json
+lunar-evolution status <run-id> --home "$state_dir/home" --json
 ```
 
 `recover` recommends `propose_patch` and persists `recovery/proposals/<fingerprint>.json`; it does

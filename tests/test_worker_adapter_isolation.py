@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.agents import (
+from lunar_evolution.agents import (
     AgentInvocationError,
     AgentRegistry,
     AgentRequest,
@@ -24,7 +24,7 @@ from famou.agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
-from famou.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
 
 
 def request(workspace: Path, task_id: str = "task") -> AgentRequest:
@@ -534,7 +534,7 @@ def test_command_cleans_descendants_after_leader_exit(tmp_path, keep_pipes):
     wrapper = textwrap.dedent("""\
         import ctypes,json,os,signal,sys,threading,time
         from pathlib import Path
-        from famou.agents import AgentRequest,CommandAgentAdapter
+        from lunar_evolution.agents import AgentRequest,CommandAgentAdapter
         workspace = Path(sys.argv[1])
         reaper = None
         if sys.platform.startswith('linux'):

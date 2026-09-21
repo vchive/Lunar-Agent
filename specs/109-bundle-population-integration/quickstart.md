@@ -20,7 +20,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from famou.candidate_evaluation_spec import CandidateEvaluationSpec
+from lunar_evolution.candidate_evaluation_spec import CandidateEvaluationSpec
 
 root = Path(os.environ["LUNAR_DEMO"])
 for name in ("inputs", "deliveries"):
@@ -105,7 +105,7 @@ print(json.dumps({"files": {"solver/main.py": main,
 print(f"created local demo: {root}")
 PY
 
-"$LUNAR_PYTHON" -m famou evolve-bundle "$LUNAR_DEMO/contract.json" \
+"$LUNAR_PYTHON" -m lunar_evolution evolve-bundle "$LUNAR_DEMO/contract.json" \
   --profile "$LUNAR_DEMO/profile.json" \
   --generator-command "$(cat "$LUNAR_DEMO/generator-command.txt")" \
   --workspace "$LUNAR_DEMO/run" --home "$LUNAR_DEMO/home" \
@@ -145,12 +145,12 @@ assert counts == {"candidate": 4, "generator": 4}
 print(f"first run: 4 candidates; best score {result['best_score']}")
 PY
 
-"$LUNAR_PYTHON" -m famou candidate-bundle inspect-delivery \
+"$LUNAR_PYTHON" -m lunar_evolution candidate-bundle inspect-delivery \
   "$(cat "$LUNAR_DEMO/delivery-path.txt")" \
   --delivery-sha256 "$(cat "$LUNAR_DEMO/delivery-sha256.txt")" \
   --home "$LUNAR_DEMO/inspection-must-not-create-home" --json > "$LUNAR_DEMO/inspection.json"
 
-"$LUNAR_PYTHON" -m famou evolve-bundle "$LUNAR_DEMO/contract.json" \
+"$LUNAR_PYTHON" -m lunar_evolution evolve-bundle "$LUNAR_DEMO/contract.json" \
   --profile "$LUNAR_DEMO/profile.json" \
   --generator-command "$(cat "$LUNAR_DEMO/generator-command.txt")" \
   --workspace "$LUNAR_DEMO/run" --home "$LUNAR_DEMO/home" \

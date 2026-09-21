@@ -10,7 +10,7 @@ The `solve` command currently compiles a conversational algorithm contract and e
 DAG, while `evolve` requires a hand-authored contract file. This split makes the strongest local
 search path awkward for a user or parent Agent: the contract has to be copied between commands,
 and staged input data is not carried into the evolution workspace. This feature adds an explicit
-`solve --evolve` handoff without making evolution mandatory and without coupling Lunar-Agent to a
+`solve --evolve` handoff without making evolution mandatory and without coupling Lunar Evolution to a
 provider or a machine-wide Hermes/OpenCode/Codex installation.
 
 The handoff keeps two durable local runs: the conversational run remains the canonical intake and

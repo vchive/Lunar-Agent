@@ -19,8 +19,8 @@ from test_materialization_execution_store import (
 )
 from test_materialization_execution_store import batch as execution_fixture
 
-from famou.evolution import CandidateExecution
-from famou.store import Store
+from lunar_evolution.evolution import CandidateExecution
+from lunar_evolution.store import Store
 
 ERROR = "^materialization_delivery_ledger_mismatch$"
 PLAN_PATH = "evolution/materialization/.delivery-publication/plan.json"

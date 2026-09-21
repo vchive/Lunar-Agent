@@ -5,8 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from famou.benchmark_comparison import BenchmarkComparisonError, parse_benchmark_comparison_plan
-from famou.benchmark_task import (
+from lunar_evolution.benchmark_comparison import (
+    BenchmarkComparisonError,
+    parse_benchmark_comparison_plan,
+)
+from lunar_evolution.benchmark_task import (
     BenchmarkTaskEnvelope,
     BenchmarkTaskError,
     admit_benchmark_task_envelope,

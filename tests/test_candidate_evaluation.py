@@ -7,21 +7,24 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
-from famou.candidate_evaluation import evaluate_candidate_execution, inspect_candidate_evaluation
-from famou.candidate_evaluation_spec import (
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
+from lunar_evolution.candidate_evaluation import (
+    evaluate_candidate_execution,
+    inspect_candidate_evaluation,
+)
+from lunar_evolution.candidate_evaluation_spec import (
     CandidateEvaluationError,
     CandidateEvaluationSpec,
     candidate_output_contract_sha256,
 )
-from famou.candidate_execution import (
+from lunar_evolution.candidate_execution import (
     CandidateExecutionBudget,
     CandidateExecutionInput,
     build_candidate_execution_admission,
 )
-from famou.candidate_execution_evidence import run_candidate_execution_recorded
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution.candidate_execution_evidence import run_candidate_execution_recorded
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 
 SOURCE = b'''import json, os
 from pathlib import Path

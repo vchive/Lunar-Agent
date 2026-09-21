@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.subject_diagnostics import (
+from lunar_evolution.subject_diagnostics import (
     SubjectDiagnosticContext,
     capture_subject_diagnostic_context,
     normalize_diagnostic,

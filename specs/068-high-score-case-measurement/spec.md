@@ -14,7 +14,7 @@ Change the measurement protocol before observing any new Lunar outcome, without 
 ## Selection and comparator
 
 Use the latest completed, selected GLM-5.2 normal experiment in the downloaded leaderboard:
-fmexp-ac8297cd-53a6-4c1f-aa06-49751bc6ad05, famou-bench 1.10.6. Its recorded adapter is
+fmexp-ac8297cd-53a6-4c1f-aa06-49751bc6ad05, reference-benchmark 1.10.6. Its recorded adapter is
 AgentServer/OpenCode, workload webagent-agentserver, release
 agentserver-online-v1-304d586a-20260828t121038z. Call this the platform WebAgent/AgentServer
 (OpenCode) record; do not relabel it as an adapter=webagent export or a verified v2.5 source commit.

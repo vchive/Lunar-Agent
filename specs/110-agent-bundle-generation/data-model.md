@@ -10,7 +10,7 @@ No Candidate, receipt, archive or database schema changes are needed.
 ## Generation context
 
 Each invocation allocates a new private directory under the run's Agent generation area. The full
-`context/context.json` uses protocol `lunar-agent-bundle-generation-v1` and includes:
+`context/context.json` uses protocol `lunar-evolution-bundle-generation-v1` and includes:
 
 | Field | Content |
 | --- | --- |

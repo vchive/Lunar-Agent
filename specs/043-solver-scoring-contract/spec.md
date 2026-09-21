@@ -6,7 +6,7 @@
 
 ## Context and scope
 
-Lunar-Agent now executes and independently audits a frozen evaluator before search. The native
+Lunar Evolution now executes and independently audits a frozen evaluator before search. The native
 Agent solver still receives an incomplete view of that authority. When a persisted
 `evolution/contract.json` is present, prompt projection omits both hard and soft constraint arrays.
 In compiled-evaluator mode it also withholds the objective text and evaluator implementation that
@@ -14,7 +14,7 @@ actually determine ranking. The solver is therefore told to satisfy constraints 
 score without seeing the complete rules.
 
 WebAgent/OpenEvolve expose their frozen harness to the candidate builder so it can first align I/O
-and feasibility, then optimize the real metric. This feature carries that effect into Lunar-Agent
+and feasibility, then optimize the real metric. This feature carries that effect into Lunar Evolution
 without exposing compiler/auditor probes or moving scoring authority into the solver. Every Agent
 generation receives the complete canonical constraint contract plus a read-only, fingerprinted
 projection of an already verified compiled evaluator. Independent execution and evaluation remain

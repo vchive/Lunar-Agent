@@ -11,7 +11,7 @@ import pytest
 from test_materialization_execution_store import JOURNAL, encoded, ids, snapshot
 from test_materialization_execution_store import batch as execution_fixture
 
-from famou.store import Store
+from lunar_evolution.store import Store
 
 ERROR = "^materialization_execution_ledger_mismatch$"
 

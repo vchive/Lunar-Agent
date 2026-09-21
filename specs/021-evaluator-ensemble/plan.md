@@ -16,8 +16,8 @@
 ## Structure
 
 ```text
-src/famou/agent_evolution.py  # ensemble composition and aggregation
-src/famou/cli.py              # repeatable evaluator portfolio option
+src/lunar_evolution/agent_evolution.py  # ensemble composition and aggregation
+src/lunar_evolution/cli.py              # repeatable evaluator portfolio option
 tests/test_agent_evolution.py # consensus and isolation tests
 tests/test_cli.py             # CLI conflicts and fingerprints
 README.md                     # evaluator ensemble usage

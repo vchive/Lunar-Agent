@@ -36,7 +36,7 @@ preserve CLI JSON compatibility
 ## Project Structure
 
 ```text
-src/famou/
+src/lunar_evolution/
 ├── recovery.py            # pure RecoveryPolicy and immutable proposal contract
 ├── controller.py          # calculate and persist advisory recovery proposal
 └── cli.py                 # recover command and additive status field

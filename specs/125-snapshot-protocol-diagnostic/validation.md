@@ -58,7 +58,7 @@ requests returnedHTTP200: compiler326.682s/28538tokens and auditor50.640s/7961to
 compiler self-tests were accepted, but preparation failed after audit response with
 EvaluatorBundleError. Freeze/joint remain0/1; zero of eight holdouts executed. Total usage is
 complete36499tokens (8069input+28430output), cost/quality/gap unknown/null. Supervisor378.853s,
-exit1, cleanup verified, no remaining observed PIDs. See [report](postrun/report.md).
+exit1, cleanup verified, no remaining observed PIDs. See [report](../../docs/history-archive.md).
 
 Independent read-only verification matched16 retained files, all77/14/91pin groups,10frozen files,
 and exact reconstructed request bytes/hashes for both roles. Two private assistant captures are

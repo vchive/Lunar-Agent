@@ -8,13 +8,13 @@ import pytest
 from test_bundle_population import build_context, draft_for_score
 from test_conversational_bundle import counts
 
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.candidate_generation_receipt import generation_event_id
-from famou.config import Config
-from famou.evolution import EvolutionError
-from famou.runtime import MockRuntime, RuntimeResult
-from famou.store import Store
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.candidate_generation_receipt import generation_event_id
+from lunar_evolution.config import Config
+from lunar_evolution.evolution import EvolutionError
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.store import Store
 
 SNAPSHOT_SOURCE = '''"""compiled-evaluator-hidden-marker"""
 import json
@@ -684,7 +684,7 @@ def test_pending_input_drift_is_rejected_before_answer_and_contract_compiler(tmp
 
 
 def test_resume_after_frozen_evaluator_before_profile_does_not_recompile(tmp_path, monkeypatch, capsys):
-    from famou import automatic_solve_bundle
+    from lunar_evolution import automatic_solve_bundle
 
     class SimulatedCrash(BaseException):
         pass

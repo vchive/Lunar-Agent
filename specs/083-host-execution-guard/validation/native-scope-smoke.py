@@ -12,8 +12,8 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from famou.host_awake import MacOSIdleSleepAssertion
-from famou.host_session import host_execution
+from lunar_evolution.host_awake import MacOSIdleSleepAssertion
+from lunar_evolution.host_session import host_execution
 
 
 def main():
@@ -55,7 +55,7 @@ def main():
         "source_sha256": {
             name: hashlib.sha256((root / name).read_bytes()).hexdigest()
             for name in (
-                "src/famou/host_awake.py", "src/famou/host_session.py", "src/famou/cli.py",
+                "src/lunar_evolution/host_awake.py", "src/lunar_evolution/host_session.py", "src/lunar_evolution/cli.py",
                 "specs/083-host-execution-guard/validation/native-scope-smoke.py",
             )
         },

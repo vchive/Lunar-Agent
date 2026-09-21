@@ -1,10 +1,15 @@
-# WebAgent 2.5 与 famou-v2 的融合架构（固定提交）
+# WebAgent 2.5 与 reference-engine-v2 的融合架构（固定提交）
 
-审查提交：`f6ad20caf8963d105fe26c96b6a30ef4dfd34859`（`origin/famou-v2.5/base`）
+本文分析外部参考项目；“参考引擎”、插件、角色、分支和 benchmark 的中性名称仅作描述，
+不是 Lunar Evolution 的组件名称，也不是声称上游已改名的实际路径。原始名称、源码路径
+及引用保留在[历史归档](history-archive.md)指向的固定迁移前版本；外部代码归属及其适用
+许可仍属于原作者。本次名称整理没有重新运行外部项目或模型测量。
+
+审查提交：`f6ad20caf8963d105fe26c96b6a30ef4dfd34859`（v2.5 base（描述性标签））
 
 ## 结论
 
-WebAgent 2.5 不是把 famou-v2 当作一个本地 subagent，也不是把演化循环嵌入普通求解循环。它采用“本地主控 + 远端演化控制面”的两层结构：WebAgent 负责理解需求、澄清、规划、委派普通求解、交付结果和决定是否进入深度演化；famou-v2 负责一次独立实验的初始化、候选生成、评估、选择、种群状态和迭代。
+WebAgent 2.5 不是把 reference-engine-v2 当作一个本地 subagent，也不是把演化循环嵌入普通求解循环。它采用“本地主控 + 远端演化控制面”的两层结构：WebAgent 负责理解需求、澄清、规划、委派普通求解、交付结果和决定是否进入深度演化；reference-engine-v2 负责一次独立实验的初始化、候选生成、评估、选择、种群状态和迭代。
 
 融合发生在物料和事件边界，不发生在模型运行时边界。
 
@@ -12,14 +17,14 @@ WebAgent 2.5 不是把 famou-v2 当作一个本地 subagent，也不是把演化
 
 ```mermaid
 flowchart TD
-    A[用户需求] --> B[famou-master 澄清/规划]
-    B --> C[famou-build 普通求解]
+    A[用户需求] --> B[外部 master 澄清/规划]
+    B --> C[外部 build 普通求解]
     C --> D[本地 evaluator 验收与交付]
     D --> E{用户主动或主控推荐深度演化}
     E -->|否| F[保持普通结果]
     E -->|是| G[submit 物料包]
     G --> H[evolve_create + approval]
-    H --> I[famou-v2 远端实验]
+    H --> I[reference-engine-v2 远端实验]
     I --> J[evolve_status / sync]
     J --> K[evolve-analyst 阶段/终态分析]
     K --> L[evolve-report 可核查报告]
@@ -28,13 +33,13 @@ flowchart TD
 
 ### 1. 普通求解先独立完成
 
-`famou-master` 先走字段扫描、澄清、规划，再派普通求解和 evaluator。新版明确要求先交付普通结果，再进入深度演化；深度演化不是普通 Build 的隐式重试。
+外部 `master` 角色先走字段扫描、澄清、规划，再派普通求解和 evaluator。新版明确要求先交付普通结果，再进入深度演化；深度演化不是普通 Build 的隐式重试。
 
-普通结果成为演化的输入物料，但不是直接把一个运行中的 worker 转交给 famou-v2。
+普通结果成为演化的输入物料，但不是直接把一个运行中的 worker 转交给 reference-engine-v2。
 
 ### 2. 提交前构造实验物料
 
-`famou-evolve-experiment-submit` 在本地创建新的 `submit/` 目录，准备并检查：
+外部实验提交技能在本地创建新的 `submit/` 目录，准备并检查：
 
 - `init.py`：初始程序/候选入口；
 - `evaluator.py`：必须能独立调用并返回 `validity`、`combined_score`、`error_info`；
@@ -46,7 +51,7 @@ flowchart TD
 
 ### 3. `evolve_create` 只提交，不承载演化逻辑
 
-`evolve_create` 是唯一创建入口，并设置 180 秒本地 CLI 调用上限。它通过 `FamouClient` 读取 `/root/.config/opencode/tool-url/famou-v2`，再调用外部 `famou-ctl experiment create`。创建返回的是 opaque `experiment_id`；WebAgent 不等待本地 worker，因为远端实验不属于本地 worker registry。
+`evolve_create` 是唯一创建入口，并设置 180 秒本地 CLI 调用上限。它通过 外部实验服务客户端 读取显式配置的外部服务 URL 文件，再调用外部服务 CLI（参数 `experiment create`）。创建返回的是 opaque `experiment_id`；WebAgent 不等待本地 worker，因为远端实验不属于本地 worker registry。
 
 V2.5 的完整版本给 `evolve_create` 增加了 approval card 中的 `max_iterations` 与 `gpu` 摘要，并对 `ok:false` 做结果适配，避免失败被误记成 approval 成功。当前提交前一致性校验函数仍处于注释状态，因此不能宣称它已经强制验证 config 与 approval card 一致。
 
@@ -62,7 +67,7 @@ V2.5 的完整版本给 `evolve_create` 增加了 approval card 中的 `max_iter
 
 ### 5. 事件处理与报告是另一层
 
-创建成功、初始化失败、阶段摘要和终态事件有不同处理路径。阶段/终态交给 `evolve-analyst` 只读分析，写入实验目录的 `analysis/`；实验完成后再由 `famou-evolve-report` 从同步目录和分析报告生成一份可核查 HTML。分析和报告不修改 evaluator、候选源码或远端种群。
+创建成功、初始化失败、阶段摘要和终态事件有不同处理路径。阶段/终态交给 `evolve-analyst` 只读分析，写入实验目录的 `analysis/`；实验完成后再由外部演化报告技能从同步目录和分析报告生成一份可核查 HTML。分析和报告不修改 evaluator、候选源码或远端种群。
 
 ## WebAgent 借鉴的关键设计
 
@@ -76,7 +81,7 @@ V2.5 的完整版本给 `evolve_create` 增加了 approval card 中的 `max_iter
 
 ## 不应直接照搬的部分
 
-- 不把 `FamouClient` 或 `CommandAgentAdapter` 塞进 Lunar 的 staged Master→Build。两者的 worker、账本、checkpoint 和 receipt 契约不同。
+- 不把 外部实验服务客户端 或 `CommandAgentAdapter` 塞进 Lunar 的 staged Master→Build。两者的 worker、账本、checkpoint 和 receipt 契约不同。
 - 不把远端 `combined_score` 当 Lunar score。同步回来的候选必须经过 Lunar 本地 exact harness 和本地 receipt。
 - 不把创建工具的 180 秒、status 的 300 秒启动轮询当作远端实验全局期限。
 - 不把当前注释掉的 config 一致性校验写成已验证能力。
@@ -92,4 +97,4 @@ Lunar 应复制 WebAgent 的“融合位置”，而不是复制它的远端实�
 4. **分析层单独读实验目录**，生成阶段/终态诊断；不修改评分权威和候选物料。
 5. **未知状态进入对账状态机**，不自动重建实验，也不虚构 cost、完成或分数。
 
-这说明 Feature 084 的最小切入点应是“submission bundle + local revalidation + remote lifecycle boundary”，而不是把 famou-v2 当成 Lunar 的第二个 Agent runtime。
+这说明 Feature 084 的最小切入点应是“submission bundle + local revalidation + remote lifecycle boundary”，而不是把 reference-engine-v2 当成 Lunar 的第二个 Agent runtime。

@@ -12,15 +12,15 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import OutputSpec
-from famou.models import Run
-from famou.output_publication import (
+from lunar_evolution.algorithm import OutputSpec
+from lunar_evolution.models import Run
+from lunar_evolution.output_publication import (
     OutputPublicationError,
     OutputPublicationUncertain,
     publish_outputs,
     recover_outputs,
 )
-from famou.store import Store
+from lunar_evolution.store import Store
 
 SPECS = (
     OutputSpec("output/first.txt", "text"),
@@ -367,9 +367,9 @@ def test_native_process_exit_preserves_recoverable_publication(tmp_path: Path, b
 import os
 import sys
 from pathlib import Path
-from famou.algorithm import OutputSpec
-from famou.output_publication import publish_outputs
-from famou.store import Store
+from lunar_evolution.algorithm import OutputSpec
+from lunar_evolution.output_publication import publish_outputs
+from lunar_evolution.store import Store
 
 database, parent_id, child_id, owner, boundary = sys.argv[1:]
 store = Store(database)

@@ -12,7 +12,7 @@
 - Before implementation, deterministic open-substitution and unbounded-read regressions produced
   **3 failed / 5 passed**; malformed result validation produced **18 failed / 4 passed**.
 - After repair, six benchmark test files: **88 passed** (0.33s).
-- Installed `lunar-agent` CLI smoke: accepted a valid local evidence fixture, returned exit 2 with
+- Installed `lunar-evolution` CLI smoke: accepted a valid local evidence fixture, returned exit 2 with
   `benchmark_result_evidence_changed` after a file edit, and left home absent throughout.
 - Legacy receipt canonical data, result ID and digest match the pre-repair implementation.
 - Independent final review found no blocker; 144 additional malformed field probes produced no

@@ -58,7 +58,7 @@ and scores remain null. No new product persistent fields or recovery authority a
 Run from the isolated worktree, with the main development virtualenv and explicit isolated imports:
 
 ```sh
-PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import famou.staged_workflow as m; assert Path(m.__file__).resolve() == Path("src/famou/staged_workflow.py").resolve(); print(m.__file__)'
+PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -c 'from pathlib import Path; import lunar_evolution.staged_workflow as m; assert Path(m.__file__).resolve() == Path("src/lunar_evolution/staged_workflow.py").resolve(); print(m.__file__)'
 PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -m pytest -o addopts='' -q tests/test_measurement078_audit.py tests/test_measurement078_runner.py specs/078-master-planning-role-measurement/postrun/test_audit.py tests/test_master_planning_role_integration.py
 /Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check specs/078-master-planning-role-measurement tests/test_measurement078_audit.py tests/test_measurement078_runner.py
 bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks

@@ -1,4 +1,4 @@
-# Quickstart: Standalone Local Famou Agent
+# Quickstart: Standalone Local Lunar Evolution Agent
 
 This validation path uses only Python and the repository's deterministic mock runtime. It does not
 require Hermes, OpenCode, Codex, a model key, or network access after dependencies are installed.
@@ -22,17 +22,17 @@ python -m pip install -e '.[dev]'
 ## Run a local goal
 
 ```bash
-uv run python -m famou run "Create a durable local run report" --runtime mock
+uv run python -m lunar_evolution run "Create a durable local run report" --runtime mock
 ```
 
-The command prints a run ID and stores the database and workspace below `.famou/` by default.
+The command prints a run ID and stores the database and workspace below `.lunar-evolution/` by default.
 
 ## Inspect and resume
 
 ```bash
-uv run python -m famou status <run-id>
-uv run python -m famou events <run-id>
-uv run python -m famou resume <run-id>
+uv run python -m lunar_evolution status <run-id>
+uv run python -m lunar_evolution events <run-id>
+uv run python -m lunar_evolution resume <run-id>
 ```
 
 To exercise recovery, stop a run after its task has been persisted, then run `resume`. The resumed
@@ -55,7 +55,7 @@ Create `plan.json`:
 Then execute it with:
 
 ```bash
-uv run python -m famou run --plan plan.json --runtime mock --json
+uv run python -m lunar_evolution run --plan plan.json --runtime mock --json
 ```
 
 The `write` task is not claimed until `research` has a verified result. Its prompt contains the
@@ -64,11 +64,11 @@ unknown dependencies, and cycles are rejected before a run is inserted.
 
 ## Agent-to-agent invocation
 
-Use the JSON mode when Codex or another Agent invokes Lunar-Agent as a child process:
+Use the JSON mode when Codex or another Agent invokes Lunar Evolution as a child process:
 
 ```bash
-uv run python -m famou run "Create a local report" --runtime mock --json
-uv run python -m famou status <run-id> --json
+uv run python -m lunar_evolution run "Create a local report" --runtime mock --json
+uv run python -m lunar_evolution status <run-id> --json
 ```
 
 The `run --json` and `status --json` commands are intentionally independent of Python imports or
@@ -78,7 +78,7 @@ Hermes installation. If the parent process times out, it should retain the retur
 For a long-running child process, use:
 
 ```bash
-uv run python -m famou run "Long analysis" --runtime subprocess --detach --json
+uv run python -m lunar_evolution run "Long analysis" --runtime subprocess --detach --json
 ```
 
 This returns before execution completes. Poll `status --json`, inspect `events --json`, or call
@@ -100,8 +100,8 @@ global `.hermes` directory.
 Set an explicit command when using a separately installed agent:
 
 ```bash
-export FAMOU_RUNTIME_COMMAND='my-agent --json'
-uv run python -m famou run "Inspect this repository" --runtime subprocess
+export LUNAR_EVOLUTION_RUNTIME_COMMAND='my-agent --json'
+uv run python -m lunar_evolution run "Inspect this repository" --runtime subprocess
 ```
 
 The command receives the task prompt on stdin and runs with the task workspace as its current working
@@ -113,13 +113,13 @@ The repository includes a standard-library OpenAI-compatible adapter. Configure 
 vLLM, or LM Studio endpoint explicitly:
 
 ```bash
-export FAMOU_MODEL_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
-export FAMOU_MODEL='your-local-model'
-uv run python -m famou run "Inspect this repository" --runtime openai-compatible --agent-loop --json
+export LUNAR_EVOLUTION_MODEL_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
+export LUNAR_EVOLUTION_MODEL='your-local-model'
+uv run python -m lunar_evolution run "Inspect this repository" --runtime openai-compatible --agent-loop --json
 ```
 
 `--endpoint` and `--model` are equivalent flags. An API key is optional for local servers and can be
-provided through `FAMOU_API_KEY`; it is never written to the ledger or controller log. The HTTP
+provided through `LUNAR_EVOLUTION_API_KEY`; it is never written to the ledger or controller log. The HTTP
 adapter requires a non-empty text response and applies the same evaluator/retry policy as other
 runtimes. Add `--allow-exec` for bounded no-shell command execution. Add `--memory` to explicitly
 enable the local `recall_memory` and `remember_memory` tools; memory notes are stored in SQLite and
@@ -130,7 +130,7 @@ The model can pause for a decision with `ask_user`. The command returns `awaitin
 question with `status --json`, then answer and resume the same run:
 
 ```bash
-uv run python -m famou answer <run-id> "json" \
-  --runtime openai-compatible --endpoint "$FAMOU_MODEL_ENDPOINT" \
-  --model "$FAMOU_MODEL" --agent-loop --memory --json
+uv run python -m lunar_evolution answer <run-id> "json" \
+  --runtime openai-compatible --endpoint "$LUNAR_EVOLUTION_MODEL_ENDPOINT" \
+  --model "$LUNAR_EVOLUTION_MODEL" --agent-loop --memory --json
 ```

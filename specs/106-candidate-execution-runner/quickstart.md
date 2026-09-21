@@ -4,7 +4,7 @@ Feature 106 is an offline execution boundary for one already admitted candidate.
 admission and private directories produced by Features 103–105, use the Python API:
 
 ```python
-from famou import run_candidate_execution
+from lunar_evolution import run_candidate_execution
 
 result = run_candidate_execution(
     admission,
@@ -22,7 +22,7 @@ metadata = result.to_dict()
 The equivalent installed CLI accepts serialized admission and plan files:
 
 ```bash
-lunar-agent candidate-bundle run admission.json --plan plan.json \
+lunar-evolution candidate-bundle run admission.json --plan plan.json \
   --workspace ./workspace --input-root ./staged-inputs \
   --admission-sha256 "$ADMISSION_SHA256" --plan-sha256 "$PLAN_SHA256" \
   --bundle-sha256 "$BUNDLE_SHA256" --contract-sha256 "$CONTRACT_SHA256" --json

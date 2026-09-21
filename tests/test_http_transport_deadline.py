@@ -18,11 +18,11 @@ from pathlib import Path
 import pytest
 from test_model_failure_evidence import SECRET, observer_payload
 
-import famou.runtime as rt
+import lunar_evolution.runtime as rt
 
 
 def transport():
-    return importlib.import_module("famou.http_transport")
+    return importlib.import_module("lunar_evolution.http_transport")
 
 
 @contextmanager
@@ -124,7 +124,7 @@ def assert_closed(processes):
 
 def test_finite_success_preserves_wire_and_scrubs_child_environment(monkeypatch):
     processes, parameters = spy_processes(monkeypatch)
-    for key in ("FAMOU_API_KEY", "SSLKEYLOGFILE", "PYTHONPATH", "UNRELATED_SECRET"):
+    for key in ("LUNAR_EVOLUTION_API_KEY", "SSLKEYLOGFILE", "PYTHONPATH", "UNRELATED_SECRET"):
         monkeypatch.setenv(key, SECRET)
     with local_http() as (endpoint, calls):
         result = rt.OpenAICompatibleRuntime(endpoint, "fixture", SECRET).complete(
@@ -352,7 +352,7 @@ def test_parent_single_pid_death_closes_lifeline_and_worker_socket(tmp_path):
     source = str(Path(module.__file__).resolve().parents[1])
     with local_http("body", disconnected=disconnected) as (endpoint, calls):
         code = (
-            "import json,os;from famou import http_transport as h;from famou.runtime import OpenAICompatibleRuntime;"
+            "import json,os;from lunar_evolution import http_transport as h;from lunar_evolution.runtime import OpenAICompatibleRuntime;"
             "original=h.Popen;"
             "exec('def spawn(*a,**kw):\\n p=original(*a,**kw)\\n print(json.dumps({\"pid\":p.pid,\"pgid\":os.getpgid(p.pid)}),flush=True)\\n return p');"
             "h.Popen=spawn;"

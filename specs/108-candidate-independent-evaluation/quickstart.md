@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from famou import (
+from lunar_evolution import (
     CandidateEvaluationSpec,
     CandidateExecutionBudget,
     CandidateExecutionInput,
@@ -25,7 +25,7 @@ from famou import (
     inspect_candidate_evaluation,
     run_candidate_execution_recorded,
 )
-from famou.algorithm import AlgorithmProblemContract
+from lunar_evolution.algorithm import AlgorithmProblemContract
 
 root = Path(tempfile.mkdtemp(prefix="lunar108-")).resolve()
 workspace, inputs, evaluations = (root / name for name in ("workspace", "inputs", "evaluations"))
@@ -100,7 +100,7 @@ for name, value in {"admission": admission, "plan": plan,
                     "contract": contract, "evaluator": evaluator}.items():
     (root / (name + ".json")).write_text(json.dumps(value.to_dict()))
 command = [
-    sys.executable, "-m", "famou", "candidate-bundle", "evaluate", str(root / "admission.json"),
+    sys.executable, "-m", "lunar_evolution", "candidate-bundle", "evaluate", str(root / "admission.json"),
     "--plan", str(root / "plan.json"), "--contract", str(root / "contract.json"),
     "--evaluator", str(root / "evaluator.json"), "--harness", str(harness_path),
     "--workspace", str(workspace), "--input-root", str(inputs),
@@ -119,7 +119,7 @@ retained = inspect_candidate_evaluation(
 )
 assert retained.report.combined_score == 9.0
 inspection = subprocess.run([
-    sys.executable, "-m", "famou", "candidate-bundle", "inspect-evaluation",
+    sys.executable, "-m", "lunar_evolution", "candidate-bundle", "inspect-evaluation",
     result["evaluation_path"], "--evaluation-sha256", result["evaluation_sha256"], "--json",
 ], check=True, capture_output=True, text=True, timeout=15)
 assert json.loads(inspection.stdout) == result

@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from test_conversational_automatic_bundle import automatic_setup
 
-from famou import bundle_parent_delivery, candidate_evaluation, cli
-from famou.automatic_solve_lifecycle import SolveExecutionControl
-from famou.store import Store
+from lunar_evolution import bundle_parent_delivery, candidate_evaluation, cli
+from lunar_evolution.automatic_solve_lifecycle import SolveExecutionControl
+from lunar_evolution.store import Store
 
 
 class Clock:
@@ -147,7 +147,7 @@ def test_delivery_checks_deadline_after_material_reads_before_publication(
 def test_late_local_process_result_cannot_admit_more_work(
     tmp_path, monkeypatch, capsys, boundary,
 ):
-    from famou import candidate_execution_runner
+    from lunar_evolution import candidate_execution_runner
 
     runtime, args, clock, _ = setup_deadline(tmp_path, monkeypatch)
     module, name = ((candidate_execution_runner, "_bounded_process")
@@ -173,7 +173,7 @@ def test_late_local_process_result_cannot_admit_more_work(
 def test_scoring_receives_remaining_time_without_rewriting_frozen_authority(
     tmp_path, monkeypatch, capsys,
 ):
-    from famou import candidate_execution_runner
+    from lunar_evolution import candidate_execution_runner
 
     runtime, args, clock, controls = setup_deadline(tmp_path, monkeypatch, seconds=6)
     original_runtime = runtime.run
@@ -291,7 +291,7 @@ def test_busy_automatic_owner_rejects_answer_before_consuming_input(
 ):
     from test_preparation_recovery_cli import snapshot
 
-    from famou.automatic_solve_lifecycle import own_automatic_solve
+    from lunar_evolution.automatic_solve_lifecycle import own_automatic_solve
 
     runtime, args, _, _ = setup_deadline(tmp_path, monkeypatch, clarify=True)
     assert cli.main(args) == 0
@@ -347,7 +347,7 @@ def test_recorded_terminal_winner_survives_late_runtime_and_budget_check(
 def test_cancellation_without_wall_timeout_blocks_later_execution_and_delivery(
     tmp_path, monkeypatch, capsys, boundary,
 ):
-    from famou import candidate_execution_runner
+    from lunar_evolution import candidate_execution_runner
 
     runtime, args = automatic_setup(tmp_path, monkeypatch)
     original_runtime = runtime.run

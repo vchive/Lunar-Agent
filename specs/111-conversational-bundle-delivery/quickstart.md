@@ -16,13 +16,13 @@ only one portable delivery copy exists. All fixture files remain on disk for ins
 For an existing profile and runtime, the user-facing commands are:
 
 ```sh
-lunar-agent solve 'Optimize the supplied data and deliver a working project' \
+lunar-evolution solve 'Optimize the supplied data and deliver a working project' \
   --evolve --bundle-profile profile.json --input ./data.csv=data.csv \
   --runtime openai-compatible --endpoint YOUR_ENDPOINT --model YOUR_MODEL --agent-loop \
   --workspace ./mission --json
-lunar-agent solve --resume --run-id RUN_ID --bundle-profile profile.json \
+lunar-evolution solve --resume --run-id RUN_ID --bundle-profile profile.json \
   --runtime openai-compatible --endpoint YOUR_ENDPOINT --model YOUR_MODEL --agent-loop --json
-lunar-agent deliver RUN_ID --json
+lunar-evolution deliver RUN_ID --json
 ```
 
 The remote command is a usage template, not part of validation. Supply credentials through the

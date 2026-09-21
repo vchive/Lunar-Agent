@@ -6,7 +6,7 @@ For a non-negative cost minimization problem, one valid utility is
 `combined_score=1/(1+cost)` while `detailed_scores.cost` retains the raw minimizing value.
 
 ```bash
-lunar-agent solve "optimize routes and write output/routes.csv" \
+lunar-evolution solve "optimize routes and write output/routes.csv" \
   --input ./orders.csv \
   --runtime openai-compatible --endpoint http://127.0.0.1:11434/v1 \
   --model local-model --evolve --strategy population \
@@ -17,7 +17,7 @@ lunar-agent solve "optimize routes and write output/routes.csv" \
 Resume with the same explicit command:
 
 ```bash
-lunar-agent solve --resume --run-id <intake-run-id> \
+lunar-evolution solve --resume --run-id <intake-run-id> \
   --runtime openai-compatible --endpoint http://127.0.0.1:11434/v1 \
   --model local-model --evolve \
   --evaluator-command "/absolute/python /absolute/score_routes.py" \

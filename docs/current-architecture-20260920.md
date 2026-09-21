@@ -1,4 +1,4 @@
-# Lunar Agent：当前架构与执行链路
+# Lunar Evolution：当前架构与执行链路
 
 创建日期：2026-09-20；2026-09-21 更新包含已完成本地验收的 143 修复。142 的已推送历史基线为
 `65d9ae2`。Feature 142 Phase A 前台生命周期和
@@ -10,7 +10,7 @@ Phase B 进程登记/取消清理已经完成离线验收，Phase C 自动多文
 
 Lunar 是一个本地运行、持久保存状态的 Agent 执行系统，并带有原生程序演化引擎。它已经能把自然语言任务转成结构化合同，调用模型和工具生成产物，运行候选程序，独立检查结果，并把可核验的文件交给父任务。
 
-系统目前是 **Python 模块化单体 + SQLite + 本地工作目录 + 受控子进程**。`lunar-agent` 和兼容命令 `famou` 都进入 `src/famou/cli.py`；`famou` 是仓库内部保留的包名。当前不依赖独立部署的调度服务、消息队列或全局 Hermes 环境。
+系统目前是 **Python 模块化单体 + SQLite + 本地工作目录 + 受控子进程**。`lunar-evolution` 是唯一安装的控制台命令，`python -m lunar_evolution` 是等价模块入口；两者都进入 `src/lunar_evolution/cli.py`。Python 包名为 `lunar_evolution`。当前不依赖独立部署的调度服务、消息队列或全局 Hermes 环境。
 
 这里有两种不同的循环：`AgentLoopRuntime` 是模型调用工具、读取反馈、继续工作的循环；`PopulationStrategy` 是生成多个程序、执行评分、选优再生成的演化循环。旧的 `LoopStrategy` 演化策略已经退役，不能和仍在使用的 Agent 工具循环混淆。
 
@@ -166,7 +166,7 @@ CLI solve / resume / answer
 | `CandidateArchive` | 候选、评分、状态与演化结果的持久档案 |
 | 发布日志 | 在文件发布与数据库登记之间留下可核验的阶段，支持有条件恢复 |
 
-默认配置仍保留 `.famou` / `FAMOU_HOME` 兼容名称；显式 `--home` 可使用 `.lunar` 或其他目录。`state.db` 使用 SQLite WAL，保存调度权威与事件；大块源码、输入、输出、模型会话和执行证据放在工作目录。
+默认状态目录为 `.lunar-evolution`；可通过 `LUNAR_EVOLUTION_HOME` 配置，显式 `--home` 优先。包、CLI、用户配置和历史兼容边界见 [Feature 145](../specs/145-lunar-evolution-identity/spec.md)，原始测量见[历史归档](history-archive.md)。`state.db` 使用 SQLite WAL，保存调度权威与事件；大块源码、输入、输出、模型会话和执行证据放在工作目录。
 
 任务的 `waiting` 可以表示等前驱依赖，也可以表示等用户；只有带真实非空问题的任务才对应用户待答。`answer` 把答案保存为产物并恢复原 run/task，不会把依赖等待误当作用户问题。
 
@@ -232,17 +232,17 @@ Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽�
 
 ## 9. 阅读源码的入口
 
-- [CLI](../src/famou/cli.py)：`_solve`、`_solve_evolution`、`_solve_payload`、`_status_projection`。
-- [Controller](../src/famou/controller.py)：`resume_conversational`、`resume`、`_execute_task`、`run_agent`、`run_evolution`、`cancel`。
-- [自动准备](../src/famou/automatic_solve_bundle.py)：`prepare_automatic_solve_bundle`。
-- [评测器编译与审查](../src/famou/evaluator_bundle.py)：`compile_evaluator_bundle`、`_compile_audit_suite`、`load_evaluator_bundle`。
-- [多文件候选生成](../src/famou/agent_bundle_generation.py)：`generate_bundle_candidate`、`parse_bundle_agent_draft`。
-- [多文件执行与评测管线](../src/famou/bundle_evolution.py)：`MultiFileCandidatePipeline`。
-- [演化引擎](../src/famou/evolution.py)：`CandidateArchive`、`PopulationStrategy`、`OpenEvolveStrategy`。
-- [独立候选评分](../src/famou/candidate_evaluation.py)：`evaluate_candidate_execution`、`inspect_candidate_evaluation`。
-- [父任务交付](../src/famou/bundle_parent_delivery.py)：`finish_bundle_parent_delivery`、`inspect_bundle_parent_delivery`。
-- [自动生命周期](../src/famou/automatic_solve_lifecycle.py)：`SolveExecutionControl`、`own_automatic_solve` 和状态投影。
-- [显式 worker](../src/famou/workers.py)：worker 会话、消息、等待、取消及重启处理。
+- [CLI](../src/lunar_evolution/cli.py)：`_solve`、`_solve_evolution`、`_solve_payload`、`_status_projection`。
+- [Controller](../src/lunar_evolution/controller.py)：`resume_conversational`、`resume`、`_execute_task`、`run_agent`、`run_evolution`、`cancel`。
+- [自动准备](../src/lunar_evolution/automatic_solve_bundle.py)：`prepare_automatic_solve_bundle`。
+- [评测器编译与审查](../src/lunar_evolution/evaluator_bundle.py)：`compile_evaluator_bundle`、`_compile_audit_suite`、`load_evaluator_bundle`。
+- [多文件候选生成](../src/lunar_evolution/agent_bundle_generation.py)：`generate_bundle_candidate`、`parse_bundle_agent_draft`。
+- [多文件执行与评测管线](../src/lunar_evolution/bundle_evolution.py)：`MultiFileCandidatePipeline`。
+- [演化引擎](../src/lunar_evolution/evolution.py)：`CandidateArchive`、`PopulationStrategy`、`OpenEvolveStrategy`。
+- [独立候选评分](../src/lunar_evolution/candidate_evaluation.py)：`evaluate_candidate_execution`、`inspect_candidate_evaluation`。
+- [父任务交付](../src/lunar_evolution/bundle_parent_delivery.py)：`finish_bundle_parent_delivery`、`inspect_bundle_parent_delivery`。
+- [自动生命周期](../src/lunar_evolution/automatic_solve_lifecycle.py)：`SolveExecutionControl`、`own_automatic_solve` 和状态投影。
+- [显式 worker](../src/lunar_evolution/workers.py)：worker 会话、消息、等待、取消及重启处理。
 - [Feature 142 规格](../specs/142-automatic-solve-lifecycle/spec.md)：Phase A/B 已实现并离线验收，Phase C 尚未开放。
 
 本文区分源码已实现、离线验收、真实运行和规划四种状态。当前真实运行结果由 Feature 139 的独立报告记录，架构存在一条执行路径并不自动意味着该路径对所有真实模型任务都已成功。

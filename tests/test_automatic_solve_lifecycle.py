@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from famou.automatic_solve_lifecycle import (
+from lunar_evolution.automatic_solve_lifecycle import (
     AutomaticSolveAlreadyRunning,
     AutomaticSolveExecutionOwner,
     SolveExecutionBudgetExceeded,
@@ -125,7 +125,7 @@ def test_owner_excludes_another_process_and_releases_workspace_lock(tmp_path) ->
     program = """
 import sys
 from pathlib import Path
-from famou.automatic_solve_lifecycle import own_automatic_solve, AutomaticSolveAlreadyRunning
+from lunar_evolution.automatic_solve_lifecycle import own_automatic_solve, AutomaticSolveAlreadyRunning
 try:
     with own_automatic_solve('parent', Path(sys.argv[1])):
         pass
@@ -152,8 +152,8 @@ def test_workspace_lock_rejects_symlink_without_touching_target(tmp_path) -> Non
 
 
 def test_budget_wins_between_last_task_success_and_parent_settlement(tmp_path) -> None:
-    from famou.models import RunStatus
-    from famou.store import Store
+    from lunar_evolution.models import RunStatus
+    from lunar_evolution.store import Store
 
     store = Store(tmp_path / "state.db")
     store.initialize()

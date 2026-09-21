@@ -9,9 +9,12 @@ import pytest
 from test_frozen_evaluator_bundle import EVALUATOR_SOURCE
 from test_snapshot_evaluator_bundle import SNAPSHOT_SOURCE, _compile, _runtime
 
-from famou import candidate_execution_runner as runner
-from famou import evaluator_bundle as bundle
-from famou.automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
+from lunar_evolution import candidate_execution_runner as runner
+from lunar_evolution import evaluator_bundle as bundle
+from lunar_evolution.automatic_solve_lifecycle import (
+    SolveExecutionBudgetExceeded,
+    SolveExecutionCancelled,
+)
 
 
 @pytest.mark.parametrize("invocation,source", [("candidate", EVALUATOR_SOURCE), ("snapshot", SNAPSHOT_SOURCE)])

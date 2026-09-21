@@ -3,13 +3,13 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import ClassVar
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.agents import AgentInvocationError, AgentRegistry, AgentResult
-from famou.config import Config
-from famou.controller import LocalController
-from famou.memory import MemoryStore
-from famou.runtime import MockRuntime, ModelTurn, RuntimeResult, ToolCall
-from famou.tools import LocalToolRegistry
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.agents import AgentInvocationError, AgentRegistry, AgentResult
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.memory import MemoryStore
+from lunar_evolution.runtime import MockRuntime, ModelTurn, RuntimeResult, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
 
 
 class DelegatingFixtureAdapter:
@@ -76,7 +76,7 @@ class FixtureModel:
 
 
 def test_controller_delegates_with_durable_agent_events_and_artifacts(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     adapter = DelegatingFixtureAdapter()
     controller = LocalController(
         config,
@@ -103,7 +103,7 @@ def test_controller_delegates_with_durable_agent_events_and_artifacts(tmp_path: 
 
 
 def test_controller_default_runtime_is_available_through_agent_boundary(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create("answer locally")
     settled, result = controller.run_agent(run.id)
     assert settled.status.value == "succeeded"
@@ -111,7 +111,7 @@ def test_controller_default_runtime_is_available_through_agent_boundary(tmp_path
 
 
 def test_controller_fails_closed_when_agent_invocation_fails(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou", max_retries=1)
+    config = Config(tmp_path / ".lunar-evolution", max_retries=1)
     adapter = FailingDelegatingAdapter()
     controller = LocalController(config, MockRuntime(), agent_registry=AgentRegistry([adapter]))
     run = controller.create("delegate a report")
@@ -128,7 +128,7 @@ def test_controller_fails_closed_when_agent_invocation_fails(tmp_path: Path) -> 
 
 
 def test_controller_completes_mock_run_and_is_idempotent(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     controller = LocalController(config, MockRuntime())
     run = controller.start("produce a local report")
     assert run.status.value == "succeeded"
@@ -143,7 +143,7 @@ def test_controller_completes_mock_run_and_is_idempotent(tmp_path: Path) -> None
 
 
 def test_controller_recovers_a_claimed_task(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     controller = LocalController(config, MockRuntime())
     run = controller.store.create_run("recover me")
     task = controller.store.next_task(run.id)
@@ -154,7 +154,7 @@ def test_controller_recovers_a_claimed_task(tmp_path: Path) -> None:
 
 
 def test_controller_wires_hermes_loop_events_and_artifacts(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     memory = MemoryStore(config.database)
     runtime = AgentLoopRuntime(
         FixtureModel(),
@@ -238,7 +238,7 @@ class ParallelFixtureRuntime:
 def test_controller_runs_independent_tasks_in_isolated_workers(tmp_path: Path) -> None:
     ParallelFixtureRuntime.reset()
     controller = LocalController(
-        Config(tmp_path / ".famou"),
+        Config(tmp_path / ".lunar-evolution"),
         ParallelFixtureRuntime(),
         runtime_factory=ParallelFixtureRuntime,
         max_workers=2,
@@ -269,7 +269,7 @@ def test_controller_parallel_workers_preserve_dependency_order(tmp_path: Path) -
     ParallelFixtureRuntime.reset()
     ParallelFixtureRuntime.release.set()
     controller = LocalController(
-        Config(tmp_path / ".famou"),
+        Config(tmp_path / ".lunar-evolution"),
         ParallelFixtureRuntime(),
         runtime_factory=ParallelFixtureRuntime,
         max_workers=2,
@@ -291,7 +291,7 @@ def test_controller_parallel_workers_preserve_dependency_order(tmp_path: Path) -
 
 def test_parallel_workers_require_a_runtime_factory(tmp_path: Path) -> None:
     try:
-        LocalController(Config(tmp_path / ".famou"), MockRuntime(), max_workers=2)
+        LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime(), max_workers=2)
     except ValueError as exc:
         assert "runtime_factory" in str(exc)
     else:
@@ -301,7 +301,7 @@ def test_parallel_workers_require_a_runtime_factory(tmp_path: Path) -> None:
 def test_controller_cancel_fans_out_to_active_workers(tmp_path: Path) -> None:
     ParallelFixtureRuntime.reset()
     controller = LocalController(
-        Config(tmp_path / ".famou"),
+        Config(tmp_path / ".lunar-evolution"),
         ParallelFixtureRuntime(),
         runtime_factory=ParallelFixtureRuntime,
         max_workers=2,

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.evolution import MAX_SOURCE_BYTES
-from famou.producer_handoff import (
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.evolution import MAX_SOURCE_BYTES
+from lunar_evolution.producer_handoff import (
     MAX_PRODUCER_ENVELOPE_BYTES,
     PRODUCER_BUDGET_INVALID,
     PRODUCER_CONTRACT_MISMATCH,
@@ -37,7 +37,7 @@ from famou.producer_handoff import (
     parse_producer_envelope,
     producer_bundle_dependency_sha256,
 )
-from famou.seed_handoff import SeedAdmissionError
+from lunar_evolution.seed_handoff import SeedAdmissionError
 
 EVALUATOR_SHA = "a" * 64
 PRODUCER_SHA = "b" * 64
@@ -603,9 +603,9 @@ def test_required_producer_fingerprint_is_pinned_before_reading_envelope(tmp_pat
 
 
 def test_prepare_manifest_is_public_and_does_not_admit_or_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import famou
-    import famou.producer_handoff as module
-    from famou.seed_handoff import SeedManifest
+    import lunar_evolution
+    import lunar_evolution.producer_handoff as module
+    from lunar_evolution.seed_handoff import SeedManifest
 
     contract = _contract()
     root = tmp_path / "producer"
@@ -620,8 +620,8 @@ def test_prepare_manifest_is_public_and_does_not_admit_or_write(tmp_path: Path, 
     manifest = module.prepare_producer_seed_manifest(
         root, contract, evaluator_fingerprint=EVALUATOR_SHA, producer_fingerprint=PRODUCER_SHA, producer_id="shinka",
     )
-    assert famou.prepare_producer_seed_manifest is module.prepare_producer_seed_manifest
-    assert "prepare_producer_seed_manifest" in famou.__all__ and "prepare_producer_seed_manifest" in module.__all__
+    assert lunar_evolution.prepare_producer_seed_manifest is module.prepare_producer_seed_manifest
+    assert "prepare_producer_seed_manifest" in lunar_evolution.__all__ and "prepare_producer_seed_manifest" in module.__all__
     assert isinstance(manifest, SeedManifest) and manifest.source_root == root.resolve()
     assert manifest.evaluator_kind == "exact_harness" and manifest.evaluator_fingerprint == EVALUATOR_SHA
     assert manifest.dependency_sha256 == producer_bundle_dependency_sha256([value["sha256"] for value in materials])
@@ -635,8 +635,8 @@ def test_prepare_manifest_is_public_and_does_not_admit_or_write(tmp_path: Path, 
 
 
 def test_preparation_and_legacy_admission_share_exact_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import famou.producer_handoff as module
-    from famou.seed_handoff import admit_seed_manifest
+    import lunar_evolution.producer_handoff as module
+    from lunar_evolution.seed_handoff import admit_seed_manifest
 
     contract = _contract()
     root = tmp_path / "producer"
@@ -681,7 +681,7 @@ def test_preparation_and_legacy_admission_share_exact_manifest(tmp_path: Path, m
     ("envelope", PRODUCER_ENVELOPE_JSON_INVALID),
 ])
 def test_preparation_preserves_envelope_and_material_checks(tmp_path: Path, mutation: str, expected: str) -> None:
-    import famou.producer_handoff as module
+    import lunar_evolution.producer_handoff as module
 
     contract = _contract()
     root = tmp_path / "producer"
@@ -704,8 +704,8 @@ def test_preparation_preserves_envelope_and_material_checks(tmp_path: Path, muta
 
 
 def test_prepared_source_is_rechecked_before_any_local_evaluation(tmp_path: Path) -> None:
-    import famou.producer_handoff as module
-    from famou.seed_handoff import admit_seed_manifest
+    import lunar_evolution.producer_handoff as module
+    from lunar_evolution.seed_handoff import admit_seed_manifest
 
     contract = _contract()
     root = tmp_path / "producer"
@@ -726,7 +726,7 @@ def test_prepared_source_is_rechecked_before_any_local_evaluation(tmp_path: Path
 
 @pytest.mark.parametrize("api", ["file", "object", "prepare"])
 def test_shared_preparation_preserves_caller_error_precedence(tmp_path: Path, api: str) -> None:
-    import famou.producer_handoff as module
+    import lunar_evolution.producer_handoff as module
 
     function = {
         "file": lambda contract, evaluator: admit_producer_result(

@@ -3,7 +3,7 @@
 Use one contract and one explicit command pair for a local comparison:
 
 ```bash
-lunar-agent benchmark contract.json \
+lunar-evolution benchmark contract.json \
   --strategy loop --strategy population \
   --generator-command "/absolute/path/to/generator" \
   --evaluator-command "/absolute/path/to/evaluator" \

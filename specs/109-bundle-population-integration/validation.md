@@ -51,7 +51,7 @@ Also passed:
 
 - `ruff check src tests` and `python -m compileall -q src tests`;
 - Specify prerequisite check with `--require-tasks --include-tasks`;
-- installed `lunar-agent evolve-bundle --help`, all six new package exports, and the executable
+- installed `lunar-evolution evolve-bundle --help`, all six new package exports, and the executable
   quickstart with relocated-delivery inspection;
 - `git diff --check` and updated readiness/validation document links;
 - zero changes relative to `027a235` under frozen `specs/051*`, `074*`, `076*`, `078*`, `082*`.

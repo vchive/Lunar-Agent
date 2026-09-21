@@ -9,7 +9,7 @@ HTTP/SSE, gateway registration, remote queues, multi-tenancy, billing, or OpenCo
 **Rationale**: The WebAgent branches show that measurable quality comes from routing, structured
 clarification, plan provenance, schema-driven outputs, independent evaluation, and explicit
 evolution. Its deployment machinery is irrelevant to a single-user local Agent and would violate
-Lunar-Agent's standalone constitution.
+Lunar Evolution's standalone constitution.
 
 **Alternatives considered**:
 

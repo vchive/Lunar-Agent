@@ -11,8 +11,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from famou import parse_candidate_source_bundle
-from famou.algorithm import AlgorithmProblemContract
+from lunar_evolution import parse_candidate_source_bundle
+from lunar_evolution.algorithm import AlgorithmProblemContract
 
 root = Path(tempfile.mkdtemp(prefix="lunar-source-bundle-")).resolve()
 source = root / "source"
@@ -49,7 +49,7 @@ manifest = root / "bundle.json"
 manifest.write_text(json.dumps(bundle.to_dict(), indent=2), encoding="utf-8")
 home = root / "unused-home"
 command = [
-    str(Path(".venv/bin/lunar-agent").absolute()), "candidate-bundle", "validate", str(manifest),
+    str(Path(".venv/bin/lunar-evolution").absolute()), "candidate-bundle", "validate", str(manifest),
     "--source-root", str(source), "--contract", str(contract_path),
     "--bundle-sha256", bundle.digest(), "--home", str(home), "--json",
 ]

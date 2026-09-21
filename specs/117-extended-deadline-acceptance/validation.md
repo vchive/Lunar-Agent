@@ -64,4 +64,4 @@ agree with the retained observations. No model, candidate or evaluator was calle
 The registered verifier, 119 local documentation links and diff checks passed after reporting.
 No source/test changes were made after the 216-test prelaunch regression; no additional product
 full suite was needed. Results and handoff are committed and pushed under the standing instruction.
-See [postrun report](postrun/report.md) and its linked machine-readable evidence.
+See [postrun report](../../docs/history-archive.md) and its linked machine-readable evidence.

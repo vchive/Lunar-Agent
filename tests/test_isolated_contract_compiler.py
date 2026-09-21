@@ -6,14 +6,24 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import ISOLATED_SYSTEM_PROMPT, AgentLoopRuntime, ProfileBudgetFailure
-from famou.config import Config
-from famou.controller import LocalController
-from famou.conversational import ContractCompilationError, RuntimeContractCompiler
-from famou.memory import MemoryStore
-from famou.profiles import ModelProfile
-from famou.runtime import MockRuntime, ModelTurn, RuntimeResult, SubprocessRuntime, ToolCall
-from famou.transcript import SessionTranscript
+from lunar_evolution.agent_loop import (
+    ISOLATED_SYSTEM_PROMPT,
+    AgentLoopRuntime,
+    ProfileBudgetFailure,
+)
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.conversational import ContractCompilationError, RuntimeContractCompiler
+from lunar_evolution.memory import MemoryStore
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import (
+    MockRuntime,
+    ModelTurn,
+    RuntimeResult,
+    SubprocessRuntime,
+    ToolCall,
+)
+from lunar_evolution.transcript import SessionTranscript
 
 
 def _contract() -> dict[str, object]:

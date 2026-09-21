@@ -6,7 +6,7 @@
 
 ## Goal
 
-Give Lunar-Agent a self-contained representation for algorithmic decision and prediction
+Give Lunar Evolution a self-contained representation for algorithmic decision and prediction
 problems. A validated contract will be the hand-off between conversational intake and later
 solver/evaluator roles, while the local workspace keeps input data, candidate programs, independent
 evaluation, and business outputs visibly separate. This is the first algorithm layer; it does not
@@ -14,15 +14,17 @@ yet execute an evolution strategy.
 
 ## Local evidence used
 
-This specification is grounded in the local WebAgent v2.5 materials and source tree:
+This specification is grounded in the local WebAgent v2.5 materials and source tree. Descriptive
+source labels below refer to external work; original titles and paths remain in the
+[historical archive](../../docs/history-archive.md):
 
-- `面经/合集/项目二-伐谋WebAgent与Workspace.md` (Clarify → PLAN → Build → independent evaluation);
-- `面经/07-伐谋WebAgent对话式决策算法-模拟面试.md` (problem formulation, validity first,
+- Local WebAgent/Workspace architecture notes (Clarify → PLAN → Build → independent evaluation);
+- Local conversational WebAgent design notes (problem formulation, validity first,
   anytime output);
-- `面经/06-伐谋Workspace程序演化算法-模拟面试.md` (program candidates, frozen evaluator,
+- Local reference-workspace program-evolution notes (program candidates, frozen evaluator,
   archive/population separation);
 - `codesets/baidu/acg-fm/webagent/agent_configs/opencode-v2.5-base/agents/data-discovery.md`,
-  `data-cleaner.md`, and `famou-evaluate.md` (role boundaries and workspace conventions).
+  `data-cleaner.md`, and the external evaluation role definition (role boundaries and workspace conventions).
 
 ## User Scenarios & Testing
 
@@ -104,7 +106,7 @@ verify canonical defaults/validation; unknown strategies are rejected without ex
 
 ### User Story 5 — Preserve local and parent-Agent interoperability (Priority: P2)
 
-As a local owner, I want to run Lunar-Agent directly without a parent Agent; as Codex, Hermes,
+As a local owner, I want to run Lunar Evolution directly without a parent Agent; as Codex, Hermes,
 OpenClaw, or another local parent Agent, I want to invoke the same binary as a CLI/JSON child
 process and continue a durable run later without installing a machine-wide runtime or a service.
 
@@ -117,7 +119,7 @@ the detached form, exit the caller, and use the returned run ID with `resume`.
 1. **Given** a contract-bearing plan and no parent Agent, **When** a user runs the local CLI, **Then**
    the run completes (or pauses for input) using only repository-owned state and the configured
    runtime adapter.
-2. **Given** a parent Agent launches `lunar-agent ... --json` as a child process, **When** it reads
+2. **Given** a parent Agent launches `lunar-evolution ... --json` as a child process, **When** it reads
    stdout, **Then** it receives a machine-readable run/status payload and no user-global Hermes,
    OpenCode, or Codex state is required.
 3. **Given** a parent Agent launches a detached run, **When** the parent exits and later calls
@@ -170,7 +172,7 @@ the detached form, exit the caller, and use the returned run ID with `resume`.
 - **FR-1210**: Solver and evaluator roles MUST remain runtime-neutral and callable through the existing
   local Runtime Adapter; this feature MUST NOT add HTTP/SSE, queues, billing, multi-tenancy, or a
   mandatory Hermes/OpenCode/Codex installation.
-- **FR-1211**: Lunar-Agent MUST support three equivalent local invocation forms: direct standalone
+- **FR-1211**: Lunar Evolution MUST support three equivalent local invocation forms: direct standalone
   CLI execution, parent-Agent child-process execution through bounded stdin/stdout JSON, and
   detached execution followed by durable `resume`; none may require a parent Agent or a
   machine-global provider installation.

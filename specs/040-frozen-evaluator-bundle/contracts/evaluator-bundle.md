@@ -16,7 +16,7 @@ failure.
 
 ## Probe preflight
 
-- Lunar-Agent writes only declared synthetic files under a private probe workspace.
+- Lunar Evolution writes only declared synthetic files under a private probe workspace.
 - Every probe receives a placeholder candidate and canonical successful execution evidence.
 - Validity must match `expected_validity`.
 - Each invalid constraint probe must include its exact `constraint_id` in `error_info.code`.

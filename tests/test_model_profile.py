@@ -2,9 +2,9 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from famou.budget import BudgetExceeded
-from famou.model_profile import ProfileBudgetExceeded, UsageLedger
-from famou.profiles import ModelProfile
+from lunar_evolution.budget import BudgetExceeded
+from lunar_evolution.model_profile import ProfileBudgetExceeded, UsageLedger
+from lunar_evolution.profiles import ModelProfile
 
 
 def test_model_profile_round_trips_and_ledger_reports_cost() -> None:

@@ -8,11 +8,11 @@ import test_master_plan_envelope_integration as envelopes
 from test_effect_adapters import SubjectModel, _subject_request
 from test_staged_effect_adapter import _config, _request
 
-from famou.agent_loop import HERMES_SYSTEM_PROMPT, AgentLoopRuntime
-from famou.effect_adapters import run_subject_adapter
-from famou.staged_workflow import StagedWorkflowRunner
-from famou.tools import LocalToolRegistry
-from famou.workflow_checkpoint import WorkflowController
+from lunar_evolution.agent_loop import HERMES_SYSTEM_PROMPT, AgentLoopRuntime
+from lunar_evolution.effect_adapters import run_subject_adapter
+from lunar_evolution.staged_workflow import StagedWorkflowRunner
+from lunar_evolution.tools import LocalToolRegistry
+from lunar_evolution.workflow_checkpoint import WorkflowController
 
 clock = envelopes.clock
 ROLE = "Planning stage: your only deliverable in this invocation is a short handoff plan for Build."
@@ -22,14 +22,16 @@ UNKNOWN_STEP = (
     "PLAN_SENTINEL: Build must resolve UNKNOWN_PUBLIC_COLUMNS from the public inputs, "
     "then implement the objective scorer and validate the combined_score locally."
 )
-# Full external system messages (including changing budget snapshots) captured from the unchanged
-# 1dacddb fixture before Feature 077. Keep their bytes and every tool schema unchanged.
+# Full external system messages, including the fixture's changing budget snapshots.
+# Feature 145 updates only the native product name to Lunar Evolution. Restoring the prior
+# system prefix reproduces all four original hashes from the pre-077 fixture; budget guidance,
+# custom-system snapshots and tool schemas remain unchanged. Originals are retained in Git.
 SYSTEM_DIGESTS = {
     "native": (
-        "ae86d3b6b2a8fad7bd3b2a88e83d3335bca1def929dafa518f8ba6f26a408791",
-        "d7ab03f0a8d5437334b3721947a44630683ad729fa466000fbc36655501310e6",
-        "80871c3c244c29ba1da17f7c5ceea24ef89c67cf7ca3aded50e3daa88cf4a7c8",
-        "f3c29c005096e4bab454a962a8bda31643c4a889085c48901a4b7854735b3b93",
+        "d327bf491a702c5d876aac69f672dfea402f721e58ed4b27bf932e70122bdf4c",
+        "03451dcdb1c151d74fdb48f9d2f463a8a6e34da17faf5d47b9cd849081f81a4a",
+        "c80ee7517f19577efacae6b3ceb3387bb54d60b1de2f13b305b1531573d454df",
+        "eed1cea3a1a0430aac4af7ffbe41d8ae31835f84bdb111bf8cca3cdff8fb2503",
     ),
     "custom": (
         "6dfdf9ad4ceb527daa44fdb18a731e9a324d10787b0b5b696f9351b02cde20d9",

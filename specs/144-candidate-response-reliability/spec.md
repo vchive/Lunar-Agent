@@ -20,7 +20,7 @@ budgets, add provider-specific APIs, or launch a real campaign in this feature.
 
 ## Acceptance stories
 
-1. A native bundle generation request declares `lunar-agent-bundle-generation-v1`. A supporting
+1. A native bundle generation request declares `lunar-evolution-bundle-generation-v1`. A supporting
    AgentLoop receives invocation-local system guidance that the final answer is only the strict
    bundle JSON. Its generic summary instruction cannot override this requirement. Model tools,
    request count and budget enforcement stay unchanged. Subsequent ordinary requests do not

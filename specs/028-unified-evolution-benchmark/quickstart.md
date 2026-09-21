@@ -3,7 +3,7 @@
 Compare all three explicit strategies:
 
 ```bash
-lunar-agent benchmark contract.json \
+lunar-evolution benchmark contract.json \
   --strategy loop --strategy population --strategy openevolve \
   --generator-command "/absolute/path/to/generator" \
   --evaluator-command "/absolute/path/to/evaluator" \

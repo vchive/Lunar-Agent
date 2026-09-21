@@ -7,7 +7,7 @@
 
 ## Context and scope
 
-Lunar-Agent can currently use one explicit solver Agent as its candidate generator. Population
+Lunar Evolution can currently use one explicit solver Agent as its candidate generator. Population
 search benefits from independent proposal styles, but callers must otherwise build their own
 round-robin wrapper outside the repository. This feature adds a small local portfolio bridge and a
 repeatable CLI option. Each generation selects one explicitly configured solver in deterministic

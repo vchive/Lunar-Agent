@@ -12,8 +12,11 @@ from pathlib import Path
 import pytest
 import test_candidate_evaluation as integration
 
-from famou.candidate_evaluation import evaluate_candidate_execution, inspect_candidate_evaluation
-from famou.candidate_evaluation_spec import (
+from lunar_evolution.candidate_evaluation import (
+    evaluate_candidate_execution,
+    inspect_candidate_evaluation,
+)
+from lunar_evolution.candidate_evaluation_spec import (
     CandidateEvaluationError,
     CandidateEvaluationSpec,
     canonical_json,
@@ -87,7 +90,7 @@ def test_evaluate_and_inspect_work_under_128_file_descriptors_in_an_isolated_pro
     script = """import resource, sys
 from pathlib import Path
 from test_candidate_evaluation import fixture
-from famou.candidate_evaluation import evaluate_candidate_execution, inspect_candidate_evaluation
+from lunar_evolution.candidate_evaluation import evaluate_candidate_execution, inspect_candidate_evaluation
 _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 if hard != resource.RLIM_INFINITY and hard < 128:
     raise SystemExit(77)

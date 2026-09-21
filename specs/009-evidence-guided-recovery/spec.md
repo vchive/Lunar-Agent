@@ -6,7 +6,7 @@
 
 ## Goal
 
-Turn durable local failure evidence into a bounded, runtime-neutral recovery proposal. Lunar-Agent
+Turn durable local failure evidence into a bounded, runtime-neutral recovery proposal. Lunar Evolution
 must recommend the next safe control-plane action without silently retrying, changing an accepted
 plan, calling a model, or executing a tool.
 
@@ -50,7 +50,7 @@ runtime failure, and a budget-exceeded run without using a model or network.
 As Codex, Hermes, OpenClaw, or another parent Agent, I want a JSON CLI command and status field for
 the most recent recovery proposal, so the CLI remains the stable local integration boundary.
 
-**Independent Test**: `lunar-agent recover <run-id> --json` emits one proposal object; a following
+**Independent Test**: `lunar-evolution recover <run-id> --json` emits one proposal object; a following
 `status --json` exposes the same stored proposal under `recovery`.
 
 ## Edge Cases

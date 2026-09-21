@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from famou import staged_workflow
-from famou.workflow_checkpoint import WorkflowCheckpointError
+from lunar_evolution import staged_workflow
+from lunar_evolution.workflow_checkpoint import WorkflowCheckpointError
 
 PLAN = {"plan": ["Save a complete candidate"], "expected_paths": ["solution.json", "_agent_summary.md"]}
 BODY = json.dumps(PLAN)

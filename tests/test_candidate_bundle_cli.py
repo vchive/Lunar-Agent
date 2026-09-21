@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from test_cli import _write_evolution_contract
 
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.candidate_bundle import MAX_CANDIDATE_BUNDLE_BYTES, CandidateSourceBundle
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.candidate_bundle import MAX_CANDIDATE_BUNDLE_BYTES, CandidateSourceBundle
 
 
 def _cli_files(tmp_path: Path):

@@ -1,0 +1,36 @@
+# Quickstart: Small reference-benchmark Breakthrough Trial
+
+First export the selected cases' exact `reference-benchmark 1.10.6` identities/public ledgers and the
+comparator's per-run receipts into `suite.json` and `baseline.json`. Do not manually enter a best
+score. Explicit adapter evidence in the export must be consistent and use an allowlisted adapter;
+the baseline source and provenance are retained in the generated report.
+
+Run one or two cases three times each in ordinary Agent mode:
+
+```bash
+lunar-evolution effect-trial suite.json baseline.json \
+  --case-source logistics_vehicle_dispatch_scheduling=/absolute/case/root \
+  --subject-command "/absolute/subject-adapter" \
+  --harness-command "/absolute/reference-harness-adapter" \
+  --requested-model gpt-5.6-sol \
+  --runs-per-case 3 --timeout 3600 \
+  --workspace .lunar-evolution/effect-trial-001 --json
+```
+
+Resume an interrupted run with the same frozen inputs and options plus `--resume`. Completed logical
+runs are reused only when runner-owned state already registers their exact record digest.
+
+An achieved milestone means at least one selected case had full planned Lunar coverage and a valid
+Lunar best score strictly above the matching exported baseline historical best. The report's
+`baseline_historical_best` field is normative for all sources; WebAgent baselines may retain the
+legacy `webagent_historical_best` alias. It does not mean
+20-case parity or formal superiority. Deep evolution is not part of this command; WebAgent source
+uses five outer iterations when `/evolve` is invoked without a numeric budget.
+
+Deterministic repository checks:
+
+```bash
+uv run pytest -q tests/test_effect_trial.py tests/test_cli.py
+uv run pytest -q
+uv run ruff check .
+```

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.cli import main
-from famou.runtime import RuntimeResult
-from famou.store import Store
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.cli import main
+from lunar_evolution.runtime import RuntimeResult
+from lunar_evolution.store import Store
 
 
 def _contract() -> AlgorithmProblemContract:
@@ -117,7 +117,7 @@ def _write_harness(tmp_path: Path) -> Path:
         "candidate = pathlib.Path(sys.argv[1])\n"
         "root = candidate.parent\n"
         "try:\n"
-        " assert 'FAMOU_API_KEY' not in os.environ\n"
+        " assert 'LUNAR_EVOLUTION_API_KEY' not in os.environ\n"
         " assert 'LUNAR_HARNESS_SENTINEL' not in os.environ\n"
         " assert json.loads((root / 'execution.json').read_text())['status'] == 'succeeded'\n"
         " assert (root / 'data/raw/orders.csv').read_text().splitlines()[1] == 'secret-order-42'\n"
@@ -138,8 +138,8 @@ def test_solve_evolve_uses_exact_harness_and_materializes_its_winner(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = HarnessRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
-    monkeypatch.setenv("FAMOU_API_KEY", "sk-model-secret-must-not-reach-harness")
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setenv("LUNAR_EVOLUTION_API_KEY", "sk-model-secret-must-not-reach-harness")
     monkeypatch.setenv("LUNAR_HARNESS_SENTINEL", "must-not-reach-harness")
     orders = tmp_path / "orders.csv"
     orders.write_text("id\nsecret-order-42\n", encoding="utf-8")
@@ -229,7 +229,7 @@ def test_harness_configuration_requires_evolution_and_matching_resume(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = HarnessRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     harness = _write_harness(tmp_path)
     command = f"{sys.executable} {harness}"
     home = tmp_path / "home"
@@ -347,7 +347,7 @@ def test_invalid_objective_harness_output_fails_closed(
     tmp_path: Path, capsys, monkeypatch, mode: str
 ) -> None:
     runtime = HarnessRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     orders = tmp_path / "orders.csv"
     orders.write_text("id\nsecret-order-42\n", encoding="utf-8")
     bad = tmp_path / "bad.py"
@@ -388,7 +388,7 @@ def test_detached_solve_propagates_objective_harness_without_secret(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = HarnessRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     captured: dict[str, object] = {}
 
     class Process:
@@ -399,8 +399,8 @@ def test_detached_solve_propagates_objective_harness_without_secret(
         captured["env"] = kwargs.get("env")
         return Process()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
-    monkeypatch.setattr("famou.cli.os.getpgid", lambda pid: pid)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.os.getpgid", lambda pid: pid)
     harness = _write_harness(tmp_path)
     command = f"{sys.executable} {harness}"
 
@@ -425,14 +425,14 @@ def test_detached_solve_propagates_objective_harness_without_secret(
     assert isinstance(child_command, list)
     index = child_command.index("--evaluator-command")
     assert child_command[index + 1] == command
-    assert "FAMOU_API_KEY" not in (captured["env"] or {})
+    assert "LUNAR_EVOLUTION_API_KEY" not in (captured["env"] or {})
 
 
 def test_answer_can_resume_pending_contract_with_the_same_objective_harness(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = QuestionHarnessRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     orders = tmp_path / "orders.csv"
     orders.write_text("id\nsecret-order-42\n", encoding="utf-8")
     harness = _write_harness(tmp_path)

@@ -77,6 +77,6 @@ reliability or real automatic multi-file success. Feature 128's separate prepara
 holdouts 8/8 remain unchanged. Address evaluator-generation timeout semantics and the two state /
 projection follow-ups before registering a fresh independent real attempt; do not reopen this one.
 
-Full report: [postrun/report.md](postrun/report.md). Results:
-[postrun/results.json](postrun/results.json). Inventory:
-[postrun/evidence.json](postrun/evidence.json).
+Full report: [postrun/report.md](../../docs/history-archive.md). Results:
+[postrun/results.json](../../docs/history-archive.md). Inventory:
+[postrun/evidence.json](../../docs/history-archive.md).

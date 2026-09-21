@@ -1,4 +1,4 @@
-# Lunar-Agent 交接记录
+# Lunar Evolution 交接记录
 
 ## 当前协作约定更新（2026-09-16）
 
@@ -7,6 +7,39 @@
 不改写冻结测量，不重跑 WebAgent。普通流程只把 Feature 069 已有的 Lunar 分数作为参考基线；
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
+
+## 2026-09-21 项目统一命名（Feature 145）
+
+用户要求当前仓库统一使用 **Lunar Evolution**。本轮沿 SDD 新增
+[`specs/145-lunar-evolution-identity/`](specs/145-lunar-evolution-identity/spec.md)，完成实际包名、
+安装命令、配置和入口迁移：发行包/唯一命令 `lunar-evolution`，Python 包及模块入口
+`lunar_evolution`，用户配置前缀 `LUNAR_EVOLUTION_`，默认状态目录 `.lunar-evolution`。
+不保留旧命令别名或环境变量回退；已有 execution-only `LUNAR_*` 协议变量仍按原义使用。
+用户已改远端名称，本地 origin 已同步到 `git@github.com:vchive/Lunar-Evolution.git`。
+本地 checkout 目录暂仍为 `/Users/liminghan/Documents/lunar_agent`。
+
+提示词、HTTP 标识、profile、协议命名、公开 digest API 和 detached 子进程入口均已同步。
+`benchmark_case_content_digest` 使用新的 `lunar-evolution-case-v1` 域，不能把旧命名空间下的
+hash 当作等价值。外部系统用 reference engine/benchmark 中性说明，保留真实归属。
+
+为不改写历史封存证据，844 个原始历史文件（5235354 字节）从当前发布树退休，固定在
+`c6947fd`；[历史索引](docs/history-archive.md)保留路径、提交和逐文件校验值。
+2294 项历史回归在仓库外的固定工作树运行，原 24 项注册回归仍用 `5560eb9`，不丢测试、
+不改封存 hash，也不把旧测量包装成改名后的新效果。旧章节术语已统一，原始命令和证据以
+索引中的固定 Git 版本为准。Git 历史不改写。
+
+本机原状态、运行证据、旧开发环境、缓存和构建目录已原样保存到
+`/Users/liminghan/Documents/lunar-evolution-archive/20260921-identity-c6947fd`。
+其中 `runs-and-evidence` 是原运行资料，`legacy-state` 是更早的本地状态。独立复核确认
+131/134/139 的 21/97/70 文件与全部 781341 字节均匹配原 SHA/size，源码 tar 的 1973 个
+Git blob 也全部一致。搬移不证明原绝对路径或 inode 绑定可续跑；普通 `--home` 会初始化所选
+工作状态，不应拿唯一归档副本当可写工作区。
+
+全新 wheel 在仓库外环境的 5 项安装验收已通过，包含真实 detached mock 子进程；runner
+34 项、CLI/effect 146 项通过。完整回归及最终静态检查正在收尾，精确结果记录在
+[145 validation](specs/145-lunar-evolution-identity/validation.md)。本轮无 provider 请求或新
+campaign，139 仍为 preparation 1/1、primary/joint 0/1；142 Phase C、143 T009 和真实完整
+交付验收仍是后续开发工作。
 
 ## 2026-09-21 候选响应协议与失败诊断（Feature 144）
 
@@ -26,7 +59,7 @@ runtime 仅在本次请求副本中应用；普通调用、自定义约束和持
 完整双阶段当前 8848 passed、1 skipped、24 deselected，冻结 123 阶段另有 24 passed，exit 0。
 最终小幅防御性改动有 100 项复验；完整回归的代码检查点、CI 和证据范围见
 [144 validation](specs/144-candidate-response-reliability/validation.md)。
-最终产品 `c6947fd` 的 [Linux CI](https://github.com/vchive/Lunar-Agent/actions/runs/35556293182)
+最终产品 `c6947fd` 的 [Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35556293182)
 也已确认 Python 3.11、3.12、3.13 完整测试和静态检查全部通过。
 本轮没有 provider 请求或新 campaign，也不修复或重放历史生成代码；131/134/139 冻结结果不变。
 下一步是新固定条件下的真实候选完成与前台完整交付验收。142 Phase C 自动后台入口和
@@ -51,9 +84,9 @@ Store migration 8 保留旧记录；旧记录缺少 owner 或锁证据时不自�
 campaign、WebAgent 重跑或历史生成源码执行，131/134/139 的冻结结果不变。
 
 CI 诊断已由 `c22bd37` 推送：保留有限日志和 JUnit，公开有界失败摘要，并让 Python 三版本
-独立完成。旧 [run 35522272395](https://github.com/vchive/Lunar-Agent/actions/runs/35522272395)
+独立完成。旧 [run 35522272395](https://github.com/vchive/Lunar-Evolution/actions/runs/35522272395)
 在 Linux 3.11 测试步骤失败且没有公开具体日志；新
-[run 35523896293](https://github.com/vchive/Lunar-Agent/actions/runs/35523896293) 三版本均报 96
+[run 35523896293](https://github.com/vchive/Lunar-Evolution/actions/runs/35523896293) 三版本均报 96
 项失败。公开摘要定位到候选执行；本地复现确认符号链接形式的 shell 被安全检查拒绝。
 正向 fixture 改为记录解析后的真实可执行路径，164 项定向回归通过，修复 `93469e7` 已推送；
 产品安全检查未放宽。该修复矩阵的候选执行失败已消失，仍暴露四项旧测试环境依赖，
@@ -62,7 +95,7 @@ Python 3.12 另有一项间歇性快照失败。后续已修：CI 创建与身�
 管理本身的 SQLite 连接，防止 GC 在快照中触发 checkpoint。193 项历史链/负测、41 项身份/
 诊断、两个 Python 版本各 76 项 attestation 及 250 项相关回归通过。未改产品安全检查或历史
 测量记录，也未上传八份私人 campaign 文件。最终修复提交 `8e1e089` 的
-[Linux CI](https://github.com/vchive/Lunar-Agent/actions/runs/35526731156) 已于
+[Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35526731156) 已于
 2026-09-21 02:05（北京时间）确认 Python 3.11、3.12、3.13 全部通过完整双阶段测试、
 报告保存及静态检查。后续仅同步验收文档，产品、测试和 CI 配置保持该已验证提交的字节。
 本轮 worker 修复与跨平台回归已收尾。
@@ -292,7 +325,7 @@ compiler 和 auditor 请求分别耗时 48.363、346.070、124.757 秒，两项�
 
 下一步按 SDD 设计足够且显式的每候选工具预算及候选完成诊断，先用离线 fixture 验证，
 再决定新真实测量的预算并独立登记。不能在旧槽追加工具、改变 guard 语义或重试补分。
-见[134 报告](specs/134-budgeted-multifile-acceptance/postrun/report.md)。真实完整交付仍未
+见[134 报告](docs/history-archive.md)。真实完整交付仍未
 通过验收；外部 producer 多文件 seed、全链路预算/取消及 detached 仍未完成。
 
 262 项测量测试通过；全量双阶段为当前 7924 passed/1 skipped/24 deselected 和固定历史
@@ -1072,7 +1105,7 @@ exact evaluator/输出绑定 → Candidate/receipt/archive/搜索与交付接线
 
 ## Feature 107：多文件候选持久化执行证据（已完成，2026-09-16）
 
-新增 `src/famou/candidate_execution_evidence.py`、`run_candidate_execution_recorded`、
+新增 `src/lunar_evolution/candidate_execution_evidence.py`、`run_candidate_execution_recorded`、
 `inspect_candidate_execution_record` 和 `CandidateExecutionRecord`。CLI 为
 `candidate-bundle run-recorded` / `inspect-execution`，均在 config/home/Store 初始化前分派。
 调用方指定不存在的 attempt 目录；完整 plan/admission/pins 和 source/input 字节复验后
@@ -1104,7 +1137,7 @@ materialization 生命周期。未运行外部框架、模型、provider 或 cam
 
 ## Feature 106：候选 bounded execution runner（已完成，2026-09-16）
 
-新增 `src/famou/candidate_execution_runner.py`、`CandidateExecutionRunner` 和静态
+新增 `src/lunar_evolution/candidate_execution_runner.py`、`CandidateExecutionRunner` 和静态
 `candidate-bundle run` CLI。runner 在启动前重建并重验 workspace plan、execution admission、
 源码 bundle、staged input、caller pins 以及 workspace/input 的实际目录 inode；共享普通祖先
 目录允许，但同根和互为父子目录拒绝。有效命令是 plan 的显式 argv 加 bundle entrypoint，
@@ -1125,7 +1158,7 @@ exact evaluator、launch intent 和 resume。未运行真实 OpenEvolve、Shinka
 
 ## Feature 105：候选执行输入 staging（已完成，2026-09-16）
 
-新增 `src/famou/candidate_input_staging.py`，公开 `stage_candidate_execution_inputs`、
+新增 `src/lunar_evolution/candidate_input_staging.py`，公开 `stage_candidate_execution_inputs`、
 `StagedCandidateExecutionInputs` 和 `CandidateInputStagingError`。完整 admission、plan 与
 caller pins 在两根目录 IO 前重验；输入按声明 target 从 caller source root 读取，在新建
 `.candidate-inputs-*` 私有目录中独占写入，再重读目标 size/SHA-256。仅复制声明输入，支持
@@ -1149,7 +1182,7 @@ archive 或恢复状态。目录返回后可被修改，未来 runner 必须在�
 
 ## Feature 104：候选 execution admission（已完成静态 admission 边界，2026-09-16）
 
-已实现 `src/famou/candidate_execution.py` 的静态、path-free admission API：
+已实现 `src/lunar_evolution/candidate_execution.py` 的静态、path-free admission API：
 `CandidateExecutionInput`、`CandidateEvaluatorPin`、`CandidateExecutionBudget`、
 `CandidateExecutionAdmission`、`VerifiedCandidateExecutionAdmission`，以及
 `build_candidate_execution_admission`、`parse_candidate_execution_admission`、
@@ -1385,9 +1418,9 @@ SQLite transaction 中登记，通过 receipt/journal SHA-256 和 prepared.attes
 进程实际运行，不识别/终止未知存活进程，不保证 exactly-once 或成功交付，协议记录暂无 GC。
 
 更新时间：2026-09-14
-当前仓库：`/Users/liminghan/Documents/lunar_agent`  
-当前分支：`main`  
-远端：`git@github.com:vchive/Lunar-Agent.git`  
+当前仓库：`/Users/liminghan/Documents/lunar_agent`
+当前分支：`main`
+远端：`git@github.com:vchive/Lunar-Evolution.git`
 提交身份：`vchive <vchive@users.noreply.github.com>`
 
 ## Feature 094 结项：materialization 证据包导出
@@ -1729,7 +1762,7 @@ schema 或显式迁移。
 ## 最新续作：Feature 086 remote material handoff
 
 Feature 086 已在当前工作树完成离线实现并完成独立审查：新增
-`src/famou/remote_material_handoff.py`，把已由调用方取得并可选 reconcile 的
+`src/lunar_evolution/remote_material_handoff.py`，把已由调用方取得并可选 reconcile 的
 `RemoteExperimentState(status="completed")` 转换为通用 `ProducerResultEnvelope`，再通过
 对象级 `admit_producer_envelope` 进入既有本地 exact evaluator、receipt 和 verified-seed
 admission。只有 pinned producer ID/fingerprint、非空 `candidate_source` references、有效
@@ -1750,13 +1783,13 @@ Shinka/producer 变更及本轮测试）；最终数字以本轮全量 pytest �
 ## 演化生态融合与 OpenEvolve verified producer
 
 本轮已把“Lunar 融合外部演化项目”的边界落实到离线实现。OpenEvolve、未来的
-ShinkaEvolve 及远端 famou-v2/WebAgent 控制面只提供候选 material；Lunar 继续持有
+ShinkaEvolve 及远端 reference-engine-v2/WebAgent 控制面只提供候选 material；Lunar 继续持有
 algorithm contract、本地 exact evaluator、receipt、canonical archive、resume、rank 和最终
 交付权威。OpenEvolve 是 AlphaEvolve 风格的第三方 Apache-2.0 开源实现，不是 Google
 DeepMind 官方源码；其他公开项目及分层接法记录在
 `docs/evolution-ecosystem-fusion-roadmap-20260911.md`。
 
-新增 `src/famou/seed_handoff.py`、`remote_evolution.py` 和 `openevolve_handoff.py`。外部 seed
+新增 `src/lunar_evolution/seed_handoff.py`、`remote_evolution.py` 和 `openevolve_handoff.py`。外部 seed
 的 evidence 与 record metadata 在 canonical persistence 前都规范化为固定
 `{present, score_present, payload_sha256}` 摘要，不保存原始外部分数、payload 或 prose；
 seed identity 绑定 evaluator kind 与 fingerprint，receipt 只接受 report schema `1`。
@@ -1786,7 +1819,7 @@ offspring outcome artifacts。terminal resume 会先核对 SQLite run 与 canoni
 status、strategy、contract、config、seed manifest/marker；缺 state 的失败或取消任务不能被
 新 manifest 复活，避免 run/state split-brain。孤立 seed identity 参数在 claim 前拒绝。
 
-新增 `src/famou/producer_handoff.py`，提供 transport-free 的
+新增 `src/lunar_evolution/producer_handoff.py`，提供 transport-free 的
 `ProducerResultEnvelope`/`ProducerMaterial` DTO、对象入口 `admit_producer_envelope` 和文件
 入口 `admit_producer_result`。OpenEvolve、
 ShinkaEvolve 或其他 runner 只需把已落盘的候选 material `{path,size,sha256}`、producer
@@ -1798,7 +1831,7 @@ credential/deep-evidence、空 terminal envelope 和 local invalid evaluation �
 没有启动真实 ShinkaEvolve 或任何远端 transport。Shinka 后续只需显式导出 `best/main.*`
 及 parent lineage，不能把其 generation/SQLite ID 映射成 Lunar iteration。
 
-当前新增的 `src/famou/shinka_handoff.py` 是上述边界的离线 exporter：它只读打开
+当前新增的 `src/lunar_evolution/shinka_handoff.py` 是上述边界的离线 exporter：它只读打开
 `programs.sqlite`（缺失时才使用 `evolution_db.sqlite`）的静态、无 WAL/SHM/rollback-journal
 sidecar 快照，支持显式有序 `program_ids`（此时省略 `top_k`），并把省略 ID 时的 `top_k`
 保留为按 `correct=1` 与 producer score 排序的 convenience 选择，省略 `top_k` 默认取一条。
@@ -1819,7 +1852,7 @@ offspring/candidate 尚未拥有与 imported seed 等价的 contract/evaluator/d
 四类完整 fingerprint/receipt，后续应另立 Feature，避免混改现有 archive schema。
 
 最终离线验证：remote lifecycle/producer/Shinka focused 130 项；主仓全量 2262 项（基线
-2210 项加本轮及此前新增测试）；全 `src/famou`/`tests` Ruff、compileall、Specify
+2210 项加本轮及此前新增测试）；全 `src/lunar_evolution`/`tests` Ruff、compileall、Specify
 prerequisites、`git diff --check` 均通过。074/076/078/082 的 595 个 Git 封存文件无 diff。
 没有启动模型、真实 OpenEvolve/ShinkaEvolve、WebAgent、provider、公司平台、远端 backend
 或 campaign，也没有复写任何历史 measurement。
@@ -1832,9 +1865,9 @@ remote material bridge 由 Feature 086 完成。仍保留的后续项包括 Shin
 
 ## 0. 历史续作起点：Feature 084
 
-已找到并离线审查本地 `famou-v2` 仓库（`/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-v2`）及 WebAgent 2.5 分支。审查结论是：famou-v2 的深度演化通过远端实验控制面运行；其 `initial_programs` 必须经过本地 evaluator enrichment/可行性门槛，有效 rollout 才推进正式 iteration。WebAgent 的 `evolve_create/status/sync/continue/cancel` 是服务委托，不是 Lunar staged Build 的本地 runtime。
+已找到并离线审查本地 `reference-engine-v2` 仓库（`/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/reference-engine-v2`）及 WebAgent 2.5 分支。审查结论是：reference-engine-v2 的深度演化通过远端实验控制面运行；其 `initial_programs` 必须经过本地 evaluator enrichment/可行性门槛，有效 rollout 才推进正式 iteration。WebAgent 的 `evolve_create/status/sync/continue/cancel` 是服务委托，不是 Lunar staged Build 的本地 runtime。
 
-Feature 084 当时以草案写入 `specs/084-verified-seed-handoff/`，目标是先实现本地 verified seed adapter、身份/lineage/provenance/evaluator receipt 和恢复校验，再定义显式但暂不联网的 famou-v2 backend protocol；该 Feature 后续已按此边界完成。远端分数只能作为 provenance，必须经 Lunar 本地 exact harness 重验后才可进入 population。084 不启动模型、WebAgent、provider、公司评测、真实 famou-v2 服务或新 campaign，也不改变 074/076/078/082 封存文件。审查证据见 `docs/famou-v2-engine-review-20260911.md`、`docs/webagent-v25-branch-audit-20260911.md` 和 `docs/webagent-v25-evolve-service-audit-20260911.md`。
+Feature 084 当时以草案写入 `specs/084-verified-seed-handoff/`，目标是先实现本地 verified seed adapter、身份/lineage/provenance/evaluator receipt 和恢复校验，再定义显式但暂不联网的 reference-engine-v2 backend protocol；该 Feature 后续已按此边界完成。远端分数只能作为 provenance，必须经 Lunar 本地 exact harness 重验后才可进入 population。084 不启动模型、WebAgent、provider、公司评测、真实 reference-engine-v2 服务或新 campaign，也不改变 074/076/078/082 封存文件。审查证据见 `docs/reference-engine-v2-review-20260911.md`、`docs/webagent-v25-branch-audit-20260911.md` 和 `docs/webagent-v25-evolve-service-audit-20260911.md`。
 
 ## 1. 历史状态：Feature 083
 
@@ -2363,7 +2396,7 @@ edaa4a6 feat: add controlled deep evolution feedback
 
 ## 2. 产品目标和设计边界
 
-Lunar-Agent 的目标是一个独立、本地、可被其他 Agent 调用的算法问题 Agent：
+Lunar Evolution 的目标是一个独立、本地、可被其他 Agent 调用的算法问题 Agent：
 
 - 用户可以直接运行；Codex、Hermes、OpenClaw 等也可以把它当作 CLI 子进程调用。
 - 不要求用户机器预装 Hermes、OpenCode、Codex 或某个全局配置目录。
@@ -2467,7 +2500,7 @@ specs/046-contract-driven-algorithm-playbooks
 specs/047-quality-diversity-population
 ```
 
-### Feature 048–050：Famou-Bench 效果层
+### Feature 048–050：reference-benchmark 效果层
 
 - Feature 048：导入历史结果，比较单 case 的 Lunar best 与通用 baseline historical best，
   只允许独立 harness 提供分数。
@@ -2479,7 +2512,7 @@ specs/047-quality-diversity-population
 本地已准备好经过官方 publication 身份校验的 `supply_chain_inventory` kit 和历史 comparator：
 
 ```text
-.lunar/famou-kit-real-001/
+.lunar/lunar_evolution-kit-real-001/
 ```
 
 该目录被 `.gitignore` 忽略。baseline 来自 FM-Eval 只读 Query 的实验
@@ -2497,14 +2530,14 @@ WebAgent historical baseline；严格的 WebAgent 比较仍需同 publication/ca
 
 ```text
 specs/051-deep-evolution-effect-trial/
-src/famou/deep_effect_trial.py
+src/lunar_evolution/deep_effect_trial.py
 tests/test_deep_effect_trial.py
 ```
 
 命令：
 
 ```bash
-lunar-agent effect-deep-trial ...
+lunar-evolution effect-deep-trial ...
 ```
 
 行为：默认 5 个 outer rounds；每轮启动新的无记忆 subject 进程；共享 attempt workspace；
@@ -2534,7 +2567,7 @@ milestone。
 
 ```text
 specs/052-deep-evolution-feedback-contract/
-src/famou/deep_feedback.py
+src/lunar_evolution/deep_feedback.py
 tests/test_deep_feedback.py
 ```
 
@@ -2571,8 +2604,8 @@ specs/053-deep-effect-failure-statistics
 ```text
 specs/054-model-profiles-cost-control/
 specs/055-runtime-model-profile-integration/
-src/famou/profiles.py
-src/famou/model_profile.py
+src/lunar_evolution/profiles.py
+src/lunar_evolution/model_profile.py
 ```
 
 `ModelProfile` 提供无凭据的模型身份、thinking budget、步数/超时、token 和 micro-USD 成本
@@ -2615,11 +2648,11 @@ one-shot runtime、`run_isolated`、effect adapter 和 evolution/benchmark 专�
 |---|---|---|
 | 深度演化 PRD | `sqWURJ5cTnE_Z7` | Session/Experiment 生命周期、Top 5、可恢复和用户可见演化图谱 |
 | v2.5 深度演化工具集设计 | `7bveCuILHL_BnP` | evolve_create/update/continue/cancel/list/status/sync 七工具和窄控制面 |
-| web agent 与 famou-v2 深度演化打通链路梳理 | `y0gVkzefWknA6h` | Console → AgentServer → AgentRunner、异步进度回调 |
-| 深度演化阶段 webagent loop vs famou-v2 evolve | `qx9kRYpa6zTQmP` | 同模型 loop 与 population/pipeline 对比、reward hacking 证据 |
-| 基于 famou-bench-v2 的深度演化阶段模型评测报告 | `YfEcoKAjskbg3P` | 100 轮模型对比、token/时长/成本、格式失败影响 |
+| web agent 与 reference-engine-v2 深度演化打通链路梳理 | `y0gVkzefWknA6h` | Console → AgentServer → AgentRunner、异步进度回调 |
+| 深度演化阶段 webagent loop vs reference-engine-v2 evolve | `qx9kRYpa6zTQmP` | 同模型 loop 与 population/pipeline 对比、reward hacking 证据 |
+| 基于 reference-benchmark-v2 的深度演化阶段模型评测报告 | `YfEcoKAjskbg3P` | 100 轮模型对比、token/时长/成本、格式失败影响 |
 | webagent benchmark 测评工程方案（二期） | `xOvDqBtdcHUO16` | fm-eval workload、评测服务化和 benchmark 接入方案 |
-| famou-v2 Island & Population Ablation | `jncZRh92LHwYV0` | population/island 消融证据，后续比较 population 时查阅 |
+| reference-engine-v2 Island & Population Ablation | `jncZRh92LHwYV0` | population/island 消融证据，后续比较 population 时查阅 |
 
 面试/架构辅助文档：
 
@@ -2631,11 +2664,11 @@ one-shot runtime、`run_isolated`、effect adapter 和 evolution/benchmark 专�
 
 ## 5. 可查阅代码仓库
 
-### Lunar-Agent
+### Lunar Evolution
 
 ```text
 本地：/Users/liminghan/Documents/lunar_agent
-远端：git@github.com:vchive/Lunar-Agent.git
+远端：git@github.com:vchive/Lunar-Evolution.git
 分支：main
 ```
 
@@ -2650,30 +2683,30 @@ one-shot runtime、`run_isolated`、effect adapter 和 evolution/benchmark 专�
 
 ```text
 origin/master
-origin/famou-v2.5/base
-origin/famou-v2.5/evolve_tool
-origin/famou-v2.5/master-agent
+origin/reference-engine-v2.5/base
+origin/reference-engine-v2.5/evolve_tool
+origin/reference-engine-v2.5/master-agent
 origin/multi-round
 origin/memory_card
-origin/famou/memory
+origin/lunar_evolution/memory
 origin/feature/or-agent
 ```
 
 重点代码检索词：`evolve`、`loop`、`population`、`workspace`、`agentic loop`、`master agent`、
 `analyst`、`executor`、`callback`。
 
-### Famou-Bench
+### reference-benchmark
 
 ```text
-本地：/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-bench
-远端：https://liminghan01@icode.baidu.com/baidu/acg-fm/famou-bench
+本地：/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/reference-benchmark
+远端：(original address retained in the archived revision)
 当前本地分支：agentco-bench-lite
 ```
 
 真实 case 示例：
 
 ```text
-/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-bench/03_assignment/supply_chain_inventory
+/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/reference-benchmark/03_assignment/supply_chain_inventory
 ```
 
 该 case 已包含 `instruction.md`、`data/`、`tests/extractor_agent.py`、`tests/evaluator.py`、
@@ -2690,11 +2723,11 @@ run export，不能直接冒充 WebAgent baseline。
 重点：`container_runtime/harness/`、`tests/test_harness_equivalence.py`、
 `tests/golden/harness_equiv/`、`tools/release/`、`service/`。
 
-### Famou-v2
+### reference-engine-v2
 
 ```text
-本地：/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/famou-v2
-远端：https://liminghan01@icode.baidu.com/baidu/acg-fm/famou-v2
+本地：/Users/liminghan/Documents/fm/codesets/baidu/acg-fm/reference-engine-v2
+远端：(original address retained in the archived revision)
 ```
 
 ### 外部参考
@@ -2702,7 +2735,7 @@ run export，不能直接冒充 WebAgent baseline。
 ```text
 OpenEvolve: https://github.com/algorithmicsuperintelligence/openevolve
 DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness
-Lunar-Agent remote: https://github.com/vchive/Lunar-Agent
+Lunar Evolution remote: https://github.com/vchive/Lunar-Evolution
 ```
 
 OpenEvolve 在 Lunar 里是 adapter，不是必须依赖；Hermes/OpenCode/OpenClaw 同样是可选外部
@@ -2746,9 +2779,9 @@ Feature 067 的独立两槽测量已明确这两个新槽触发 token ceiling（
 历史分数：
 
 ```text
-suite:    .lunar/famou-kit-real-001/suite.json
-projection: .lunar/famou-kit-real-001/baseline-agentserver.json
-raw:      .lunar/famou-kit-real-001/fm-eval-results.json
+suite:    .lunar/lunar_evolution-kit-real-001/suite.json
+projection: .lunar/lunar_evolution-kit-real-001/baseline-agentserver.json
+raw:      .lunar/lunar_evolution-kit-real-001/fm-eval-results.json
 case:     supply_chain_inventory
 baseline model (historical): gpt-5.6-sol
 current Lunar solver:        glm-5.1
@@ -2786,8 +2819,8 @@ effect protocol 的规范机器字段是 `baseline_historical_best`；显式 Web
 legacy export 继续兼容，但必须另外保留来源证明。
 
 2026-09-08 初次检查时，普通 shell 中没有
-`FAMOU_MODEL_ENDPOINT`、
-`FAMOU_API_KEY`、`FAMOU_MODEL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、
+`LUNAR_EVOLUTION_MODEL_ENDPOINT`、
+`LUNAR_EVOLUTION_API_KEY`、`LUNAR_EVOLUTION_MODEL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、
 `ANTHROPIC_MODEL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 或 `ANTHROPIC_API_KEY`。本轮已另行创建
 专用 `.lunar/harness-venv-sdk-0.1.81/` 并安装、验证评分依赖，见第 15 节；无需在项目 venv 中
 重复安装。来源实验的 extractor 冻结为 Anthropic API、模型
@@ -2813,7 +2846,7 @@ CC Switch 当前 provider 的 API 配置；第 16 节记录了只读接入、显
 
 ### P1：修复真实 case 适配差距
 
-真实 Famou-Bench 的 extractor 使用 `claude_agent_sdk`，并可能需要 case-specific 的数据
+真实 reference-benchmark 的 extractor 使用 `claude_agent_sdk`，并可能需要 case-specific 的数据
 语义。执行真实试验后，若 Lunar 写出的文件不能被 extractor 识别，优先补充：
 
 - case-specific output contract / `OutputSpec`；
@@ -2853,7 +2886,7 @@ CC Switch 当前 provider 的 API 配置；第 16 节记录了只读接入、显
 ```bash
 --model 6Astra
 --agent-runtime-model 6Astra
-export FAMOU_MODEL=6Astra
+export LUNAR_EVOLUTION_MODEL=6Astra
 ```
 
 但模型必须真实存在于所配置的 endpoint/provider，并且 provider 返回的 `model` 字段如果存在
@@ -2863,7 +2896,7 @@ export FAMOU_MODEL=6Astra
 
 后续接手者应区分两件事：
 
-1. **Lunar CLI 调模型**：检查 `FAMOU_MODEL_ENDPOINT`、`FAMOU_MODEL` 或对应 CLI 参数，确认
+1. **Lunar CLI 调模型**：检查 `LUNAR_EVOLUTION_MODEL_ENDPOINT`、`LUNAR_EVOLUTION_MODEL` 或对应 CLI 参数，确认
    endpoint 的路由文档中确实使用 `6Astra` 这个精确 ID。
 2. **Codex 项目本身切换模型**：检查 Codex Desktop 的宿主模型权限、项目策略和当前 host 的
    model catalog；这不由 Lunar 项目文件解决。
@@ -2925,7 +2958,7 @@ baseline、provenance 和发布期 SDK 身份复算。历史三次分数为
 `runtime_observed`，authority 为 `descriptive`，所选 case slice 的 conclusion eligibility 为
 `eligible`。来源 adapter 是 `agentserver` 且 `deep_evolution=false`，因此不能把它标成 WebAgent
 baseline。严格的 WebAgent comparison 仍缺同身份 `adapter=webagent` export。这些产物位于被
-`.gitignore` 忽略的 `.lunar/famou-kit-real-001/`，不包含凭据。
+`.gitignore` 忽略的 `.lunar/lunar_evolution-kit-real-001/`，不包含凭据。
 
 本次还修复了普通/深度效果试验对未登记 record 的自动采信、深度 receipt/request 绑定、完整
 telemetry/metric 恢复校验、未登记 harness 重评分、失败 attempt 复用边界、subject 越界创建
@@ -3051,8 +3084,8 @@ OutputSpec，并保留 `output_valid` 叶子诊断用于重试反馈。可选输
 本节准备阶段的启动阻塞曾是缺少以下连接配置，现已通过第 16 节的用户授权 CC Switch 接入解决：
 
 ```text
-FAMOU_MODEL_ENDPOINT
-FAMOU_API_KEY
+LUNAR_EVOLUTION_MODEL_ENDPOINT
+LUNAR_EVOLUTION_API_KEY
 ANTHROPIC_BASE_URL
 ANTHROPIC_AUTH_TOKEN
 ```
@@ -3241,7 +3274,7 @@ Feature 061 Specify prerequisites、diff 检查通过。独立代码审查无阻
 
 ## 21. WebAgent 分支审查与 Feature 063（2026-09-09）
 
-已 fetch WebAgent，`famou-v2.5/base` 从 `465af9d` 更新至当天 `e24df25`。盘点全部远端分支，
+已 fetch WebAgent，`reference-engine-v2.5/base` 从 `465af9d` 更新至当天 `e24df25`。盘点全部远端分支，
 深入检查 base、memory_card `865a270`、layered-compaction `5197081` 及演化/角色分支。
 完整结论见 [分支审查文档](docs/webagent-v25-review-20260909.md)。
 

@@ -3,7 +3,7 @@
 Use two explicit evaluator Agents for a local population run:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-command "/absolute/path/to/solver --json" \
   --evaluator-portfolio-command "/absolute/path/to/evaluator-a --json" \
   --evaluator-portfolio-command "/absolute/path/to/evaluator-b --json" \

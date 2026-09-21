@@ -16,9 +16,9 @@
 ## Structure
 
 ```text
-src/famou/agent_evolution.py  # Agent -> CandidateGenerator bridge
-src/famou/evolution.py        # unchanged strategy/evaluator boundary
-src/famou/cli.py              # --agent-command alternative for evolve
+src/lunar_evolution/agent_evolution.py  # Agent -> CandidateGenerator bridge
+src/lunar_evolution/evolution.py        # unchanged strategy/evaluator boundary
+src/lunar_evolution/cli.py              # --agent-command alternative for evolve
 tests/test_agent_evolution.py # bridge tests
 tests/test_cli.py             # evolve Agent command regression
 ```

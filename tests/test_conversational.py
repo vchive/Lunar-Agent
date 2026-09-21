@@ -3,16 +3,16 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.config import Config
-from famou.controller import LocalController
-from famou.conversational import (
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.conversational import (
     ContractCompilationError,
     RuntimeContractCompiler,
     build_algorithm_plan,
     build_algorithm_role_plan,
 )
-from famou.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
 
 
 def _contract() -> AlgorithmProblemContract:

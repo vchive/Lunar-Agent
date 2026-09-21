@@ -11,8 +11,8 @@ import time
 import pytest
 from test_candidate_execution_evidence import fixture, inspect
 
-from famou import CandidateExecutionEvidenceError, run_candidate_execution_recorded
-from famou import candidate_execution_evidence as evidence
+from lunar_evolution import CandidateExecutionEvidenceError, run_candidate_execution_recorded
+from lunar_evolution import candidate_execution_evidence as evidence
 
 FILES = ("launch-intent.json", "result.json", "completed.json")
 PREFIX = "candidate_execution_evidence_"
@@ -424,8 +424,8 @@ def test_attempt_replacement_during_intent_write_never_launches_or_deletes_forei
 
 _CRASH_WORKER = r"""
 import json, os, sys
-from famou import run_candidate_execution_recorded
-from famou import candidate_execution_evidence as evidence
+from lunar_evolution import run_candidate_execution_recorded
+from lunar_evolution import candidate_execution_evidence as evidence
 payload = json.loads(sys.argv[1])
 boundary = payload["boundary"]
 real_runner = evidence.run_candidate_execution
@@ -483,8 +483,8 @@ def test_process_crash_retains_exact_record_and_never_grants_replay(tmp_path, bo
 _WORKER = r"""
 import json, os, sys, time
 from pathlib import Path
-from famou import run_candidate_execution_recorded, CandidateExecutionEvidenceError
-from famou import candidate_execution_evidence as evidence
+from lunar_evolution import run_candidate_execution_recorded, CandidateExecutionEvidenceError
+from lunar_evolution import candidate_execution_evidence as evidence
 payload = json.loads(sys.argv[1])
 request = payload["request"]
 Path(payload["ready"]).write_text("ready")
@@ -548,7 +548,7 @@ def test_concurrent_real_processes_authorize_only_one_attempt(tmp_path):
 
 @pytest.mark.parametrize("interface", ["api", "cli"])
 def test_close_oserror_is_fixed_and_preserves_record(tmp_path, monkeypatch, capsys, interface):
-    from famou import cli
+    from lunar_evolution import cli
 
     admission, request = fixture(tmp_path)
     record = run_candidate_execution_recorded(admission, **request)

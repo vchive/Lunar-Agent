@@ -1,6 +1,6 @@
 # Native Search Runner Contract
 
-For native conversational loop/population search, Lunar-Agent invokes every generated `.py`
+For native conversational loop/population search, Lunar Evolution invokes every generated `.py`
 candidate with the absolute current interpreter and `-I`, without a shell. The working directory is
 the candidate archive directory. Verified inputs are copied to their `data/raw/*` paths before
 execution. Required and present optional `output/*` files must pass the immutable contract.

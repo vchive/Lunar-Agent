@@ -38,7 +38,7 @@ One final defensive change uses `getattr` for a malformed typed evidence object 
 field is missing. It was made after the full run started; the final 100-case quickstart above
 ran after that change. The earlier shared count is not relabeled as a rerun of those final bytes.
 The final product commit `c6947fdfbf43d84e83cc29cc215e7bc0250db83a` passed the complete
-[Linux CI matrix](https://github.com/vchive/Lunar-Agent/actions/runs/35556293182), confirmed at
+[Linux CI matrix](https://github.com/vchive/Lunar-Evolution/actions/runs/35556293182), confirmed at
 2026-09-21 03:28:01 UTC. Python 3.11, 3.12 and 3.13 each passed installation, complete split
 regression, failure annotations, result preservation and Ruff. This validates the final product
 bytes including the defensive change above. The follow-up recording commit is documentation only.

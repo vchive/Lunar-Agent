@@ -7,12 +7,12 @@
 **Status**: Draft
 
 **Input**: WebAgent branch research and product direction: carry over the useful Master policy,
-plan, patch, and replan behavior into the standalone local Lunar-Agent without reproducing the
+plan, patch, and replan behavior into the standalone local Lunar Evolution without reproducing the
 WebAgent service or fixed stage machine.
 
 ## Goal
 
-Give Lunar-Agent a durable control-plane contract for deciding whether to answer directly, ask for
+Give Lunar Evolution a durable control-plane contract for deciding whether to answer directly, ask for
 bounded input, execute a plan, patch a plan, replan, or deliver a result. Complex work gains the
 auditable structure that made WebAgent effective, while simple questions remain fast and do not
 enter an unnecessary workflow. The contract is local, versioned, runtime-neutral, and consumable by

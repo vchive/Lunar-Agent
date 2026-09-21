@@ -78,7 +78,7 @@ specs/006-master-policy-plan-contract/
 ### Source Code (repository root)
 
 ```text
-src/famou/
+src/lunar_evolution/
 ├── policy.py        # policy, plan, patch domain validation and application
 ├── models.py        # durable run/task status additions
 ├── store.py         # SQLite plan revisions, decision records, atomic revision updates

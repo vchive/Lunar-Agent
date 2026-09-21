@@ -25,7 +25,7 @@ Lunar 当前把演化策略分成 `loop`、`population` 和 `openevolve`。其�
 - `effect-deep-trial` 的 `strategy=loop` 是 Feature 051 的历史测量协议标识，**不改写**
   已封存报告、manifest 或 receipt。
 - 旧 loop archive 可以只读读取和生成诊断；不允许从旧 loop 状态继续创建新的 loop 迭代。
-- 本 Feature 不实现远端 famou-v2 调用；verified seed admission 由 Feature 084 提供。
+- 本 Feature 不实现远端 reference-engine-v2 调用；verified seed admission 由 Feature 084 提供。
 
 ## Requirements
 

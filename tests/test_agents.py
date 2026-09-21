@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.agents import (
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.agents import (
     AgentInvocationError,
     AgentRegistry,
     AgentRequest,
@@ -14,8 +14,8 @@ from famou.agents import (
     CommandAgentAdapter,
     RuntimeAgentAdapter,
 )
-from famou.runtime import MockRuntime, ModelTurn, RuntimeResult, ToolCall
-from famou.tools import LocalToolRegistry
+from lunar_evolution.runtime import MockRuntime, ModelTurn, RuntimeResult, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
 
 
 class FixtureAdapter:

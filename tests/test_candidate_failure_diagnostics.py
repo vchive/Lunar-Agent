@@ -4,23 +4,23 @@ import json
 
 import pytest
 
-from famou.agent_evolution import AgentCandidateGenerator
-from famou.agent_loop import AgentLoopRuntime
-from famou.agents import (
+from lunar_evolution.agent_evolution import AgentCandidateGenerator
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.agents import (
     AgentResult,
     CandidateGenerationBudget,
     RuntimeAgentAdapter,
     candidate_model_failure_cause,
 )
-from famou.candidate_generation_receipt import (
+from lunar_evolution.candidate_generation_receipt import (
     CandidateGenerationReceiptError,
     build_candidate_generation_receipt,
     generation_event_id,
     inspect_candidate_generation_events,
 )
-from famou.evolution import EvolutionError, GenerationRequest
-from famou.runtime import MODEL_FAILURE_REASONS, ModelFailureEvidence, ModelRequestFailure
-from famou.store import Store
+from lunar_evolution.evolution import EvolutionError, GenerationRequest
+from lunar_evolution.runtime import MODEL_FAILURE_REASONS, ModelFailureEvidence, ModelRequestFailure
+from lunar_evolution.store import Store
 
 RUN_ID = "candidate-diagnostic-run"
 TASK_ID = "candidate-diagnostic-task"

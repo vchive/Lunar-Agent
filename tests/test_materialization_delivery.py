@@ -25,10 +25,10 @@ from test_materialization_publication import (
     _forbid_execution_and_promotion,
 )
 
-import famou.materialization_delivery as delivery
-from famou import output_publication
-from famou.algorithm import AlgorithmProblemContract
-from famou.evolution import EvolutionError
+import lunar_evolution.materialization_delivery as delivery
+from lunar_evolution import output_publication
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.evolution import EvolutionError
 
 PREPARED = "materialization_delivery_prepared"
 
@@ -664,11 +664,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from famou.algorithm import AlgorithmProblemContract
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import StrategyResult
-from famou.runtime import MockRuntime
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import StrategyResult
+from lunar_evolution.runtime import MockRuntime
 home, parent_id, child_id, raw_contract, raw_result, boundary = sys.argv[1:]
 controller = LocalController(Config(Path(home)), MockRuntime())
 method = {"execution_committed":"commit_materialization_execution", "plan":"record_materialization_delivery", "output_commit":"commit_output_publication", "terminal_prepared":"prepare_materialization_publication"}[boundary]

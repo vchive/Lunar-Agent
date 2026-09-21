@@ -5,12 +5,12 @@ from threading import Event, Thread
 
 import pytest
 
-from famou.budget import BudgetExceeded, BudgetSpec
-from famou.config import Config
-from famou.controller import LocalController
-from famou.policy import PlanDocument, PlanTask
-from famou.routing import RouteDecision
-from famou.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.budget import BudgetExceeded, BudgetSpec
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.policy import PlanDocument, PlanTask
+from lunar_evolution.routing import RouteDecision
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
 
 
 class CapturingRuntime:
@@ -71,7 +71,7 @@ def _route_with_budget(controller: LocalController, budget: BudgetSpec) -> Route
 
 def test_run_agent_clips_explicit_timeout_to_remaining_run_budget(tmp_path: Path) -> None:
     runtime = MockRuntime()
-    controller = LocalController(Config(tmp_path / ".famou"), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), runtime)
     adapter = _CapturingAdapter()
     controller.agent_registry = controller.agent_registry.__class__([adapter])
     run = controller.store.create_run(
@@ -86,7 +86,7 @@ def test_run_agent_clips_explicit_timeout_to_remaining_run_budget(tmp_path: Path
 
 
 def test_run_agent_does_not_claim_when_wall_budget_is_already_exhausted(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     adapter = _CapturingAdapter()
     controller.agent_registry = controller.agent_registry.__class__([adapter])
     run = controller.store.create_run(
@@ -117,7 +117,7 @@ class _CapturingAdapter:
 
     def run(self, request):
         self.timeout = request.timeout
-        from famou.agents import AgentResult
+        from lunar_evolution.agents import AgentResult
 
         return AgentResult(self.name, request.role, "done")
 
@@ -133,7 +133,7 @@ class _CapturingAdapter:
 
 def test_resume_workers_share_one_wall_clock_budget(tmp_path: Path) -> None:
     runtime = CapturingRuntime(delay=0.05)
-    controller = LocalController(Config(tmp_path / ".famou", runtime_timeout=10), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     plan = PlanDocument(
         goal="write two reports",
         plan_id="wall-clock",
@@ -158,7 +158,7 @@ def test_concurrent_workers_use_one_shared_wall_clock_budget(tmp_path: Path) -> 
         return runtime
 
     controller = LocalController(
-        Config(tmp_path / ".famou", runtime_timeout=10),
+        Config(tmp_path / ".lunar-evolution", runtime_timeout=10),
         CapturingRuntime(),
         runtime_factory=factory,
         max_workers=2,
@@ -180,7 +180,7 @@ def test_concurrent_workers_use_one_shared_wall_clock_budget(tmp_path: Path) -> 
 
 def test_exhausted_run_records_budget_before_claiming_next_task(tmp_path: Path) -> None:
     runtime = CapturingRuntime(delay=0.08)
-    controller = LocalController(Config(tmp_path / ".famou", runtime_timeout=10), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     plan = PlanDocument(
         goal="write two reports",
         plan_id="wall-clock-fail",
@@ -199,7 +199,7 @@ def test_exhausted_run_records_budget_before_claiming_next_task(tmp_path: Path) 
 
 def test_cancellation_first_discards_result_returned_after_wall_budget(tmp_path: Path) -> None:
     runtime = BlockingRuntime()
-    controller = LocalController(Config(tmp_path / ".famou", runtime_timeout=10), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     run = controller.store.create_run(
         "cancel before the wall budget",
         route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=0.05)),
@@ -232,7 +232,7 @@ def test_budget_first_rejects_later_cancellation_without_rewriting_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = BlockingRuntime()
-    controller = LocalController(Config(tmp_path / ".famou", runtime_timeout=10), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     run = controller.store.create_run(
         "exhaust the wall budget before cancellation",
         route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=0.05)),

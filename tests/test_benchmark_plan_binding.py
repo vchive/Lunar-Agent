@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from famou import benchmark_result
-from famou.benchmark_comparison import BenchmarkComparisonPlan
-from famou.benchmark_result import (
+from lunar_evolution import benchmark_result
+from lunar_evolution.benchmark_comparison import BenchmarkComparisonPlan
+from lunar_evolution.benchmark_result import (
     BenchmarkComparisonResult,
     BenchmarkResultError,
     ComparisonArmResult,

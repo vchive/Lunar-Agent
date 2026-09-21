@@ -7,12 +7,12 @@ import os
 import pytest
 
 TYPE = "PreventUserIdleSystemSleep"
-NAME = "Lunar Agent evaluation"
+NAME = "Lunar Evolution evaluation"
 SECRET = "credential-like-text-must-not-escape"
 
 
 def awake():
-    return importlib.import_module("famou.host_awake")
+    return importlib.import_module("lunar_evolution.host_awake")
 
 
 class FakeAPI:

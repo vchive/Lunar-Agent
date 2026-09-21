@@ -59,6 +59,6 @@ the external command to write a bounded `result.json` containing either:
 {"candidate_path": "candidate.py", "evaluation": {"...": "..."}}
 ```
 
-or a candidate path that Lunar-Agent evaluates itself. The adapter imports only paths below the
+or a candidate path that Lunar Evolution evaluates itself. The adapter imports only paths below the
 adapter directory, copies the candidate into the canonical archive, and records the subprocess exit
 status. It never treats external stdout as a successful result by itself.

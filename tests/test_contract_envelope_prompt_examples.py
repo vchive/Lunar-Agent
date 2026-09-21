@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from famou.conversational import (
+from lunar_evolution.conversational import (
     _COMPILED_ENVELOPE_EXAMPLE,
     _NEEDS_INPUT_ENVELOPE_EXAMPLE,
     ContractCompilationError,

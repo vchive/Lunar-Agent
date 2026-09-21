@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from famou import (
+from lunar_evolution import (
     CANDIDATE_INPUT_ROOT_ENV,
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
@@ -119,7 +119,7 @@ def test_reserved_environment_and_process_budget_are_rejected_before_launch(tmp_
 
 def test_start_failure_is_fixed_and_does_not_expose_local_details(tmp_path: Path, monkeypatch):
     admission, plan, workspace, inputs = _fixture(tmp_path)
-    import famou.candidate_execution_runner as runner
+    import lunar_evolution.candidate_execution_runner as runner
 
     def fail(*_args, **_kwargs):
         raise OSError("private host detail")
@@ -132,7 +132,7 @@ def test_start_failure_is_fixed_and_does_not_expose_local_details(tmp_path: Path
 
 def test_caller_pin_is_checked_before_process_start(tmp_path: Path, monkeypatch):
     admission, plan, workspace, inputs = _fixture(tmp_path)
-    import famou.candidate_execution_runner as runner
+    import lunar_evolution.candidate_execution_runner as runner
 
     monkeypatch.setattr(runner.subprocess, "Popen", lambda *_a, **_k: pytest.fail("Popen called"))
     _assert_code(
@@ -164,7 +164,7 @@ def test_all_32_planned_command_items_are_executable(tmp_path: Path):
 
 @pytest.mark.parametrize("kind", ["symlink", "ancestor_symlink", "fifo", "directory", "nonexecutable"])
 def test_unsafe_executables_fail_before_launch(tmp_path: Path, monkeypatch, kind: str):
-    import famou.candidate_execution_runner as runner
+    import lunar_evolution.candidate_execution_runner as runner
 
     executable = tmp_path / "executable"
     if kind == "symlink":
@@ -189,7 +189,7 @@ def test_unsafe_executables_fail_before_launch(tmp_path: Path, monkeypatch, kind
 
 @pytest.mark.parametrize("changed", ["file", "ancestor", "same_inode"])
 def test_executable_drift_is_rechecked_and_descriptors_close(tmp_path: Path, monkeypatch, changed: str):
-    import famou.candidate_execution_runner as runner
+    import lunar_evolution.candidate_execution_runner as runner
 
     executable_root = tmp_path / "runtime"
     executable_root.mkdir()
@@ -239,7 +239,7 @@ def test_executable_drift_is_rechecked_and_descriptors_close(tmp_path: Path, mon
 
 @pytest.mark.parametrize("changed", ["workspace", "input"])
 def test_last_root_recheck_has_fixed_runner_error(tmp_path: Path, monkeypatch, changed: str):
-    import famou.candidate_execution_runner as runner
+    import lunar_evolution.candidate_execution_runner as runner
 
     admission, plan, workspace, inputs = _fixture(tmp_path)
     original_verify = runner.verify_candidate_source_bundle

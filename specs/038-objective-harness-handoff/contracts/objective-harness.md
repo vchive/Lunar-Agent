@@ -1,6 +1,6 @@
 # Objective Harness Contract
 
-Lunar-Agent invokes the explicit executable without a shell as:
+Lunar Evolution invokes the explicit executable without a shell as:
 
 ```text
 COMMAND... ABSOLUTE_CANDIDATE_PATH

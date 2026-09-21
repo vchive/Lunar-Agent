@@ -45,8 +45,8 @@ acceptance criterion. It does not implement a campaign or modify Feature 139 mea
 
 ## Expected touch points
 
-- `src/famou/cli.py`
-- `src/famou/agent_evolution.py` (profile-compatible completion count projection only)
+- `src/lunar_evolution/cli.py`
+- `src/lunar_evolution/agent_evolution.py` (profile-compatible completion count projection only)
 - focused CLI/automatic bundle/evolution tests
 - candidate receipt integration tests only where needed to observe propagation
 - this feature's validation record

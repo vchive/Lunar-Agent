@@ -7,13 +7,13 @@ from dataclasses import replace
 import pytest
 from test_bundle_population import build_context
 
-from famou.artifacts import ArtifactStore
-from famou.candidate_execution import CandidateExecutionInput
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import EvolutionError
-from famou.runtime import MockRuntime
-from famou.solve_bundle import (
+from lunar_evolution.artifacts import ArtifactStore
+from lunar_evolution.candidate_execution import CandidateExecutionInput
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import EvolutionError
+from lunar_evolution.runtime import MockRuntime
+from lunar_evolution.solve_bundle import (
     bundle_pipeline_sha256,
     prepare_solve_bundle_pipeline,
     validate_solve_bundle_inputs,

@@ -13,10 +13,10 @@ must infer experiment intent repeatedly from code excerpts, so loop and populati
 failed ideas or make several changes without attribution.
 
 WebAgent's evo-builder writes a per-round `PLAN.md` and accumulates `knowledge/insights.md`.
-OpenEvolve similarly uses an archive as an experience database. Lunar-Agent can retain the useful
+OpenEvolve similarly uses an archive as an experience database. Lunar Evolution can retain the useful
 effect without storing chain-of-thought or introducing mutable knowledge state: an Agent response
 may declare one bounded experiment plan next to its candidate source; after independent evaluation,
-Lunar-Agent derives an outcome card from persisted candidate lineage and verified scores. Future
+Lunar Evolution derives an outcome card from persisted candidate lineage and verified scores. Future
 prompts reconstruct cards from the append-only archive, making resume deterministic.
 
 ## User stories and acceptance scenarios
@@ -32,7 +32,7 @@ prompts reconstruct cards from the append-only archive, making resume determinis
 
 ### User Story 2 — Learn from independently measured outcomes (P1)
 
-1. For every declared experiment, Lunar-Agent combines the persisted plan with candidate/parent
+1. For every declared experiment, Lunar Evolution combines the persisted plan with candidate/parent
    `EvaluationReport` values; the model cannot self-report success or score deltas.
 2. Cards classify seed, improved, unchanged, regressed, and invalid outcomes and expose bounded
    per-metric before/after/delta facts when both reports contain the metric.

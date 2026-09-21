@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from famou import (
+from lunar_evolution import (
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
     CandidateExecutionEvidenceError,
@@ -19,7 +19,7 @@ from famou import (
     inspect_candidate_execution_record,
     run_candidate_execution_recorded,
 )
-from famou import candidate_execution_evidence as evidence
+from lunar_evolution import candidate_execution_evidence as evidence
 
 
 def fixture(tmp_path: Path, script: bytes | None = None):

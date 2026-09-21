@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.benchmark_comparison import BenchmarkComparisonPlan
-from famou.benchmark_result import (
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.benchmark_comparison import BenchmarkComparisonPlan
+from lunar_evolution.benchmark_result import (
     BenchmarkComparisonResult,
     BenchmarkResultError,
     ComparisonArmResult,
@@ -23,7 +23,7 @@ def _plan() -> BenchmarkComparisonPlan:
 
 def _result(plan: BenchmarkComparisonPlan) -> BenchmarkComparisonResult:
     arms = tuple(ComparisonArmResult(a.id, "completed", 10, 2, 1, 0.5, "e" * 64) for a in plan.arms)
-    from famou import benchmark_result as module
+    from lunar_evolution import benchmark_result as module
     rid = module._result_id(plan.comparison_id, arms)
     return BenchmarkComparisonResult(plan.comparison_id, rid, arms)
 
@@ -58,12 +58,12 @@ def test_result_evidence_binding_checks_declared_file(tmp_path: Path):
     (evidence_root / "sky.json").write_bytes(payload)
     (evidence_root / "llm4ad.json").write_bytes(payload)
     digest = hashlib.sha256(payload).hexdigest()
-    from famou.benchmark_result import bind_benchmark_comparison_result_evidence
+    from lunar_evolution.benchmark_result import bind_benchmark_comparison_result_evidence
     arms = tuple(
         ComparisonArmResult(a.id, "completed", 10, 2, 1, 0.5, digest, f"{a.id}.json", len(payload))
         for a in plan.arms
     )
-    from famou import benchmark_result as module
+    from lunar_evolution import benchmark_result as module
     result = BenchmarkComparisonResult(plan.comparison_id, module._result_id(plan.comparison_id, arms), arms)
     assert bind_benchmark_comparison_result_evidence(result, plan, evidence_root) == result
 
@@ -80,9 +80,9 @@ def test_result_evidence_binding_rejects_missing_or_changed_file(tmp_path: Path)
         ComparisonArmResult(a.id, "completed", 10, 2, 1, 0.5, digest, f"{a.id}.json", len(payload))
         for a in plan.arms
     )
-    from famou import benchmark_result as module
+    from lunar_evolution import benchmark_result as module
     result = BenchmarkComparisonResult(plan.comparison_id, module._result_id(plan.comparison_id, arms), arms)
-    from famou.benchmark_result import (
+    from lunar_evolution.benchmark_result import (
         BenchmarkResultError,
         bind_benchmark_comparison_result_evidence,
     )
@@ -104,9 +104,9 @@ def test_result_evidence_binding_rejects_symlink_and_traversal(tmp_path: Path):
         ComparisonArmResult("sky", "completed", 10, 2, 1, 0.5, digest, "sky.json", len(payload)),
         ComparisonArmResult("llm4ad", "completed", 10, 2, 1, 0.5, digest, "llm4ad.json", len(payload)),
     )
-    from famou import benchmark_result as module
+    from lunar_evolution import benchmark_result as module
     result = BenchmarkComparisonResult(plan.comparison_id, module._result_id(plan.comparison_id, arms), arms)
-    from famou.benchmark_result import (
+    from lunar_evolution.benchmark_result import (
         BenchmarkResultError,
         bind_benchmark_comparison_result_evidence,
     )
@@ -126,7 +126,7 @@ def test_cli_validates_plan_and_result_without_initializing_home(tmp_path: Path,
     })
     contract_path = tmp_path / "contract.json"; contract_path.write_text(json.dumps(contract.to_dict()))
     input_root = tmp_path / "inputs"; input_root.mkdir(); (input_root / "task.json").write_bytes(b'{"items":[1]}')
-    from famou.benchmark_task import BenchmarkTaskEnvelope
+    from lunar_evolution.benchmark_task import BenchmarkTaskEnvelope
     envelopes = {name: BenchmarkTaskEnvelope.from_dict({**item.to_dict(), "contract_sha256": contract.digest()}) for name, item in (("sky", env()), ("llm4ad", env("llm4ad")))}
     plan = BenchmarkComparisonPlan.from_envelopes(envelopes)
     result = _result(plan)
@@ -152,11 +152,11 @@ def test_cli_evidence_root_binds_descriptor_receipts(tmp_path: Path, monkeypatch
     digest = hashlib.sha256(evidence).hexdigest()
     for arm_id in ("sky", "llm4ad"):
         (evidence_root / f"{arm_id}.json").write_bytes(evidence)
-    from famou.benchmark_task import BenchmarkTaskEnvelope
+    from lunar_evolution.benchmark_task import BenchmarkTaskEnvelope
     envelopes = {name: BenchmarkTaskEnvelope.from_dict({**item.to_dict(), "contract_sha256": contract.digest()}) for name, item in (("sky", env()), ("llm4ad", env("llm4ad")))}
     plan = BenchmarkComparisonPlan.from_envelopes(envelopes)
     arms = tuple(ComparisonArmResult(a.id, "completed", 10, 2, 1, 0.5, digest, f"{a.id}.json", len(evidence)) for a in plan.arms)
-    from famou import benchmark_result as module
+    from lunar_evolution import benchmark_result as module
     result = BenchmarkComparisonResult(plan.comparison_id, module._result_id(plan.comparison_id, arms), arms)
     plan_path = tmp_path / "plan.json"; plan_path.write_text(json.dumps(plan.to_dict()))
     result_path = tmp_path / "result.json"; result_path.write_text(json.dumps(result.to_dict()))

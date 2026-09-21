@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from test_cli import _write_evolution_contract
 
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.benchmark_task import (
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.benchmark_task import (
     BenchmarkTaskEnvelope,
     BenchmarkTaskError,
     admit_benchmark_task_envelope,
@@ -132,4 +132,4 @@ def test_cli_validate_dispatches_without_home_initialization(tmp_path: Path, mon
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "validated"
     assert output["input_count"] == 1
-    assert not (tmp_path / ".famou").exists()
+    assert not (tmp_path / ".lunar-evolution").exists()

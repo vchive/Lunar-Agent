@@ -1,7 +1,7 @@
 # Final Candidate Runner Contract
 
 Automatic conversational materialization accepts a regular, non-symlink Python source file ending
-in `.py`. Lunar-Agent copies it to an isolated attempt workspace and invokes it without a shell:
+in `.py`. Lunar Evolution copies it to an isolated attempt workspace and invokes it without a shell:
 
 ```text
 <absolute current Python executable> -I <absolute attempt candidate.py>
@@ -12,6 +12,6 @@ paths under `data/raw/`. The program must finish within the configured evolution
 and write each required `AlgorithmProblemContract.outputs` path below `output/`. It may use Python's
 standard library; package installation and environment discovery are outside this protocol.
 
-The process receives a minimal environment and cannot declare its own validity. Lunar-Agent ignores
+The process receives a minimal environment and cannot declare its own validity. Lunar Evolution ignores
 stdout as a deliverable, independently parses each output according to its declared format/fields,
 rejects symlinks and oversized files, and promotes only passing bytes to the intake workspace.

@@ -8,7 +8,7 @@ the isolated system+user pair used by automatic preparation. Do not use direct .
 
 Reuse the frozen113 RuntimeGuard admission/accounting through an explicit importlib file loader.
 A new optional observer retains bounded assistant text and safe exchange metadata after the native
-outcome. Wrap famou.runtime.exchange only within the single worker and return/rethrow the same
+outcome. Wrap lunar_evolution.runtime.exchange only within the single worker and return/rethrow the same
 objects; measure response and failure without changing bytes, parameters, retries or deadlines.
 Record role from the known isolated call sequence, not prefix heuristics (snapshot prefix differs).
 Restore patches on every exit. Raw captures are local private diagnostics, not scored evidence.

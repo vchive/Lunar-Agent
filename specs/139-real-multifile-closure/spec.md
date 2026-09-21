@@ -58,7 +58,7 @@ or arbitrary exception text. Feature 131/134 files and WebAgent history remain u
 
 The user explicitly authorized the real acceptance attempt and requested changing its total wall
 limit from 40 to 50 minutes before launch. The original 40-minute manifest is retained byte for
-byte at [measurement/registrations/unlaunched-40min.json](measurement/registrations/unlaunched-40min.json)
+byte at [measurement/registrations/unlaunched-40min.json](../../docs/history-archive.md)
 (30,853 bytes; SHA-256 `26fb2d8b447fd5f5b848016a55e041c5f273903f610d4b7c39c0bf10613f19f9`).
 Its root `.lunar/real-automatic-multifile-closure-20260920` had not been created; no admission,
 attempt, worker, or provider request occurred. Its status is **superseded before admission**,

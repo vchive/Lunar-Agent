@@ -1,4 +1,4 @@
-# Implementation Plan: Standalone Local Famou Agent
+# Implementation Plan: Standalone Local Lunar Evolution Agent
 
 **Branch**: `001-standalone-local-agent` | **Date**: 2026-09-01 | **Spec**: [spec.md](./spec.md)
 
@@ -6,7 +6,7 @@
 
 ## Summary
 
-Build a local-first Famou controller that owns durable run state and artifacts while delegating
+Build a local-first Lunar Evolution controller that owns durable run state and artifacts while delegating
 execution through a replaceable Runtime Adapter. The first increment is a synchronous CLI with a
 SQLite ledger, run-scoped filesystem artifacts, recovery of interrupted tasks, a deterministic mock
 runtime, and a subprocess runtime contract. Hermes is deliberately not a required dependency and
@@ -74,7 +74,7 @@ specs/001-standalone-local-agent/
 ### Source Code (repository root)
 
 ```text
-src/famou/
+src/lunar_evolution/
 ├── __init__.py
 ├── __main__.py
 ├── cli.py
@@ -90,7 +90,7 @@ tests/
 └── test_store.py
 ```
 
-**Structure Decision**: A single `src/famou` package keeps the local application easy to install and
+**Structure Decision**: A single `src/lunar_evolution` package keeps the local application easy to install and
 keeps domain, storage, runtime, and CLI boundaries visible without premature service decomposition.
 
 ## Phase 0: Research
@@ -123,8 +123,8 @@ out of scope; detached execution uses a local process group and durable PID meta
 ## Phase 3 model runtime design
 
 The first built-in model adapter is deliberately narrow: a standard-library HTTP client for an
-OpenAI-compatible `POST /chat/completions` endpoint. `FAMOU_MODEL_ENDPOINT` (or `--endpoint`) and
-`FAMOU_MODEL` (or `--model`) are explicit; `FAMOU_API_KEY` (or `--api-key`) is optional for local
+OpenAI-compatible `POST /chat/completions` endpoint. `LUNAR_EVOLUTION_MODEL_ENDPOINT` (or `--endpoint`) and
+`LUNAR_EVOLUTION_MODEL` (or `--model`) are explicit; `LUNAR_EVOLUTION_API_KEY` (or `--api-key`) is optional for local
 servers. The request is non-streaming and contains only the task prompt. Responses are accepted from
 the normal `choices[0].message.content` shape, with a small compatibility fallback for
 `choices[0].text` and Ollama-style `message.content`. Credentials are never included in exception

@@ -7,7 +7,7 @@ cd /Users/liminghan/Documents/lunar_agent
 uv run --extra dev pytest -q
 ```
 
-No Hermes, OpenCode, Codex, Famou Workspace, network service, or OpenEvolve installation is needed
+No Hermes, OpenCode, Codex, the external reference workspace, network service, or OpenEvolve installation is needed
 for the native strategies.
 
 ## Deterministic loop

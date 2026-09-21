@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from famou import cli
-from famou.config import Config
-from famou.models import Run, RunStatus
-from famou.store import Store
+from lunar_evolution import cli
+from lunar_evolution.config import Config
+from lunar_evolution.models import Run, RunStatus
+from lunar_evolution.store import Store
 
 
 def run(status: RunStatus) -> Run:

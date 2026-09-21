@@ -56,7 +56,7 @@ Native request reconstruction matches6268bytes and recorded SHA256
 641f2b1b84a6e4ec006d1d902d00bf2fcf87007447a32d6488a0fe293ba3aa53. Captured assistant text is
 complete2045bytes, no truncation/redaction; its SHA is
 01dab63e1cdfb8ad09bc1b889275fbb8814440d5e586da3f7e624a32e56c95d5. No generated code was executed
-after completion, and no retry/repair/normalization was applied. See[report](postrun/report.md).
+after completion, and no retry/repair/normalization was applied. See[report](../../docs/history-archive.md).
 
 Results SHA256:ea537172d2e6a4cd2ab7566529331b40a5c84200325baba8ad13a0fbddf72c35.
 Evidence inventory SHA256:0081524e22cc3e53a418a40f62a138b82b44124571f63eab475245be3614f761.

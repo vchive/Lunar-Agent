@@ -8,11 +8,11 @@ import json
 import pytest
 from test_bundle_population import MAIN_SOURCE, build_context, draft_for_score
 
-from famou.bundle_delivery import inspect_bundle_delivery, publish_bundle_delivery
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import CandidateArchive, CandidateDraft, EvolutionError
-from famou.runtime import MockRuntime
+from lunar_evolution.bundle_delivery import inspect_bundle_delivery, publish_bundle_delivery
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import CandidateArchive, CandidateDraft, EvolutionError
+from lunar_evolution.runtime import MockRuntime
 
 
 def _completed(tmp_path, generate=None):
@@ -182,7 +182,7 @@ def test_inspect_bundle_delivery_rejects_modified_copy(tmp_path, changed):
 
 
 def test_delivery_publication_write_failure_retains_incomplete_copy(tmp_path, monkeypatch):
-    from famou.bundle_delivery import PrivateTree
+    from lunar_evolution.bundle_delivery import PrivateTree
 
     identity = {key: "a" * 64 for key in (
         "contract_sha256", "bundle_sha256", "receipt_sha256", "evaluation_sha256",
@@ -209,9 +209,9 @@ def test_delivery_publication_write_failure_retains_incomplete_copy(tmp_path, mo
 
 
 def test_delivery_supports_all_source_input_output_files_with_long_paths(tmp_path):
-    from famou.algorithm import MAX_OUTPUTS
-    from famou.candidate_bundle import MAX_CANDIDATE_BUNDLE_FILES
-    from famou.candidate_execution import MAX_EXECUTION_INPUTS
+    from lunar_evolution.algorithm import MAX_OUTPUTS
+    from lunar_evolution.candidate_bundle import MAX_CANDIDATE_BUNDLE_FILES
+    from lunar_evolution.candidate_execution import MAX_EXECUTION_INPUTS
 
     # Both source bundles and input declarations allow 64 long paths independently. Combining
     # those with 32 outputs must retain all 165 files, even when their manifest exceeds 128 KiB.
@@ -252,7 +252,7 @@ def test_delivery_supports_all_source_input_output_files_with_long_paths(tmp_pat
 
 
 def test_delivery_preserves_interruption_when_tree_close_also_fails(tmp_path, monkeypatch):
-    from famou.bundle_delivery import PrivateTree
+    from lunar_evolution.bundle_delivery import PrivateTree
 
     original_write, original_close = PrivateTree.write, PrivateTree.close
 

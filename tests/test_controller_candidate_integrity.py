@@ -8,17 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import (
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import (
     Candidate,
     CandidateArchive,
     CandidateDraft,
     EvolutionConfig,
     EvolutionError,
 )
-from famou.runtime import MockRuntime
+from lunar_evolution.runtime import MockRuntime
 
 SEED_EVALUATOR_SHA = "a" * 64
 SEED_DEPENDENCY_SHA = "b" * 64
@@ -102,7 +102,7 @@ def _seed_manifest(root: Path, contract: AlgorithmProblemContract) -> Path:
 
 def test_controller_indexes_ordinary_record_and_receipt_idempotently(tmp_path: Path) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -168,7 +168,7 @@ def test_controller_indexes_nested_ordinary_sidecars_from_archive_code_path(tmp_
     """Sidecars follow the source parent, including a nested candidate filename."""
 
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -215,7 +215,7 @@ def test_controller_observes_each_ordinary_candidate_once(tmp_path: Path) -> Non
     """Candidate persistence emits one controller archive event per durable record."""
 
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -251,7 +251,7 @@ def test_controller_indexes_published_sidecars_after_state_write_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -335,7 +335,7 @@ def test_controller_indexes_state_bound_prefix_after_outcome_append_failure(
     expected_archive_ids: list[str],
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -402,7 +402,7 @@ def test_controller_failure_does_not_index_uncommitted_seed_sidecars(
     """Archive metadata alone cannot publish verified-seed evidence to the ledger."""
 
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -477,7 +477,7 @@ def test_controller_rejects_conflicting_duplicate_candidate_artifact_rows(
     tmp_path: Path,
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -538,7 +538,7 @@ def test_seeded_controller_preflights_ordinary_integrity_before_seed_evaluation(
 ) -> None:
     contract = _contract()
     manifest = _seed_manifest(tmp_path / "incoming", contract)
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -631,7 +631,7 @@ def test_seeded_controller_preflights_ordinary_state_before_seed_evaluation(
 ) -> None:
     contract = _contract()
     manifest = _seed_manifest(tmp_path / "incoming", contract)
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,

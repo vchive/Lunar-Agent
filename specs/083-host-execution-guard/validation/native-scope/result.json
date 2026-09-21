@@ -4,9 +4,9 @@
   "completed_utc": "2026-09-11T07:36:32.523273+00:00",
   "owner_pid": 14017,
   "source_sha256": {
-    "src/famou/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
-    "src/famou/host_session.py": "db63d52cfcab8200c7c895e60a391abe65038daee88e481842a520bb703abc95",
-    "src/famou/cli.py": "5fb5c723b99428868d0940661397fe7f6765998f89448374b6263e7afcbd8298",
+    "src/lunar_evolution/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
+    "src/lunar_evolution/host_session.py": "db63d52cfcab8200c7c895e60a391abe65038daee88e481842a520bb703abc95",
+    "src/lunar_evolution/cli.py": "5fb5c723b99428868d0940661397fe7f6765998f89448374b6263e7afcbd8298",
     "specs/083-host-execution-guard/validation/native-scope-smoke.py": "e1c3fe78491201f928ebc8294423b7865d05fe1f1df1f180a2d2eea8a8af159a"
   },
   "scopes": [

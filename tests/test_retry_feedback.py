@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from famou.config import Config
-from famou.controller import LocalController
-from famou.runtime import RuntimeExecutionError, RuntimeResult
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.runtime import RuntimeExecutionError, RuntimeResult
 
 
 class AcceptanceRetryRuntime:
@@ -47,7 +47,7 @@ def test_retry_prompt_contains_failed_acceptance_rule_and_preserves_original_pro
     tmp_path: Path,
 ) -> None:
     runtime = AcceptanceRetryRuntime()
-    controller = LocalController(Config(tmp_path / ".famou", max_retries=2), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", max_retries=2), runtime)
     run = controller.start(
         "verified retry",
         [
@@ -73,7 +73,7 @@ def test_runtime_retry_feedback_is_generic_and_does_not_copy_raw_error(
     tmp_path: Path,
 ) -> None:
     runtime = RuntimeFailureRetryRuntime()
-    controller = LocalController(Config(tmp_path / ".famou", max_retries=2), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", max_retries=2), runtime)
     run = controller.start("runtime retry", [{"id": "task", "prompt": "Complete the task"}])
 
     assert run.status.value == "succeeded"
@@ -87,7 +87,7 @@ def test_runtime_retry_feedback_is_generic_and_does_not_copy_raw_error(
 
 
 def test_retry_feedback_ignores_malformed_persisted_evidence(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou", max_retries=2), RuntimeFailureRetryRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", max_retries=2), RuntimeFailureRetryRuntime())
     run = controller.create("malformed feedback", [{"id": "task", "prompt": "do it"}])
     task = controller.store.next_task(run.id)
     assert task is not None

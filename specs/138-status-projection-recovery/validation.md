@@ -36,7 +36,7 @@ no evaluator or generated source was executed, and no old campaign was resumed.
 
 ```sh
 .venv/bin/pytest -q tests/test_preparation* tests/test_measurement* tests/test_status_projection.py
-.venv/bin/ruff check src/famou/cli.py src/famou/automatic_solve_bundle.py \
+.venv/bin/ruff check src/lunar_evolution/cli.py src/lunar_evolution/automatic_solve_bundle.py \
   specs/134-budgeted-multifile-acceptance/measurement tests
 .venv/bin/python -m compileall -q src tests
 bash .specify/scripts/bash/check-prerequisites.sh

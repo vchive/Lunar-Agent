@@ -21,7 +21,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from famou.host_awake import MacOSIdleSleepAssertion, _IOKitAPI
+from lunar_evolution.host_awake import MacOSIdleSleepAssertion, _IOKitAPI
 
 
 def require(condition):
@@ -85,7 +85,7 @@ def process_exit():
             name_key = api._string("AssertName", owned)
             level_key = api._string("AssertLevel", owned)
             expected_type = api._string("PreventUserIdleSystemSleep", owned)
-            expected_name = api._string("Lunar Agent evaluation", owned)
+            expected_name = api._string("Lunar Evolution evaluation", owned)
             matched = 0
             count = api.cf.CFArrayGetCount(entries)
             require(0 <= count <= 16)
@@ -105,7 +105,7 @@ def process_exit():
             return matched
 
     source = """import json, os, sys
-from famou.host_awake import MacOSIdleSleepAssertion
+from lunar_evolution.host_awake import MacOSIdleSleepAssertion
 guard = MacOSIdleSleepAssertion()
 print(json.dumps(guard.acquire()), flush=True)
 sys.stdin.buffer.read(1)
@@ -158,7 +158,7 @@ def main():
         "source_sha256": {
             path: hashlib.sha256((repository / path).read_bytes()).hexdigest()
             for path in (
-                "src/famou/host_awake.py", "tests/test_host_awake.py",
+                "src/lunar_evolution/host_awake.py", "tests/test_host_awake.py",
                 "specs/083-host-execution-guard/validation/native-smoke.py",
             )
         },

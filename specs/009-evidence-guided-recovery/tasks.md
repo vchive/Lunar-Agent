@@ -10,7 +10,7 @@
 ## Phase 2 — Pure Policy (US1, US2)
 
 - [x] T003 [US1] Add bounded immutable `RecoveryProposal` and runtime-neutral `RecoveryPolicy` in
-  `src/famou/recovery.py`.
+  `src/lunar_evolution/recovery.py`.
 - [x] T004 [US1] Add unit/controller fixtures proving failed acceptance maps to a versioned-task
   patch proposal and makes no plan/task mutation.
 - [x] T005 [US2] Add precedence fixtures for input, runtime configuration, budget, retry, success,

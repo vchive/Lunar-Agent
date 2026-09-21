@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.models import RunStatus, TaskStatus
-from famou.store import Store
+from lunar_evolution.models import RunStatus, TaskStatus
+from lunar_evolution.store import Store
 
 
 def test_orchestration_task_is_durable_and_hidden_from_scheduler(tmp_path: Path) -> None:
@@ -73,8 +73,8 @@ def test_terminal_parent_cannot_gain_new_orchestration(tmp_path: Path) -> None:
 def test_automatic_parent_remains_running_through_delivery(tmp_path, monkeypatch, capsys):
     from test_conversational_automatic_bundle import automatic_setup
 
-    from famou import cli
-    from famou.controller import LocalController
+    from lunar_evolution import cli
+    from lunar_evolution.controller import LocalController
 
     _runtime, args = automatic_setup(tmp_path, monkeypatch)
     original = LocalController.deliver_bundle_to_parent
@@ -111,8 +111,8 @@ def test_failed_child_never_finishes_parent_successfully(tmp_path, monkeypatch, 
 
     from test_conversational_automatic_bundle import automatic_setup
 
-    from famou import cli
-    from famou.controller import LocalController
+    from lunar_evolution import cli
+    from lunar_evolution.controller import LocalController
 
     _runtime, args = automatic_setup(tmp_path, monkeypatch)
     original = LocalController.run_evolution
@@ -137,7 +137,7 @@ def test_failed_child_never_finishes_parent_successfully(tmp_path, monkeypatch, 
 def test_legacy_automatic_request_does_not_gain_orchestration(tmp_path, monkeypatch, capsys):
     from test_conversational_automatic_bundle import automatic_setup
 
-    from famou import cli
+    from lunar_evolution import cli
 
     _runtime, args = automatic_setup(tmp_path, monkeypatch, clarify=True)
     assert cli.main(args) == 0

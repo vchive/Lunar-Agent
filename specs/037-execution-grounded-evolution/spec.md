@@ -13,7 +13,7 @@ candidate that does not run or produce its required output may consume evaluator
 the archive with a model-reported score. This weakens both search efficiency and evidence quality.
 
 This feature makes every native `solve --evolve` candidate execution-grounded. Before the
-independent evaluator is called, Lunar-Agent copies verified `data/raw/*` inputs into that
+independent evaluator is called, Lunar Evolution copies verified `data/raw/*` inputs into that
 candidate's private directory, runs self-contained Python source with the same bounded local
 protocol as final materialization, and checks required/present outputs against `OutputSpec`.
 Process or output failure becomes an immediate validity-zero report and does not call the model

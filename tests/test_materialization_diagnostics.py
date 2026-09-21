@@ -28,17 +28,17 @@ from test_materialization_delivery import (
 from test_materialization_execution import _delete_execution_batch
 from test_materialization_launch import _attempt, _intent, _interrupt_after_intent
 
-import famou.controller as controller_module
-import famou.materialization_delivery as delivery
-import famou.materialization_execution as execution
-import famou.materialization_launch as launch
-import famou.materialization_publication as terminal
-import famou.output_publication as outputs
-from famou import cli
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import CommandCandidateRunner
-from famou.store import Store
+import lunar_evolution.controller as controller_module
+import lunar_evolution.materialization_delivery as delivery
+import lunar_evolution.materialization_execution as execution
+import lunar_evolution.materialization_launch as launch
+import lunar_evolution.materialization_publication as terminal
+import lunar_evolution.output_publication as outputs
+from lunar_evolution import cli
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import CommandCandidateRunner
+from lunar_evolution.store import Store
 
 STAGES = {"launch", "execution", "delivery", "outputs", "terminal"}
 STAGE_STATES = {"absent", "present", "incomplete", "invalid", "unavailable"}
@@ -55,7 +55,7 @@ def _fixture(tmp_path: Path, outcome: str = "success"):
 
 
 def _diagnose(database: Path, parent_id: str, child_id: str) -> dict:
-    from famou.materialization_diagnostics import diagnose_materialization
+    from lunar_evolution.materialization_diagnostics import diagnose_materialization
 
     return diagnose_materialization(database, parent_id, child_id)
 

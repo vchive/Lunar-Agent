@@ -10,8 +10,8 @@ from types import MappingProxyType
 
 import pytest
 
-from famou.algorithm import MAX_REPORT_BYTES, EvaluationReport, OutputSpec
-from famou.candidate_evaluation_spec import (
+from lunar_evolution.algorithm import MAX_REPORT_BYTES, EvaluationReport, OutputSpec
+from lunar_evolution.candidate_evaluation_spec import (
     MAX_CANDIDATE_EVALUATION_SPEC_BYTES,
     CandidateEvaluationError,
     CandidateEvaluationSpec,
@@ -21,7 +21,7 @@ from famou.candidate_evaluation_spec import (
     parse_candidate_evaluation_spec,
     strict_json,
 )
-from famou.candidate_execution import CandidateEvaluatorPin
+from lunar_evolution.candidate_execution import CandidateEvaluatorPin
 
 
 def _spec(**kwargs):

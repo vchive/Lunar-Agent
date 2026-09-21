@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_evolution import AgentCandidateGenerator
-from famou.agents import AgentResult
-from famou.algorithm import AlgorithmProblemContract
-from famou.evaluator_bundle import EvaluatorBundleError, SolverScoringContract
+from lunar_evolution.agent_evolution import AgentCandidateGenerator
+from lunar_evolution.agents import AgentResult
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.evaluator_bundle import EvaluatorBundleError, SolverScoringContract
 
 
 def _contract() -> AlgorithmProblemContract:

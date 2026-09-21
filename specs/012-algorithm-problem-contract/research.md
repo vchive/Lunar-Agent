@@ -94,7 +94,7 @@ standalone requirement.
 ## Decision 6: Make the parent Agent an optional process caller
 
 **Decision**: Expose one local run contract through the CLI and JSON output. It must work when a
-person launches Lunar-Agent directly, when Codex/Hermes/OpenClaw launches it as a child process,
+person launches Lunar Evolution directly, when Codex/Hermes/OpenClaw launches it as a child process,
 and when a parent launches a detached run and later resumes the durable run ID. The repository's
 controller, SQLite ledger, and workspace remain authoritative in all three forms; no parent
 Agent's installation, memory directory, or session protocol is imported.

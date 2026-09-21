@@ -14,7 +14,7 @@ Add one optional `--agent-runtime` profile to `evolve`. Build a fresh runtime ad
 solver and evaluator requests never share mutable runtime state. Explicit options fill their seam;
 the runtime fills any unbound seam. Runtime provenance is hashed with the same credential-safe
 fingerprint boundary already used by command adapters. Detached children receive non-secret settings
-as arguments and API keys through `FAMOU_AGENT_RUNTIME_API_KEY`.
+as arguments and API keys through `LUNAR_EVOLUTION_AGENT_RUNTIME_API_KEY`.
 
 ## Alternatives considered
 
@@ -32,13 +32,13 @@ The repository was also compared with the publicly available harness surfaces of
 [Claude Code](https://github.com/anthropics/claude-code), and
 [Codex](https://github.com/openai/codex):
 
-| Harness | Useful boundary | Why it is not the default Lunar-Agent runtime |
+| Harness | Useful boundary | Why it is not the default Lunar Evolution runtime |
 |---|---|---|
 | DeepSeek Harness | Cordis plugin composition, headless/SDK/ACP profiles, lifecycle events, session event log, sandbox and subagent providers | A Node/TypeScript developer-preview platform with a broad plugin surface; embedding it would make the Python local controller depend on another runtime and its breaking-change cadence. |
 | Claude Code | Feature-development workflow, hooks/plugins, multi-reviewer flow, and persistent Ralph-style loop | The core runtime is not exposed as a small embeddable library, and the repository is governed by Anthropic commercial terms. It is best treated as an explicitly invoked external adapter. |
 | Codex | Apache-2.0 Rust implementation, non-interactive `exec`, MCP, sandbox policy, and app-server/JSON-RPC protocol | The core is a large Rust workspace. The stable integration value is its process/protocol boundary, not vendoring the whole execution core into this Python package. |
 
-The common lesson is to separate a control plane from an execution plane. Lunar-Agent owns the
+The common lesson is to separate a control plane from an execution plane. Lunar Evolution owns the
 durable run/task ledger, SDD plan revisions, evolution archive, evaluator authority, validity-first
 selection, artifact confinement, and resume checks. Any of these harnesses can be an explicit
 subprocess, endpoint, ACP, or app-server provider behind the runtime/Agent adapter, but none is

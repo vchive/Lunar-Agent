@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
-import famou.evolution as evolution_module
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.cli import _status_payload, main
-from famou.config import Config
-from famou.controller import LocalController
-from famou.conversational import build_algorithm_plan
-from famou.evolution import (
+import lunar_evolution.evolution as evolution_module
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.cli import _status_payload, main
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.conversational import build_algorithm_plan
+from lunar_evolution.evolution import (
     Candidate,
     CandidateArchive,
     CandidateDraft,
@@ -25,8 +25,8 @@ from famou.evolution import (
     EvolutionError,
     StrategyResult,
 )
-from famou.output_publication import OutputPublicationUncertain
-from famou.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.output_publication import OutputPublicationUncertain
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
 
 
 def _contract() -> AlgorithmProblemContract:
@@ -421,7 +421,7 @@ def test_solve_evolve_materializes_reports_and_delivers_output(
     source = (
         "import os\n"
         "from pathlib import Path\n"
-        "assert 'FAMOU_API_KEY' not in os.environ\n"
+        "assert 'LUNAR_EVOLUTION_API_KEY' not in os.environ\n"
         "counter = Path('execution-count.txt')\n"
         "count = int(counter.read_text()) if counter.exists() else 0\n"
         "counter.write_text(str(count + 1))\n"
@@ -429,8 +429,8 @@ def test_solve_evolve_materializes_reports_and_delivers_output(
         "Path('output/routes.csv').write_text('item_id,route_id\\norder-1,route-a\\n')\n"
     )
     runtime = MaterializingRuntime(source)
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
-    monkeypatch.setenv("FAMOU_API_KEY", "sk-should-not-reach-candidate")
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setenv("LUNAR_EVOLUTION_API_KEY", "sk-should-not-reach-candidate")
     orders = tmp_path / "orders.csv"
     orders.write_text("id\norder-1\n", encoding="utf-8")
     home = tmp_path / "home"
@@ -545,7 +545,7 @@ def test_solve_reports_composite_failure_when_final_output_is_missing(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = MaterializingRuntime("pass\n")
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     home = tmp_path / "home"
 
     assert (

@@ -38,7 +38,7 @@ All 24 errors are setup failures in the original `registered` fixture: it explic
 zero assertion failures. Keep this original result; it is not an all-green current-product suite.
 
 All 24 original nodes then passed in **12.33s** inside a detached 5560eb9 checkout, with all 160
-registered product/measurement/history pins and the frozen famou import location verified. Its
+registered product/measurement/history pins and the frozen lunar_evolution import location verified. Its
 src/pyproject bytes equal the registered 519fea5 product; the temporary worktree was removed.
 Only temporary fixture manifests were prepared/verified, never the original registration or slot.
 

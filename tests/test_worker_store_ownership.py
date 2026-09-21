@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.models import WorkerOutcome, WorkerPhase, WorkerProcess
-from famou.store import Store
+from lunar_evolution.models import WorkerOutcome, WorkerPhase, WorkerProcess
+from lunar_evolution.store import Store
 
 
 @pytest.fixture

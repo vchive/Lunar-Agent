@@ -10,9 +10,9 @@ import pytest
 from test_bundle_population import MAIN_SOURCE, draft_for_score
 from test_bundle_population_cli import command
 
-from famou import cli
-from famou.evolution import CandidateArchive
-from famou.runtime import MockRuntime, ModelTurn, OpenAICompatibleRuntime, RuntimeResult
+from lunar_evolution import cli
+from lunar_evolution.evolution import CandidateArchive
+from lunar_evolution.runtime import MockRuntime, ModelTurn, OpenAICompatibleRuntime, RuntimeResult
 
 
 def agent_command(tmp_path, mode="command"):

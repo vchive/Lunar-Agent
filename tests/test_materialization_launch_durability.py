@@ -16,8 +16,8 @@ from test_materialization_launch import (
     _materialize,
 )
 
-from famou.evolution import CommandCandidateRunner
-from famou.materialization_launch import MaterializationLaunchUncertain
+from lunar_evolution.evolution import CommandCandidateRunner
+from lunar_evolution.materialization_launch import MaterializationLaunchUncertain
 
 
 def _descriptor_names_path(descriptor: int, path: Path) -> bool:

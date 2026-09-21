@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from test_conversational_automatic_bundle import automatic_setup
 
-from famou import cli
-from famou.store import Store
+from lunar_evolution import cli
+from lunar_evolution.store import Store
 
 PRIVATE_ERROR = "api_key=do-not-retain-this-secret private provider detail"
 

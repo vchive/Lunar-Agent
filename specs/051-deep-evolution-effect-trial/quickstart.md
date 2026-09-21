@@ -4,12 +4,12 @@ The default is five outer rounds, matching the checked-in WebAgent `/evolve` sou
 no numeric argument is supplied:
 
 ```bash
-lunar-agent effect-deep-trial .lunar/famou-kit/suite.json baseline.json \
-  --case-source supply_chain_inventory=/absolute/famou-bench/03_assignment/supply_chain_inventory \
-  --subject-command "/absolute/lunar-agent effect-subject --endpoint http://127.0.0.1:11434/v1/chat/completions --model local-model --max-steps 100" \
-  --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case" \
+lunar-evolution effect-deep-trial .lunar-evolution/reference-kit/suite.json baseline.json \
+  --case-source supply_chain_inventory=/absolute/reference-benchmark/03_assignment/supply_chain_inventory \
+  --subject-command "/absolute/lunar-evolution effect-subject --endpoint http://127.0.0.1:11434/v1/chat/completions --model local-model --max-steps 100" \
+  --harness-command "/absolute/lunar-evolution effect-harness --case-root /absolute/private-case" \
   --requested-model local-model --runs-per-case 2 \
-  --workspace .lunar/deep-trial --json
+  --workspace .lunar-evolution/deep-trial --json
 ```
 
 The subject is invoked five times per logical run in one attempt workspace. Each later request

@@ -21,10 +21,10 @@ from test_materialization_publication import (
     _filesystem_snapshot,
 )
 
-import famou.controller as controller_module
-import famou.materialization_launch as launch
-from famou.evolution import CommandCandidateRunner
-from famou.materialization_launch import MaterializationLaunchUncertain
+import lunar_evolution.controller as controller_module
+import lunar_evolution.materialization_launch as launch
+from lunar_evolution.evolution import CommandCandidateRunner
+from lunar_evolution.materialization_launch import MaterializationLaunchUncertain
 
 INTENT_RELATIVE = "evolution/materialization/launch-intent.json"
 LAUNCH_EVENT = "materialization_launch_intended"
@@ -381,12 +381,12 @@ import os
 import sys
 from pathlib import Path
 
-import famou.evolution as evolution
-from famou.algorithm import AlgorithmProblemContract
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import StrategyResult
-from famou.runtime import MockRuntime
+import lunar_evolution.evolution as evolution
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import StrategyResult
+from lunar_evolution.runtime import MockRuntime
 
 home, parent_id, child_id, raw_result, raw_contract = sys.argv[1:]
 controller = LocalController(Config(Path(home)), MockRuntime())

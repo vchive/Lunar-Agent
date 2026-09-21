@@ -16,10 +16,10 @@ from test_effect_adapters import _subject_request
 from test_effect_trial import _fixture
 from test_staged_effect_adapter import _config, _profile, _profile_sha
 
-import famou.runtime as rt
-from famou.effect_adapters import EffectAdapterError, run_subject_adapter
-from famou.effect_trial import EffectTrialConfig, EffectTrialRunner
-from famou.subject_diagnostics import (
+import lunar_evolution.runtime as rt
+from lunar_evolution.effect_adapters import EffectAdapterError, run_subject_adapter
+from lunar_evolution.effect_trial import EffectTrialConfig, EffectTrialRunner
+from lunar_evolution.subject_diagnostics import (
     SubjectDiagnosticContext,
     SubjectDiagnosticObserver,
     normalize_diagnostic,
@@ -419,7 +419,7 @@ def test_deep_second_round_http_failure_keeps_first_independent_score(tmp_path):
         _write_json,
     )
 
-    from famou.deep_effect_trial import DeepEffectTrialRunner
+    from lunar_evolution.deep_effect_trial import DeepEffectTrialRunner
 
     public, suite = _make_case(tmp_path)
     suite_path = _write_json(tmp_path / "suite.json", suite)

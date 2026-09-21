@@ -40,8 +40,8 @@ FM-Eval per-run export + suite.json + explicit owner attestation
 
 ## Module changes
 
-- Add `famou.effect_kit` for deterministic build and cleanup.
-- Reuse `famou_case_content_digest` and strengthen it against LFS pointer content.
+- Add `lunar_evolution.effect_kit` for deterministic build and cleanup.
+- Reuse `benchmark_case_content_digest` and strengthen it against LFS pointer content.
 - Extend `effect-baseline` with one explicit attestation flag.
 - Make EffectTrial comparability vocabulary conditional on baseline authority.
 - Add CLI/public exports, README/quickstart, fixture tests, and a local real-case preflight.

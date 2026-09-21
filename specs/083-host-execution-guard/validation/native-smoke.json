@@ -4,7 +4,7 @@
   "started_utc": "2026-09-11T07:30:22.418178+00:00",
   "owner_pid": 12971,
   "source_sha256": {
-    "src/famou/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
+    "src/lunar_evolution/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
     "tests/test_host_awake.py": "5d345a19957493f983e9176e0fce14a3fa3b34d1db3e1e73c690bc8d1d8248eb",
     "specs/083-host-execution-guard/validation/native-smoke.py": "1cdee2cd5ab7886f15cfadb6e7c06178f86b657bd8b888945b36710555e0c949"
   },

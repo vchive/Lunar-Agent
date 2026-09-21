@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.evolution import MAX_SOURCE_BYTES
-from famou.openevolve_handoff import (
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.evolution import MAX_SOURCE_BYTES
+from lunar_evolution.openevolve_handoff import (
     CANDIDATE_ENCODING_INVALID,
     CANDIDATE_PATH_UNSAFE,
     CANDIDATE_TOO_LARGE,

@@ -5,7 +5,7 @@ JSON and keep the canonical `plan.digest()` alongside the independently frozen m
 This factory records declarations; it does not run or certify a measurement.
 
 ```python
-from famou import BenchmarkComparisonResult, parse_benchmark_comparison_plan
+from lunar_evolution import BenchmarkComparisonResult, parse_benchmark_comparison_plan
 
 plan = parse_benchmark_comparison_plan("plan.json")
 # arms contains the caller's independently obtained ComparisonArmResult summaries.
@@ -15,7 +15,7 @@ plan_pin = plan.digest()  # canonical plan SHA-256, not a hash of pretty-printed
 ```
 
 ```bash
-lunar-agent benchmark-comparison validate-result plan.json result.json \
+lunar-evolution benchmark-comparison validate-result plan.json result.json \
   --contract contract.json --input-root ./public-input \
   --model-profile-sha256 "$MODEL_PROFILE_SHA256" \
   --evaluator-fingerprint "$EVALUATOR_SHA256" \

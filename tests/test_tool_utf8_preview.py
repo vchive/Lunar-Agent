@@ -2,7 +2,7 @@
 
 import pytest
 
-from famou.tools import LocalToolRegistry
+from lunar_evolution.tools import LocalToolRegistry
 
 TRUNCATED = "\n[tool output truncated]"
 CHARACTERS = ("¢", "中", "😀")

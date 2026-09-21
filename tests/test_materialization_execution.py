@@ -29,10 +29,10 @@ from test_materialization_publication import (
     _forbid_execution_and_promotion,
 )
 
-import famou.controller as controller_module
-import famou.materialization_execution as publication
-from famou.evolution import CandidateExecution, CommandCandidateRunner, EvolutionError
-from famou.materialization_execution import MaterializationExecutionUncertain
+import lunar_evolution.controller as controller_module
+import lunar_evolution.materialization_execution as publication
+from lunar_evolution.evolution import CandidateExecution, CommandCandidateRunner, EvolutionError
+from lunar_evolution.materialization_execution import MaterializationExecutionUncertain
 
 PREPARED = "materialization_execution_prepared"
 COMMITTED = "materialization_execution_committed"
@@ -565,11 +565,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from famou.algorithm import AlgorithmProblemContract
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import StrategyResult
-from famou.runtime import MockRuntime
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import StrategyResult
+from lunar_evolution.runtime import MockRuntime
 
 home, parent_id, child_id, raw_contract, raw_result, boundary = sys.argv[1:]
 controller = LocalController(Config(Path(home)), MockRuntime())

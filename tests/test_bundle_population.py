@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.bundle_evolution import MultiFileCandidatePipeline
-from famou.candidate_evaluation import inspect_candidate_evaluation
-from famou.candidate_evaluation_spec import CandidateEvaluationSpec
-from famou.candidate_execution import CandidateExecutionInput
-from famou.evolution import (
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.bundle_evolution import MultiFileCandidatePipeline
+from lunar_evolution.candidate_evaluation import inspect_candidate_evaluation
+from lunar_evolution.candidate_evaluation_spec import CandidateEvaluationSpec
+from lunar_evolution.candidate_execution import CandidateExecutionInput
+from lunar_evolution.evolution import (
     CandidateArchive,
     CandidateDraft,
     EvolutionConfig,

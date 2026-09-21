@@ -7,9 +7,9 @@ import subprocess
 
 import pytest
 
-from famou import _benchmark_files as files
-from famou.candidate_bundle import CandidateSourceBundle
-from famou.candidate_execution import (
+from lunar_evolution import _benchmark_files as files
+from lunar_evolution.candidate_bundle import CandidateSourceBundle
+from lunar_evolution.candidate_execution import (
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
     CandidateExecutionError,
@@ -17,7 +17,7 @@ from famou.candidate_execution import (
     admit_candidate_execution,
     build_candidate_execution_admission,
 )
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 
 
 def _plan():

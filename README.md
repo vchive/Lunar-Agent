@@ -1,6 +1,6 @@
-# Lunar-Agent
+# Lunar Evolution
 
-Lunar-Agent is a standalone, local-first agent for conversational problem solving **and concrete
+Lunar Evolution is a standalone, local-first agent for conversational problem solving **and concrete
 data production**. It is inspired by Hermes' continuous sessions, practical tools, and long-running
 memory, but keeps the durable task ledger, artifacts, optional memory, and algorithm outputs in a
 run-scoped local directory. It does **not** require a machine-wide Hermes, OpenCode, or Codex
@@ -16,13 +16,13 @@ the diagnostic failure projection in
 [`specs/053-deep-effect-failure-statistics/`](specs/053-deep-effect-failure-statistics/). Its normal
 single-session predecessor remains in
 [`specs/050-content-addressed-effect-kit/`](specs/050-content-addressed-effect-kit/). It compiles
-one or two local Famou cases into a deterministic public-only trial kit and records owner-confirmed
+one or two local reference-benchmark cases into a deterministic public-only trial kit and records owner-confirmed
 cross-release content equivalence without pretending it is an official publication identity. This
-builds on the fresh Lunar subject, exact private extractor/evaluator harness adapter, and offline
-FM-Eval per-run results converter in
-[`specs/049-famou-bench-adapters/`](specs/049-famou-bench-adapters/) and the strict protocol in
-[`specs/048-famou-bench-breakthrough/`](specs/048-famou-bench-breakthrough/). That protocol adds a bounded,
-recoverable one/two-case normal-Agent trial against exported Famou-Bench per-run history.
+builds on the fresh Lunar Evolution subject, exact private extractor/evaluator harness adapter, and offline
+per-run results converter for the external reference benchmark in
+[`specs/049-reference-benchmark-adapters/`](specs/049-reference-benchmark-adapters/) and the strict protocol in
+[`specs/048-reference-benchmark-breakthrough/`](specs/048-reference-benchmark-breakthrough/). That protocol adds a bounded,
+recoverable one/two-case normal-Agent trial against exported reference-benchmark per-run history.
 It deliberately does not call an evolution strategy or claim 20-case parity. This builds on the
 quality-diverse native population in
 [`specs/047-quality-diversity-population/`](specs/047-quality-diversity-population/) and the
@@ -84,17 +84,17 @@ You can now start an algorithm task without authoring a contract by hand. `solve
 strict `AlgorithmProblemContract`, then attaches a versioned plan and runs the normal durable DAG:
 
 ```bash
-lunar-agent solve "根据订单数据设计配送路线" --runtime mock --json --home .lunar
+lunar-evolution solve "根据订单数据设计配送路线" --runtime mock --json --home .lunar-evolution
 ```
 
 For a local model, use an explicit repository runtime (no global Hermes/OpenCode/Codex state is
 read):
 
 ```bash
-lunar-agent solve "根据订单数据设计配送路线" \
+lunar-evolution solve "根据订单数据设计配送路线" \
   --runtime openai-compatible \
   --endpoint http://127.0.0.1:11434/v1/chat/completions \
-  --model your-local-model --json --home .lunar
+  --model your-local-model --json --home .lunar-evolution
 ```
 
 The compiler must return a strict JSON envelope; one complete lowercase `json` code fence with LF
@@ -104,9 +104,9 @@ deliverable is unknown, the run returns `status=awaiting_input`; answer the same
 compilation:
 
 ```bash
-lunar-agent answer <run-id> "最小化总行驶时间" \
+lunar-evolution answer <run-id> "最小化总行驶时间" \
   --runtime openai-compatible --endpoint http://127.0.0.1:11434/v1/chat/completions \
-  --model your-local-model --json --home .lunar
+  --model your-local-model --json --home .lunar-evolution
 ```
 
 The run ID remains stable. Contract, plan, compiler manifest, input answers, and generated task
@@ -114,13 +114,12 @@ artifacts are all local and SHA-256 indexed. The baseline generated DAG is
 `data_discovery → formulate → solve → verify`; candidate evolution remains an explicit opt-in
 stage through `evolve`.
 
-For a conversational mission that should search candidates immediately, use `--evolve`. Lunar-
-Agent compiles the contract first and then links a second durable evolution run:
+For a conversational mission that should search candidates immediately, use `--evolve`. Lunar Evolution compiles the contract first and then links a second durable evolution run:
 
 ```bash
-lunar-agent solve "根据订单数据优化配送路线" \
+lunar-evolution solve "根据订单数据优化配送路线" \
   --runtime mock --evolve --strategy population --max-rounds 3 \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The JSON response includes the intake `run_id` and `evolution.run_id`. The intake keeps the
@@ -136,9 +135,9 @@ model evaluator entirely. Successful evaluator requests contain a bounded source
 execution summary, and output path/schema/size/SHA-256 metadata—not raw input or output contents.
 Source-only contracts receive the same process gate without requiring output files.
 
-When the compiled contract declares `outputs`, Lunar-Agent then runs the selected best candidate
+When the compiled contract declares `outputs`, Lunar Evolution then runs the selected best candidate
 once more in a separate final workspace. Search-time output is evidence only and is never promoted
-directly. The final candidate must recreate the exact declared files before Lunar stages their
+directly. The final candidate must recreate the exact declared files before Lunar Evolution stages their
 bytes and journals the output batch in the intake workspace. Final paths use no-clobber links;
 all new artifact rows and promotion evidence commit in one SQLite transaction. The response exposes this as
 `evolution.materialization`; a failed process, timeout, missing/malformed output, symlink,
@@ -154,7 +153,7 @@ SQLite batch. Staging and journal files are retained. Output recovery never reru
 or infers a terminal result from output files alone.
 
 Feature [089](specs/089-recoverable-materialization-result/) also makes terminal result registration
-recoverable. Lunar retains the validated result bytes and a database preparation receipt before
+recoverable. Lunar Evolution retains the validated result bytes and a database preparation receipt before
 publishing `result.json`. Resume can finish that exact pending result and register its artifact and
 events atomically, without executing the candidate again. A completion receipt prevents damaged
 completed results from being silently repaired. Old results remain subject to strict read-only
@@ -172,7 +171,7 @@ This prevents automatic duplicate launch under the protocol; it does not guarant
 exactly-once execution or identify surviving processes.
 
 Feature [091](specs/091-recoverable-materialization-execution/) makes explicitly prepared execution
-registration recoverable. After the runner returns, Lunar checks the exact execution bytes and
+registration recoverable. After the runner returns, Lunar Evolution checks the exact execution bytes and
 launch intent, retains a journal, and records a preparation receipt. The execution artifact and
 its events then commit together. Resume can finish this pending registration without running the
 candidate; retained completion or downstream publication evidence prevents deleted records from
@@ -205,7 +204,7 @@ workspace or database and never authorizes recovery.
 Feature [095](specs/095-manual-execution-attestation/) adds the explicit operator command
 `attest-materialization-execution PARENT CHILD --receipt FILE`. A reviewed canonical receipt binds
 one exact launch, candidate, task and retained execution file, including its digest and inode.
-Lunar preflights a private database copy, then revalidates under the lifecycle lock and records the
+Lunar Evolution preflights a private database copy, then revalidates under the lifecycle lock and records the
 attestation together with execution preparation. The command only registers execution; normal
 resume can then continue delivery without rerunning the candidate. Exact receipt retries are
 idempotent, while changed bytes, reused nonce and downstream records are refused. This is local
@@ -223,12 +222,12 @@ When a domain already has an exact local objective or constraint checker, keep t
 compiler/generator path and replace only model scoring:
 
 ```bash
-lunar-agent solve "optimize routes and write output/routes.csv" \
+lunar-evolution solve "optimize routes and write output/routes.csv" \
   --input ./orders.csv --runtime openai-compatible \
   --endpoint http://127.0.0.1:11434/v1 --model local-model \
   --evolve --strategy population \
   --evaluator-command "/absolute/python /absolute/score_routes.py" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The harness receives the candidate path after local execution/output validation and can inspect its
@@ -244,14 +243,14 @@ If no exact scorer already exists, native search can explicitly compile one befo
 candidate:
 
 ```bash
-lunar-agent solve "minimize route cost and write output/routes.csv" \
+lunar-evolution solve "minimize route cost and write output/routes.csv" \
   --input ./orders.csv --runtime openai-compatible \
   --endpoint http://127.0.0.1:11434/v1 --model local-model \
   --evolve --compile-evaluator --strategy population \
-  --max-rounds 5 --json --home .lunar
+  --max-rounds 5 --json --home .lunar-evolution
 ```
 
-The evaluator compiler is a separate runtime turn. Before invoking it, Lunar-Agent verifies the
+The evaluator compiler is a separate runtime turn. Before invoking it, Lunar Evolution verifies the
 exact staged input ledger and locally profiles CSV, JSON, JSONL, or text data. The compiler sees
 only relative paths, format, byte size/SHA-256, row or line count, actual field names, conservative
 types, null counts, and unique counts. It never receives rows, raw values, samples, extrema,
@@ -259,7 +258,7 @@ category labels, or source-machine paths. Malformed/ambiguous data, unsupported 
 or ledger drift fail before the compiler or search runs.
 
 The compiler must return a strict objective, Python evaluator, one synthetic rejecting probe per
-hard constraint, at least two valid probes, and a declared better/worse score ordering. Lunar-Agent
+hard constraint, at least two valid probes, and a declared better/worse score ordering. Lunar Evolution
 statically rejects dangerous imports and dynamic execution, runs every probe locally, and parses
 every result through `EvaluationReport`. It then starts a fresh adversarial auditor turn. The auditor
 sees the immutable contract, private structural profile, objective, and evaluator source—but not
@@ -275,7 +274,7 @@ Small synthetic inputs may differ from private row counts and field statistics; 
 not infer business schemas from field descriptions. Existing frozen bundles load without replaying
 probes or reapplying this creation-time check. See [126 validation](specs/126-synthetic-input-format/validation.md).
 
-Lunar-Agent hashes and freezes `objective.md`, `evaluator.py`, canonical `probes.json`, independent
+Lunar Evolution hashes and freezes `objective.md`, `evaluator.py`, canonical `probes.json`, independent
 `audit.json`, canonical `input-profile.json`, and `manifest.json` under the intake run. The profile
 and audit digests are part of bundle identity. Resume re-profiles current ledger-bound bytes and
 reuses the same bundle without another compiler or auditor call; input, profile, audit, permission,
@@ -291,7 +290,7 @@ its first candidate. The authoritative evaluator stays in the parent bundle, and
 workspaces.
 
 Agent solvers may also return one bounded `experiment` beside candidate source: a short hypothesis,
-change tags, and target metric directions. Lunar-Agent treats that declaration as intent, never as
+change tags, and target metric directions. Lunar Evolution treats that declaration as intent, never as
 proof. After independent evaluation it derives seed/improved/unchanged/regressed/invalid experiment
 cards, score delta, and compatible metric deltas from the append-only archive. Later population
 prompts receive up to eight recent cards plus bounded per-tag outcome counts. Resume
@@ -322,9 +321,9 @@ families different from the parent and from each other. Unknown or malformed tag
 protected slot, while untagged legacy archives retain the historical ranking fallback. Family is
 therefore a search descriptor only: evaluator validity and score still own final-best selection.
 
-## Small Famou-Bench effect trials
+## Small reference-benchmark effect trials
 
-The available historical result for `famou-bench 1.10.6` is an AgentServer/company-platform
+The available historical result for `reference-benchmark 1.10.6` is an AgentServer/company-platform
 normal-Agent experiment, not a WebAgent or deep-evolution experiment. Its model/tool interactions
 are turns inside one solution attempt. WebAgent deep evolution is activated separately by `/evolve`;
 the checked-in source defaults to five outer iterations when no numeric budget is supplied.
@@ -334,8 +333,8 @@ local private case trees. When the owner has established that the selected histo
 case contents are equivalent despite release-label changes, record that explicitly:
 
 ```bash
-lunar-agent effect-kit .lunar/famou-kit \
-  --case supply_chain_inventory=/absolute/famou-bench/03_assignment/supply_chain_inventory \
+lunar-evolution effect-kit .lunar-evolution/reference-kit \
+  --case supply_chain_inventory=/absolute/reference-benchmark/03_assignment/supply_chain_inventory \
   --owner-attested-content-equivalence --json
 ```
 
@@ -344,11 +343,11 @@ harness identities from bytes. The generated `cases/<key>/` tree contains only `
 and direct `data/*` inputs. No private source path, evaluator, extractor, ground truth, release
 number, or raw data value is copied into the JSON provenance.
 
-The current local Lunar evaluation uses `glm-5.1`, selected from existing WebAgent experiment
-records. The GPT commands here describe the retained comparator workflow; its baseline cannot be
-relabeled for GLM. The GLM run uses the existing subject and exact harness adapters for an independent
-case score, with comparisons disabled. Current local results and configuration are recorded in
-[`HANDOFF.md`](HANDOFF.md).
+The archived local evaluation selected `glm-5.1` from existing WebAgent experiment records.
+The GPT commands here illustrate the comparator workflow; its baseline cannot be relabeled for GLM.
+Historical scores and their original configuration remain in the
+[historical archive](docs/history-archive.md). These examples do not constitute a new measurement
+or claim that an archived result was produced by the renamed implementation.
 
 Save the matching comparator experiment-results response and convert those per-run results offline.
 When the export carries adapter metadata, the converter requires consistent allowlisted evidence and
@@ -357,8 +356,8 @@ remain accepted only through the compatibility path. The
 attestation flag labels content equivalence as owner-attested and forces formal ineligibility:
 
 ```bash
-lunar-agent effect-baseline results.json .lunar/famou-kit/suite.json baseline.json \
-  --experiment-id fmexp-... \
+lunar-evolution effect-baseline results.json .lunar-evolution/reference-kit/suite.json baseline.json \
+  --experiment-id EXPERIMENT_ID \
   --requested-model gpt-5.6-sol \
   --effective-model openai/gpt-5.6-sol \
   --model-evidence not_observable \
@@ -377,41 +376,42 @@ private script or call a model. Values of the named environment variables are ne
 report:
 
 ```bash
-lunar-agent effect-preflight .lunar/famou-kit-real-001/suite.json \
-  .lunar/famou-kit-real-001/baseline-agentserver.json \
-  --case-source supply_chain_inventory=.lunar/famou-kit-real-001/cases/supply_chain_inventory \
-  --subject-command "/absolute/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
-  --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
-  --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case --python /absolute/harness-venv/bin/python --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL --extractor-env ANTHROPIC_MODEL" \
+lunar-evolution effect-preflight .lunar-evolution/reference-kit-real-001/suite.json \
+  .lunar-evolution/reference-kit-real-001/baseline-agentserver.json \
+  --case-source supply_chain_inventory=.lunar-evolution/reference-kit-real-001/cases/supply_chain_inventory \
+  --subject-command "/absolute/lunar-evolution effect-subject --model gpt-5.6-sol --max-steps 100" \
+  --subject-env LUNAR_EVOLUTION_MODEL_ENDPOINT --subject-env LUNAR_EVOLUTION_API_KEY \
+  --harness-command "/absolute/lunar-evolution effect-harness --case-root /absolute/private-case --python /absolute/harness-venv/bin/python --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL --extractor-env ANTHROPIC_MODEL" \
   --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL --harness-env ANTHROPIC_MODEL \
   --harness-python /absolute/harness-venv/bin/python \
   --harness-import anyio --harness-import claude_agent_sdk \
   --harness-package claude-agent-sdk==0.1.81 \
   --requested-model gpt-5.6-sol \
-  --output .lunar/effect-preflight-real-001.json --json
+  --output .lunar-evolution/effect-preflight-real-001.json --json
 ```
 
-The current `.lunar/famou-kit-real-001/baseline-agentserver.json` is an AgentServer/company-platform
-historical projection. It is suitable for descriptive comparison only and does not establish
+In this example, `baseline-agentserver.json` is an AgentServer/company-platform
+historical projection created from an owner-provided export. It is suitable for descriptive comparison only and does not establish
 WebAgent parity, suite parity, or statistical superiority. A matching WebAgent export must be
 converted separately before making a WebAgent-specific comparison. The preflight report is
 point-in-time evidence. `effect-trial` and `effect-deep-trial` still perform their own validation
 when they start and do not treat a stale report as permission to run.
-The kit and historical exports are local ignored files. The old `baseline.json` is retained for
-audit; new examples use `baseline-agentserver.json` to avoid the legacy WebAgent alias.
+Generate a new kit at the example path when using the current adapter. Existing kits and historical
+exports retain their original identities in the separate archive; moving them does not update
+content identities or authorize a new comparison.
 
 For a matching-model comparator trial, use the built-in adapters in normal mode:
 
 ```bash
-lunar-agent effect-trial .lunar/famou-kit/suite.json baseline.json \
-  --case-source supply_chain_inventory=.lunar/famou-kit/cases/supply_chain_inventory \
-  --subject-command "/absolute/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
-  --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
-  --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL" \
+lunar-evolution effect-trial .lunar-evolution/reference-kit/suite.json baseline.json \
+  --case-source supply_chain_inventory=.lunar-evolution/reference-kit/cases/supply_chain_inventory \
+  --subject-command "/absolute/lunar-evolution effect-subject --model gpt-5.6-sol --max-steps 100" \
+  --subject-env LUNAR_EVOLUTION_MODEL_ENDPOINT --subject-env LUNAR_EVOLUTION_API_KEY \
+  --harness-command "/absolute/lunar-evolution effect-harness --case-root /absolute/private-case --extractor-env ANTHROPIC_AUTH_TOKEN --extractor-env ANTHROPIC_BASE_URL" \
   --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL \
   --requested-model gpt-5.6-sol \
   --runs-per-case 3 --timeout 3600 \
-  --workspace .lunar/effect-trial-001 --json
+  --workspace .lunar-evolution/effect-trial-001 --json
 ```
 
 For macOS runs, both `effect-trial` and `effect-deep-trial` optionally accept
@@ -421,7 +421,7 @@ existing trial call, and releases it on normal or exceptional exit. The report m
 existing parent without symlink components, and be outside the workspace and all case sources,
 including on resume. Unsupported hosts or failed acquisition reject before trial dispatch.
 Without this option execution is unchanged. Python supervisors may use
-`from famou.host_session import host_execution` and `with host_execution(report_path): ...`.
+`from lunar_evolution.host_session import host_execution` and `with host_execution(report_path): ...`.
 
 The bounded host journal records assertion checks, cleanup, and wall/monotonic clock observations.
 Its work outcome distinguishes a returned call from an exception; native receipts and scores
@@ -430,23 +430,23 @@ sleep. Clock divergence is not an exact sleep duration, and partial journals do 
 See [Feature 083](specs/083-host-execution-guard/quickstart.md) for the lifecycle and local checks.
 
 The suite freezes the benchmark publication, evaluation profile, CaseRevision, public-file ledger,
-and extractor/evaluator digests. The baseline contains individual comparator results; Lunar derives
+and extractor/evaluator digests. The baseline contains individual comparator results; Lunar Evolution derives
 the historical best locally and does not accept a manually entered target score. Only the separate
 harness command may provide validity and score. A case milestone is achieved when all planned
-Lunar runs finish, model identities match, and at least one evaluator-valid Lunar score is strictly
+Lunar Evolution runs finish, model identities match, and at least one evaluator-valid Lunar Evolution score is strictly
 higher than that case's evaluator-valid baseline historical best. This is a single-case
 breakthrough—not whole-suite parity or statistical superiority. Use `--resume` with the same
 options to preserve completed logical runs after an interruption. Subject/harness separation is a
 bounded request and filesystem-layout contract, not an OS sandbox; use an owner-provided sandbox
-for an untrusted same-user command. Lunar rechecks frozen controls, public sources, and run records
+for an untrusted same-user command. Lunar Evolution rechecks frozen controls, public sources, and run records
 before writing a successful report. Only logical records whose digests are already registered in
 runner-owned state are reused; an unregistered record is independently rescored in a new attempt.
 The built-in subject is a fresh attempt-local Agent loop with
-no memory or transcript reuse. The harness recomputes FM-Eval's canonical CaseRevision content
+no memory or transcript reuse. The harness recomputes the external reference benchmark's canonical CaseRevision content
 digest, matches its public projection, hashes `tests/extractor_agent.py` and
 `tests/evaluator.py`, runs each stage once, and starts the evaluator without inherited
-model/extractor credentials. Lunar does not download historical publications or authenticate to
-FM-Eval; those remain explicit owner-controlled local inputs. A content-equivalence attestation is
+model/extractor credentials. Lunar Evolution does not download historical publications or authenticate to
+the external reference benchmark; those remain explicit owner-controlled local inputs. A content-equivalence attestation is
 reported as `descriptive_owner_attested_content_equivalent`, never as cryptographic proof of an
 identical official publication or as a statistically powered superiority conclusion.
 
@@ -454,14 +454,14 @@ To measure the outer evolution effect separately, use the deep protocol. It defa
 rounds, matching the checked-in WebAgent `/evolve` source default when no numeric argument is given:
 
 ```bash
-lunar-agent effect-deep-trial .lunar/famou-kit/suite.json baseline.json \
-  --case-source supply_chain_inventory=.lunar/famou-kit/cases/supply_chain_inventory \
-  --subject-command "/absolute/lunar-agent effect-subject --model gpt-5.6-sol --max-steps 100" \
-  --subject-env FAMOU_MODEL_ENDPOINT --subject-env FAMOU_API_KEY \
-  --harness-command "/absolute/lunar-agent effect-harness --case-root /absolute/private-case" \
+lunar-evolution effect-deep-trial .lunar-evolution/reference-kit/suite.json baseline.json \
+  --case-source supply_chain_inventory=.lunar-evolution/reference-kit/cases/supply_chain_inventory \
+  --subject-command "/absolute/lunar-evolution effect-subject --model gpt-5.6-sol --max-steps 100" \
+  --subject-env LUNAR_EVOLUTION_MODEL_ENDPOINT --subject-env LUNAR_EVOLUTION_API_KEY \
+  --harness-command "/absolute/lunar-evolution effect-harness --case-root /absolute/private-case" \
   --harness-env ANTHROPIC_AUTH_TOKEN --harness-env ANTHROPIC_BASE_URL \
   --requested-model gpt-5.6-sol --runs-per-case 2 \
-  --workspace .lunar/deep-effect-trial-001 --json
+  --workspace .lunar-evolution/deep-effect-trial-001 --json
 ```
 
 Rounds within one attempt share a subject workspace, and every round starts a fresh subject process.
@@ -559,10 +559,10 @@ run's `data/raw/` directory and copied into each isolated task attempt; use `SOU
 destination must match a contract path:
 
 ```bash
-lunar-agent solve "根据订单数据设计配送路线" \
+lunar-evolution solve "根据订单数据设计配送路线" \
   --input ./orders.csv \
   --input ./vehicles.json=vehicles.json \
-  --runtime openai-compatible --agent-loop --json --home .lunar
+  --runtime openai-compatible --agent-loop --json --home .lunar-evolution
 ```
 
 Inputs are recorded as `kind=input_data` with size and SHA-256 metadata. The source machine path is
@@ -584,7 +584,7 @@ available through the explicit `--agent-loop` option.
 For a more explicit specialist workflow, add `--role-dag`:
 
 ```bash
-lunar-agent solve "根据订单数据设计配送路线" --runtime mock --role-dag --json --home .lunar
+lunar-evolution solve "根据订单数据设计配送路线" --runtime mock --role-dag --json --home .lunar-evolution
 ```
 
 This uses `data_discovery → problem_formulator → solver → evaluator → reviewer`. It is still the
@@ -605,13 +605,13 @@ An algorithm mission has two deliberately separate result channels:
    checked independently of the Solver's prose.
 
 The Solver writes logical paths such as `output/routes.csv` in its private attempt workspace. Only
-after independent evaluation passes does Lunar-Agent copy the file to the stable run workspace,
+after independent evaluation passes does Lunar Evolution copy the file to the stable run workspace,
 `<run-workspace>/output/routes.csv`, hash it, and record it as `kind=output`. This means a parent
 Agent can consume data deterministically:
 
 ```bash
-lunar-agent status <run-id> --json   # algorithm_outputs + SHA-256 metadata
-lunar-agent deliver <run-id> --json  # fail-closed delivery decision
+lunar-evolution status <run-id> --json   # algorithm_outputs + SHA-256 metadata
+lunar-evolution deliver <run-id> --json  # fail-closed delivery decision
 ```
 
 Role-DAG evidence is available through the same `status --json` response under `role_evidence` and
@@ -632,6 +632,13 @@ repair/retry flow, and only passing outputs are promoted for delivery. See
 
 ## Bootstrap
 
+Python 3.11 or newer is required. Clone the repository and run the installation commands from its root:
+
+```bash
+git clone https://github.com/vchive/Lunar-Evolution.git
+cd Lunar-Evolution
+```
+
 Using [uv](https://docs.astral.sh/uv/):
 
 ```bash
@@ -649,38 +656,46 @@ python -m pip install -e '.[dev]'
 ## Run the standalone mock agent
 
 ```bash
-uv run famou run "Create a durable local run report" --runtime mock
-uv run famou status <run-id>
-uv run famou events <run-id>
-uv run famou resume <run-id>
+uv run lunar-evolution run "Create a durable local run report" --runtime mock
+uv run lunar-evolution status <run-id>
+uv run lunar-evolution events <run-id>
+uv run lunar-evolution resume <run-id>
 ```
 
-The installed `lunar-agent` command is an equivalent alias for `famou`, which is convenient when a
-parent Agent wants to invoke the project by its repository name.
+The distribution and sole console command are named `lunar-evolution`. The Python package is
+`lunar_evolution`; `python -m lunar_evolution` invokes the same CLI. After activating the installed
+environment, either invocation works outside the repository without setting `PYTHONPATH`.
 
-The default home is `.famou/` in the current working directory. Set `FAMOU_HOME` or pass
-`--home PATH` to use another local directory. The mock runtime is deterministic and requires no
-network, credentials, model, or user-global Hermes state.
+The default home is `.lunar-evolution/` in the current working directory. Set `LUNAR_EVOLUTION_HOME` or pass
+`--home PATH` to use another local directory; `--home` takes precedence over the environment variable.
+The mock runtime is deterministic and requires no network, credentials, model, or user-global Hermes state.
+
+Feature [145](specs/145-lunar-evolution-identity/spec.md) changes the package, command, user-configuration
+variables and versioned product identities together. No predecessor command or configuration aliases
+are installed. Existing state and sealed measurement records are retained separately; renaming does
+not migrate their bytes, make their hashes equivalent, or establish that an old run can resume.
+The [historical archive](docs/history-archive.md) records the fixed revision and integrity index.
+Historical model results describe that archived implementation, not a new result for this namespace.
 
 ## Explicit external runtime
 
 An external agent can be used only when explicitly configured:
 
 ```bash
-export FAMOU_RUNTIME_COMMAND='my-agent --json'
-uv run famou run "Inspect this repository" --runtime subprocess
+export LUNAR_EVOLUTION_RUNTIME_COMMAND='my-agent --json'
+uv run lunar-evolution run "Inspect this repository" --runtime subprocess
 ```
 
-The command receives the task prompt on stdin and runs inside the task workspace. Lunar-Agent never
+The command receives the task prompt on stdin and runs inside the task workspace. Lunar Evolution never
 searches for Hermes or imports `~/.hermes`.
 
 ## Explicit Agent delegation
 
-Lunar-Agent can also act as a local control plane for another CLI/TUI Agent. The worker is supplied
+Lunar Evolution can also act as a local control plane for another CLI/TUI Agent. The worker is supplied
 explicitly; no Hermes, OpenCode, OpenClaw, or Codex installation is discovered or required:
 
 ```bash
-lunar-agent delegate "inspect the repository and write an answer" \
+lunar-evolution delegate "inspect the repository and write an answer" \
   --agent-command "/absolute/path/to/agent-wrapper --json" \
   --agent-name my-worker --agent-role solver \
   --capability read_files --capability write_artifacts --json
@@ -689,7 +704,7 @@ lunar-agent delegate "inspect the repository and write an answer" \
 The command receives one JSON request on stdin and returns one JSON object (or bounded plain text)
 on stdout. The request includes the durable `run_id`, `task_id`, role, required capabilities,
 attempt workspace, and timeout. A structured response can declare `text`, run-relative `artifacts`,
-`metadata`, and `status`. Lunar-Agent verifies and SHA-256 hashes those artifacts, evaluates the
+`metadata`, and `status`. Lunar Evolution verifies and SHA-256 hashes those artifacts, evaluates the
 text, and remains the only component allowed to settle the SQLite task/run. Absolute executable
 paths, timeouts, malformed output, non-zero exits, and workspace escapes fail closed.
 
@@ -697,7 +712,7 @@ For a long delegation, add `--detach`; the command returns a durable run ID and 
 working. Re-enter it later with the same explicit worker command:
 
 ```bash
-lunar-agent delegate --run-id <run-id> \
+lunar-evolution delegate --run-id <run-id> \
   --agent-command "/absolute/path/to/agent-wrapper --json" \
   --agent-role solver --json
 ```
@@ -705,7 +720,7 @@ lunar-agent delegate --run-id <run-id> \
 This makes the same project usable in three ways: directly as a standalone Agent, as a child called
 by Codex/Hermes/OpenClaw, or as the controller that delegates a role to one of those tools. The
 library equivalents are `AgentRequest`, `AgentResult`, `AgentRegistry`, `RuntimeAgentAdapter`, and
-`CommandAgentAdapter` from `famou.agents`.
+`CommandAgentAdapter` from `lunar_evolution.agents`.
 
 The separate typed `WorkerService` API provides persistent worker sessions with
 `dispatch/send/list/wait/resume/cancel`, independent execution instances, owned process cleanup
@@ -716,23 +731,23 @@ yet migrated to this API.
 
 ## Continuous Hermes-inspired model session
 
-Lunar-Agent includes a dependency-free OpenAI-compatible HTTP adapter and a bounded continuous
+Lunar Evolution includes a dependency-free OpenAI-compatible HTTP adapter and a bounded continuous
 tool-calling loop. Point it at a local Ollama, vLLM, LM Studio, or other compatible server:
 
 ```bash
-export FAMOU_MODEL_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
-export FAMOU_MODEL='your-local-model'
-lunar-agent run "Inspect this repository" --runtime openai-compatible --agent-loop --json
+export LUNAR_EVOLUTION_MODEL_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
+export LUNAR_EVOLUTION_MODEL='your-local-model'
+lunar-evolution run "Inspect this repository" --runtime openai-compatible --agent-loop --json
 ```
 
 You can pass `--endpoint` and `--model` instead of environment variables. Hosted endpoints may use
-`FAMOU_API_KEY` (or `--api-key`); the key is sent only as an Authorization header and is redacted
+`LUNAR_EVOLUTION_API_KEY` (or `--api-key`); the key is sent only as an Authorization header and is redacted
 from persisted errors. The adapter accepts the standard OpenAI response shape plus Ollama-style
 responses, and all normal retries, evaluator checks, artifacts, and recovery remain owned by the
 local controller. Add `--allow-exec` to expose bounded no-shell command execution:
 
 ```bash
-lunar-agent run "Run the tests and fix the failing file" \
+lunar-evolution run "Run the tests and fix the failing file" \
   --runtime openai-compatible --agent-loop --allow-exec --max-steps 40
 ```
 
@@ -743,8 +758,8 @@ interruption. It is not a WebAgent stage machine.
 For plans with independent tasks, local workers can overlap without sharing runtime session state:
 
 ```bash
-lunar-agent run --plan plan.json --runtime mock --workers 2 --json
-lunar-agent resume <run-id> --runtime mock --workers 2 --json
+lunar-evolution run --plan plan.json --runtime mock --workers 2 --json
+lunar-evolution resume <run-id> --runtime mock --workers 2 --json
 ```
 
 The default is one worker, preserving serial behavior. `--workers N` is a local bounded thread
@@ -760,13 +775,13 @@ service plane. It chooses the smallest useful action, stores an auditable plan r
 patch/replan and delivery decisions in SQLite:
 
 ```bash
-lunar-agent decide "What does SQLite WAL mode provide?" --json
-lunar-agent plan plan.json --runtime mock --json
-lunar-agent plan <run-id> --json                 # inspect current revision
-lunar-agent patch <run-id> patch.json --json
-lunar-agent replan <run-id> replacement.json --json
-lunar-agent resume <run-id> --runtime mock --json # execute newly opened tasks
-lunar-agent deliver <run-id> --json
+lunar-evolution decide "What does SQLite WAL mode provide?" --json
+lunar-evolution plan plan.json --runtime mock --json
+lunar-evolution plan <run-id> --json                 # inspect current revision
+lunar-evolution patch <run-id> patch.json --json
+lunar-evolution replan <run-id> replacement.json --json
+lunar-evolution resume <run-id> --runtime mock --json # execute newly opened tasks
+lunar-evolution deliver <run-id> --json
 ```
 
 `plan` creation is atomic with the run and task DAG. Each revision has a parent version and remains
@@ -785,8 +800,8 @@ with the run and returned by `status --json`; no provider call or machine-wide A
 needed to choose them.
 
 ```bash
-lunar-agent run "Analyze a CSV and write a report" --runtime mock --json
-lunar-agent status <run-id> --json
+lunar-evolution run "Analyze a CSV and write a report" --runtime mock --json
+lunar-evolution status <run-id> --json
 ```
 
 Budgets fail closed: they bound scheduler task count, total attempts, session tool calls, controller
@@ -839,7 +854,7 @@ methods raise `loop_strategy_retired`. The current local `--workers` option only
 independent DAG tasks; it is not population search.
 
 The retired strategy name is separate from `AgentLoopRuntime`, `--agent-loop`, and
-`--agent-runtime-loop`. Those options still wrap one model invocation in Lunar-Agent's bounded
+`--agent-runtime-loop`. Those options still wrap one model invocation in Lunar Evolution's bounded
 tool-capable runtime; they do not select the evolution algorithm.
 
 ### Local evolution strategies
@@ -848,7 +863,7 @@ The strategy seam is available as a library so a standalone caller or another Ag
 own solver/generator and evaluator:
 
 ```python
-from famou import CandidateDraft, EvolutionConfig, EvolutionContext, build_strategy
+from lunar_evolution import CandidateDraft, EvolutionConfig, EvolutionContext, build_strategy
 
 context = EvolutionContext(
     contract=contract,
@@ -875,11 +890,11 @@ local generator/evaluator commands; their first argument is a run-scoped request
 respectively:
 
 ```bash
-lunar-agent evolve contract.json \
+lunar-evolution evolve contract.json \
   --strategy population \
   --generator-command "/absolute/python /absolute/generator.py" \
   --evaluator-command "/absolute/python /absolute/evaluator.py" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The command creates a normal SQLite-backed run and returns `run_id`, candidate counts, the best
@@ -887,29 +902,29 @@ candidate, and the canonical workspace.  Use `--detach` for a durable child proc
 with the same contract and explicit commands:
 
 ```bash
-lunar-agent evolve contract.json \
+lunar-evolution evolve contract.json \
   --strategy population --population-size 8 --detach \
   --generator-command "/absolute/python /absolute/generator.py" \
   --evaluator-command "/absolute/python /absolute/evaluator.py" \
-  --json --home .lunar
-lunar-agent evolve contract.json --resume --run-id <run-id> \
+  --json --home .lunar-evolution
+lunar-evolution evolve contract.json --resume --run-id <run-id> \
   --generator-command "/absolute/python /absolute/generator.py" \
   --evaluator-command "/absolute/python /absolute/evaluator.py" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The generic `evolve` command can optionally import an already produced population seed manifest.
 This path is population-only and requires the caller's current dependency and environment identity:
 
 ```bash
-lunar-agent evolve contract.json \
+lunar-evolution evolve contract.json \
   --strategy population \
   --seed-manifest "/absolute/path/to/seed-manifest.json" \
   --seed-dependency-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --seed-environment-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
   --generator-command "/absolute/python /absolute/generator.py" \
   --evaluator-command "/absolute/python /absolute/local-exact-evaluator.py" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The manifest's contract digest must match `contract.json`; its `evaluator_kind=exact_harness` and
@@ -918,27 +933,27 @@ dependency/environment digests must match the two explicit flags. The digest fla
 without `--seed-manifest`. Omitting all three seed options preserves the generic evolution path
 without an imported manifest. The staged Master→Build path and benchmark do not infer or attach a
 seed manifest. Resuming a seeded run requires the same manifest, dependency/environment digests,
-and exact evaluator command so Lunar-Agent can repeat admission and reject changed material or
+and exact evaluator command so Lunar Evolution can repeat admission and reject changed material or
 identity before population mutation. The stable `seed-*` identity binds both evaluator kind and
-fingerprint. For an external seed, Lunar-Agent converts both producer evidence and seed metadata to
+fingerprint. For an external seed, Lunar Evolution converts both producer evidence and seed metadata to
 the fixed digest-only summary `{present, score_present, payload_sha256}` before they enter canonical
 state; raw external scores, payloads, and prose are not archived.
 
 OpenEvolve output is untrusted candidate material. Even when its result envelope contains an
-external score, Lunar-Agent admits and ranks the candidate only after the explicit local evaluator
+external score, Lunar Evolution admits and ranks the candidate only after the explicit local evaluator
 returns a matching receipt:
 
 ```bash
-lunar-agent evolve contract.json \
+lunar-evolution evolve contract.json \
   --strategy openevolve \
   --openevolve-command "/absolute/path/to/openevolve-wrapper" \
   --evaluator-command "/absolute/path/to/local-exact-evaluator" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The wrapper runs in a private mode-0700 system temporary directory and receives only a bounded
 contract/budget configuration whose workspace points back to that directory. Its stdout and stderr
-are discarded. After local evaluation succeeds, Lunar-Agent atomically publishes a stable
+are discarded. After local evaluation succeeds, Lunar Evolution atomically publishes a stable
 `seed-*` candidate with `strategy=openevolve`, `iteration=1`, and a matching receipt; the producer
 workspace is removed. Resuming an already completed run verifies canonical source, provenance,
 configuration, and receipt, invokes the current local evaluator again, and does not rerun the
@@ -954,11 +969,11 @@ receives the candidate path, runs in that candidate's attempt directory, and pro
 `execution.json` evidence before the evaluator command is called:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --generator-command "/absolute/path/to/generator" \
   --candidate-runner-command "/absolute/path/to/run-candidate" \
   --evaluator-command "/absolute/path/to/evaluate-candidate" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The evaluator keeps its existing candidate-path argument and can read the sibling
@@ -969,7 +984,7 @@ command, so historical command-only and Agent-backed evolution remains compatibl
 
 ### Repository-owned runtime evolution
 
-Native evolution can use Lunar-Agent's own runtime as the solver, evaluator, or both. This is the
+Native evolution can use Lunar Evolution's own runtime as the solver, evaluator, or both. This is the
 standalone path: it does not import or discover a machine-wide Hermes, OpenCode, Codex, Claude Code,
 or DeepSeek Harness installation. The runtime profile is explicit and is adapted through the same
 strict `AgentCandidateGenerator` / `AgentCandidateEvaluator` bridges as external workers:
@@ -977,17 +992,17 @@ strict `AgentCandidateGenerator` / `AgentCandidateEvaluator` bridges as external
 ```bash
 # A local runtime command can produce candidate source for solver prompts and
 # a strict EvaluationReport JSON object for evaluator prompts.
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-runtime subprocess \
   --agent-runtime-command "/absolute/path/to/local-agent --json" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 
 # Or call an OpenAI-compatible local server directly.
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint "http://127.0.0.1:11434/v1/chat/completions" \
   --agent-runtime-model "your-local-model" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The available profiles are `mock`, `subprocess`, and `openai-compatible`. A runtime fills either
@@ -997,24 +1012,24 @@ with a runtime-backed solver, and vice versa. `--agent-runtime` cannot be combin
 Each role gets a fresh runtime adapter, while the SQLite ledger and candidate archive remain the
 durable authority. Runtime kind, endpoint/model, command identity, role, and capabilities are
 stored only as credential-safe fingerprints. Detached runs pass non-secret settings as arguments
-and an API key through `FAMOU_AGENT_RUNTIME_API_KEY`, never through argv or state.
+and an API key through `LUNAR_EVOLUTION_AGENT_RUNTIME_API_KEY`, never through argv or state.
 
 For an OpenAI-compatible local model that needs to inspect a candidate, edit files, or run tests
 before returning, keep the population strategy and opt into the bounded repository-owned runtime
 loop:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
   --agent-runtime-model your-local-model \
   --agent-runtime-loop --agent-runtime-session-history \
   --agent-runtime-allow-exec --agent-runtime-max-steps 40 \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 `--agent-runtime-loop` wraps each runtime invocation with the same confined `read_file`,
-`write_file`, `list_dir`, and optional no-shell `run_command` tools used by normal Lunar-Agent
+`write_file`, `list_dir`, and optional no-shell `run_command` tools used by normal Lunar Evolution
 sessions. Each solver and evaluator role receives a fresh runtime and tool registry. The runtime
 loop is bounded to at most 200 tool calls, and memory, transcripts, and command execution are all
 explicit opt-ins. It does not reactivate the retired evolution strategy. Its text still crosses the
@@ -1027,11 +1042,11 @@ evaluator, and bounded budget. With no `--strategy`, the benchmark runs only `po
 workspace and archive:
 
 ```bash
-lunar-agent benchmark contract.json \
+lunar-evolution benchmark contract.json \
   --generator-command "/absolute/path/to/generator" \
   --evaluator-command "/absolute/path/to/evaluator" \
   --max-rounds 3 --population-size 4 --seed 7 \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The JSON report contains per-strategy status, elapsed time, candidate counts, best score, and
@@ -1040,28 +1055,28 @@ commands and model credentials are not included. To compare the native populatio
 OpenEvolve adapter, select both and retain the local evaluator command:
 
 ```bash
-lunar-agent benchmark contract.json \
+lunar-evolution benchmark contract.json \
   --strategy population --strategy openevolve \
   --generator-command "/absolute/path/to/generator" \
   --openevolve-command "/absolute/path/to/openevolve-wrapper" \
   --evaluator-command "/absolute/path/to/local-exact-evaluator" \
   --max-rounds 3 --population-size 4 --seed 7 \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The wrapper receives a generated config and writes bounded candidate material. Its evaluation is
 external provenance only; the displayed comparison score comes from the explicit local evaluator.
-OpenEvolve remains an opt-in subprocess and is never installed or discovered by Lunar-Agent.
+OpenEvolve remains an opt-in subprocess and is never installed or discovered by Lunar Evolution.
 
 ShinkaEvolve and other program-search runners can use the same transport-free producer envelope
 before a service adapter exists. The public `ProducerResultEnvelope` / `ProducerMaterial` API accepts
 only a terminal status, producer identity, bounded budget, lineage, and already-written candidate
 files with size and SHA-256; `admit_producer_result(...)` verifies those bytes and converts the
-batch to one verified-seed manifest. Lunar assigns islands and identities only after the full batch
+batch to one verified-seed manifest. Lunar Evolution assigns islands and identities only after the full batch
 has passed the local exact evaluator. Producer metrics such as `combined_score`, `correct`, or
-feedback are reduced to `{present, score_present, payload_sha256}` and cannot become Lunar scores.
+feedback are reduced to `{present, score_present, payload_sha256}` and cannot become Lunar Evolution scores.
 
-For a native Shinka result directory, `famou.export_shinka_result(...)` is a read-only, offline
+For a native Shinka result directory, `lunar_evolution.export_shinka_result(...)` is a read-only, offline
 exporter. It opens `programs.sqlite` (with an explicit legacy `evolution_db.sqlite` fallback) in
 immutable read-only mode when the database is quiescent (live `-wal`/`-shm`/rollback-journal
 sidecars are rejected), and writes a fresh envelope plus bounded candidate copies under the
@@ -1069,33 +1084,33 @@ requested export root. The export-root leaf must be a new path, its existing par
 regular directory without arbitrary symlink components, and a failed commit can report an
 unknown parent-directory durability state after the complete tree becomes visible. Pass
 `program_ids=[...]` to select an explicit ordered set and leave `top_k` omitted; this can include
-rows that Shinka marked incorrect so Lunar can make the authoritative decision. If IDs are omitted, `top_k`
+rows that Shinka marked incorrect so Lunar Evolution can make the authoritative decision. If IDs are omitted, `top_k`
 defaults to one convenience row and otherwise selects rows with `correct = 1`, ordered
 deterministically by the producer's `combined_score`, generation, and ID. The exporter prefers
 `gen_<generation>/main.<ext>` and uses `best/main.<ext>` only when that generation file is absent,
 after checking exact UTF-8 bytes against the database row. Call `admit_producer_result(export_root,
 ...)` afterwards; Shinka scores, correctness, metrics, and SQLite/generation metadata are reduced
-to bounded external evidence and never become Lunar iteration, score, or rank authority. The
+to bounded external evidence and never become Lunar Evolution iteration, score, or rank authority. The
 exporter does not launch ShinkaEvolve, a model, a scheduler, or a remote backend.
 
 Feature [096](specs/096-producer-cli-warm-start/) exposes that workflow directly through the CLI:
 
 ```bash
-lunar-agent export-shinka-result ./shinka-run --output ./shinka-export \
+lunar-evolution export-shinka-result ./shinka-run --output ./shinka-export \
   --contract contract.json --producer-fingerprint "$SHINKA_FINGERPRINT" \
   --program-id program-1 --json
 
-lunar-agent evolve contract.json --producer-result ./shinka-export \
+lunar-evolution evolve contract.json --producer-result ./shinka-export \
   --producer-fingerprint "$SHINKA_FINGERPRINT" --producer-id shinka \
   --generator-command "/absolute/path/to/generator" \
   --evaluator-command "/absolute/path/to/local-exact-evaluator" \
-  --population-size 4 --json --home .lunar
+  --population-size 4 --json --home .lunar-evolution
 ```
 
 `SHINKA_FINGERPRINT` is your pinned producer version/configuration SHA-256. Export copies material
-without initializing a Lunar run or executing a producer. Use repeated `--program-id` values for
+without initializing a Lunar Evolution run or executing a producer. Use repeated `--program-id` values for
 ordered selection, or `--top-k N` for producer-score selection (default one); export success does
-not mean the candidate passed Lunar evaluation. `evolve --producer-result` prepares an unadmitted
+not mean the candidate passed Lunar Evolution evaluation. `evolve --producer-result` prepares an unadmitted
 manifest and sends it through the same local exact evaluator and seed receipt path as
 `--seed-manifest`. It accepts any compatible completed producer export directory. Source-bundle
 dependency and declared-protocol environment digests are derived by the existing adapter; explicit
@@ -1112,25 +1127,25 @@ Feature [097](specs/097-benchmark-task-envelope/) adds a static `lunar-benchmark
 envelope for future SkyDiscover/LLM4AD comparisons:
 
 ```bash
-lunar-agent benchmark-task validate task.json --contract contract.json \
+lunar-evolution benchmark-task validate task.json --contract contract.json \
   --input-root ./public-input --model-profile-sha256 "$MODEL_PROFILE_SHA256" \
   --evaluator-fingerprint "$EVALUATOR_SHA256" --json
 ```
 
 Validation rechecks confined input bytes and caller pins, emitting only bounded envelope and
-comparison digests. It does not initialize Lunar storage or run an external framework, model or
-evaluator; framework scores and generation IDs remain outside Lunar score and iteration authority.
+comparison digests. It does not initialize Lunar Evolution storage or run an external framework, model or
+evaluator; framework scores and generation IDs remain outside Lunar Evolution score and iteration authority.
 
 Feature [098](specs/098-benchmark-comparison-plan/) freezes a multi-arm comparison plan on top of
 these envelopes. Every arm must share the same task comparison digest, contract, model, exact
 evaluator, candidate kind and physical budget. `BenchmarkComparisonPlan` and
 `admit_benchmark_comparison_plan(...)` only validate those identities and local input bytes; they
-do not run SkyDiscover, LLM4AD, Lunar or any evaluator, and they produce no effectiveness claim.
+do not run SkyDiscover, LLM4AD, Lunar Evolution or any evaluator, and they produce no effectiveness claim.
 
 Feature [099](specs/099-benchmark-comparison-result/) adds a bounded result receipt for that plan.
 It records per-arm status, counters, timing, finite score summaries and evidence digests, then
 checks that every planned arm appears exactly once. It remains measurement evidence and never
-updates Lunar candidate, score or iteration authority.
+updates Lunar Evolution candidate, score or iteration authority.
 
 The static `benchmark-comparison validate-result` command validates a plan and result receipt with
 the same local contract, input, model and evaluator pins. It runs before normal configuration
@@ -1139,7 +1154,7 @@ initialization and emits only comparison/result IDs and arm summaries.
 Feature [100](specs/100-benchmark-evidence-binding/) also checks the actual per-arm evidence files:
 
 ```bash
-lunar-agent benchmark-comparison validate-result plan.json result.json \
+lunar-evolution benchmark-comparison validate-result plan.json result.json \
   --contract contract.json --input-root ./public-input \
   --model-profile-sha256 "$MODEL_PROFILE_SHA256" \
   --evaluator-fingerprint "$EVALUATOR_SHA256" \
@@ -1151,7 +1166,7 @@ Paths are relative to `--evidence-root`; files and ancestor directories must not
 The command reads bounded bytes and rejects observed replacement, size or digest changes, returning
 `evidence_bound: true` only after all arms pass. Without the flag it checks the receipt with
 `evidence_bound: false`. This verifies local bytes; it does not certify how they were produced or
-turn external scores into Lunar scores.
+turn external scores into Lunar Evolution scores.
 
 Feature [101](specs/101-exact-comparison-plan-binding/) binds a result to the complete plan, including
 each arm's benchmark name, release and publication digest. Create a new pinned receipt with
@@ -1165,7 +1180,7 @@ Feature [102](specs/102-candidate-source-bundle/) adds a standalone manifest for
 files. Validate the declared files against their sizes, SHA-256 values and algorithm contract:
 
 ```bash
-lunar-agent candidate-bundle validate bundle.json --source-root ./source \
+lunar-evolution candidate-bundle validate bundle.json --source-root ./source \
   --contract contract.json --bundle-sha256 "$BUNDLE_SHA256" --json
 ```
 
@@ -1183,7 +1198,7 @@ Feature [103](specs/103-candidate-workspace-materialization/) adds a separate ma
 boundary:
 
 ```bash
-lunar-agent candidate-bundle materialize bundle.json --source-root ./source \
+lunar-evolution candidate-bundle materialize bundle.json --source-root ./source \
   --contract contract.json --workspace-root ./workspaces \
   --command /usr/bin/python main.py --json
 ```
@@ -1200,7 +1215,7 @@ dependency/environment commitments, evaluator fingerprint, output-contract ident
 process budget into one path-free admission digest:
 
 ```python
-from famou import admit_candidate_execution, build_candidate_execution_admission
+from lunar_evolution import admit_candidate_execution, build_candidate_execution_admission
 ```
 
 Structural parsing and validation perform no filesystem IO. When a caller supplies an input root,
@@ -1215,7 +1230,7 @@ side effects.
 Feature 105 prepares a separate private input directory from that declaration:
 
 ```bash
-lunar-agent candidate-bundle stage-inputs admission.json --plan plan.json \
+lunar-evolution candidate-bundle stage-inputs admission.json --plan plan.json \
   --input-root ./inputs --staging-root ./staging --json
 ```
 
@@ -1223,7 +1238,7 @@ Both roots must exist and be disjoint physical directories. Staging checks the c
 and plan before accessing either root, copies only declared inputs, then re-reads destination sizes
 and SHA-256 values. It supports binary and empty files; directories use mode 0700 and files 0600.
 The CLI returns `input_path` alongside digest/count metadata. The Python API
-`famou.stage_candidate_execution_inputs(...)` returns the path as a separate property and excludes
+`lunar_evolution.stage_candidate_execution_inputs(...)` returns the path as a separate property and excludes
 it from `to_dict()`. Each call creates a new directory owned by the caller. Failures clean only
 identity-matched files created by the operation; an unsafe or failed cleanup has an explicit error.
 Staging does not run the plan, merge inputs into candidate source files, or create an execution receipt.
@@ -1233,7 +1248,7 @@ and explains how to serialize an admission. Future runners must recheck the muta
 Feature 106 runs one already admitted multi-file candidate in that private workspace:
 
 ```bash
-lunar-agent candidate-bundle run admission.json --plan plan.json \
+lunar-evolution candidate-bundle run admission.json --plan plan.json \
   --workspace ./workspace --input-root ./staged-inputs --json
 ```
 
@@ -1242,16 +1257,16 @@ root disjointness before starting. It passes an explicit argv plus the bundle en
 `shell=False`, a fixed cwd, an isolated process group and `LUNAR_CANDIDATE_INPUT_ROOT`; timeout and
 output ceilings are enforced with bounded pipe reads. The static CLI runs before normal config/home/
 Store initialization and returns path-free execution telemetry. A successful exit is only process
-telemetry, not exact evaluator acceptance or a Lunar Candidate/score/receipt. Feature 106 does not
+telemetry, not exact evaluator acceptance or a Lunar Evolution Candidate/score/receipt. Feature 106 does not
 install dependencies, call models or evaluators, write execution evidence, or claim parity with
 OpenEvolve, ShinkaEvolve or WebAgent.
 
 Feature 107 retains launch intent and execution telemetry in a new caller-owned attempt:
 
 ```bash
-lunar-agent candidate-bundle run-recorded admission.json --plan plan.json \
+lunar-evolution candidate-bundle run-recorded admission.json --plan plan.json \
   --workspace ./workspace --input-root ./staged-inputs --attempt ./attempt-001 --json
-lunar-agent candidate-bundle inspect-execution admission.json --plan plan.json \
+lunar-evolution candidate-bundle inspect-execution admission.json --plan plan.json \
   --attempt ./attempt-001 --json
 ```
 
@@ -1268,10 +1283,10 @@ available below; native population integration is described after evaluation. Se
 Feature 108 independently evaluates a successful recorded multi-file candidate:
 
 ```bash
-lunar-agent candidate-bundle evaluate admission.json --plan plan.json --contract contract.json \
+lunar-evolution candidate-bundle evaluate admission.json --plan plan.json --contract contract.json \
   --evaluator evaluator.json --harness harness.py --workspace ./workspace \
   --input-root ./staged-inputs --attempt ./attempt-001 --evaluation-root ./evaluations --json
-lunar-agent candidate-bundle inspect-evaluation ./evaluations/.candidate-evaluation-ID --json
+lunar-evolution candidate-bundle inspect-evaluation ./evaluations/.candidate-evaluation-ID --json
 ```
 
 The admission must pin `CandidateEvaluationSpec.pin()` and
@@ -1293,10 +1308,10 @@ See the complete [108 quickstart](specs/108-candidate-independent-evaluation/qui
 Feature 109 connects complete source bundles to native population search and delivery:
 
 ```bash
-lunar-agent evolve-bundle contract.json --profile bundle-profile.json \
+lunar-evolution evolve-bundle contract.json --profile bundle-profile.json \
   --generator-command '/absolute/python /absolute/generator.py' \
   --workspace ./bundle-run --destination-root ./deliveries --json
-lunar-agent candidate-bundle inspect-delivery ./deliveries/.bundle-delivery-ID \
+lunar-evolution candidate-bundle inspect-delivery ./deliveries/.bundle-delivery-ID \
   --delivery-sha256 SAVED_SHA256 --json
 ```
 
@@ -1323,7 +1338,7 @@ Feature 110 lets the existing Agent worker generate the complete bundle. Select 
 instead of a request-file generator, or use the native runtime directly:
 
 ```bash
-lunar-agent evolve-bundle contract.json --profile bundle-profile.json --workspace ./bundle-run \
+lunar-evolution evolve-bundle contract.json --profile bundle-profile.json --workspace ./bundle-run \
   --agent-runtime openai-compatible --agent-runtime-endpoint YOUR_ENDPOINT \
   --agent-runtime-model YOUR_MODEL --agent-runtime-loop \
   --destination-root ./deliveries --json
@@ -1345,12 +1360,12 @@ helper-only improvement, complete delivery and terminal resume using local proce
 Feature 111 also exposes this pipeline through ordinary conversational intake:
 
 ```bash
-lunar-agent solve 'Optimize the supplied data' --evolve --bundle-profile bundle-profile.json \
+lunar-evolution solve 'Optimize the supplied data' --evolve --bundle-profile bundle-profile.json \
   --input ./data.csv=data.csv --runtime openai-compatible --endpoint YOUR_ENDPOINT \
   --model YOUR_MODEL --agent-loop --workspace ./mission --json
-lunar-agent solve --resume --run-id RUN_ID --bundle-profile bundle-profile.json \
+lunar-evolution solve --resume --run-id RUN_ID --bundle-profile bundle-profile.json \
   --runtime openai-compatible --endpoint YOUR_ENDPOINT --model YOUR_MODEL --agent-loop --json
-lunar-agent deliver RUN_ID --json
+lunar-evolution deliver RUN_ID --json
 ```
 
 The profile's complete input set must match the parent's registered `data/raw/<target>` files by
@@ -1369,7 +1384,7 @@ budget. See the standalone [111 quickstart](specs/111-conversational-bundle-deli
 Feature 112 prepares the evaluator and profile automatically:
 
 ```bash
-lunar-agent solve 'Optimize the supplied data' --evolve --multi-file \
+lunar-evolution solve 'Optimize the supplied data' --evolve --multi-file \
   --input ./data.csv=data.csv --runtime openai-compatible --endpoint YOUR_ENDPOINT \
   --model YOUR_MODEL --agent-loop --workspace ./mission --json
 ```
@@ -1385,12 +1400,12 @@ Feature [142](specs/142-automatic-solve-lifecycle/spec.md) adds a shared foregro
 budget for this automatic native multi-file path:
 
 ```bash
-lunar-agent solve 'Optimize the supplied data' --evolve --multi-file \
+lunar-evolution solve 'Optimize the supplied data' --evolve --multi-file \
   --input ./data.csv=data.csv --runtime openai-compatible --endpoint YOUR_ENDPOINT \
   --model YOUR_MODEL --agent-loop --workspace ./mission \
   --timeout 600 --evaluator-preparation-timeout 900 \
   --evaluator-preparation-wall-timeout 1860 --solve-wall-timeout 3000 \
-  --candidate-generation-max-steps 12 --home .lunar --json
+  --candidate-generation-max-steps 12 --home .lunar-evolution --json
 ```
 
 These are example limits, not new defaults. `--solve-wall-timeout` accepts a finite positive number
@@ -1408,9 +1423,9 @@ same value. A legacy handoff cannot acquire this policy later, and an exhausted 
 terminal run cannot replenish its budget through continuation.
 
 ```bash
-lunar-agent resume RUN_ID --runtime openai-compatible --endpoint YOUR_ENDPOINT \
-  --model YOUR_MODEL --agent-loop --home .lunar --json
-lunar-agent status RUN_ID --home .lunar --json
+lunar-evolution resume RUN_ID --runtime openai-compatible --endpoint YOUR_ENDPOINT \
+  --model YOUR_MODEL --agent-loop --home .lunar-evolution --json
+lunar-evolution status RUN_ID --home .lunar-evolution --json
 ```
 
 The parent remains running through evolution and succeeds only after verified delivery. A durable
@@ -1435,7 +1450,7 @@ prove full business correctness. See the local [112 quickstart](specs/112-automa
 
 Normal solving remains the default. The first preregistered GLM-5.2 acceptance on `c977eb4`
 completed **0/2** tasks: both failed at contract intake, before evaluator or candidate generation.
-See the [113 report](specs/113-real-multifile-acceptance/postrun/report.md). Current-version reliability
+See the [113 report](docs/history-archive.md). Current-version reliability
 still needs successful real-model validation; local fixtures do not establish effectiveness or
 relative WebAgent performance. Active-process cancellation orchestration and OpenEvolve/Shinka
 multi-file seed imports remain future work.
@@ -1446,7 +1461,7 @@ retains its tools. Describe the required input schema and objective in the goal 
 clarifications; the isolated compiler does not inspect staged files. Invalid responses still fail
 without an automatic repair request. The repair has offline coverage; a new preregistered run is
 required to measure its real-model effect. See [114 verification](specs/114-isolated-contract-intake/quickstart.md).
-The separately registered [115 follow-up](specs/115-isolated-intake-acceptance/postrun/report.md)
+The separately registered [115 follow-up](docs/history-archive.md)
 also completed 0/2: one accepted contract reached evaluator preparation, then timed out; the other
 contract request timed out. Known usage is only a subtotal. Generated evaluator quality and
 successful real multi-file delivery remain unverified.
@@ -1468,7 +1483,7 @@ contents, paths, probe names or exception prose. They remain nonrecoverable vali
 runtime recovery rules and frozen evaluator reuse are unchanged. Older observations still load,
 and invalid optional detail is omitted. See [127 diagnostics](specs/127-evaluator-preparation-diagnostics/quickstart.md).
 
-The independently registered [117 run](specs/117-extended-deadline-acceptance/postrun/report.md)
+The independently registered [117 run](docs/history-archive.md)
 on Feature 116 extended request/process limits to 600 seconds and task limits to 3600 seconds,
 retaining the other task/model/budget conditions. It still completed **0/2**: one evaluator request
 timed out, and the other task's contract response was wrapped in a Markdown JSON fence and rejected.
@@ -1486,7 +1501,7 @@ coverage. This does not prove helper imports, standard-library-only execution or
 See [118 capability and framing checks](specs/118-contract-protocol-capabilities/quickstart.md).
 
 Feature 119 supports one hard source requirement: `verification_scope="source"` with
-`source_check={"kind":"python_file_count","minimum":2}` (integer minimum 1–64). Lunar counts
+`source_check={"kind":"python_file_count","minimum":2}` (integer minimum 1–64). Lunar Evolution counts
 distinct declared paths ending in lowercase `.py`, including empty files, against the verified
 source bundle. The output evaluator checks the remaining output requirements. A source failure
 forces an invalid result and skips the output harness; source success cannot override output failure.
@@ -1495,7 +1510,7 @@ without rerunning the program. This proves the declared file count, not helper i
 Unsupported source, soft source and execution requirements still stop before evaluator generation.
 See [119 source verification](specs/119-source-file-verification/quickstart.md).
 
-The separately registered [120 real acceptance](specs/120-supported-scope-acceptance/postrun/report.md)
+The separately registered [120 real acceptance](docs/history-archive.md)
 completed **0/2** on the supported file-count scope. Both contracts compiled; both evaluator-generation
 requests timed out at 600 seconds before any candidate or delivery. Known usage was 16,161 tokens;
 timeout consumption and cost are unknown. This does not establish real multi-file reliability.
@@ -1514,7 +1529,7 @@ CONNECT/TLS, and received headers may precede a redirect. Final status and coars
 remain separate. Only fixed names and integers enter this detail; request bytes, TLS, proxies,
 redirects, deadlines and retries are unchanged. No new real model result is claimed.
 
-The independently registered [123 small diagnostic](specs/123-small-evaluator-diagnostic/postrun/report.md)
+The independently registered [123 small diagnostic](docs/history-archive.md)
 finished **0/1** evaluator preparations. Its compiler request returned HTTP200 in243 seconds
 (20,831 reported tokens), then local preparation rejected the evaluator; no auditor or holdout ran.
 Static inspection found that generated code looked for input descriptor `path`, while the native
@@ -1523,7 +1538,7 @@ This identifies a concrete next repair, without establishing the cause of120's t
 multi-file delivery. No attempt was retried; historical denominators remain separate.
 
 A completed observation from the transport-free remote lifecycle can use
-`famou.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
+`lunar_evolution.admit_remote_materials(material_root, state, contract, evaluator, ...)`. The bridge accepts
 only a reconciled `completed` state with pinned producer identity and `candidate_source` references,
 then routes every local file through the same exact evaluator and receipt path. Remote experiment
 timestamps, attempts, raw state identity, and any external score-like observations are reduced to
@@ -1538,15 +1553,15 @@ digest-mismatched files fail closed. If every local evaluation is unusable, the 
 the generic `SeedAdmissionError(code="no_usable_seeds")` result semantics. A supplied staging root
 must be a sibling tree disjoint from the material root, including resolved filesystem aliases.
 
-The same benchmark can use Lunar-Agent's repository-owned runtime instead of command adapters. A
+The same benchmark can use Lunar Evolution's repository-owned runtime instead of command adapters. A
 one-shot comparison uses:
 
 ```bash
-lunar-agent benchmark contract.json \
+lunar-evolution benchmark contract.json \
   --agent-runtime openai-compatible \
   --agent-runtime-endpoint http://127.0.0.1:11434/v1/chat/completions \
   --agent-runtime-model your-local-model \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 Run the identical command in a new workspace with `--agent-runtime-loop` to measure the bounded
@@ -1555,7 +1570,7 @@ no-shell execution remain explicit opt-ins. Runtime-backed calls still use the p
 and strict candidate/evaluator bridges, so a model response cannot bypass validity checks.
 
 Hermes, DeepSeek Harness, Codex, Claude Code, and OpenClaw remain useful optional adapters or parent
-processes. They are execution-plane integrations; Lunar-Agent's local controller, evolution
+processes. They are execution-plane integrations; Lunar Evolution's local controller, evolution
 strategy, evaluator authority, artifacts, and resume semantics stay repository-owned.
 
 For higher-assurance algorithm work, configure two or more independent evaluator Agents. Every
@@ -1565,11 +1580,11 @@ failure, malformed report, or validity disagreement is represented as a controll
 and cannot become the best candidate:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-command "/absolute/path/to/solver --json" \
   --evaluator-portfolio-command "/absolute/path/to/evaluator-a --json" \
   --evaluator-portfolio-command "/absolute/path/to/evaluator-b --json" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The ordered evaluator command list and shared role/capability profile are included in the
@@ -1597,20 +1612,20 @@ events, Agent model/tool lifecycle events, and indexed `evolution/archive.jsonl`
 `evolution/state.json`, `evolution/result.json`, and redacted solver/evaluator transcript artifacts.
 OpenEvolve remains optional and is invoked only when `--openevolve-command` points to an existing
 absolute executable and `--evaluator-command` supplies local verification; no global installation
-is discovered and an external evaluation never becomes the Lunar score.
+is discovered and an external evaluation never becomes the Lunar Evolution score.
 
 An explicit Agent can generate candidates directly while the evaluator remains independent:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-command "/absolute/path/to/agent-wrapper --json" \
   --agent-role solver --agent-capability read_files \
   --evaluator-command "/absolute/path/to/evaluator-wrapper" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 The Agent receives a bounded algorithm context and returns source text or a `{\"source\": ...}`
-object. Lunar-Agent archives and evaluates that proposal through the same validity-first path as
+object. Lunar Evolution archives and evaluates that proposal through the same validity-first path as
 command generators; an Agent claim is never treated as evaluation evidence. See
 [`specs/015-agent-backed-evolution/`](specs/015-agent-backed-evolution/) for the SDD contract.
 
@@ -1619,21 +1634,21 @@ If a separate evaluator Agent is available, use `--evaluator-agent-command` inst
 schema before influencing selection:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-command "/absolute/path/to/solver-wrapper --json" \
   --evaluator-agent-command "/absolute/path/to/evaluator-wrapper --json" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 Population search can also rotate multiple explicit solver Agents using repeatable
 `--agent-portfolio-command` options:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-portfolio-command "/absolute/path/to/solver-a --json" \
   --agent-portfolio-command "/absolute/path/to/solver-b --json" \
   --evaluator-agent-command "/absolute/path/to/evaluator --json" \
-  --json --home .lunar
+  --json --home .lunar-evolution
 ```
 
 Calls use the ordered portfolio deterministically in round-robin order. Every proposal still goes
@@ -1646,7 +1661,7 @@ candidate archive. Failed or all-invalid runs return `null` for both the best ca
 
 ### Three local invocation modes
 
-Lunar-Agent is the same independent agent in each mode; a parent Agent is optional.
+Lunar Evolution is the same independent agent in each mode; a parent Agent is optional.
 
 1. Run it directly as a standalone local Agent. The repository-owned SQLite ledger and workspace
    are enough; no Hermes/OpenCode/Codex installation is discovered or imported.
@@ -1661,18 +1676,18 @@ Examples:
 
 ```bash
 # 1. Standalone
-lunar-agent plan routing-plan.json --runtime mock --home .lunar --json
+lunar-evolution plan routing-plan.json --runtime mock --home .lunar-evolution --json
 
 # 2. Parent Agent child process (stdin/stdout JSON)
-printf '%s' 'solve this routing problem' | lunar-agent run - --runtime mock --json --home .lunar
+printf '%s' 'solve this routing problem' | lunar-evolution run - --runtime mock --json --home .lunar-evolution
 
 # 3. Detached then resumed (general agent run)
-lunar-agent run "search for a feasible schedule" --runtime mock --detach --json --home .lunar
-lunar-agent resume <run-id> --runtime mock --json --home .lunar
+lunar-evolution run "search for a feasible schedule" --runtime mock --detach --json --home .lunar-evolution
+lunar-evolution resume <run-id> --runtime mock --json --home .lunar-evolution
 ```
 
 These are process/interface choices, not different evolution algorithms. New evolution work uses
-the population strategy behind the same Solver/Evaluator boundary, independent of whether Lunar is
+the population strategy behind the same Solver/Evaluator boundary, independent of whether Lunar Evolution is
 called directly, by a parent Agent, or through a detached process. `--agent-loop` and
 `--agent-runtime-loop` remain model/tool runtime choices inside that boundary.
 
@@ -1681,8 +1696,8 @@ returns the question in JSON/status output. Answer the same durable run later; n
 created:
 
 ```bash
-lunar-agent answer <run-id> "json" --runtime openai-compatible \
-  --endpoint "$FAMOU_MODEL_ENDPOINT" --model "$FAMOU_MODEL" --agent-loop --memory --json
+lunar-evolution answer <run-id> "json" --runtime openai-compatible \
+  --endpoint "$LUNAR_EVOLUTION_MODEL_ENDPOINT" --model "$LUNAR_EVOLUTION_MODEL" --agent-loop --memory --json
 ```
 
 The answer is written as a bounded run artifact and included in the next task prompt. Use `-` as the
@@ -1692,7 +1707,7 @@ For retries and `resume` to replay recent model/tool context, add `--session-his
 bounded, redacted JSONL transcript under the run workspace and indexes one stable session artifact:
 
 ```bash
-lunar-agent run "Continue the migration" \
+lunar-evolution run "Continue the migration" \
   --runtime openai-compatible --agent-loop --session-history --json
 ```
 
@@ -1716,15 +1731,15 @@ Memory is explicitly opt-in because recalled local notes may be sent to the conf
 endpoint. Enable it for a session with `--memory`:
 
 ```bash
-lunar-agent run "Continue the migration and remember the key decisions" \
+lunar-evolution run "Continue the migration and remember the key decisions" \
   --runtime openai-compatible --agent-loop --memory --json
 ```
 
 The model can call `recall_memory` and `remember_memory`. Entries are bounded and stored in the same
 local SQLite database, with `global` and run-scoped namespaces. Notes are never injected into a
 request silently; the model must explicitly request recall. No embeddings service or vector database
-is required. Inspect notes locally with `lunar-agent memory --json` or search global notes with
-`lunar-agent memory "deployment" --json`.
+is required. Inspect notes locally with `lunar-evolution memory --json` or search global notes with
+`lunar-evolution memory "deployment" --json`.
 
 ## Multi-step plans
 
@@ -1743,7 +1758,7 @@ dependent prompt:
 ```
 
 ```bash
-uv run famou run --plan plan.json --runtime mock --json
+uv run lunar-evolution run --plan plan.json --runtime mock --json
 ```
 
 Malformed plans (duplicate IDs, unknown dependencies, or cycles) are rejected without leaving a
@@ -1785,7 +1800,7 @@ symlink escape fail closed and leave an auditable failure rather than reading ou
 payload is `{ "path": "output/...", "format": "json|jsonl|csv|text", "fields": [...] }`.
 
 The `task_evaluated` event and attempt `evaluation.json` contain a bounded rule-level decision tree.
-`lunar-agent status <run-id> --json` exposes the most recent evaluation summary under each task's
+`lunar-evolution status <run-id> --json` exposes the most recent evaluation summary under each task's
 `evaluation` field, so a parent Agent can decide whether to patch or replan without scraping logs.
 The complete v1 grammar and a runnable local example are in
 [`specs/008-artifact-acceptance-contracts/contracts/acceptance-contract.md`](specs/008-artifact-acceptance-contracts/contracts/acceptance-contract.md)
@@ -1797,8 +1812,8 @@ After a failed verifier, exhausted runtime path, budget boundary, interruption, 
 the local controller for an advisory next step:
 
 ```bash
-lunar-agent recover <run-id> --json
-lunar-agent status <run-id> --json
+lunar-evolution recover <run-id> --json
+lunar-evolution status <run-id> --json
 ```
 
 The deterministic local `RecoveryPolicy` returns one of `retry`, `ask_user`, `propose_patch`,
@@ -1830,17 +1845,17 @@ Codex or another local Agent can invoke the CLI as a child process. Use `--json`
 one stable machine-readable value, and use the returned run ID as the durable handle:
 
 ```bash
-result=$(uv run famou run "Inspect this repository" --runtime mock --json)
+result=$(uv run lunar-evolution run "Inspect this repository" --runtime mock --json)
 run_id=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
-uv run famou status "$run_id" --json
+uv run lunar-evolution status "$run_id" --json
 ```
 
 For a long-running goal, return the handle immediately and let a local child process continue:
 
 ```bash
-result=$(uv run famou run "Inspect this repository" --runtime subprocess --detach --json)
+result=$(uv run lunar-evolution run "Inspect this repository" --runtime subprocess --detach --json)
 run_id=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
-uv run famou status "$run_id" --json
+uv run lunar-evolution status "$run_id" --json
 ```
 
 The detached controller log is stored at `<run-workspace>/controller.log`.
@@ -1853,7 +1868,7 @@ Long goals can be piped without shell escaping:
 
 ```bash
 printf '%s' 'Analyze these three artifacts and produce a report' \
-  | uv run famou run - --runtime mock --json
+  | uv run lunar-evolution run - --runtime mock --json
 ```
 
 The TUI, if added later, is for human observation and approvals; the CLI/JSON contract remains the
@@ -1862,17 +1877,25 @@ automation boundary for Codex, Hermes, OpenClaw, and scripts.
 ## Development
 
 ```bash
-uv run --extra dev python tools/run_tests.py --junit-dir .lunar/test-results
-uv run --extra lint ruff check .
+python -m pip install 'uv==0.11.8'
+python -m venv .venv
+uv pip install --python .venv/bin/python -e '.[dev,lint]'
+.venv/bin/python tools/run_tests.py --junit-dir .lunar-evolution/test-results
+.venv/bin/ruff check src tests tools
 ```
 
-Full validation runs current tests in this checkout and 24 frozen registration tests in a temporary
-checkout of `5560eb9`, using the same Python interpreter. Those tests deliberately require the
-registered product bytes; their source and guards remain unchanged. Both phases must pass, with
-separate JUnit reports in `.lunar/test-results`. The runner needs local Git history (CI fetches it),
-verifies frozen imports and registered file hashes, and removes the temporary checkout afterward.
-Use `python -m pytest tests/<file>.py` for focused current tests; a direct unfiltered pytest run on
-new product code will correctly fail the old registration fixtures' `product_changed` prerequisite.
+The full regression runner requires this uv version and its populated dependency cache; historical
+environments install offline from that cache. See the [archive guide](docs/history-archive.md).
+
+Full validation runs three separate phases: current product tests, archived historical tests at
+`c6947fdfbf43d84e83cc29cc215e7bc0250db83a`, and the 24 original frozen registration tests at
+`5560eb9f67463badc31fed17e309bb5dc1dabf8f`. Historical phases use temporary checkouts and separate
+environments outside this repository; their original product bytes, registered hashes and exact
+collection inventories remain unchanged. All three phases must pass, with separate JUnit reports
+in `.lunar-evolution/test-results`. The runner needs local Git history and removes temporary
+checkouts afterward. See the [historical archive](docs/history-archive.md) for the retained evidence.
+Use `python -m pytest tests/<file>.py` for focused current-product tests. These regressions do not
+run model campaigns or call providers.
 
 See the [quickstart](specs/001-standalone-local-agent/quickstart.md) for the recovery scenario and
 the [runtime contract](specs/001-standalone-local-agent/contracts/runtime-adapter.md) before adding
@@ -1883,8 +1906,8 @@ The effect-layer design and WebAgent branch comparison are documented in
 [`specs/062-fixed-budget-independent-measurement/`](specs/062-fixed-budget-independent-measurement/).
 
 Model selection and local spend policy can be represented without provider credentials using
-`famou.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,
-`total_tokens`) to `famou.UsageLedger` to enforce a token ceiling; provide integer micro-USD rates
+`lunar_evolution.ModelProfile`. Feed normalized runtime usage (`input_tokens`, `output_tokens`,
+`total_tokens`) to `lunar_evolution.UsageLedger` to enforce a token ceiling; provide integer micro-USD rates
 and a cost ceiling when a cost estimate is available. `AgentLoopRuntime` accepts the profile to
 enforce its timeout, step, token, and cost limits while preserving the legacy no-profile behavior.
 See
@@ -1893,8 +1916,8 @@ contract and [`specs/055-runtime-model-profile-integration/`](specs/055-runtime-
 for runtime enforcement. The ordinary CLI loop can load the same policy from a bounded JSON file:
 
 ```bash
-lunar-agent run "continue the task" --runtime openai-compatible --agent-loop \
-  --endpoint "$FAMOU_MODEL_ENDPOINT" --model-profile ./model-profile.json --json
+lunar-evolution run "continue the task" --runtime openai-compatible --agent-loop \
+  --endpoint "$LUNAR_EVOLUTION_MODEL_ENDPOINT" --model-profile ./model-profile.json --json
 ```
 
 The profile supplies the model when `--model` is omitted; changing it while resuming a

@@ -20,7 +20,7 @@ declarations; they do not authenticate installed packages or the host interprete
 For an existing explicit bundle profile, users can select a native model runtime directly:
 
 ```sh
-lunar-agent evolve-bundle contract.json --profile profile.json --workspace ./bundle-run \
+lunar-evolution evolve-bundle contract.json --profile profile.json --workspace ./bundle-run \
   --agent-runtime openai-compatible --agent-runtime-endpoint YOUR_ENDPOINT \
   --agent-runtime-model YOUR_MODEL --agent-runtime-loop \
   --destination-root ./deliveries --json

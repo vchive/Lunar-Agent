@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from famou import benchmark_result as module
-from famou.benchmark_result import (
+from lunar_evolution import benchmark_result as module
+from lunar_evolution.benchmark_result import (
     BenchmarkComparisonResult,
     BenchmarkResultError,
     ComparisonArmResult,

@@ -1,7 +1,7 @@
 # Recovery Proposal CLI and JSON Contract
 
 ```bash
-lunar-agent recover <run-id> --json
+lunar-evolution recover <run-id> --json
 ```
 
 The command is advisory and exits `0` for an existing run regardless of its execution status. A
@@ -32,5 +32,5 @@ Example acceptance failure proposal:
 }
 ```
 
-After this call, `lunar-agent status <run-id> --json` includes the same proposal object at
+After this call, `lunar-evolution status <run-id> --json` includes the same proposal object at
 `recovery`. Existing status fields are unchanged.

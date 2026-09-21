@@ -10,8 +10,8 @@ from typing import ClassVar, Self
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.cli import (
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.cli import (
     _adapter_fingerprint,
     _compiler_fingerprint,
     _controller,
@@ -21,9 +21,9 @@ from famou.cli import (
     build_parser,
     main,
 )
-from famou.config import Config
-from famou.profiles import ModelProfile
-from famou.store import Store
+from lunar_evolution.config import Config
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.store import Store
 
 
 class BenchmarkModelHandler(BaseHTTPRequestHandler):
@@ -395,7 +395,7 @@ def test_cli_delegate_detach_preserves_explicit_worker_request(tmp_path: Path, c
         calls.append((command, kwargs))
         return Process()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     home = tmp_path / "home"
     assert (
         main(
@@ -605,7 +605,7 @@ def test_cli_seed_adjudication_summary_survives_later_strategy_failure(
         def run():
             raise RuntimeError("strategy failure containing private credential text")
 
-    monkeypatch.setattr("famou.controller.build_strategy", lambda context: FailingStrategy())
+    monkeypatch.setattr("lunar_evolution.controller.build_strategy", lambda context: FailingStrategy())
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     assert (
@@ -1524,7 +1524,7 @@ def test_cli_evolve_detach_propagates_runtime_without_secret_argv(tmp_path: Path
         calls.append((command, kwargs))
         return object()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     assert (
         main(
             [
@@ -1550,7 +1550,7 @@ def test_cli_evolve_detach_propagates_runtime_without_secret_argv(tmp_path: Path
     child_command, child_kwargs = calls[0]
     assert "--agent-runtime" in child_command
     assert "secret-runtime-key" not in child_command
-    assert child_kwargs["env"]["FAMOU_AGENT_RUNTIME_API_KEY"] == "secret-runtime-key"
+    assert child_kwargs["env"]["LUNAR_EVOLUTION_AGENT_RUNTIME_API_KEY"] == "secret-runtime-key"
 
 
 def test_cli_evolve_execution_backed_evaluator_indexes_evidence_and_provenance(
@@ -1655,7 +1655,7 @@ def test_cli_evolve_detach_propagates_candidate_runner(tmp_path: Path, capsys, m
         calls.append((command, kwargs))
         return object()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     assert (
         main(
             [
@@ -1782,7 +1782,7 @@ def test_cli_evolve_detach_returns_handle_then_resume_executes_same_run(
         calls.append((command, kwargs))
         return object()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     command_args = [
         "evolve",
         str(contract_path),
@@ -2128,7 +2128,7 @@ def test_cli_detach_returns_durable_handle_before_execution(tmp_path: Path, caps
         calls.append((command, kwargs))
         return object()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     assert (
         main(
             [
@@ -2150,7 +2150,7 @@ def test_cli_detach_returns_durable_handle_before_execution(tmp_path: Path, caps
     assert payload["status"] == "pending"
     assert payload["workers"] == 3
     assert payload["run_id"]
-    assert calls[0][0][:4] == [sys.executable, "-m", "famou", "resume"]
+    assert calls[0][0][:4] == [sys.executable, "-m", "lunar_evolution", "resume"]
     assert calls[0][0][calls[0][0].index("--workers") + 1] == "3"
     assert calls[0][1]["start_new_session"] is True
 
@@ -2236,7 +2236,7 @@ def test_detached_model_options_propagate_without_api_key_in_argv(
         calls.append((command, kwargs))
         return object()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     assert (
         main(
             [
@@ -2262,7 +2262,7 @@ def test_detached_model_options_propagate_without_api_key_in_argv(
     command, kwargs = calls[0]
     assert "--endpoint" in command and "--model" in command
     assert "--api-key" not in command
-    assert kwargs["env"]["FAMOU_API_KEY"] == "secret-key"
+    assert kwargs["env"]["LUNAR_EVOLUTION_API_KEY"] == "secret-key"
 
 
 def test_detached_agent_loop_options_propagate(tmp_path: Path, capsys, monkeypatch) -> None:
@@ -2272,7 +2272,7 @@ def test_detached_agent_loop_options_propagate(tmp_path: Path, capsys, monkeypat
         calls.append((command, kwargs))
         return object()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     assert (
         main(
             [
@@ -2320,7 +2320,7 @@ def test_detached_agent_loop_model_profile_propagates_without_model_override(
         calls.append((command, kwargs))
         return object()
 
-    monkeypatch.setattr("famou.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("lunar_evolution.cli.subprocess.Popen", fake_popen)
     assert (
         main(
             [
@@ -2490,7 +2490,7 @@ def test_model_profile_changes_runtime_and_compiler_fingerprints() -> None:
 
 
 def test_cli_memory_inspection_is_json(tmp_path: Path, capsys) -> None:
-    from famou.memory import MemoryStore
+    from lunar_evolution.memory import MemoryStore
 
     memory = MemoryStore(tmp_path / "state.db")
     memory.initialize()

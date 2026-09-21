@@ -65,7 +65,7 @@ future candidate/population scale is explicitly deferred.
 ## Project Structure
 
 ```text
-src/famou/
+src/lunar_evolution/
 ├── algorithm.py          # contract, workspace manifest, evaluation report validation
 ├── policy.py             # optional PlanDocument.algorithm_problem field
 ├── controller.py         # validate/materialize contract-bearing run metadata

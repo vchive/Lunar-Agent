@@ -38,6 +38,6 @@ these checks existed; conclusions requiring the hardened authority boundary need
 
 ## Report
 
-The report declares protocol `famou-bench-deep-evolution-v1`, mode `deep_evolution`, strategy
+The report declares protocol `reference-benchmark-deep-evolution-v1`, mode `deep_evolution`, strategy
 `loop`, source-default alignment, per-run records, per-case best/delta and distribution summaries,
 round-best/P50/P90 curves, milestone, comparability, and limitations.

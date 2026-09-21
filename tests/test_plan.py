@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract
-from famou.cli import _stage_input_files
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evaluator import Evaluation
-from famou.policy import PlanDocument, PlanPatch, PlanTask
-from famou.runtime import MockRuntime, RuntimeResult
-from famou.store import Store
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.cli import _stage_input_files
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evaluator import Evaluation
+from lunar_evolution.policy import PlanDocument, PlanPatch, PlanTask
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.store import Store
 
 
 class RecordingRuntime:
@@ -88,7 +88,7 @@ class RejectingEvaluator:
 
 
 def test_plan_runs_in_dependency_order_and_handoffs_artifact(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     runtime = RecordingRuntime()
     controller = LocalController(config, runtime)
     run = controller.start(
@@ -111,7 +111,7 @@ def test_plan_runs_in_dependency_order_and_handoffs_artifact(tmp_path: Path) -> 
 def test_staged_input_data_is_hashed_and_materialized_into_attempts(tmp_path: Path) -> None:
     source = tmp_path / "orders.csv"
     source.write_text("id,demand\n1,3\n", encoding="utf-8")
-    controller = LocalController(Config(tmp_path / ".famou"), RecordingRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), RecordingRuntime())
     run = controller.create("inspect staged input")
 
     assert _stage_input_files(run, controller.store, [str(source)]) == ("data/raw/orders.csv",)
@@ -139,7 +139,7 @@ def test_staged_input_data_is_hashed_and_materialized_into_attempts(tmp_path: Pa
 def test_staged_inputs_reject_unsafe_destinations_sources_and_counts(tmp_path: Path) -> None:
     source = tmp_path / "orders.csv"
     source.write_text("id\n1\n", encoding="utf-8")
-    controller = LocalController(Config(tmp_path / ".famou"), RecordingRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), RecordingRuntime())
     run = controller.create("inspect staged input")
 
     with pytest.raises(ValueError, match="portable relative"):
@@ -157,7 +157,7 @@ def test_tampered_staged_input_fails_before_runtime_execution(tmp_path: Path) ->
     source = tmp_path / "orders.csv"
     source.write_text("id\n1\n", encoding="utf-8")
     runtime = RecordingRuntime()
-    controller = LocalController(Config(tmp_path / ".famou", max_retries=1), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", max_retries=1), runtime)
     run = controller.create("inspect staged input")
     _stage_input_files(run, controller.store, [str(source)])
     (run.workspace / "data" / "raw" / "orders.csv").write_text("id\ncorrupted\n", encoding="utf-8")
@@ -199,7 +199,7 @@ def test_algorithm_outputs_are_promoted_hashed_and_delivered(tmp_path: Path) -> 
         tasks=(PlanTask("solver", "Solver", "write the route output"),),
         algorithm_problem=contract.to_dict(),
     )
-    controller = LocalController(Config(tmp_path / ".famou"), StructuredOutputRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), StructuredOutputRuntime())
     run = controller.start_plan(plan)
 
     delivered_path = run.workspace / "output" / "routes.csv"
@@ -226,7 +226,7 @@ def test_required_algorithm_output_is_not_satisfied_by_prose(tmp_path: Path) -> 
         algorithm_problem=_structured_output_contract().to_dict(),
     )
     controller = LocalController(
-        Config(tmp_path / ".famou", max_retries=1), StructuredOutputRuntime(mode="invalid")
+        Config(tmp_path / ".lunar-evolution", max_retries=1), StructuredOutputRuntime(mode="invalid")
     )
     run = controller.start_plan(plan)
 
@@ -263,7 +263,7 @@ def test_algorithm_contract_round_trips_in_revision_and_legacy_plan_stays_generi
         "success_criteria": ["Every worker is assigned."],
         "deliverables": ["Assignment table."],
     }
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     document = PlanDocument.from_dict(
         {
             "plan_id": "assignment-plan-revision",
@@ -306,7 +306,7 @@ def test_replan_updates_algorithm_contract_manifest_and_keeps_revision_audit(tmp
         "deliverables": ["Route table."],
         "evolution": {"strategy": "population", "max_rounds": 5, "stagnation_rounds": 3},
     }
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     original = PlanDocument.from_dict(
         {
             "plan_id": "plan-algorithm-replan",
@@ -368,7 +368,7 @@ def test_replan_updates_algorithm_contract_manifest_and_keeps_revision_audit(tmp
 
 
 def test_rejected_plan_task_blocks_dependents_and_writes_audit(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou", max_retries=1)
+    config = Config(tmp_path / ".lunar-evolution", max_retries=1)
     controller = LocalController(config, MockRuntime(), evaluator=RejectingEvaluator())
     run = controller.start(
         "reject goal",
@@ -388,7 +388,7 @@ def test_rejected_plan_task_blocks_dependents_and_writes_audit(tmp_path: Path) -
 
 
 def test_plan_acceptance_contains_is_applied_after_base_evaluator(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.start(
         "acceptance goal",
         [{"id": "check", "prompt": "make output", "acceptance": {"contains": "required"}}],
@@ -399,7 +399,7 @@ def test_plan_acceptance_contains_is_applied_after_base_evaluator(tmp_path: Path
 
 
 def test_artifact_acceptance_is_independently_verified_and_deliverable(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), ArtifactRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), ArtifactRuntime())
     run = controller.start_plan(
         PlanDocument(
             goal="write a verified report",
@@ -435,7 +435,7 @@ def test_artifact_acceptance_is_independently_verified_and_deliverable(tmp_path:
 
 
 def test_missing_artifact_acceptance_prevents_delivery(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou", max_retries=1), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", max_retries=1), MockRuntime())
     run = controller.start(
         "checked output",
         [{"id": "report", "prompt": "write report", "acceptance": {"artifact_exists": "report.json"}}],
@@ -447,7 +447,7 @@ def test_missing_artifact_acceptance_prevents_delivery(tmp_path: Path) -> None:
 
 
 def test_replan_preserves_a_completed_artifact_contract(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), ArtifactRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), ArtifactRuntime())
     acceptance = {"json_has_keys": {"path": "report.json", "keys": ["summary", "sources"]}}
     original = PlanDocument(
         goal="write checked report",
@@ -525,7 +525,7 @@ class FailOnceEvaluator:
 
 
 def test_failed_task_reopens_after_replan_and_can_resume(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou", max_retries=1)
+    config = Config(tmp_path / ".lunar-evolution", max_retries=1)
     evaluator = FailOnceEvaluator()
     controller = LocalController(config, MockRuntime(), evaluator=evaluator)
     document = PlanDocument(
@@ -551,7 +551,7 @@ def test_failed_task_reopens_after_replan_and_can_resume(tmp_path: Path) -> None
 
 
 def test_patch_with_new_dependency_maps_logical_ids_and_resume_executes(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     controller = LocalController(config, MockRuntime())
     run = controller.start_plan(
         PlanDocument(
@@ -578,7 +578,7 @@ def test_patch_with_new_dependency_maps_logical_ids_and_resume_executes(tmp_path
 
 
 def test_succeeded_task_redefinition_is_rejected_atomically(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     controller = LocalController(config, MockRuntime())
     document = PlanDocument(
         goal="immutable", plan_id="plan-immutable", tasks=(PlanTask("one", "One", "run one"),)
@@ -613,7 +613,7 @@ class BlockingRuntime(RecordingRuntime):
 
 
 def test_cancel_discards_late_runtime_result(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     runtime = BlockingRuntime()
     controller = LocalController(config, runtime)
     run = controller.create("cancel race")

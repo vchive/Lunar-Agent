@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 from test_diagnostic_snapshot import CHILD, PARENT, seed, source_state
 
-from famou.diagnostic_snapshot import diagnostic_snapshot
-from famou.evolution import CandidateExecution
-from famou.materialization_diagnostics import diagnose_materialization
-from famou.materialization_evidence_bundle import export_materialization_evidence
+from lunar_evolution.diagnostic_snapshot import diagnostic_snapshot
+from lunar_evolution.evolution import CandidateExecution
+from lunar_evolution.materialization_diagnostics import diagnose_materialization
+from lunar_evolution.materialization_evidence_bundle import export_materialization_evidence
 
 KIND = "materialization_execution_attested"
 NONCE = "private-attestation-nonce-do-not-export-0123456789"

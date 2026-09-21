@@ -11,18 +11,18 @@
 - [x] T002 [P] [US3] Add evaluation-report fixtures covering validity-first score invariants,
   bounded errors, metric direction, and malformed numeric values in `tests/test_algorithm.py`.
 - [x] T003 [US1] Implement bounded `AlgorithmProblemContract`, `InputSpec`, `ObjectiveSpec`,
-  `ConstraintSpec`, and `EvolutionSpec` canonicalization in `src/famou/algorithm.py`.
+  `ConstraintSpec`, and `EvolutionSpec` canonicalization in `src/lunar_evolution/algorithm.py`.
 - [x] T004 [US3] Implement `EvaluationReport` validation and structured error categories in
-  `src/famou/algorithm.py`.
+  `src/lunar_evolution/algorithm.py`.
 
 ## Phase 2 — Isolated algorithm workspace (P1)
 
 - [x] T005 [P] [US2] Add workspace manifest/digest and path-confinement tests, including raw input
   immutability and symlink escape rejection, in `tests/test_algorithm.py`.
 - [x] T006 [US2] Implement fixed role-directory materialization and canonical manifest writing in
-  `src/famou/algorithm.py`.
+  `src/lunar_evolution/algorithm.py`.
 - [x] T007 [US2] Integrate contract validation and workspace materialization into
-  `src/famou/controller.py` without copying or mutating input files.
+  `src/lunar_evolution/controller.py` without copying or mutating input files.
 
 ## Phase 3 — Versioned plan and parent-Agent integration (P2)
 
@@ -30,10 +30,10 @@
   tests in `tests/test_plan.py`.
 - [x] T009 [P] [US5] Add additive `plan`/`status --json` contract metadata assertions in
   `tests/test_cli.py`.
-- [x] T010 [US5] Extend `PlanDocument` and patch/replan reconstruction in `src/famou/policy.py` to
+- [x] T010 [US5] Extend `PlanDocument` and patch/replan reconstruction in `src/lunar_evolution/policy.py` to
   preserve the optional algorithm contract immutably.
 - [x] T011 [US5] Expose the canonical contract and workspace manifest metadata through existing
-  status/plan JSON in `src/famou/cli.py`.
+  status/plan JSON in `src/lunar_evolution/cli.py`.
 
 ## Phase 4 — Documentation and verification
 

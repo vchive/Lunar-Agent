@@ -6,7 +6,7 @@ First split the existing producer admission implementation after strict envelope
 object-level helper. The current `admit_producer_result` keeps its public file-reading behavior and
 delegates to that helper, so OpenEvolve/Shinka compatibility and fixed error codes remain stable.
 
-Add `src/famou/remote_material_handoff.py` as a small adapter over the existing
+Add `src/lunar_evolution/remote_material_handoff.py` as a small adapter over the existing
 `RemoteExperimentState`, `ProducerResultEnvelope`, and object-level admission helper. It validates
 state status, identity pins, optional previous-state reconciliation, candidate-source material
 kind, a caller-supplied bounded producer budget, and a non-empty material set. It creates a generic

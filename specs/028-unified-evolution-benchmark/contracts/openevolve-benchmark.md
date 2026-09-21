@@ -1,7 +1,7 @@
 # Contract: OpenEvolve Benchmark Adapter
 
 For a selected `openevolve` strategy, `BenchmarkConfig` must provide a non-empty command tuple whose
-first token is an existing absolute executable. Lunar-Agent invokes it as:
+first token is an existing absolute executable. Lunar Evolution invokes it as:
 
 ```text
 <command> <strategy-workspace>/evolution/external/openevolve/config.json

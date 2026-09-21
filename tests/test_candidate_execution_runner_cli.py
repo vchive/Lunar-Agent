@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from famou import (
+from lunar_evolution import (
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
     CandidateExecutionInput,
@@ -76,7 +76,7 @@ def test_cli_run_returns_path_free_telemetry_without_home(tmp_path, monkeypatch,
 
 def test_installed_cli_run_executes_one_fixture_process(tmp_path):
     args, _plan, _admission, _workspace, _inputs = _fixture(tmp_path)
-    launcher = Path(sys.executable).parent / "lunar-agent"
+    launcher = Path(sys.executable).parent / "lunar-evolution"
     if not launcher.is_file():
         return
     completed = subprocess.run(
@@ -95,7 +95,7 @@ def test_installed_cli_run_executes_one_fixture_process(tmp_path):
     ("--admission-sha256", "identity_mismatch"),
 ])
 def test_cli_pins_fail_before_launch_without_home(tmp_path, monkeypatch, capsys, pin, code):
-    import famou.candidate_execution_runner as runner
+    import lunar_evolution.candidate_execution_runner as runner
 
     args, _plan, _admission, _workspace, _inputs = _fixture(tmp_path)
     home = tmp_path / "must-not-exist"

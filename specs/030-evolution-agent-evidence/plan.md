@@ -42,11 +42,11 @@ records these events and artifacts using the existing `ArtifactStore` and `Store
 ## Project structure
 
 ```text
-src/famou/agents.py          # runtime event forwarding and artifact safety
-src/famou/agent_evolution.py # bridge artifact validation/observer binding
-src/famou/agent_loop.py      # bounded runtime failure events
-src/famou/evolution.py       # optional observer binding at strategy boundary
-src/famou/controller.py      # SQLite artifact/event handoff
+src/lunar_evolution/agents.py          # runtime event forwarding and artifact safety
+src/lunar_evolution/agent_evolution.py # bridge artifact validation/observer binding
+src/lunar_evolution/agent_loop.py      # bounded runtime failure events
+src/lunar_evolution/evolution.py       # optional observer binding at strategy boundary
+src/lunar_evolution/controller.py      # SQLite artifact/event handoff
 tests/test_agent_evolution.py
 tests/test_controller.py
 ```

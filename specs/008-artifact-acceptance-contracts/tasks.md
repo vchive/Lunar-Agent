@@ -8,9 +8,9 @@
 
 ## Phase 2 — Safe Acceptance Interpreter (US1, US2)
 
-- [x] T003 [US1] Extend `src/famou/evaluator.py` with canonical contract compilation, bounded
+- [x] T003 [US1] Extend `src/lunar_evolution/evaluator.py` with canonical contract compilation, bounded
   result/artifact/JSON rules, and structured rule evidence.
-- [x] T004 [US2] Validate contracts in `src/famou/policy.py` and `src/famou/store.py` before run
+- [x] T004 [US2] Validate contracts in `src/lunar_evolution/policy.py` and `src/lunar_evolution/store.py` before run
   creation; test traversal, symlink, malformed, oversized, secret, and unknown-rule rejection.
 - [x] T005 [US1] Add unit fixtures in `tests/test_evaluator.py` and controller fixtures in
   `tests/test_plan.py`, then preserve legacy `contains` behavior.

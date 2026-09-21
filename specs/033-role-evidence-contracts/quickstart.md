@@ -3,14 +3,14 @@
 Run the offline specialist workflow:
 
 ```bash
-lunar-agent solve "设计配送路线" --runtime mock --role-dag --json --home .lunar
+lunar-evolution solve "设计配送路线" --runtime mock --role-dag --json --home .lunar
 ```
 
 Inspect the role evidence and independent evaluator report:
 
 ```bash
-lunar-agent status <run-id> --json --home .lunar
-lunar-agent deliver <run-id> --json --home .lunar
+lunar-evolution status <run-id> --json --home .lunar
+lunar-evolution deliver <run-id> --json --home .lunar
 ```
 
 The JSON status response contains `role_evidence`, whose rows point to hashed files below

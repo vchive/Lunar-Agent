@@ -19,12 +19,12 @@ from test_materialization_publication import (
     _forbid_execution_and_promotion,
 )
 
-import famou.controller as controller_module
-import famou.materialization_attestation as attestation
-import famou.materialization_execution as publication
-from famou import cli
-from famou.evolution import EvolutionError
-from famou.materialization_launch import materialization_lock
+import lunar_evolution.controller as controller_module
+import lunar_evolution.materialization_attestation as attestation
+import lunar_evolution.materialization_execution as publication
+from lunar_evolution import cli
+from lunar_evolution.evolution import EvolutionError
+from lunar_evolution.materialization_launch import materialization_lock
 
 ATTESTED = "materialization_execution_attested"
 
@@ -326,7 +326,7 @@ def test_concurrent_cli_attestation_is_nonblocking_and_does_not_consume_nonce(tm
     controller, parent, child, _, receipt = fixture
     with materialization_lock(child):
         result = subprocess.run([
-            sys.executable, "-m", "famou", "attest-materialization-execution", parent.id, child.id,
+            sys.executable, "-m", "lunar_evolution", "attest-materialization-execution", parent.id, child.id,
             "--receipt", str(receipt), "--home", str(controller.config.home), "--json",
         ], capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == 2

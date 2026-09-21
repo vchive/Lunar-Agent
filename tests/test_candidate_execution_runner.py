@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from famou import (
+from lunar_evolution import (
     CANDIDATE_INPUT_ROOT_ENV,
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
@@ -17,7 +17,7 @@ from famou import (
     build_candidate_workspace_plan,
     run_candidate_execution,
 )
-from famou.candidate_execution_runner import CandidateExecutionRunnerError
+from lunar_evolution.candidate_execution_runner import CandidateExecutionRunnerError
 
 
 def _setup(tmp_path: Path, script: bytes = b"#!/bin/sh\ncat \"$LUNAR_CANDIDATE_INPUT_ROOT/in.txt\"\n"):
@@ -111,7 +111,7 @@ def test_timeout_does_not_wait_for_background_descendant_pipe(tmp_path: Path):
 
 
 def test_small_timeout_is_not_increased_above_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import famou.candidate_execution_runner as runner
+    import lunar_evolution.candidate_execution_runner as runner
 
     admission, plan, workspace, inputs = _setup(tmp_path, b"#!/bin/sh\nsleep 1\n")
     short_plan = build_candidate_workspace_plan(

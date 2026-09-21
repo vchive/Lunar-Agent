@@ -1,15 +1,15 @@
 import json
 from pathlib import Path
 
-from famou.agent_loop import AgentInputRequired, AgentLoopRuntime
-from famou.artifacts import ArtifactStore
-from famou.cli import main
-from famou.config import Config
-from famou.controller import LocalController
-from famou.memory import MemoryStore
-from famou.runtime import ModelTurn, ToolCall
-from famou.store import Store
-from famou.tools import LocalToolRegistry
+from lunar_evolution.agent_loop import AgentInputRequired, AgentLoopRuntime
+from lunar_evolution.artifacts import ArtifactStore
+from lunar_evolution.cli import main
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.memory import MemoryStore
+from lunar_evolution.runtime import ModelTurn, ToolCall
+from lunar_evolution.store import Store
+from lunar_evolution.tools import LocalToolRegistry
 
 
 class AskingModel:
@@ -54,7 +54,7 @@ def test_ask_user_pauses_before_another_model_turn(tmp_path: Path) -> None:
 
 
 def test_controller_persists_input_and_resumes_same_task(tmp_path: Path) -> None:
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     model = AskingModel()
     controller = LocalController(
         config,

@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.producer_handoff import ProducerHandoffError
-from famou.remote_evolution import (
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.producer_handoff import ProducerHandoffError
+from lunar_evolution.remote_evolution import (
     RemoteExperimentState,
     RemoteMaterialReference,
 )
-from famou.remote_material_handoff import (
+from lunar_evolution.remote_material_handoff import (
     REMOTE_HANDOFF_BUDGET_INVALID,
     REMOTE_HANDOFF_EXPERIMENT_ID_REQUIRED,
     REMOTE_HANDOFF_IDENTITY_MISMATCH,
@@ -70,7 +70,7 @@ def _state(
     *,
     status: str = "completed",
     experiment_id: str | None = "experiment:1",
-    producer_id: str = "famou-v2",
+    producer_id: str = "reference-engine-v2",
     producer_fingerprint: str = PRODUCER_SHA,
     materials: tuple[RemoteMaterialReference, ...] | None = None,
 ) -> RemoteExperimentState:
@@ -111,7 +111,7 @@ def _admit(root: Path, *, evaluator=None, **kwargs):
         contract,
         evaluator or (lambda path, supplied: _report()),
         evaluator_fingerprint=EVALUATOR_SHA,
-        producer_id="famou-v2",
+        producer_id="reference-engine-v2",
         producer_fingerprint=PRODUCER_SHA,
         budget={"max_iterations": 3},
         staging_root=root.parent / "staging",
@@ -126,7 +126,7 @@ def test_completed_remote_state_maps_to_digest_only_envelope(tmp_path: Path) -> 
     envelope = remote_state_to_producer_envelope(
         state,
         contract_sha256=_contract().digest(),
-        producer_id="famou-v2",
+        producer_id="reference-engine-v2",
         producer_fingerprint=PRODUCER_SHA,
         budget={"max_iterations": 3},
     )
@@ -158,7 +158,7 @@ def test_remote_materials_use_local_evaluator_and_preserve_reference_digest(tmp_
     assert admitted.evaluation.combined_score == 0.75
     assert admitted.receipt.evaluator_kind == "exact_harness"
     assert admitted.provenance.origin_kind == "external"
-    assert admitted.provenance.producer_id == "famou-v2"
+    assert admitted.provenance.producer_id == "reference-engine-v2"
     assert admitted.provenance.material_refs == ("submission/init.py",)
     assert admitted.provenance.external_evidence["score_present"] is False
 
@@ -176,7 +176,7 @@ def test_non_completed_remote_state_fails_before_local_evaluator(tmp_path: Path,
             _contract(),
             lambda path, contract: calls.append(path) or _report(),
             evaluator_fingerprint=EVALUATOR_SHA,
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
         )
@@ -195,7 +195,7 @@ def test_completed_state_requires_an_experiment_id(tmp_path: Path) -> None:
             _contract(),
             lambda path, contract: _report(),
             evaluator_fingerprint=EVALUATOR_SHA,
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
         )
@@ -209,7 +209,7 @@ def test_empty_materials_and_identity_drift_fail_closed(tmp_path: Path) -> None:
         remote_state_to_producer_envelope(
             empty,
             contract_sha256=_contract().digest(),
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
         )
@@ -236,7 +236,7 @@ def test_unsupported_material_kind_is_rejected_before_read(tmp_path: Path) -> No
         remote_state_to_producer_envelope(
             state,
             contract_sha256=_contract().digest(),
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
         )
@@ -252,7 +252,7 @@ def test_reconciliation_is_required_when_previous_state_is_supplied(tmp_path: Pa
         remote_state_to_producer_envelope(
             observed,
             contract_sha256=_contract().digest(),
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
             previous_state=previous,
@@ -273,7 +273,7 @@ def test_material_digest_and_path_checks_remain_in_generic_boundary(tmp_path: Pa
             _contract(),
             lambda path, supplied: _report(),
             evaluator_fingerprint=EVALUATOR_SHA,
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
         )
@@ -286,7 +286,7 @@ def test_invalid_budget_fails_before_any_material_or_evaluator_work(tmp_path: Pa
         remote_state_to_producer_envelope(
             _state(root),
             contract_sha256=_contract().digest(),
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={},
         )
@@ -302,7 +302,7 @@ def test_malicious_budget_mapping_is_contained_by_fixed_error(tmp_path: Path) ->
         remote_state_to_producer_envelope(
             _state(tmp_path / "materials"),
             contract_sha256=_contract().digest(),
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget=ExplodingMapping(max_iterations=3),
         )
@@ -317,7 +317,7 @@ def test_forged_frozen_state_is_revalidated_before_material_admission(tmp_path: 
         remote_state_to_producer_envelope(
             state,
             contract_sha256=_contract().digest(),
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
         )
@@ -351,7 +351,7 @@ def test_staging_root_must_be_disjoint_without_mutating_material_root(tmp_path: 
             _contract(),
             lambda path, supplied: calls.append(path) or _report(),
             evaluator_fingerprint=EVALUATOR_SHA,
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
             staging_root=nested,
@@ -387,7 +387,7 @@ def test_staging_root_case_alias_is_rejected_on_case_insensitive_filesystem(
             _contract(),
             lambda path, supplied: calls.append(path) or _report(),
             evaluator_fingerprint=EVALUATOR_SHA,
-            producer_id="famou-v2",
+            producer_id="reference-engine-v2",
             producer_fingerprint=PRODUCER_SHA,
             budget={"max_iterations": 3},
             staging_root=staging,

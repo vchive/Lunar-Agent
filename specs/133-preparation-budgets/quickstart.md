@@ -8,8 +8,8 @@ From the repository root with its development environment installed:
 .venv/bin/pytest -q tests/test_preparation_request_failure.py tests/test_preparation_recovery_cli.py
 .venv/bin/pytest -q tests/test_automatic_solve_bundle.py tests/test_snapshot_evaluator_bundle.py tests/test_evaluator_request_failure.py
 .venv/bin/python tools/run_tests.py --junit-dir .lunar/test-results/feature133
-.venv/bin/ruff check src/famou tests
-.venv/bin/python -m compileall -q src/famou
+.venv/bin/ruff check src/lunar_evolution tests
+.venv/bin/python -m compileall -q src/lunar_evolution
 git diff --check
 ```
 

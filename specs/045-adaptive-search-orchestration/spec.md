@@ -6,7 +6,7 @@
 
 ## Context and scope
 
-Lunar-Agent's loop and population strategies already select a parent/inspirations and retain a
+Lunar Evolution's loop and population strategies already select a parent/inspirations and retain a
 verified archive. The Agent solver receives those objects but is left to infer the purpose of each
 generation. A seed request, an infeasible repair, a local refinement, and a cross-island
 recombination currently share the same generic instruction. Population can therefore emit near-

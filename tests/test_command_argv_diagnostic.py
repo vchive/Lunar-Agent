@@ -7,12 +7,12 @@ from copy import deepcopy
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.model_profile import UsageLedger
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, ToolCall
-from famou.tools import LocalToolRegistry
-from famou.transcript import SessionTranscript
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.model_profile import UsageLedger
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
+from lunar_evolution.transcript import SessionTranscript
 
 SECRET = "CALLER-PRIVATE-SENTINEL"
 
@@ -28,7 +28,7 @@ def test_json_encoded_arrays_return_static_correctable_error_without_dispatch(tm
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", process)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", process)
     result = LocalToolRegistry(allow_exec=True).execute("run_command", {"command": command}, tmp_path)
     assert not result.success and not result.artifacts
     assert calls == []
@@ -53,8 +53,8 @@ def test_non_array_json_and_ordinary_strings_preserve_shlex_and_process_contract
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 7, stdout="fixture-stdout", stderr="fixture-stderr")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", process)
-    monkeypatch.setattr("famou.tools.time.monotonic", lambda: 100)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", process)
+    monkeypatch.setattr("lunar_evolution.tools.time.monotonic", lambda: 100)
     registry = LocalToolRegistry(allow_exec=True, command_timeout=30, command_environment=environment)
     with registry.execution_deadline(103):
         result = registry.execute("run_command", {"command": command}, tmp_path)
@@ -78,7 +78,7 @@ def test_actual_argv_arrays_remain_exact(tmp_path, monkeypatch, command):
         assert kwargs["shell"] is False
         return subprocess.CompletedProcess(argv, 0, stdout="fixture", stderr="")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", process)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", process)
     result = LocalToolRegistry(allow_exec=True).execute("run_command", {"command": command}, tmp_path)
     assert result.success and calls == [command]
 
@@ -93,7 +93,7 @@ def test_deep_json_probe_failure_keeps_existing_string_path(tmp_path, monkeypatc
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout="fixture", stderr="")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", process)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", process)
     result = LocalToolRegistry(allow_exec=True).execute("run_command", {"command": command}, tmp_path)
     assert result.success and calls == [shlex.split(command)]
 
@@ -109,8 +109,8 @@ def test_json_value_error_probe_keeps_existing_string_path(tmp_path, monkeypatch
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout="fixture", stderr="")
 
-    monkeypatch.setattr("famou.tools.json.loads", invalid_integer)
-    monkeypatch.setattr("famou.tools.subprocess.run", process)
+    monkeypatch.setattr("lunar_evolution.tools.json.loads", invalid_integer)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", process)
     result = LocalToolRegistry(allow_exec=True).execute("run_command", {"command": command}, tmp_path)
     assert result.success and calls == [shlex.split(command)]
 
@@ -120,7 +120,7 @@ def test_invalid_real_arrays_keep_existing_validation(tmp_path, monkeypatch, com
     def forbidden(*args, **kwargs):
         pytest.fail("invalid arrays must not launch a subprocess")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", forbidden)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", forbidden)
     result = LocalToolRegistry(allow_exec=True).execute("run_command", {"command": command}, tmp_path)
     assert not result.success and not result.artifacts
     assert result.output == "tool_error: ToolError: command must be a non-empty string or string array"
@@ -130,8 +130,8 @@ def test_disabled_execution_precedes_json_diagnostic(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("disabled commands must not be parsed or dispatched")
 
-    monkeypatch.setattr("famou.tools.json.loads", forbidden)
-    monkeypatch.setattr("famou.tools.subprocess.run", forbidden)
+    monkeypatch.setattr("lunar_evolution.tools.json.loads", forbidden)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", forbidden)
     result = LocalToolRegistry().execute("run_command", {"command": "[]"}, tmp_path)
     assert not result.success and "run_command is disabled" in result.output
     assert "argv" not in result.output
@@ -171,7 +171,7 @@ def test_model_corrects_next_tool_call_without_hidden_retry_or_usage_reset(tmp_p
             assert "exit_code=0" in messages[-1]["content"]
             return ModelTurn("completed", response_model="fixture", usage=usage)
 
-    monkeypatch.setattr("famou.tools.subprocess.run", process)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", process)
     transcript = SessionTranscript(tmp_path / "transcript.jsonl")
     runtime = AgentLoopRuntime(
         Model(), tools=LocalToolRegistry(allow_exec=True), max_steps=2,

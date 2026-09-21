@@ -22,7 +22,7 @@ Both suites must pass against the same evaluator before the bundle can become sc
 
 ### User Story 1 — Challenge the generated judge independently (P1)
 
-1. Given `solve --evolve --compile-evaluator`, Lunar-Agent invokes the evaluator compiler once and
+1. Given `solve --evolve --compile-evaluator`, Lunar Evolution invokes the evaluator compiler once and
    then invokes an isolated auditor once before generating any candidate.
 2. The auditor receives no compiler probe content or solver evidence and returns only one strict
    probe-suite JSON object.

@@ -1,0 +1,713 @@
+"""Conversational intake for algorithm missions.
+
+The compiler is deliberately a small, runtime-neutral boundary.  A model or local subprocess may
+suggest a contract, but the existing ``AlgorithmProblemContract`` and ``PlanDocument`` validators
+remain authoritative before any generated task is scheduled.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Protocol
+
+from .algorithm import LOOP_STRATEGY_RETIRED_MESSAGE, AlgorithmProblemContract
+from .policy import PlanDocument, PlanTask
+from .runtime import Runtime
+
+MAX_GOAL_BYTES = 8_000
+MAX_RESPONSE_BYTES = 64 * 1024
+MAX_QUESTIONS = 4
+MAX_OPTIONS = 10
+MAX_QUESTION_BYTES = 2_000
+MAX_OPTION_BYTES = 200
+MAX_ANSWER_BYTES = 20_000
+_SECRET_RE = re.compile(
+    r"(?i)(?:sk-[A-Za-z0-9_-]{12,}|bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*\S+)"
+)
+
+CompilationStatus = Literal["compiled", "needs_input"]
+
+
+class ContractCompilationError(RuntimeError):
+    """A compiler response could not be accepted as a safe algorithm contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class CompilationQuestion:
+    question: str
+    options: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.question, str) or not self.question.strip():
+            raise ValueError("question must be non-empty")
+        question = self.question.strip()
+        if len(question.encode("utf-8")) > MAX_QUESTION_BYTES or "\x00" in question:
+            raise ValueError("question exceeds the bounded input limit")
+        if _SECRET_RE.search(question):
+            raise ValueError("question contains credential-like content")
+        if len(self.options) > MAX_OPTIONS:
+            raise ValueError("question has too many options")
+        options: list[str] = []
+        for option in self.options:
+            if not isinstance(option, str) or not option.strip():
+                raise ValueError("question options must be non-empty strings")
+            normalized = option.strip()
+            if len(normalized.encode("utf-8")) > MAX_OPTION_BYTES or "\x00" in normalized:
+                raise ValueError("question option exceeds the bounded input limit")
+            if _SECRET_RE.search(normalized):
+                raise ValueError("question option contains credential-like content")
+            options.append(normalized)
+        if len(set(options)) != len(options):
+            raise ValueError("question options must be unique")
+        object.__setattr__(self, "question", question)
+        object.__setattr__(self, "options", tuple(options))
+
+    def to_dict(self) -> dict[str, object]:
+        return {"question": self.question, "options": list(self.options)}
+
+
+@dataclass(frozen=True, slots=True)
+class CompilationResult:
+    status: CompilationStatus
+    contract: AlgorithmProblemContract | None = None
+    questions: tuple[CompilationQuestion, ...] = ()
+    plan: PlanDocument | None = None
+    evidence: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.status not in {"compiled", "needs_input"}:
+            raise ValueError("unsupported compilation status")
+        if len(self.questions) > MAX_QUESTIONS:
+            raise ValueError("a compilation result may contain at most four questions")
+        if self.status == "compiled" and self.contract is None:
+            raise ValueError("compiled result requires a contract")
+        if self.status == "compiled" and self.questions:
+            raise ValueError("compiled result must not contain questions")
+        if self.status == "needs_input" and self.contract is not None:
+            raise ValueError("needs_input result must not contain a contract")
+        if self.status == "needs_input" and not self.questions:
+            raise ValueError("needs_input result requires questions")
+        if self.status == "needs_input" and self.plan is not None:
+            raise ValueError("needs_input result must not contain a plan")
+        for item in self.evidence:
+            if not isinstance(item, str) or not item.strip() or len(item.encode("utf-8")) > 512:
+                raise ValueError("compilation evidence is invalid")
+            if _SECRET_RE.search(item):
+                raise ValueError("compilation evidence contains credential-like content")
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "status": self.status,
+            "questions": [item.to_dict() for item in self.questions],
+            "evidence": list(self.evidence),
+        }
+        if self.contract is not None:
+            payload["contract"] = self.contract.to_dict()
+        if self.plan is not None:
+            payload["plan"] = self.plan.to_dict()
+        return payload
+
+
+class ContractCompiler(Protocol):
+    def compile(
+        self,
+        goal: str,
+        workspace: Path,
+        *,
+        answer: str | None = None,
+        timeout: float | None = None,
+    ) -> CompilationResult:
+        """Compile one bounded conversational turn into a contract or questions."""
+
+
+def _bounded_goal(goal: str) -> str:
+    if not isinstance(goal, str) or not goal.strip():
+        raise ContractCompilationError("goal must be a non-empty string")
+    goal = goal.strip()
+    if "\x00" in goal or len(goal.encode("utf-8")) > MAX_GOAL_BYTES:
+        raise ContractCompilationError("goal exceeds the bounded input limit")
+    if _SECRET_RE.search(goal):
+        raise ContractCompilationError("goal contains credential-like content")
+    return goal
+
+
+def _bounded_answer(answer: str | None) -> str | None:
+    if answer is None:
+        return None
+    if not isinstance(answer, str) or not answer.strip():
+        raise ContractCompilationError("answer must be a non-empty string")
+    answer = answer.strip()
+    if "\x00" in answer or len(answer.encode("utf-8")) > MAX_ANSWER_BYTES:
+        raise ContractCompilationError("answer exceeds the bounded input limit")
+    if _SECRET_RE.search(answer):
+        raise ContractCompilationError("answer contains credential-like content")
+    return answer
+
+
+def _safe_error(error: Exception) -> str:
+    """Keep compiler failures bounded and credential-safe before they reach the ledger."""
+    message = _SECRET_RE.sub("[REDACTED]", str(error))
+    return message[-2_000:] or type(error).__name__
+
+
+def _questions(raw: object) -> tuple[CompilationQuestion, ...]:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_QUESTIONS:
+        raise ContractCompilationError("needs_input requires one to four questions")
+    result: list[CompilationQuestion] = []
+    for item in raw:
+        if isinstance(item, str):
+            result.append(CompilationQuestion(item))
+            continue
+        if not isinstance(item, dict) or set(item) - {"question", "options"}:
+            raise ContractCompilationError("question must contain only question and options")
+        options = item.get("options", [])
+        if not isinstance(options, list):
+            raise ContractCompilationError("question options must be an array")
+        try:
+            result.append(CompilationQuestion(item.get("question"), tuple(options)))  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise ContractCompilationError(str(exc)) from exc
+    return tuple(result)
+
+
+def _parse_response(raw: str) -> CompilationResult:
+    if not isinstance(raw, str) or not raw.strip():
+        raise ContractCompilationError("compiler returned empty output")
+    try:
+        encoded = raw.encode("utf-8")
+    except UnicodeError as exc:
+        raise ContractCompilationError("compiler response must be valid UTF-8 text") from exc
+    if len(encoded) > MAX_RESPONSE_BYTES:
+        raise ContractCompilationError("compiler response exceeds the bounded limit")
+    if _SECRET_RE.search(raw):
+        raise ContractCompilationError("compiler response contains credential-like content")
+    candidate = raw.strip(" \t\r\n")
+    # Remove only one complete, explicitly labelled envelope. Never search for JSON in prose,
+    # choose between competing objects, or repair the JSON carried inside the envelope.
+    fenced = re.fullmatch(r"```json\n(.*)\n```", candidate, flags=re.DOTALL)
+    if fenced is not None:
+        candidate = fenced.group(1)
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object member")
+            result[key] = value
+        return result
+
+    def reject_constant(_value):
+        raise ValueError("nonfinite JSON number")
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("nonfinite JSON number")
+        return result
+
+    try:
+        payload = json.loads(
+            candidate, object_pairs_hook=unique_object,
+            parse_constant=reject_constant, parse_float=finite_float,
+        )
+    except (ValueError, RecursionError) as exc:
+        raise ContractCompilationError("compiler response must be one strict JSON object") from exc
+    if not isinstance(payload, dict) or set(payload) - {"status", "contract", "questions", "evidence"}:
+        raise ContractCompilationError("compiler response contains unknown fields")
+    status = payload.get("status")
+    if status == "needs_input":
+        if "contract" in payload:
+            raise ContractCompilationError("needs_input response must not include a contract")
+        questions = _questions(payload.get("questions"))
+        evidence = payload.get("evidence", [])
+        if not isinstance(evidence, list):
+            raise ContractCompilationError("compiler evidence must be an array")
+        try:
+            return CompilationResult("needs_input", questions=questions, evidence=tuple(evidence))
+        except (TypeError, ValueError) as exc:
+            raise ContractCompilationError(str(exc)) from exc
+    if status != "compiled" or set(payload) - {"status", "contract", "evidence"} or "contract" not in payload:
+        raise ContractCompilationError("compiler response must be status=compiled with contract")
+    evidence = payload.get("evidence", [])
+    if not isinstance(evidence, list):
+        raise ContractCompilationError("compiler evidence must be an array")
+    try:
+        _validate_contract_shape(payload["contract"])
+        contract = AlgorithmProblemContract.from_dict(payload["contract"])
+        if contract.evolution.strategy == "loop":
+            raise ContractCompilationError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        return CompilationResult("compiled", contract=contract, evidence=tuple(evidence))
+    except (TypeError, ValueError) as exc:
+        raise ContractCompilationError(f"compiled contract is invalid: {exc}") from exc
+
+
+def _validate_contract_shape(value: object) -> None:
+    """Reject fields silently ignored by the legacy dataclass deserializers."""
+    if not isinstance(value, dict):
+        raise ContractCompilationError("contract must be a JSON object")
+    allowed = {
+        "schema_version",
+        "problem_id",
+        "problem_type",
+        "statement",
+        "inputs",
+        "decision_variables",
+        "objective",
+        "hard_constraints",
+        "soft_constraints",
+        "success_criteria",
+        "deliverables",
+        "assumptions",
+        "evolution",
+        "outputs",
+    }
+    unknown = set(value) - allowed
+    if unknown:
+        raise ContractCompilationError(f"contract contains unknown fields: {', '.join(sorted(unknown))}")
+    inputs = value.get("inputs")
+    if isinstance(inputs, list):
+        for item in inputs:
+            if not isinstance(item, dict) or set(item) - {"path", "format", "fields", "key"}:
+                raise ContractCompilationError("input contains unknown fields")
+    objective = value.get("objective")
+    if isinstance(objective, dict) and set(objective) - {"name", "direction", "metrics"}:
+        raise ContractCompilationError("objective contains unknown fields")
+    metrics = objective.get("metrics") if isinstance(objective, dict) else None
+    if isinstance(metrics, list):
+        for item in metrics:
+            if not isinstance(item, dict) or set(item) - {"name", "direction", "weight"}:
+                raise ContractCompilationError("objective metric contains unknown fields")
+    for key in ("hard_constraints", "soft_constraints"):
+        constraints = value.get(key)
+        if isinstance(constraints, list):
+            for item in constraints:
+                if not isinstance(item, dict) or set(item) - {
+                    "id",
+                    "description",
+                    "source",
+                    "verification",
+                    "result_fields",
+                    "verification_scope",
+                    "source_check",
+                }:
+                    raise ContractCompilationError("constraint contains unknown fields")
+    evolution = value.get("evolution")
+    if isinstance(evolution, dict) and set(evolution) - {"strategy", "max_rounds", "stagnation_rounds"}:
+        raise ContractCompilationError("evolution contains unknown fields")
+    outputs = value.get("outputs")
+    if isinstance(outputs, list):
+        for item in outputs:
+            if not isinstance(item, dict) or set(item) - {
+                "path",
+                "format",
+                "fields",
+                "required",
+                "description",
+            }:
+                raise ContractCompilationError("output contains unknown fields")
+
+
+_NEEDS_INPUT_ENVELOPE_EXAMPLE = """{
+  "status": "needs_input",
+  "questions": [
+    {
+      "question": "Which objective should be optimized?",
+      "options": [
+        "minimize time",
+        "minimize cost"
+      ]
+    }
+  ],
+  "evidence": [
+    "The goal does not specify an objective."
+  ]
+}"""
+
+
+_COMPILED_ENVELOPE_EXAMPLE = """{
+  "status": "compiled",
+  "contract": {
+    "schema_version": "1",
+    "problem_id": "example-assignment",
+    "problem_type": "assignment",
+    "statement": "Assign each item to one bin and minimize total cost.",
+    "inputs": [
+      {
+        "path": "items.json",
+        "format": "json",
+        "fields": {
+          "items": "Items to assign.",
+          "bins": "Available bins.",
+          "costs": "Assignment costs by item and bin."
+        },
+        "key": null
+      }
+    ],
+    "decision_variables": [
+      "The selected bin for each item."
+    ],
+    "objective": {
+      "name": "total cost",
+      "direction": "minimize",
+      "metrics": []
+    },
+    "hard_constraints": [
+      {
+        "id": "one-bin-per-item",
+        "description": "Assign every item to exactly one bin.",
+        "source": "user_confirmed",
+        "verification": "independent",
+        "result_fields": [
+          "assignments"
+        ],
+        "verification_scope": "output"
+      }
+    ],
+    "soft_constraints": [],
+    "success_criteria": [
+      "Every item is assigned and total cost is reported."
+    ],
+    "deliverables": [
+      "output/result.json"
+    ],
+    "assumptions": [],
+    "outputs": [
+      {
+        "path": "output/result.json",
+        "format": "json",
+        "fields": [
+          "assignments",
+          "total_cost"
+        ],
+        "required": true,
+        "description": "Assignments and their total cost."
+      }
+    ],
+    "evolution": {
+      "strategy": "population",
+      "max_rounds": 5,
+      "stagnation_rounds": 3
+    }
+  },
+  "evidence": [
+    "The goal specifies its input, objective, constraints, and output."
+  ]
+}"""
+
+
+def build_algorithm_plan(goal: str, contract: AlgorithmProblemContract) -> PlanDocument:
+    """Build the conservative baseline DAG used after intake succeeds."""
+    problem_id = contract.problem_id
+    plan_id = f"plan-{problem_id}-{contract.digest()[:8]}"
+    output_acceptance = _output_acceptance(contract)
+    tasks = (
+        PlanTask(
+            "data_discovery",
+            "Discover and profile input data",
+            "Inspect the declared input files under data/raw. Record observed schema, row counts, and data-quality issues in data/processed/data-profile.json. Do not invent missing fields or constraints.",
+        ),
+        PlanTask(
+            "formulate",
+            "Formulate the algorithm problem",
+            "Using the validated contract and the verified data profile, restate decision variables, objective, provenance-backed constraints, and a measurable evaluation procedure. Write the formulation to solve/problem-formulation.md.",
+            ("data_discovery",),
+        ),
+        PlanTask(
+            "solve",
+            "Implement a candidate algorithm",
+            "Implement and test a candidate solution from the formulation. Keep source and reproducible run instructions under solve/ and write the requested deliverables under output/.",
+            ("formulate",),
+            output_acceptance,
+        ),
+        PlanTask(
+            "verify",
+            "Independently verify the solution",
+            "Review the candidate against every success criterion and hard constraint using observed data. Write a structured verification report under evaluate/ and identify any unresolved assumptions.",
+            ("solve",),
+        ),
+    )
+    return PlanDocument(
+        goal=goal,
+        plan_id=plan_id,
+        tasks=tasks,
+        objective=contract.objective.to_dict(),
+        hard_constraints=tuple(item.description for item in contract.hard_constraints),
+        soft_constraints=tuple(item.description for item in contract.soft_constraints),
+        evidence=("contract compiled from an explicit conversational intake",),
+        assumptions=contract.assumptions,
+        acceptance={"required": True},
+        verification={"required": True, "independent": True},
+        delivery={"artifacts": list(contract.deliverables)},
+        algorithm_problem=contract.to_dict(),
+    )
+
+
+def build_algorithm_role_plan(goal: str, contract: AlgorithmProblemContract) -> PlanDocument:
+    """Build the opt-in five-role workflow for higher-assurance algorithm missions.
+
+    Roles are ordinary plan tasks on purpose.  This keeps the scheduler, retries, cancellation,
+    and artifact handoff identical to legacy plans while making authority boundaries visible in the
+    prompts consumed by any selected runtime.
+    """
+    plan_id = f"plan-{contract.problem_id}-{contract.digest()[:8]}-roles"
+    output_acceptance = _output_acceptance(contract)
+    tasks = (
+        PlanTask(
+            "data_discovery",
+            "DataDiscovery — observe and profile inputs",
+            "Role: DataDiscovery. Inspect only declared input files under data/raw. Report observed schema, row counts, missing values, and data-quality issues in data/processed/data-profile.json. You may not invent fields, constraints, or objective values; do not edit the validated contract.",
+            acceptance={"data_profile_valid": "data/processed/data-profile.json"},
+        ),
+        PlanTask(
+            "problem_formulator",
+            "ProblemFormulator — make the objective measurable",
+            "Role: ProblemFormulator. Read the validated contract and the verified DataDiscovery artifacts. Translate the existing decision variables, objective, provenance, and success criteria into a measurable formulation in solve/problem-formulation.md. You may clarify unresolved assumptions but may not relax, add, or silently reinterpret hard constraints.",
+            ("data_discovery",),
+            {"artifact_valid": {"path": "solve/problem-formulation.md", "format": "text", "fields": []}},
+        ),
+        PlanTask(
+            "solver",
+            "Solver — implement a reproducible candidate",
+            "Role: Solver. Implement and test a reproducible candidate from the validated formulation. Keep source and run instructions under solve/ and requested outputs under output/. Do not claim a score or change contract authority; leave all evidence needed by the independent Evaluator.",
+            ("problem_formulator",),
+            output_acceptance,
+        ),
+        PlanTask(
+            "evaluator",
+            "Evaluator — independently test the candidate",
+            "Role: Evaluator. Independently execute or inspect the Solver candidate against every success criterion and hard constraint using only verified artifacts and observed data. Write a structured report under evaluate/evaluation.json. Do not accept Solver claims without evidence and do not modify the candidate or contract.",
+            ("solver",),
+            {"evaluation_report_valid": "evaluate/evaluation.json"},
+        ),
+        PlanTask(
+            "reviewer",
+            "Reviewer — audit evidence and deliver",
+            "Role: Reviewer. Audit the formulation, candidate, and independent evaluation. Summarize only verified evidence, unresolved assumptions, and any required follow-up in evaluate/review.md. You may recommend retry or replan, but may not mark an invalid candidate valid or change hard constraints.",
+            ("evaluator",),
+            {"artifact_valid": {"path": "evaluate/review.md", "format": "text", "fields": []}},
+        ),
+    )
+    return PlanDocument(
+        goal=goal,
+        plan_id=plan_id,
+        tasks=tasks,
+        objective=contract.objective.to_dict(),
+        hard_constraints=tuple(item.description for item in contract.hard_constraints),
+        soft_constraints=tuple(item.description for item in contract.soft_constraints),
+        evidence=("contract compiled with the built-in specialist role DAG",),
+        assumptions=contract.assumptions,
+        acceptance={"required": True},
+        verification={"required": True, "independent": True},
+        delivery={"artifacts": list(contract.deliverables)},
+        algorithm_problem=contract.to_dict(),
+    )
+
+
+def _output_acceptance(contract: AlgorithmProblemContract) -> dict[str, object] | None:
+    """Compile required algorithm data outputs into independent artifact checks."""
+    rules = [
+        {
+            "output_valid": {
+                "path": output.path,
+                "format": output.format,
+                "fields": list(output.fields),
+            }
+        }
+        for output in contract.outputs
+        if output.required
+    ]
+    if not rules:
+        return None
+    return rules[0] if len(rules) == 1 else {"all": rules}
+
+
+def _default_contract(goal: str) -> AlgorithmProblemContract:
+    """Repository-owned deterministic fallback for ``--runtime mock`` smoke tests."""
+    lowered = goal.lower()
+    if any(token in lowered for token in ("route", "配送", "路径")):
+        problem_type = "routing"
+        name = "routing objective"
+    elif any(token in lowered for token in ("schedule", "排班", "调度")):
+        problem_type = "scheduling"
+        name = "scheduling objective"
+    elif any(token in lowered for token in ("assign", "分配")):
+        problem_type = "assignment"
+        name = "assignment objective"
+    elif any(token in lowered for token in ("pack", "装箱")):
+        problem_type = "packing"
+        name = "packing objective"
+    else:
+        problem_type = "continuous"
+        name = "stated objective"
+    digest = hashlib.sha256(goal.encode("utf-8")).hexdigest()[:12]
+    return AlgorithmProblemContract.from_dict(
+        {
+            "schema_version": "1",
+            "problem_id": f"mission-{digest}",
+            "problem_type": problem_type,
+            "statement": goal,
+            "inputs": [
+                {
+                    "path": "input.json",
+                    "format": "json",
+                    "fields": {"records": "records supplied by the user"},
+                }
+            ],
+            "decision_variables": ["algorithm solution"],
+            "objective": {"name": name, "direction": "maximize"},
+            "hard_constraints": [],
+            "soft_constraints": [],
+            "success_criteria": ["Produce a reproducible solution and report its measured result."],
+            "deliverables": ["algorithm source", "verification report"],
+            "assumptions": ["Input schema, objective details, and hard constraints require user or data confirmation."],
+            "evolution": {"strategy": "population", "max_rounds": 3, "stagnation_rounds": 2},
+        }
+    )
+
+
+class RuntimeContractCompiler:
+    """Compile a strict JSON envelope using an explicit repository ``Runtime``."""
+
+    def __init__(self, runtime: Runtime, *, mock_fallback: bool = True) -> None:
+        self.runtime = runtime
+        self.mock_fallback = mock_fallback
+
+    def compile(
+        self,
+        goal: str,
+        workspace: Path,
+        *,
+        answer: str | None = None,
+        timeout: float | None = None,
+    ) -> CompilationResult:
+        goal = _bounded_goal(goal)
+        answer = _bounded_answer(answer)
+        if self.mock_fallback and getattr(self.runtime, "name", "") == "mock":
+            contract = _default_contract(goal)
+            return CompilationResult(
+                "compiled",
+                contract=contract,
+                evidence=("repository mock compiler; no model response was used",),
+            )
+        prompt = self._prompt(goal, answer)
+        try:
+            isolated = getattr(self.runtime, "run_isolated", None)
+            invoke = isolated if callable(isolated) else self.runtime.run
+            result = invoke(prompt, workspace, timeout)
+        except Exception as exc:
+            raise ContractCompilationError(
+                f"compiler runtime failed: {type(exc).__name__}: {_safe_error(exc)}"
+            ) from exc
+        try:
+            return _parse_response(result.text)
+        except ContractCompilationError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive normalization
+            raise ContractCompilationError(f"compiler response could not be normalized: {exc}") from exc
+
+    @staticmethod
+    def _prompt(goal: str, answer: str | None) -> str:
+        answer_section = (
+            "\n\nA user answered the previous clarification question. Treat it as user-provided evidence; do not infer additional facts:\n"
+            + answer
+            if answer
+            else ""
+        )
+        return (
+            "You are Lunar Evolution's algorithm contract compiler. Return exactly one strict JSON object "
+            "and no markdown, code fences, surrounding prose, or tool calls. Use only the goal and "
+            "explicit user answer below; do not inspect files or use memory or prior session history. "
+            "Use status=needs_input when a material input schema, objective, hard constraint, or "
+            "deliverable is unknown. Never invent user-confirmed constraints or data fields.\n\n"
+            "Envelope schema (no additional keys):\n"
+            '- For status="needs_input", include questions: an array of one to four objects with '
+            'question (non-empty string) and optional options (array of at most ten unique non-empty '
+            'strings). Do not include contract.\n'
+            '- For status="compiled", include contract: a complete object with the schema below. '
+            'Do not include questions.\n'
+            "- Either envelope may include evidence: an array of non-empty strings. Every response "
+            "must include the top-level status field.\n\n"
+            "Complete envelope examples follow. They demonstrate JSON shape only. Replace all "
+            "example task content with facts from the user goal and explicit answer; never copy "
+            "the example task content.\n\n"
+            "needs_input example:\n"
+            f"{_NEEDS_INPUT_ENVELOPE_EXAMPLE}\n\n"
+            "compiled example:\n"
+            f"{_COMPILED_ENVELOPE_EXAMPLE}\n\n"
+            "Contract schema (no additional keys):\n"
+            '- schema_version: string "1". problem_id: a safe identifier string. '
+            'problem_type: one of "scheduling", "routing", "packing", "assignment", '
+            '"forecasting", "network_flow", "continuous". statement: a non-empty string.\n'
+            "- inputs: a non-empty array of objects with path (relative path string), format "
+            "(string), fields (non-empty object mapping field-name strings to description strings, "
+            "not an array), and optional key (a declared field-name string or null).\n"
+            "- decision_variables, success_criteria, deliverables: non-empty arrays of strings. "
+            "assumptions: an optional array of strings.\n"
+            '- objective: an object with name (string), direction ("maximize" or "minimize"), '
+            'and optional metrics (array of objects with name, direction, weight). Each metric name '
+            'is a unique string, direction is "maximize" or "minimize", and weight is a finite '
+            "non-negative JSON number; a non-empty metrics array must have positive total weight.\n"
+            "- hard_constraints and soft_constraints: arrays of objects with id (unique safe "
+            "identifier string), description (string), source "
+            '("user_confirmed", "data_observed", or "explicit_assumption"), verification '
+            '("independent", "partial", or "solver"), optional result_fields '
+            '(array of field-name strings), and verification_scope ("output", "source", or '
+            '"execution"). Declare the scope explicitly: output means decidable from declared '
+            "inputs and result files; source means properties of the delivered source files; "
+            "execution means actual program behavior or runtime dependencies. Scope is separate "
+            "from verification strength: partial and empty result_fields do not remove a requirement. "
+            "For example, file count is source; using only standard-library dependencies or actually "
+            "reading every input is execution. Split requirements with different scopes; never "
+            "relabel source/execution requirements as output or drop them to fit an evaluator. "
+            "If a material scope is ambiguous, request clarification. Use empty arrays when no "
+            "constraints are specified.\n"
+            '- A source constraint may additionally declare source_check with exactly '
+            '{"kind":"python_file_count","minimum":2}; minimum is an integer 1..64, never '
+            "a boolean. This counts distinct declared paths ending in lowercase .py, including "
+            "empty files. Use it only for an explicit minimum Python-file count requirement. "
+            "It does not prove syntax validity, helper imports, useful code, runtime dependencies "
+            "or actual input use. Never replace those requirements with file count. Unsupported "
+            "source requirements keep source scope without a fabricated checker. Do not emit "
+            "source_check for output or execution constraints.\n"
+            "- outputs: an optional array of objects with path (unique relative path string below "
+            'output/), format ("json", "jsonl", "csv", or "text"), optional fields (array of '
+            "unique field-name strings, not an object; empty for text), optional required (JSON "
+            "boolean, default true), and optional description (string).\n"
+            "- evolution: an optional object with only strategy, max_rounds, stagnation_rounds. "
+            'strategy is "population" (default) or "openevolve"; never emit the retired "loop". '
+            "max_rounds is an integer from 1 to 10000 (default 5). stagnation_rounds is an integer "
+            "from 1 to 1000 (default 3). These integers must not be booleans, strings, or decimals. "
+            "Omit evolution or unspecified settings to retain their defaults. Do not add "
+            "population_size, offspring_per_iteration, islands, migration, seed, or other engine "
+            "settings to the contract.\n\n"
+            f"User goal:\n{goal}{answer_section}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CallableContractCompiler:
+    """Tiny test/integration seam for callers that already own a compiler function."""
+
+    function: Callable[..., CompilationResult]
+    name: str = "callable"
+
+    def compile(
+        self,
+        goal: str,
+        workspace: Path,
+        *,
+        answer: str | None = None,
+        timeout: float | None = None,
+    ) -> CompilationResult:
+        result = self.function(goal, workspace, answer=answer, timeout=timeout)
+        if not isinstance(result, CompilationResult):
+            raise ContractCompilationError("compiler callable returned an invalid result")
+        if result.contract is not None and result.contract.evolution.strategy == "loop":
+            raise ContractCompilationError(LOOP_STRATEGY_RETIRED_MESSAGE)
+        return result

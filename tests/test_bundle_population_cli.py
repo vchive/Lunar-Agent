@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from test_bundle_population import MAIN_SOURCE, build_context
 
-from famou import cli
-from famou.evolution import CandidateArchive
+from lunar_evolution import cli
+from lunar_evolution.evolution import CandidateArchive
 
 
 def command(tmp_path):

@@ -9,9 +9,9 @@ import pytest
 from test_cli import _write_evolution_commands, _write_evolution_contract
 from test_producer_handoff import _envelope, _material
 
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.producer_handoff import ProducerResultEnvelope
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.producer_handoff import ProducerResultEnvelope
 
 PRODUCER_SHA = "b" * 64
 
@@ -33,7 +33,7 @@ def _inputs(tmp_path):
 
 
 def test_export_dispatches_without_initializing_or_running_anything(tmp_path, monkeypatch, capsys):
-    from famou import shinka_handoff
+    from lunar_evolution import shinka_handoff
 
     contract_path, root, _ = _inputs(tmp_path)
     envelope = ProducerResultEnvelope.from_dict(json.loads((root / "producer-result.json").read_bytes()))
@@ -65,7 +65,7 @@ def test_export_dispatches_without_initializing_or_running_anything(tmp_path, mo
 
 @pytest.mark.parametrize("options", [[], ["--top-k", "2"]])
 def test_export_preserves_convenience_selection_default(tmp_path, monkeypatch, capsys, options):
-    from famou import shinka_handoff
+    from lunar_evolution import shinka_handoff
 
     contract_path, root, _ = _inputs(tmp_path)
     envelope = ProducerResultEnvelope.from_dict(json.loads((root / "producer-result.json").read_bytes()))

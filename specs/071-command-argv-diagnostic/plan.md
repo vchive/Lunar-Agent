@@ -31,12 +31,12 @@ Use the repository's existing interpreter with explicit worktree source imports:
 ```sh
 PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -m pytest \
   -o addopts='' -q tests/test_command_argv_diagnostic.py
-/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/famou tests
+/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/lunar_evolution tests
 bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 git diff --check
 ```
 
-Confirm `famou.tools.__file__` belongs to this worktree. Use deterministic model fixtures and a
+Confirm `lunar_evolution.tools.__file__` belongs to this worktree. Use deterministic model fixtures and a
 fake subprocess; never execute historical model-produced commands. Run relevant runtime/budget/
 transcript tests and the full suite before the branch is considered ready.
 

@@ -6,11 +6,11 @@
 
 **Status**: Complete and independently reviewed (2026-09-14)
 
-**Input**: Local review of famou-v2 `product/dev`, WebAgent 2.5 evolution control, and Lunar's existing population evolution path.
+**Input**: Local review of reference-engine-v2 `product/dev`, WebAgent 2.5 evolution control, and Lunar's existing population evolution path.
 
 ## Problem and goal
 
-famou-v2 starts with executable `initial_programs`, re-runs enrichment and evaluation locally, and refuses to start when no seed is usable. WebAgent 2.5 delegates deep evolution to a remote famou-v2 service through an experiment control plane. Lunar currently has a local population strategy, but it has no typed handoff for importing an externally produced candidate with its lineage, evaluator evidence, producer identity, and environment assumptions. This feature adds a framework-neutral local handoff boundary for local subprocess producers such as OpenEvolve and for remote evolution backends. It also documents an opt-in remote backend contract without changing the staged Master→Build path or treating any external score as a Lunar score.
+reference-engine-v2 starts with executable `initial_programs`, re-runs enrichment and evaluation locally, and refuses to start when no seed is usable. WebAgent 2.5 delegates deep evolution to a remote reference-engine-v2 service through an experiment control plane. Lunar currently has a local population strategy, but it has no typed handoff for importing an externally produced candidate with its lineage, evaluator evidence, producer identity, and environment assumptions. This feature adds a framework-neutral local handoff boundary for local subprocess producers such as OpenEvolve and for remote evolution backends. It also documents an opt-in remote backend contract without changing the staged Master→Build path or treating any external score as a Lunar score.
 
 ### User Story 1 - Admit only locally verified seeds (Priority: P1)
 
@@ -42,7 +42,7 @@ An operator can start or resume Lunar's existing local population strategy with 
 
 ### User Story 3 - Keep remote evolution backends explicitly optional (Priority: P2)
 
-An integration owner can describe a remote evolution experiment, such as a future famou-v2 integration, using a typed `submit`/`status`/`sync`/`continue_experiment`/`cancel` boundary. The boundary records backend identity and material provenance, but remote output is imported only as an untrusted seed candidate pending local exact-harness re-evaluation. The default CLI remains local and performs no network call.
+An integration owner can describe a remote evolution experiment, such as a future reference-engine-v2 integration, using a typed `submit`/`status`/`sync`/`continue_experiment`/`cancel` boundary. The boundary records backend identity and material provenance, but remote output is imported only as an untrusted seed candidate pending local exact-harness re-evaluation. The default CLI remains local and performs no network call.
 
 **Why this priority**: WebAgent's current deep-evolution path is a remote control plane, not a drop-in local Agent runtime. Making that distinction explicit prevents accidental coupling and false Lunar leaderboard claims.
 
@@ -73,7 +73,7 @@ An integration owner can describe a remote evolution experiment, such as a futur
 - **FR-004**: System MUST fail initialization when no seed has a usable local score, and MUST make zero generator, remote backend, or population mutations after the evaluator gate in that case. The admission evaluator is an explicit injected local contract; any model-backed evaluator remains outside this claim.
 - **FR-005**: System MUST persist seed provenance and identity in candidate metadata and checkpoint/archive records, including evaluator kind as well as fingerprint, a compact producer projection, and the safe external summary, subject to existing bounded artifact and secret-safety limits.
 - **FR-006**: System MUST reject resume when source, dependency/environment, evaluator, contract identity, or canonical provenance fingerprint no longer matches the persisted handoff. `producer_run_id` remains provenance and MUST NOT replace or determine the candidate ID.
-- **FR-007**: System MUST ensure seed admission/evaluator failures do not advance an iteration or enter the active population. Any change to later rollout retry semantics MUST be separately specified and tested; 084 MUST NOT claim current PopulationStrategy already matches famou-v2.
+- **FR-007**: System MUST ensure seed admission/evaluator failures do not advance an iteration or enter the active population. Any change to later rollout retry semantics MUST be separately specified and tested; 084 MUST NOT claim current PopulationStrategy already matches reference-engine-v2.
 - **FR-008**: System MUST expose a framework-neutral remote backend protocol for `submit`, `status`, `sync`, `continue_experiment`, and `cancel` with opaque IDs and bounded, credential-safe payloads.
 - **FR-009**: System MUST keep the remote backend opt-in and absent from default staged and local evolution construction.
 - **FR-010**: System MUST route every external candidate, including an explicit local OpenEvolve result and a remote synchronized result, through the configured exact-harness evaluator before local ranking, verify its evaluator fingerprint and receipt digest, and label external scores as provenance-only until then.
@@ -98,7 +98,7 @@ An integration owner can describe a remote evolution experiment, such as a futur
 
 ## Assumptions and limits
 
-- The first implementation is local-only for seed admission; no real external evolution framework or famou-v2 service is invoked.
+- The first implementation is local-only for seed admission; no real external evolution framework or reference-engine-v2 service is invoked.
 - Existing `EvaluationReport`, `Candidate`, archive, checkpoint, and exact harness contracts remain authoritative and are extended only through bounded metadata or a versioned adapter contract.
 - This feature does not claim an effective-solution improvement and does not reopen sealed campaign slots. A future real measurement needs a separate frozen registration.
 

@@ -3,7 +3,7 @@
 Use two explicit solver commands in a population run:
 
 ```bash
-lunar-agent evolve contract.json --strategy population \
+lunar-evolution evolve contract.json --strategy population \
   --agent-portfolio-command "/absolute/path/to/solver-a --json" \
   --agent-portfolio-command "/absolute/path/to/solver-b --json" \
   --evaluator-agent-command "/absolute/path/to/evaluator --json" \

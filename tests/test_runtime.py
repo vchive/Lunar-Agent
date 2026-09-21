@@ -8,23 +8,23 @@ from typing import ClassVar, Self
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.algorithm import AlgorithmProblemContract
-from famou.artifacts import ArtifactError, ArtifactStore
-from famou.config import Config
-from famou.controller import LocalController
-from famou.memory import MemoryStore
-from famou.policy import PlanDocument, PlanTask
-from famou.profiles import ModelProfile
-from famou.runtime import (
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.artifacts import ArtifactError, ArtifactStore
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.memory import MemoryStore
+from lunar_evolution.policy import PlanDocument, PlanTask
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import (
     MockRuntime,
     ModelTurn,
     OpenAICompatibleRuntime,
     RuntimeExecutionError,
     SubprocessRuntime,
 )
-from famou.store import Store
-from famou.tools import LocalToolRegistry
+from lunar_evolution.store import Store
+from lunar_evolution.tools import LocalToolRegistry
 
 
 def test_mock_runtime_is_deterministic_without_external_environment(tmp_path: Path) -> None:
@@ -40,8 +40,8 @@ def test_subprocess_runtime_uses_explicit_command_and_workspace(tmp_path: Path) 
 
 
 def test_subprocess_runtime_requires_explicit_command(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FAMOU_RUNTIME_COMMAND", raising=False)
-    with pytest.raises(ValueError, match="requires FAMOU_RUNTIME_COMMAND"):
+    monkeypatch.delenv("LUNAR_EVOLUTION_RUNTIME_COMMAND", raising=False)
+    with pytest.raises(ValueError, match="requires LUNAR_EVOLUTION_RUNTIME_COMMAND"):
         SubprocessRuntime()
 
 

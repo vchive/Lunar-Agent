@@ -21,7 +21,7 @@ freeze set. Product source, historical scripts/evidence and main are unchanged.
 The guarded offline scenario set passed 328 tests: 51 preaudit, 40 runner, 71 postrun, 14 actual
 Master-role message tests, 60 public-plan/receipt tests, 46 staged state-machine tests, 44 prior
 actual-byte validators and 2 failed-subject/no-harness cases. The run used the main development
-interpreter with an explicit isolated src path and verified the actual famou import. It inherited
+interpreter with an explicit isolated src path and verified the actual lunar_evolution import. It inherited
 no provider environment, blocked network/CC Switch file access, and used temporary synthetic
 workspaces. Source test hashes matched before/after. This is implementation readiness, not the
 actual registered dry-run; no manifest was materialized and no real subject or private harness ran.

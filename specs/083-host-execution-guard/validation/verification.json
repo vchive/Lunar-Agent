@@ -3,9 +3,9 @@
   "completed_utc": "2026-09-11T07:44:42.420241+00:00",
   "source_base_commit": "fe38cfb001e955810ff652d5ac935e7df00156ff",
   "reviewed_product_and_test_sha256": {
-    "src/famou/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
-    "src/famou/host_session.py": "db63d52cfcab8200c7c895e60a391abe65038daee88e481842a520bb703abc95",
-    "src/famou/cli.py": "5fb5c723b99428868d0940661397fe7f6765998f89448374b6263e7afcbd8298",
+    "src/lunar_evolution/host_awake.py": "da33de0ae15b91729c8352067abbdc4a85cb710560d5f02c51f4e9b1bb4d3afd",
+    "src/lunar_evolution/host_session.py": "db63d52cfcab8200c7c895e60a391abe65038daee88e481842a520bb703abc95",
+    "src/lunar_evolution/cli.py": "5fb5c723b99428868d0940661397fe7f6765998f89448374b6263e7afcbd8298",
     "tests/test_host_awake.py": "5d345a19957493f983e9176e0fce14a3fa3b34d1db3e1e73c690bc8d1d8248eb",
     "tests/test_host_session.py": "cbc42f681daf6b634b49dae1cb92037b470946306e79dfcd00e59e6c62cdb017",
     "tests/test_host_execution_cli.py": "724264572bf28b224fae87f79b21ed8b98b533cd722786a08a0d9cbdfe8d4eb8",

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from famou import cli
+from lunar_evolution import cli
 
 
 def _argv(command: str, workspace: Path) -> list[str]:
@@ -32,7 +32,7 @@ def test_default_dispatch_does_not_import_guard_or_validate_new_paths(
     original_import = builtins.__import__
 
     def reject_host_import(name, *args, **kwargs):
-        assert name not in {"host_session", "host_awake", "famou.host_session", "famou.host_awake"}
+        assert name not in {"host_session", "host_awake", "lunar_evolution.host_session", "lunar_evolution.host_awake"}
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", reject_host_import)
@@ -72,7 +72,7 @@ def test_guard_spans_whole_operation_and_preserves_returned_native_failure(
         finally:
             events.append("released")
 
-    monkeypatch.setitem(sys.modules, "famou.host_session", SimpleNamespace(host_execution=scope))
+    monkeypatch.setitem(sys.modules, "lunar_evolution.host_session", SimpleNamespace(host_execution=scope))
 
     def operation(args):
         assert events == ["active"]
@@ -100,7 +100,7 @@ def test_failed_guard_entry_precedes_profile_environment_and_runner(
         raise ValueError("host_acquisition_failed")
         yield  # pragma: no cover
 
-    monkeypatch.setitem(sys.modules, "famou.host_session", SimpleNamespace(host_execution=scope))
+    monkeypatch.setitem(sys.modules, "lunar_evolution.host_session", SimpleNamespace(host_execution=scope))
 
     def forbidden(*args, **kwargs):
         pytest.fail("configuration/credentials/runner accessed before host gate")
@@ -149,7 +149,7 @@ def test_report_location_rejected_before_journal_creation(
     def forbidden(*args, **kwargs):
         pytest.fail("scope or work entered for a disallowed journal path")
 
-    monkeypatch.setitem(sys.modules, "famou.host_session", SimpleNamespace(host_execution=forbidden))
+    monkeypatch.setitem(sys.modules, "lunar_evolution.host_session", SimpleNamespace(host_execution=forbidden))
     monkeypatch.setattr(cli, "_effect_trial", forbidden)
     argv = [*_argv("effect-trial", workspace), "--case-source", f"case={source}",
             "--keep-awake-report", str(report)]
@@ -176,7 +176,7 @@ def test_location_validation_keeps_original_path_for_scope_symlink_checks(tmp_pa
         seen.append(path)
         yield
 
-    monkeypatch.setitem(sys.modules, "famou.host_session", SimpleNamespace(host_execution=scope))
+    monkeypatch.setitem(sys.modules, "lunar_evolution.host_session", SimpleNamespace(host_execution=scope))
     args = argparse.Namespace(keep_awake_report=supplied, workspace=tmp_path / "trial", case_source=[])
     assert cli._effect_host_scope(args, lambda args: {}) == {}
     assert seen == [supplied]
@@ -202,7 +202,7 @@ def test_report_filesystem_alias_rejected_before_scope(
     def forbidden(*args, **kwargs):
         pytest.fail("aliased protected directory accepted for journal")
 
-    monkeypatch.setitem(sys.modules, "famou.host_session", SimpleNamespace(host_execution=forbidden))
+    monkeypatch.setitem(sys.modules, "lunar_evolution.host_session", SimpleNamespace(host_execution=forbidden))
     monkeypatch.setattr(cli, "_effect_trial", forbidden)
     workspace = root if protected == "workspace" else tmp_path / "workspace"
     argv = [*_argv("effect-trial", workspace), "--keep-awake-report", str(report_root / "host.jsonl")]
@@ -234,7 +234,7 @@ def test_read_only_preflight_has_no_guard_option(tmp_path):
 def test_real_scope_journal_surrounds_cli_configuration_and_runner(
     command, runner_name, configuration_failure, tmp_path, monkeypatch, capsys,
 ):
-    from famou import host_session
+    from lunar_evolution import host_session
 
     report = tmp_path / "host.jsonl"
     calls = []

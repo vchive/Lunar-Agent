@@ -24,7 +24,7 @@ schema before any task is scheduled.
 
 ### User Story 1 — Describe an algorithm problem conversationally (P1)
 
-As a local user, I want to say what I need in ordinary language so that Lunar-Agent can produce a
+As a local user, I want to say what I need in ordinary language so that Lunar Evolution can produce a
 reviewable algorithm contract and plan.
 
 1. **Given** a valid compiler response, **when** `solve` is invoked, **then** the run stores a

@@ -5,13 +5,13 @@ solve. Set `SHINKA_FINGERPRINT` to your pinned 64-character lowercase SHA-256 id
 producer version/configuration; use the same pin for export and import.
 
 ```sh
-lunar-agent export-shinka-result ./shinka-run \
+lunar-evolution export-shinka-result ./shinka-run \
   --output ./shinka-export \
   --contract ./contract.json \
   --producer-fingerprint "$SHINKA_FINGERPRINT" \
   --program-id program-1 --program-id program-2 --json
 
-lunar-agent evolve ./contract.json \
+lunar-evolution evolve ./contract.json \
   --producer-result ./shinka-export \
   --producer-fingerprint "$SHINKA_FINGERPRINT" --producer-id shinka \
   --generator-command "/absolute/path/to/generator" \
@@ -43,7 +43,7 @@ external runtime installation or downloaded dependencies.
 
 The same evolve flags accept any completed `lunar-producer-result-v1` directory, including material
 exported by another compatible producer. They do not run or install Shinka/OpenEvolve. A manifest
-can also be prepared directly with `famou.prepare_producer_seed_manifest(...)`; preparation alone
+can also be prepared directly with `lunar_evolution.prepare_producer_seed_manifest(...)`; preparation alone
 never creates a Candidate, score or evaluator receipt.
 
 # Offline validation

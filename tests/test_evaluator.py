@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from famou.evaluator import (
+from lunar_evolution.evaluator import (
     MAX_ARTIFACT_BYTES,
     acceptance_evaluator,
     compile_acceptance,

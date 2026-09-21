@@ -10,8 +10,8 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-import famou.diagnostic_snapshot as snapshot
-from famou.diagnostic_snapshot import DiagnosticSnapshotError, diagnostic_snapshot
+import lunar_evolution.diagnostic_snapshot as snapshot
+from lunar_evolution.diagnostic_snapshot import DiagnosticSnapshotError, diagnostic_snapshot
 
 PARENT = "parent-1"
 CHILD = "child-1"

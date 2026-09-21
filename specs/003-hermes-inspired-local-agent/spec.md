@@ -8,11 +8,11 @@
 
 **Input**: Product direction clarified by the owner: adapt the useful Hermes execution model for a
 standalone local agent, retain long-running memory and existing tools, and add orchestration without
-turning Lunar-Agent into a WebAgent service or copying WebAgent's stage machine.
+turning Lunar Evolution into a WebAgent service or copying WebAgent's stage machine.
 
 ## Direction
 
-Lunar-Agent is a local Hermes-inspired agent, not a WebAgent reimplementation and not a launcher for
+Lunar Evolution is a local Hermes-inspired agent, not a WebAgent reimplementation and not a launcher for
 the user's installed Hermes. The repository owns the agent loop, tool policy, durable run ledger,
 memory, and recovery. Hermes may remain an optional external subprocess adapter, but no code path
 discovers or imports a machine-wide Hermes installation.
@@ -65,7 +65,7 @@ all paths stay below the task workspace and command execution is opt-in.
 
 ### User Story 4 - Invoke from Another Agent (Priority: P2)
 
-As Codex, OpenClaw, Hermes, or another local agent, I can invoke Lunar-Agent as a CLI/TUI process,
+As Codex, OpenClaw, Hermes, or another local agent, I can invoke Lunar Evolution as a CLI/TUI process,
 obtain one JSON run handle, and poll status/events while the child continues in the background.
 
 **Independent Test**: `run --detach --json` returns before execution, and `status --json` reports the
@@ -97,7 +97,7 @@ same durable run ID and current scheduler state.
 
 ## Non-Goals
 
-- Reproducing Famou WebAgent's Master/Build/Verify/Delivery/Evolution stage machine.
+- Reproducing WebAgent's Master/Build/Verify/Delivery/Evolution stage machine.
 - A hosted service, HTTP/SSE control plane, multi-tenant storage, distributed queue, or UI product.
 - Automatic discovery, installation, or mutation of a user's Hermes environment.
 - Embeddings/vector search, model training, or mandatory cloud APIs for memory.

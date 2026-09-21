@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://lunar-agent.local/contracts/output-spec.schema.json",
-  "title": "Lunar-Agent OutputSpec",
+  "$id": "https://lunar-evolution.local/contracts/output-spec.schema.json",
+  "title": "Lunar Evolution OutputSpec",
   "type": "object",
   "additionalProperties": false,
   "required": ["path", "format"],

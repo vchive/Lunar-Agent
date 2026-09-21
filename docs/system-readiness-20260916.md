@@ -1,6 +1,13 @@
-# Lunar-Agent 当前能力、剩余工作与终态验收
+# Lunar Evolution 当前能力、剩余工作与终态验收
 
-评估创建于 2026-09-16，2026-09-21 更新继续补充候选响应可靠性（144）。已推送的 142 历史产品
+评估创建于 2026-09-16，2026-09-21 更新补充候选响应可靠性（144）与统一命名（145）。
+当前产品统一使用 Lunar Evolution；包/命令、用户配置、默认 home 与后台入口同步迁移，
+无旧身份兼容别名。历史封存资料和原测量测试改由[固定归档索引](history-archive.md)定位，
+原始 hash、分数和 Git 历史不改写。全新安装和真实 detached mock 验收已通过，完整回归
+结果见 [145 validation](../specs/145-lunar-evolution-identity/validation.md)。名称迁移不增加
+真实模型成功样本，也不关闭下面列出的实现和发布验收缺口。
+
+已推送的 142 历史产品
 基线为 `65d9ae2`：Feature 142 Phase A
 前台生命周期和 Phase B 进程取消/清理已完成。本机定向、兼容和双阶段全量回归均通过；
 该历史提交的 Linux CI 曾失败；后续修复提交 `8e1e089` 已通过 Python 3.11/3.12/3.13
@@ -31,7 +38,7 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 | 后续能力 | OpenEvolve/Shinka 多文件接入、Shinka 启动调度及真实框架验收 | 外部候选走同一执行/评分/交付链，在新独立登记中验证；不重跑 WebAgent |
 | 后续扩展 | 更复杂输入、跨文件依赖、通用仓库/workflow 与远端运行 | 明确支持范围和代表性验收，不从一个双文件样例外推 |
 
-公共 GitHub Actions 元数据确认 [run 35522272395](https://github.com/vchive/Lunar-Agent/actions/runs/35522272395)
+公共 GitHub Actions 元数据确认 [run 35522272395](https://github.com/vchive/Lunar-Evolution/actions/runs/35522272395)
 中的 Python 3.11 checkout、环境和依赖安装成功，`Run tests` 退出 1，静态检查未运行。
 3.12/3.13 的取消原因明确为矩阵中 3.11 失败，不是两个版本各自验收失败。公开注释没有
 失败测试名，日志要求登录，下载接口返回 403，且该次无上传报告；当时无法判定 current
@@ -44,7 +51,7 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 该矩阵已确认候选执行失败消失，另暴露三项历史链单测依赖私人本机文件、一项虚拟环境
 身份不匹配，以及 Python 3.12 的间歇性测试连接 GC 问题。后续仅在 CI 设置与测试 fixture 修复，
 新增负测并保持原校验函数、真实历史记录不变。最终 `8e1e089` 的
-[run 35526731156](https://github.com/vchive/Lunar-Agent/actions/runs/35526731156) 已确认三个版本的
+[run 35526731156](https://github.com/vchive/Lunar-Evolution/actions/runs/35526731156) 已确认三个版本的
 完整双阶段测试、报告保存和静态检查均成功，CI 发布检查已关闭。该结论不增加真实模型样本；
 产品、测试和 CI 配置在后续验收文档同步中保持不变。详见
 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
@@ -120,7 +127,7 @@ authority-bound identity，并将 runtime failure、空响应和 parser failure 
 
 ## Feature 120 真实验收结果
 
-Feature 120 在已推送登记 `f3b575c` 上按支持范围运行两题，结果 **0/2**。两题合同编译分别耗时约44秒和118秒，随后 evaluator preparation 请求都在600秒 `open_response` 超时；无 evaluator、候选、交付或 holdout，已知用量16,161 tokens，超时消费/费用未知。详见 [120 report](../specs/120-supported-scope-acceptance/postrun/report.md)。
+Feature 120 在已推送登记 `f3b575c` 上按支持范围运行两题，结果 **0/2**。两题合同编译分别耗时约44秒和118秒，随后 evaluator preparation 请求都在600秒 `open_response` 超时；无 evaluator、候选、交付或 holdout，已知用量16,161 tokens，超时消费/费用未知。详见 [120 report](history-archive.md)。
 
 Feature 121 随后离线补齐 evaluator compiler/auditor 的完整响应/报告格式、源码限制和
 合成测试数据规则；新增51项测试通过，最终全仓 **6049 passed, 1 skipped**，保持解析、
@@ -142,7 +149,7 @@ Feature 123 随后先推送独立登记再执行一项小型合成evaluator准�
 没有auditor或8项holdout执行。静态检查确认生成源码把input descriptor的target误认成path，
 使有效probe提前被判无效。下一步补齐snapshot request的实际嵌套结构和本地一致性检查。
 这个诊断没有solver/多文件交付，不证明原120超时根因或真实闭环已成功。见
-[123 report](../specs/123-small-evaluator-diagnostic/postrun/report.md)。
+[123 report](history-archive.md)。
 
 Feature 124 已补齐共享snapshot请求示例：runtime inputs[]使用target，contract/profile/probe
 中的path分别解释，outputs[].path直接读取，不重复前缀。元数据和任务内容明确区分，
@@ -159,7 +166,7 @@ Feature 125 已完成该独立诊断：compiler通过原生自测并进入audito
 发现evaluator和其3个自测把JSON输入误当整数；合同与5个audit输入是含limit的对象，
 evaluator的整根类型检查会拒绝有效对象。独立audit阻止了错误冻结。下一步让合成输入复用
 真实输入既有格式准入，并补准确本地阶段诊断；不从描述字段推断通用schema，不修补旧响应。
-见[125 report](../specs/125-snapshot-protocol-diagnostic/postrun/report.md)。这仍未完成真实
+见[125 report](history-archive.md)。这仍未完成真实
 多文件交付，不构成124因果收益；123与125分母各自独立，均0/1。
 
 Feature 126 已让合成输入和真实画像共用格式解析：compiler/audit整组输入在第一个probe
@@ -191,13 +198,13 @@ Feature 128 已在固定产品b951857、先push登记38c323c后完成新的唯�
 auditor均HTTP200，3项自测与5项独立探针通过，冻结1/1，8项预声明holdout全部精确匹配，
 联合1/1。耗时507.148秒、记录用量完整43630tokens、费用未知、清理通过。209项测量测试与
 325项相关回归通过，63份保留证据和全部固定pins复验通过。见
-[128 report](../specs/128-format-admission-diagnostic/postrun/report.md)。这次没有solver或
+[128 report](history-archive.md)。这次没有solver或
 多文件交付，也不证明通用评测正确性或126/127因果改善；8项整数检查不完整覆盖bool/float。
 Feature129随后独立登记08624f5并push，固定同一产品运行小型真实自动多文件任务。唯一
 合同请求45.509秒HTTP200，4076tokens；响应顶层仅contract、缺少status=compiled，原生
 parser拒绝，未进入evaluator或候选。primary/preparation/joint均0/1，0/8holdout执行，
 quality/gap为null；总47.339秒、exit1、清理通过。183项新测量测试和353项相关回归通过，
-16份证据复验匹配。见[129 report](../specs/129-small-multifile-acceptance/postrun/report.md)。
+16份证据复验匹配。见[129 report](history-archive.md)。
 仍未完成真实多文件交付；下一步补完整合同响应封装示例及离线检查，保留严格字段验证。
 现有提示已描述status规则，不能归因于规则缺失，也不能据此证明提示修复必有效；旧槽不重开。
 
@@ -214,7 +221,7 @@ evaluator compiler随后在等待响应头时于600.004秒`transport_timeout`，
 正文或已知用量；该里程碑不能区分provider排队、模型生成或其他远端延迟。总用量因此为
 null。primary/preparation/joint均0/1，0/8 holdout执行，没有evaluator、candidate或delivery，
 quality/gap为null；清理和21份证据库存复验通过。见
-[131 report](../specs/131-small-multifile-recheck/postrun/report.md)。原始transport台账中的
+[131 report](history-archive.md)。原始transport台账中的
 首请求HTTP200未进入公开`results.json`投影；CLI/worker已失败且runner pid/pgid为空，但
 SQLite父run仍为`running`、任务为1 ready/3 waiting/1 succeeded。两项均未造成成功误判或
 残留进程；当时分别列为安全HTTP状态投影和持久终态一致性后续项。Feature132复核后确认
@@ -254,7 +261,7 @@ evaluated/valid candidates均0，child以offspring_batch_failed结束；尚未�
 独立评分或交付。HTTP成功不代表候选生成完成。
 compiler/auditor分别346.070/124.757秒，均低于旧600秒时限，因此不构成增加预算的因果
 收益。262项测量测试和全量双阶段7924 passed/1 skipped/24 deselected、固定历史24 passed
-通过。见[134 report](../specs/134-budgeted-multifile-acceptance/postrun/report.md)。
+通过。见[134 report](history-archive.md)。
 本次真实请求都成功；类型化preparation请求失败与墙钟失败分支仅由离线fixture验证。
 
 Lunar 已有可运行的本地 Agent 和完整的单文件 population 演化链路。多文件链路也已接通
@@ -290,7 +297,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |
 | 远端演化 | lifecycle 协议和 completed material bridge 已实现 | 无内置真实 transport/client；默认本地路线不依赖它 |
 
-代码接点：`src/famou/controller.py`、`evolution.py`、`producer_handoff.py`、
+代码接点：`src/lunar_evolution/controller.py`、`evolution.py`、`producer_handoff.py`、
 `candidate_execution_evidence.py`、`candidate_evaluation.py`、`bundle_evolution.py`、`agent_bundle_generation.py`、
 `bundle_delivery.py`、`solve_bundle.py`、`automatic_solve_bundle.py`、`bundle_parent_delivery.py`、`remote_evolution.py`。
 
@@ -382,26 +389,26 @@ Feature 108 的快照明确是评测时观察：107 completion 仍不包含执�
 
 ## 真实效果证据
 
-- [069 普通/分阶段测量](../specs/069-webagent-normal-workflow/postrun/results.md)：普通流程
+- [069 普通/分阶段测量](history-archive.md)：普通流程
   GLM-5.2 的两例均有效，钣金 `0.999999`、邮政 `1.0185`。每例仅一次，产品源码固定
   `80f5af1`；它证明这两个任务上的交付能力，不是当前 HEAD 的效果或整体 parity。
-- [082 分阶段测量](../specs/082-http-deadline-measurement/postrun/results.md)：两例均通过
+- [082 分阶段测量](history-archive.md)：两例均通过
   Master 计划并进入 Build，最终有效 `0/2`，没有完成的 subject/harness 回执。后续基础
   设施修复不能代替新的真实验收。
-- [113 当前版本验收](../specs/113-real-multifile-acceptance/postrun/report.md)：`c977eb4`
+- [113 当前版本验收](history-archive.md)：`c977eb4`
   的两例 GLM-5.2 自动多文件入口均在合同编译失败，有效 **0/2**，质量 null，已知用量
   15958 tokens。没有进入 evaluator/候选生成，不构成这些后续阶段的效果证据。
-- [115 修复后验收](../specs/115-isolated-intake-acceptance/postrun/report.md)：`5e2568f`
+- [115 修复后验收](history-archive.md)：`5e2568f`
   完成 0/2，一例合同编译成功后 evaluator 请求超时，另一例合同请求超时。已知用量小计
   8625 tokens，超时消费未知；没有交付或可审计的冻结 evaluator。
-- [117 延长时限验收](../specs/117-extended-deadline-acceptance/postrun/report.md)：`9a26a73`
+- [117 延长时限验收](history-archive.md)：`9a26a73`
   完成 0/2，evaluator 请求在 600 秒超时，另一题合同原始响应含 Markdown 代码块而被
   拒绝。三请求、两响应，已知用量小计 11309 tokens，超时消费未知；没有 evaluator/交付。
-- [131 同任务复查](../specs/131-small-multifile-recheck/postrun/report.md)：`c730483`
+- [131 同任务复查](history-archive.md)：`c730483`
   完成0/1；合同在25.237秒HTTP200返回并通过验证，evaluator compiler在等待响应头时于
   600.004秒超时。仅首请求3656tokens已知，总用量null；没有evaluator、候选、交付或
   holdout。封装失败未复现不构成130的因果证据，也没有当前版本真实多文件闭环成功。
-- [134 新预算验收](../specs/134-budgeted-multifile-acceptance/postrun/report.md)：固定产品
+- [134 新预算验收](history-archive.md)：固定产品
   `15710bd`，登记`358f738`先推送。准备1/1、8/8holdout，完整交付/联合仍0/1，quality/gap
   null。11次请求均HTTP200，完整98714tokens，费用未知；896.396秒、native/process exit1、
   清理通过。三次生成均触及登记工具预算，evaluated/valid candidates为0，尚无候选执行或

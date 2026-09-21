@@ -8,9 +8,9 @@ import pytest
 from test_conversational_automatic_bundle import automatic_setup
 from test_preparation_recovery_cli import snapshot
 
-from famou import cli
-from famou.evolution import EvolutionError
-from famou.store import Store
+from lunar_evolution import cli
+from lunar_evolution.evolution import EvolutionError
+from lunar_evolution.store import Store
 
 
 def request_for(*arguments):

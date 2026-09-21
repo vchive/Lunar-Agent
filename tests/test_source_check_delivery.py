@@ -11,15 +11,20 @@ import test_bundle_parent_delivery as parent_fixture
 from test_bundle_population import build_context, draft_for_score
 from test_bundle_population_controller import _calls
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.bundle_delivery import inspect_bundle_delivery, publish_bundle_delivery
-from famou.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
-from famou.candidate_evaluation_spec import canonical_json
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import CandidateArchive, CandidateDraft, EvolutionError, PopulationStrategy
-from famou.runtime import MockRuntime
-from famou.source_constraints import MAX_SOURCE_CHECK_BYTES, source_check_evidence
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.bundle_delivery import inspect_bundle_delivery, publish_bundle_delivery
+from lunar_evolution.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
+from lunar_evolution.candidate_evaluation_spec import canonical_json
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import (
+    CandidateArchive,
+    CandidateDraft,
+    EvolutionError,
+    PopulationStrategy,
+)
+from lunar_evolution.runtime import MockRuntime
+from lunar_evolution.source_constraints import MAX_SOURCE_CHECK_BYTES, source_check_evidence
 
 
 def _contract(contract, *, minimum=2, scope="source", checker=True, soft=False):
@@ -195,9 +200,9 @@ def test_source_evidence_cannot_be_attached_to_a_legacy_contract(tmp_path):
 
 
 def test_source_aware_delivery_supports_all_166_declared_materials(tmp_path):
-    from famou.algorithm import MAX_OUTPUTS
-    from famou.candidate_bundle import MAX_CANDIDATE_BUNDLE_FILES
-    from famou.candidate_execution import MAX_EXECUTION_INPUTS
+    from lunar_evolution.algorithm import MAX_OUTPUTS
+    from lunar_evolution.candidate_bundle import MAX_CANDIDATE_BUNDLE_FILES
+    from lunar_evolution.candidate_execution import MAX_EXECUTION_INPUTS
 
     destination, identity, materials = _portable(tmp_path)
     contract = AlgorithmProblemContract.from_dict(json.loads(materials["contract.json"]))

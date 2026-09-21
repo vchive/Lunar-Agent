@@ -1,5 +1,10 @@
 # WebAgent 传输恢复机制有界只读比较（2026-09-11）
 
+本文分析外部参考项目；“参考引擎”、插件、角色、分支和 benchmark 的中性名称仅作描述，
+不是 Lunar Evolution 的组件名称，也不是声称上游已改名的实际路径。原始名称、源码路径
+及引用保留在[历史归档](history-archive.md)指向的固定迁移前版本；外部代码归属及其适用
+许可仍属于原作者。本次名称整理没有重新运行外部项目或模型测量。
+
 WebAgent 的固定提交包含值得借鉴的恢复机制：对特定瞬时模型错误保留同一请求的恢复机会，先完整接收模型响应再提交，以及要求求解器保存当前产出并修复确定性执行错误。它们分别解决传输中断、重复提交和求解产出丢失，不能合并成“WebAgent 失败后总会自动重跑”的结论。
 
 本说明只比较代码与已接受的 082 邮政终止观察，不修改产品，不启动实验，不认定当前缺陷已经修复，也不推断失败根因。**它不授权重试、替换、续跑或重放当前 082 的任何 case。** 后续恢复功能须在 082 封存后另行定义预算、账本和回执契约并预注册测量。
@@ -11,15 +16,15 @@ WebAgent 的固定提交包含值得借鉴的恢复机制：对特定瞬时模�
 - 观察到本地 WebAgent HEAD 为 `9ee31a0b0bdc7cbe4c16d2a44bb61d4993f6dc4b`，因此不能把当前工作区文件的行链接当作固定提交证据。
 - Lunar 比较固定提交：`e36b103fd6fc4a64304d16ae446e0383dab0a8a8`，以下 `L` 引用均指该提交的 Git blob 行号。
 - 082 预注册 SHA256：`880761221b0ac2bb11acaffac2dbb8312171ae91adcc6da5ffd06763d2546bdb`。
-- 082 观察来源：[独立部分审计 JSON](/Users/liminghan/Documents/lunar_agent/specs/082-http-deadline-measurement/postrun/observations/20260911T050153627104Z-independent-partial-audit.json)及[对应报告](/Users/liminghan/Documents/lunar_agent/specs/082-http-deadline-measurement/postrun/observations/20260911T050153627104Z-independent-partial-report.md)。这是当时的部分观察，不是整个 campaign 的最终状态。
+- 082 观察来源：[独立部分审计 JSON](history-archive.md)及[对应报告](history-archive.md)。这是当时的部分观察，不是整个 campaign 的最终状态。
 
 本次仅使用本地 Git blob、现有 Lunar 源码和已保存观察；未 fetch、联网、运行 WebAgent、执行模型请求、读取密钥或运行候选。未执行测试；下述计数边界是静态代码推导，不是复现实验。WebAgent 的 SKILL.md 作为被研究的提示词材料读取，不作为本任务的执行指令。
 
 ### 固定 blob 索引
 
-复核方式为在对应仓库执行 `git show <固定提交>:<相对路径> | nl -ba`。表中行号及后文行区间均属于该 blob。
+复核方式为在对应仓库执行 `git show <Git blob SHA-1> | nl -ba`。表中行号及后文行区间均属于该 blob；描述性模块名不代表该固定提交的字面路径，原始路径见历史归档。
 
-| 引用 | 相对路径 | Git blob SHA-1 |
+| 引用 | 文件或模块描述 | Git blob SHA-1 |
 | --- | --- | --- |
 | W1 | `opencode/litellm-thinking-provider/src/retry-cap.ts` | `ac6026ffcdcab50ea7c081de291911246415ff02` |
 | W2 | `opencode/litellm-thinking-provider/dist/retry-cap.js` | `71b7da722cfa17120961b1ae5b3d025ec977619c` |
@@ -31,14 +36,14 @@ WebAgent 的固定提交包含值得借鉴的恢复机制：对特定瞬时模�
 | W8 | `opencode/litellm-thinking-provider/package.json` | `4bf4b66cd8f254d2143ca88a9a1d996f89cc8577` |
 | W9 | `harness/installer.py` | `f728f3def3617a828aa6adce126487329ce5be48` |
 | W10 | `harness/backends/opencode_run.py` | `3749bf265f30fe714c5e6468f53efc5385c0ba4a` |
-| W11 | `opencode/agents/famou-master.md` | `ffb7374457960bb0c23470d67b79657f9d9f4c5a` |
-| W12 | `opencode/agents/famou-or-solver.md` | `6adf2712e9f2e492a58c40c203117d2bef53dee0` |
-| W13 | `opencode/skills/famou-runtime-budget/SKILL.md` | `1c5ba3cecb44011a02dd4f7fcd860cb01d910fca` |
+| W11 | 外部 `master` 角色文件 | `ffb7374457960bb0c23470d67b79657f9d9f4c5a` |
+| W12 | 外部 `or-solver` 角色文件 | `6adf2712e9f2e492a58c40c203117d2bef53dee0` |
+| W13 | 外部运行预算技能 `SKILL.md` | `1c5ba3cecb44011a02dd4f7fcd860cb01d910fca` |
 | W14 | `README.md` | `686cf4c25ce3f88bea07568d40bd1e3152b99a34` |
-| L1 | `src/famou/agent_loop.py` | `c182908daa0aa0083ab2761f6597ed332bbbe289` |
-| L2 | `src/famou/model_profile.py` | `5ccdf424975e5c63570b5357191991ad3f398345` |
-| L3 | `src/famou/runtime.py` | `921c08fbe60047f0bb7ee80c4a686577586eb62a` |
-| L4 | `src/famou/staged_workflow.py` | `3cdc5ca984810beffe4f4ae3ca57a7f18b875de7` |
+| L1 | 历史产品模块 `agent_loop.py` | `c182908daa0aa0083ab2761f6597ed332bbbe289` |
+| L2 | 历史产品模块 `model_profile.py` | `5ccdf424975e5c63570b5357191991ad3f398345` |
+| L3 | 历史产品模块 `runtime.py` | `921c08fbe60047f0bb7ee80c4a686577586eb62a` |
+| L4 | 历史产品模块 `staged_workflow.py` | `3cdc5ca984810beffe4f4ae3ca57a7f18b875de7` |
 
 ## 2. 模型请求恢复：哪些由本仓库执行
 

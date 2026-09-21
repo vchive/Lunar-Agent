@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from famou.store import Store
+from lunar_evolution.store import Store
 
 _PUBLISHER = r'''
 import fcntl
@@ -16,9 +16,9 @@ import sys
 import time
 from pathlib import Path
 
-import famou.output_publication as publication
-from famou.algorithm import OutputSpec
-from famou.store import Store
+import lunar_evolution.output_publication as publication
+from lunar_evolution.algorithm import OutputSpec
+from lunar_evolution.store import Store
 
 database, parent_id, child_id, owner, barrier_directory, mode = sys.argv[1:]
 barriers = Path(barrier_directory)

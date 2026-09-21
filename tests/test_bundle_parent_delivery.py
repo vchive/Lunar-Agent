@@ -10,15 +10,15 @@ import pytest
 from test_bundle_population import MAIN_SOURCE, build_context
 from test_bundle_population_controller import _calls
 
-from famou import bundle_parent_delivery as delivery_module
-from famou.budget import BudgetSpec
-from famou.bundle_delivery import PrivateTree
-from famou.config import Config
-from famou.controller import LocalController
-from famou.conversational import build_algorithm_plan
-from famou.evolution import CandidateArchive, CandidateDraft, EvolutionError
-from famou.output_publication import OutputPublicationUncertain
-from famou.runtime import MockRuntime
+from lunar_evolution import bundle_parent_delivery as delivery_module
+from lunar_evolution.budget import BudgetSpec
+from lunar_evolution.bundle_delivery import PrivateTree
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.conversational import build_algorithm_plan
+from lunar_evolution.evolution import CandidateArchive, CandidateDraft, EvolutionError
+from lunar_evolution.output_publication import OutputPublicationUncertain
+from lunar_evolution.runtime import MockRuntime
 
 
 class SimulatedCrash(BaseException):

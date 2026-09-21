@@ -15,7 +15,7 @@ The new bundle compiler consumes the same explicit repository runtime once, prod
    ordinary model evaluation and user commands remain available.
 2. **Strict JSON protocol** — generated prose cannot become an evaluator. The envelope is bounded,
    rejects unknown fields, and carries declarative probes rather than executable test code.
-3. **Repository-owned preflight** — Lunar-Agent builds probe workspaces, runs the evaluator, parses
+3. **Repository-owned preflight** — Lunar Evolution builds probe workspaces, runs the evaluator, parses
    reports, checks constraint codes, and verifies score ordering.
 4. **Freeze by content** — manifest hashes bind contract, objective, evaluator, and probes. Files
    become read-only; strategy resume binds the aggregate digest.

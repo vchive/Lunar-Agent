@@ -104,7 +104,7 @@ as well as the best result reached by the run.
 
 ## Out of scope
 
-- Running the complete 20-case Famou suite or publishing FM-Eval experiments.
+- Running the complete 20-case external reference-benchmark suite or publishing FM-Eval experiments.
 - Claiming that five local rounds reproduce every WebAgent role, prompt, model call, or service detail.
 - Implementing reinforcement learning, learned selection, or a second population protocol in this
   effect-measurement feature.

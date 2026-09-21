@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime, ProfileBudgetFailure
-from famou.model_profile import BudgetFailureEvidence, UsageSnapshot
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
-from famou.subject_diagnostics import (
+from lunar_evolution.agent_loop import AgentLoopRuntime, ProfileBudgetFailure
+from lunar_evolution.model_profile import BudgetFailureEvidence, UsageSnapshot
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, ToolCall
+from lunar_evolution.subject_diagnostics import (
     SubjectDiagnosticContext,
     SubjectDiagnosticObserver,
     normalize_diagnostic,

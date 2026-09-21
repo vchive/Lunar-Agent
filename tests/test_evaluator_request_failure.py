@@ -10,14 +10,14 @@ from test_frozen_evaluator_bundle import BundleRuntime, _compile_bundle, _contra
 from test_http_transport_deadline import assert_closed, local_http, spy_processes
 from test_model_failure_evidence import chat, local_model
 
-from famou.evaluator_bundle import EvaluatorBundleRuntimeError, compile_evaluator_bundle
-from famou.evaluator_request_diagnostics import (
+from lunar_evolution.evaluator_bundle import EvaluatorBundleRuntimeError, compile_evaluator_bundle
+from lunar_evolution.evaluator_request_diagnostics import (
     normalize_evaluator_request_failure,
     project_evaluator_request_failure,
 )
-from famou.evolution import CandidateInputArtifact
-from famou.http_transport import TransportObservation
-from famou.runtime import (
+from lunar_evolution.evolution import CandidateInputArtifact
+from lunar_evolution.http_transport import TransportObservation
+from lunar_evolution.runtime import (
     MAX_REQUEST_OBSERVATION_MS,
     MODEL_FAILURE_REASONS,
     ModelFailureEvidence,

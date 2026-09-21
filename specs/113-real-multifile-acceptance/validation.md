@@ -35,5 +35,5 @@ The manifest is byte-identical to preregistration `10b844b`.
 Independent postrun audit verified all 76 product pins and 12 measurement/test pins, the complete
 34-file evidence inventory, six Store artifact rows, both call journals and failure events.
 There were no retries, pending requests or remaining observed processes. Frozen historical files
-and product bytes are unchanged. See [the report](postrun/report.md) for the failure distinctions
+and product bytes are unchanged. See [the report](../../docs/history-archive.md) for the failure distinctions
 and confirmed next repair; the raw responses are unavailable, so their precise contents are unknown.

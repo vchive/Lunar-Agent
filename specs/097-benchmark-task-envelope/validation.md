@@ -2,7 +2,7 @@
 
 ## Results
 
-- Failure-first test collection reproduced the missing `famou.benchmark_task` module before implementation.
+- Failure-first test collection reproduced the missing `lunar_evolution.benchmark_task` module before implementation.
 - Benchmark and task-envelope focused tests: **19 passed**.
 - Ruff and compileall passed for the new module, CLI, exports and tests.
 - Full regression before final pin-symmetry/private-path refinements: **3842 passed in 210.24s**.

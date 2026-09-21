@@ -4,7 +4,7 @@ Use an explicit local runner with the existing evaluator command. The runner rec
 path; the evaluator receives the same path and can read the sibling `execution.json` evidence.
 
 ```bash
-lunar-agent evolve contract.json --strategy loop \
+lunar-evolution evolve contract.json --strategy loop \
   --generator-command "/absolute/path/to/generator" \
   --candidate-runner-command "/absolute/path/to/run-candidate" \
   --evaluator-command "/absolute/path/to/evaluate-candidate" \

@@ -43,7 +43,7 @@ and recorded as `task_result_discarded`, never attached as a successful artifact
 
 The initial subprocess adapter sends the task prompt as UTF-8 on stdin, sets the run workspace as the
 working directory, and treats stdout as the result text. The configured command is explicit (for
-example, `FAMOU_RUNTIME_COMMAND='my-agent --json'`); the adapter never searches PATH for Hermes or
+example, `LUNAR_EVOLUTION_RUNTIME_COMMAND='my-agent --json'`); the adapter never searches PATH for Hermes or
 reads `~/.hermes`.
 
 - Exit code `0`: candidate result returned.
@@ -65,8 +65,8 @@ The built-in `openai-compatible` adapter sends:
 
 to the explicitly configured endpoint. It accepts `choices[0].message.content`,
 `choices[0].text`, or an Ollama-compatible top-level `message.content`. The endpoint is supplied by
-`--endpoint` or `FAMOU_MODEL_ENDPOINT`; the model by `--model` or `FAMOU_MODEL`; an optional API key
-comes from `--api-key` or `FAMOU_API_KEY`. Keys are never included in persisted errors or logs.
+`--endpoint` or `LUNAR_EVOLUTION_MODEL_ENDPOINT`; the model by `--model` or `LUNAR_EVOLUTION_MODEL`; an optional API key
+comes from `--api-key` or `LUNAR_EVOLUTION_API_KEY`. Keys are never included in persisted errors or logs.
 
 When `--agent-loop` is selected, the adapter sends the same endpoint a sequence of chat requests.
 The model may return structured `tool_calls`; the local loop executes them, appends bounded tool
@@ -83,23 +83,23 @@ API key, is never written into events, and is disabled by default.
 ## CLI contract
 
 ```text
-python -m famou run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json] [--detach]
-python -m famou run [<goal>] --plan PLAN.json [--runtime mock|subprocess] [--home PATH] [--json]
-python -m famou run "<goal>" --runtime openai-compatible --endpoint URL --model MODEL [--json]
-python -m famou run "<goal>" --runtime openai-compatible --agent-loop [--max-steps N] [--allow-exec] [--memory] [--session-history]
-python -m famou run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
-python -m famou resume <run-id> [--home PATH] [--json]
-python -m famou answer <run-id> [<text>|-] [--runtime ...] [--home PATH] [--json]
-python -m famou status <run-id> [--home PATH] [--json]
-python -m famou events <run-id> [--home PATH] [--json]
-python -m famou cancel <run-id> [--home PATH] [--json]
-python -m famou memory [<query>] [--scope global|run:<run-id>] [--home PATH] [--json]
+python -m lunar_evolution run "<goal>" [--runtime mock|subprocess] [--home PATH] [--json] [--detach]
+python -m lunar_evolution run [<goal>] --plan PLAN.json [--runtime mock|subprocess] [--home PATH] [--json]
+python -m lunar_evolution run "<goal>" --runtime openai-compatible --endpoint URL --model MODEL [--json]
+python -m lunar_evolution run "<goal>" --runtime openai-compatible --agent-loop [--max-steps N] [--allow-exec] [--memory] [--session-history]
+python -m lunar_evolution run - [--runtime mock|subprocess] [--home PATH] [--json]  # goal from stdin
+python -m lunar_evolution resume <run-id> [--home PATH] [--json]
+python -m lunar_evolution answer <run-id> [<text>|-] [--runtime ...] [--home PATH] [--json]
+python -m lunar_evolution status <run-id> [--home PATH] [--json]
+python -m lunar_evolution events <run-id> [--home PATH] [--json]
+python -m lunar_evolution cancel <run-id> [--home PATH] [--json]
+python -m lunar_evolution memory [<query>] [--scope global|run:<run-id>] [--home PATH] [--json]
 ```
 
 Commands return zero only when the requested operation succeeds. Human-readable output is the
 default. With `--json`, stdout contains exactly one JSON value and diagnostics are written to stderr;
 this is the stable interface for Codex, Hermes, OpenClaw, shell scripts, or another Agent invoking
-Lunar-Agent as a child process. `run --detach --json` persists the run, starts a local background
+Lunar Evolution as a child process. `run --detach --json` persists the run, starts a local background
 controller, and returns the run ID before task execution begins; it writes controller output under
 the run workspace. A caller must treat the run ID as the durable handle and use `resume`, `status`,
 or `cancel` after a timeout or process interruption.

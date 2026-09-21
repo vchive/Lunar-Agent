@@ -8,8 +8,8 @@ from urllib.error import HTTPError, URLError
 import pytest
 from test_model_failure_evidence import SECRET, chat, local_model, observer_payload
 
-import famou.runtime as rt
-from famou.subject_diagnostics import normalize_diagnostic
+import lunar_evolution.runtime as rt
+from lunar_evolution.subject_diagnostics import normalize_diagnostic
 
 
 class Response:

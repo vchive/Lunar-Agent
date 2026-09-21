@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from famou import candidate_execution_runner as runner
+from lunar_evolution import candidate_execution_runner as runner
 
 
 def _run(tmp_path, *, tracked=True, code="print('done')", released=None):

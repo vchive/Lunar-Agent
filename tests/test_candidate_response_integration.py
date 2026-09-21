@@ -8,13 +8,13 @@ from types import SimpleNamespace
 import pytest
 from test_bundle_population import build_context, draft_for_score
 
-from famou.agent_evolution import AgentCandidateGenerator
-from famou.agent_loop import AgentLoopRuntime
-from famou.agents import CandidateGenerationBudget, RuntimeAgentAdapter
-from famou.candidate_generation_receipt import inspect_candidate_generation_events
-from famou.evolution import EvolutionError, GenerationRequest, PopulationStrategy
-from famou.runtime import MODEL_FAILURE_REASONS, ModelRequestFailure, ModelTurn, ToolCall
-from famou.store import Store
+from lunar_evolution.agent_evolution import AgentCandidateGenerator
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.agents import CandidateGenerationBudget, RuntimeAgentAdapter
+from lunar_evolution.candidate_generation_receipt import inspect_candidate_generation_events
+from lunar_evolution.evolution import EvolutionError, GenerationRequest, PopulationStrategy
+from lunar_evolution.runtime import MODEL_FAILURE_REASONS, ModelRequestFailure, ModelTurn, ToolCall
+from lunar_evolution.store import Store
 
 
 class ScriptedModel:
@@ -143,7 +143,7 @@ def test_valid_bundle_crosses_model_adapter_store_and_independent_evaluation(
     assert len(chain.model.requests) == 2 and not chain.model.actions
     for messages in chain.model.requests:
         system = "\n".join(message["content"] for message in messages if message["role"] == "system")
-        assert "lunar-agent-bundle-generation-v1" in system
+        assert "lunar-evolution-bundle-generation-v1" in system
         assert "Return only one strict JSON object" in system
     # The real candidate executed once; acceptance came from the independent harness.
     assert [path.read_text() for path in chain.context.workspace.rglob("count")] == ["x"]

@@ -14,14 +14,14 @@
 ## Phase 2 — implementation
 
 - [x] T023-04 Implement immutable `CandidateExecution`, `CandidateRunner`, and explicit command
-  runner in `src/famou/evolution.py`.
+  runner in `src/lunar_evolution/evolution.py`.
 - [x] T023-05 Implement execution-aware evaluator composition while preserving the legacy evaluator
-  command protocol in `src/famou/evolution.py`.
+  command protocol in `src/lunar_evolution/evolution.py`.
 - [x] T023-06 Add CLI runner construction, fingerprints, validation, and detached propagation in
-  `src/famou/cli.py`.
+  `src/lunar_evolution/cli.py`.
 - [x] T023-07 Index execution evidence and preserve cancellation/retry behavior in
-  `src/famou/controller.py`.
-- [x] T023-08 Export the new library seam from `src/famou/__init__.py`.
+  `src/lunar_evolution/controller.py`.
+- [x] T023-08 Export the new library seam from `src/lunar_evolution/__init__.py`.
 
 ## Phase 3 — documentation and verification
 

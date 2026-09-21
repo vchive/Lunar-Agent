@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.candidate_bundle import CandidateSourceBundle
-from famou.candidate_workspace_plan import (
+from lunar_evolution.candidate_bundle import CandidateSourceBundle
+from lunar_evolution.candidate_workspace_plan import (
     MAX_WORKSPACE_PLAN_BYTES,
     CandidateWorkspaceError,
     CandidateWorkspacePlan,

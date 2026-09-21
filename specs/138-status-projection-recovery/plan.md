@@ -5,8 +5,8 @@
 
 ## Technical approach
 
-1. Trace the existing status payload/text path in `src/famou/cli.py` and preparation recovery
-   decisions in `src/famou/automatic_solve_bundle.py`; preserve the Feature 116/132 persisted
+1. Trace the existing status payload/text path in `src/lunar_evolution/cli.py` and preparation recovery
+   decisions in `src/lunar_evolution/automatic_solve_bundle.py`; preserve the Feature 116/132 persisted
    `running` recovery contract.
 2. Introduce a small bounded status projector that keeps persisted parent, preparation, and
    effective status separate. Reuse current precedence and typed diagnostic validators; do not
@@ -22,8 +22,8 @@
 
 ## Touch points
 
-- `src/famou/cli.py`
-- `src/famou/automatic_solve_bundle.py`
+- `src/lunar_evolution/cli.py`
+- `src/lunar_evolution/automatic_solve_bundle.py`
 - `specs/134-budgeted-multifile-acceptance/measurement/analysis.py` and any shared projector
 - preparation/status and measurement analysis tests
 

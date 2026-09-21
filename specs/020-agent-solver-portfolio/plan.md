@@ -16,8 +16,8 @@
 ## Structure
 
 ```text
-src/famou/agent_evolution.py  # portfolio composition bridge
-src/famou/cli.py              # repeatable portfolio command option
+src/lunar_evolution/agent_evolution.py  # portfolio composition bridge
+src/lunar_evolution/cli.py              # repeatable portfolio command option
 tests/test_agent_evolution.py # rotation and failure tests
 tests/test_cli.py             # CLI and fingerprint tests
 README.md                     # local multi-agent usage

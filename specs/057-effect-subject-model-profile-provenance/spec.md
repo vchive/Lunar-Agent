@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make the isolated Famou-Bench subject adapter use the same bounded `ModelProfile` policy as the
+Make the isolated reference-benchmark subject adapter use the same bounded `ModelProfile` policy as the
 ordinary CLI agent loop, while preserving score authority in the private harness and making
 resume fail closed when the profile changes.
 

@@ -5,14 +5,14 @@ import json
 import pytest
 from test_automatic_solve_bundle import _fixture, _prepare, _snapshot
 
-from famou import automatic_solve_bundle, evaluator_bundle
-from famou.automatic_solve_bundle import (
+from lunar_evolution import automatic_solve_bundle, evaluator_bundle
+from lunar_evolution.automatic_solve_bundle import (
     AutomaticBundlePreparationError,
     automatic_bundle_preparation_status,
 )
-from famou.evaluator_bundle import EvaluatorBundleError
-from famou.evolution import EvolutionError
-from famou.runtime import RuntimeResult
+from lunar_evolution.evaluator_bundle import EvaluatorBundleError
+from lunar_evolution.evolution import EvolutionError
+from lunar_evolution.runtime import RuntimeResult
 
 
 def _observations(controller, parent, kind=None):

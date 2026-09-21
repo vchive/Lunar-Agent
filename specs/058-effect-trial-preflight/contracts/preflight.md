@@ -3,7 +3,7 @@
 Invocation:
 
 ```text
-lunar-agent effect-preflight <suite.json> <baseline.json> \
+lunar-evolution effect-preflight <suite.json> <baseline.json> \
   --case-source CASE_KEY=PUBLIC_CASE_ROOT \
   --subject-command "<absolute subject command>" \
   --harness-command "<absolute harness command>" \

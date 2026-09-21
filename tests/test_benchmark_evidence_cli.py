@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from test_cli import _write_evolution_contract
 
-from famou import benchmark_result as module
-from famou import cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.benchmark_comparison import BenchmarkComparisonPlan
-from famou.benchmark_result import BenchmarkComparisonResult, ComparisonArmResult
-from famou.benchmark_task import BenchmarkTaskEnvelope
+from lunar_evolution import benchmark_result as module
+from lunar_evolution import cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.benchmark_comparison import BenchmarkComparisonPlan
+from lunar_evolution.benchmark_result import BenchmarkComparisonResult, ComparisonArmResult
+from lunar_evolution.benchmark_task import BenchmarkTaskEnvelope
 from tests.test_benchmark_comparison import env
 
 

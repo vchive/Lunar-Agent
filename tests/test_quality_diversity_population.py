@@ -1,8 +1,12 @@
 import json
 from pathlib import Path
 
-from famou.algorithm import ALGORITHM_FAMILY_REPERTOIRES, AlgorithmProblemContract, EvaluationReport
-from famou.evolution import (
+from lunar_evolution.algorithm import (
+    ALGORITHM_FAMILY_REPERTOIRES,
+    AlgorithmProblemContract,
+    EvaluationReport,
+)
+from lunar_evolution.evolution import (
     Candidate,
     CandidateArchive,
     CandidateDraft,

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from test_candidate_execution_evidence import fixture
 
-from famou import cli
+from lunar_evolution import cli
 
 
 def command(tmp_path):
@@ -62,7 +62,7 @@ def test_cli_inspection_of_incomplete_attempt_is_readonly(tmp_path, monkeypatch,
 
 def test_installed_cli_records_then_inspects_relative_paths(tmp_path):
     request, run, inspect = command(tmp_path)
-    launcher = Path(sys.executable).parent / "lunar-agent"
+    launcher = Path(sys.executable).parent / "lunar-evolution"
     if not launcher.is_file():
         pytest.skip("installed CLI unavailable")
     def local_args(args):

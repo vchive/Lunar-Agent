@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from famou.store import Store
+from lunar_evolution.store import Store
 
 JOURNAL_SHA256 = "a" * 64
 CHILD = "evolution-child"

@@ -32,12 +32,12 @@ Inside the isolated worktree, using the existing repository environment:
 ```sh
 PYTHONPATH="$PWD/src" /Users/liminghan/Documents/lunar_agent/.venv/bin/python -m pytest \
   -o addopts='' -q tests/test_tool_utf8_preview.py
-/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/famou/tools.py tests/test_tool_utf8_preview.py
+/Users/liminghan/Documents/lunar_agent/.venv/bin/ruff check src/lunar_evolution/tools.py tests/test_tool_utf8_preview.py
 bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 git diff --check
 ```
 
-Confirm `famou.tools.__file__` points into this worktree before testing. Run the adjacent tests and
+Confirm `lunar_evolution.tools.__file__` points into this worktree before testing. Run the adjacent tests and
 full suite with the same explicit source selection. Use no API credentials or actual model calls.
 
 ## Constitution review

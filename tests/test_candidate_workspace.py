@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.candidate_bundle import parse_candidate_source_bundle
-from famou.candidate_workspace import (
+from lunar_evolution.candidate_bundle import parse_candidate_source_bundle
+from lunar_evolution.candidate_workspace import (
     CandidateWorkspaceError,
     build_candidate_workspace_plan,
     candidate_file_table_sha256,
@@ -106,7 +106,7 @@ def test_materialize_never_executes_entrypoint_or_initializes_home(tmp_path: Pat
 
 
 def test_materialize_constructor_os_failure_keeps_fixed_error_and_cleans_tree(tmp_path, monkeypatch):
-    from famou import _candidate_workspace_io as workspace_io
+    from lunar_evolution import _candidate_workspace_io as workspace_io
 
     source = tmp_path / "source"
     source.mkdir()

@@ -10,10 +10,10 @@ from test_effect_adapters import _subject_request
 from test_model_failure_evidence import SECRET, chat, local_model, observer_payload
 from test_model_request_timing import Response
 
-import famou.runtime as rt
-from famou.effect_adapters import EffectAdapterError, run_subject_adapter
-from famou.http_transport import TransportFailure, TransportObservation, TransportResponse
-from famou.subject_diagnostics import SubjectDiagnosticContext, normalize_diagnostic
+import lunar_evolution.runtime as rt
+from lunar_evolution.effect_adapters import EffectAdapterError, run_subject_adapter
+from lunar_evolution.http_transport import TransportFailure, TransportObservation, TransportResponse
+from lunar_evolution.subject_diagnostics import SubjectDiagnosticContext, normalize_diagnostic
 
 
 def detail(milestone="wait_response_headers", index=1, elapsed=17):

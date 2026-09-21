@@ -1,25 +1,25 @@
 <!--
 Sync Impact Report
 - Version change: template → 1.0.0
-- Modified principles: replaced all scaffold placeholders with six Lunar-Agent principles
+- Modified principles: replaced all scaffold placeholders with six Lunar Evolution principles
 - Added sections: Standalone Runtime Constraints; Development Workflow
 - Removed sections: none
 - Deferred items: none
 -->
 
-# Lunar-Agent Constitution
+# Lunar Evolution Constitution
 
 ## Core Principles
 
 ### I. Standalone Distribution
-Lunar-Agent MUST be installable and usable from this repository without relying on any pre-existing
+Lunar Evolution MUST be installable and usable from this repository without relying on any pre-existing
 Hermes, OpenCode, Codex, Python package, model gateway, or user-specific agent directory. Runtime
 dependencies MUST be declared and reproducibly installed by the repository. A globally installed
 Hermes environment MAY be used only as an explicit development convenience, never as a runtime
 requirement.
 
 ### II. Local-First and Durable State
-Lunar-Agent MUST run as a single-user local application by default. Run state, event history,
+Lunar Evolution MUST run as a single-user local application by default. Run state, event history,
 checkpoints, and artifacts MUST be recoverable from local storage after a process or terminal
 failure. The controller, not an Agent Runtime, is the source of truth for task state.
 
@@ -76,7 +76,7 @@ safety, or user-value reason.
 
 ## Governance
 
-This constitution supersedes ad-hoc implementation preferences for Lunar-Agent. Amendments require
+This constitution supersedes ad-hoc implementation preferences for Lunar Evolution. Amendments require
 updating this file, its Sync Impact Report, and any affected feature specs or plans. Versioning uses
 semantic versioning: MAJOR for incompatible governance changes, MINOR for new or materially expanded
 principles, and PATCH for clarifications. Every implementation review MUST verify compliance with

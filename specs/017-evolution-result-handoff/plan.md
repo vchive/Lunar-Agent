@@ -16,7 +16,7 @@
 ## Structure
 
 ```text
-src/famou/evolution.py   # result field and confined best-path derivation
+src/lunar_evolution/evolution.py   # result field and confined best-path derivation
 tests/test_evolution.py  # strategy result assertions
 tests/test_cli.py        # JSON/status handoff assertions
 README.md                # parent-Agent usage note

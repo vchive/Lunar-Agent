@@ -1,9 +1,9 @@
-# Lunar-Agent architecture
+# Lunar Evolution architecture
 
 For the current implementation snapshot, execution chains, operational boundaries, and verified
 Feature 139 status, see [Current architecture and execution flow](current-architecture-20260920.md).
 
-Lunar-Agent keeps the useful *effect layer* ideas from WebAgent v2.5 while remaining a single
+Lunar Evolution keeps the useful *effect layer* ideas from WebAgent v2.5 while remaining a single
 local process and an installable CLI. The model runtime is an adapter: Hermes-style sessions,
 OpenAI-compatible endpoints, a subprocess agent, and the deterministic mock runtime all use the
 same controller and ledger contracts.
@@ -78,7 +78,7 @@ AgentCandidateGenerator / AgentCandidateEvaluator
 population or explicit openevolve strategy → canonical candidate archive
 ```
 
-This profile is the internal Agent skeleton for standalone Lunar-Agent use. It is intentionally small,
+This profile is the internal Agent skeleton for standalone Lunar Evolution use. It is intentionally small,
 local, and dependency-free at the protocol boundary; no Hermes/OpenCode/Codex/Claude Code/DeepSeek
 Harness process is required. A subprocess runtime or OpenAI-compatible server may still be backed
 by any of those tools when the owner explicitly supplies the command or endpoint. Adding
@@ -277,10 +277,10 @@ authenticated. The advisory locks coordinate these publishers, not unrelated sam
 
 The WebAgent branches demonstrated that Master routing, explicit clarification, solve/evaluate
 separation, schema-driven artifacts, patch/replan lifecycle, and experience/memory capture improve
-long-running work. Lunar-Agent makes the separation concrete with a restricted local acceptance
+long-running work. Lunar Evolution makes the separation concrete with a restricted local acceptance
 contract interpreter instead of accepting a Worker completion claim. The branches also contain
 service concerns (HTTP/SSE, queues, cloud sandboxes, multi-tenancy, billing) and an OpenCode-specific
-process model. Lunar-Agent adopts the portable behaviors and excludes those deployment assumptions.
+process model. Lunar Evolution adopts the portable behaviors and excludes those deployment assumptions.
 A parent agent can invoke the JSON CLI as a child process, while a local user can run the same
 binary without a Hermes installation or a machine-wide configuration directory.
 
@@ -362,7 +362,7 @@ stdout; it does not become a required runtime dependency. In detached mode, the 
 run ID before work finishes and can safely terminate; a later process reconstructs the same plan
 revision, contract manifest, retries, and artifacts with `resume`.
 
-`famou evolve CONTRACT` is the CLI/controller entry point for this seam. It creates one ordinary
+`lunar-evolution evolve CONTRACT` is the CLI/controller entry point for this seam. It creates one ordinary
 SQLite run with an evolution task, copies the contract to `evolution/contract.json`, and records
 `evolution_started`, `evolution_iteration`, `evolution_candidate_archived`, and
 `evolution_finished` events. `--detach` returns the run ID before execution; `--resume --run-id`
@@ -389,7 +389,7 @@ stub whose `run()` and `resume()` calls fail with `loop_strategy_retired`; histo
 candidates, archives, and benchmark results remain readable. `AgentCandidateGenerator` adapts an
 explicit role-bearing solver Agent to the generation seam, while `AgentCandidateEvaluator` adapts a separate
 evaluator Agent that must return one strict JSON `EvaluationReport`. The report is parsed and
-validated by Lunar-Agent before validity-first selection; evaluator prose, status claims, and
+validated by Lunar Evolution before validity-first selection; evaluator prose, status claims, and
 malformed JSON are never accepted as evidence. The solver and evaluator may be different commands
 and roles, and both remain optional adapters rather than required runtime dependencies. For
 higher-assurance runs, `AgentEvaluatorEnsemble` composes two or more explicit evaluator adapters:
@@ -397,7 +397,7 @@ each member receives the same candidate and contract through an isolated workspa
 be unanimous, and valid numeric evidence is aggregated with a median. A member failure, malformed
 report, or validity disagreement produces an invalid aggregate report.
 `openevolve` is only an adapter: it receives an explicit executable and a generated config, then
-imports a validated result into Lunar-Agent's canonical archive. The existing `--workers` pool is
+imports a validated result into Lunar Evolution's canonical archive. The existing `--workers` pool is
 scheduler parallelism for independent DAG tasks and must not be interpreted as a candidate
 population.
 
@@ -708,7 +708,7 @@ against the imported normal WebAgent history. The comparison is descriptive and 
 comparable, but deliberately does not claim WebAgent prompt/role identity, full-suite parity, or
 statistical superiority.
 
-The baseline converter checks every explicit FM-Eval adapter signal available in the experiment and
+The baseline converter checks every explicit external reference-benchmark adapter signal available in the experiment and
 selected result receipts. It accepts only consistent `webagent` evidence; an AgentServer export or
 conflicting adapter metadata fails before a baseline is written. Legacy exports with no adapter
 field remain readable for compatibility and depend on separately preserved source provenance.
@@ -753,7 +753,7 @@ evaluator remains authoritative, and any runner failure overrides an otherwise v
 with `validity=0`. This creates a portable execution proof boundary without assuming a particular
 language, test framework, or operating-system sandbox.
 
-Conversational native evolution may opt into a repository-owned compiled evaluator. Lunar-Agent
+Conversational native evolution may opt into a repository-owned compiled evaluator. Lunar Evolution
 first derives a value-free structural profile from the exact input ledger, then runs two bounded
 runtime turns before candidate generation. The compiler emits an objective, restricted evaluator,
 and self probes. After those probes execute successfully, a fresh auditor sees the contract,
@@ -765,7 +765,7 @@ canonical bytes and aggregate fingerprint without model calls. This reduces corr
 and self-test omissions; it is not a claim that two calls to one configured model are fully
 independent or that generated Python is an OS sandbox.
 
-After admission, Lunar-Agent projects that scoring authority into native Agent generation without
+After admission, Lunar Evolution projects that scoring authority into native Agent generation without
 delegating trust. The solver prompt preserves the full canonical hard/soft constraints and
 assumptions and adds a bounded `scoring_contract` containing the objective, evaluator digest,
 source excerpt, and bundle fingerprint. Each isolated generation also receives read-only exact
@@ -837,7 +837,7 @@ The `--agent-runtime` evolution profile is mutually exclusive with OpenEvolve an
 fill either or both missing native seams. Explicit generator/solver and evaluator adapters remain
 available for mixed configurations. When both seams are already explicit, a runtime option is
 rejected rather than silently ignored. Runtime provenance is recorded as credential-safe digests;
-detached children receive secrets only through `FAMOU_AGENT_RUNTIME_API_KEY`.
+detached children receive secrets only through `LUNAR_EVOLUTION_AGENT_RUNTIME_API_KEY`.
 
 For Agent-backed generation, the bridge projects bounded `evaluation_feedback` from prior validated
 reports into the next prompt. This lets a solver address constraint failures and weak metrics while

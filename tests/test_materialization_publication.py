@@ -16,8 +16,8 @@ from test_evolved_output_materialization import (
     _evolution_fixture,
 )
 
-import famou.materialization_publication as publication
-from famou.evolution import CommandCandidateRunner, EvolutionError
+import lunar_evolution.materialization_publication as publication
+from lunar_evolution.evolution import CommandCandidateRunner, EvolutionError
 
 RESULT_RELATIVE = "evolution/materialization/result.json"
 PREPARED_EVENT = "materialization_publication_prepared"
@@ -472,11 +472,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from famou.algorithm import AlgorithmProblemContract
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import StrategyResult
-from famou.runtime import MockRuntime
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import StrategyResult
+from lunar_evolution.runtime import MockRuntime
 
 home, parent_id, child_id, raw_result, raw_contract, boundary = sys.argv[1:]
 controller = LocalController(Config(Path(home)), MockRuntime())

@@ -5,7 +5,7 @@ from dataclasses import FrozenInstanceError, asdict
 import pytest
 from test_http_transport_deadline import frames, success_frames
 
-from famou import http_transport as h
+from lunar_evolution import http_transport as h
 
 
 def milestone(name, index, elapsed=10):

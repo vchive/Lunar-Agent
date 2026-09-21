@@ -11,7 +11,7 @@ native loop/population strategies without requiring a global Hermes/OpenCode/Ope
 Feature 013 provides local loop and population search, but its generator and evaluator seams are
 currently callback- or command-oriented. Feature 014 provides a role/capability-aware Agent
 Adapter. This feature bridges a selected Agent to candidate generation so a local Agent can propose
-algorithm candidates while Lunar-Agent retains archive, evaluation, recovery, and run authority.
+algorithm candidates while Lunar Evolution retains archive, evaluation, recovery, and run authority.
 The evaluator remains an independent injected boundary. OpenEvolve remains a separate optional
 strategy and is not silently mixed with an Agent-backed generator.
 
@@ -36,7 +36,7 @@ verify the archive keeps the candidate but no best candidate is selected.
 
 ### User Story 3 - Invoke the bridge from the local CLI (Priority: P1)
 
-As a parent Agent or shell script, I want `lunar-agent evolve --agent-command ...` to use the same
+As a parent Agent or shell script, I want `lunar-evolution evolve --agent-command ...` to use the same
 durable evolution run and JSON status as command generators.
 
 **Independent Test**: Run a fixture JSON Agent command with an explicit absolute executable,

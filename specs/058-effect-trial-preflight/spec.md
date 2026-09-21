@@ -2,7 +2,7 @@
 
 ## Goal
 
-Provide a read-only gate that proves a planned Famou-Bench normal or deep trial can start with
+Provide a read-only gate that proves a planned reference-benchmark normal or deep trial can start with
 the selected local inputs and runtimes. The gate is useful before credentials are used or a paid
 model is called: it validates the frozen suite and baseline, the public case projection, command
 executables, explicitly requested environment variables, model-profile identity, and the Python

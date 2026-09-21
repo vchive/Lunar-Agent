@@ -11,10 +11,10 @@ from dataclasses import replace
 
 import pytest
 
-import famou.bundle_evolution as bundles
-from famou import evolution
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.evolution import (
+import lunar_evolution.bundle_evolution as bundles
+from lunar_evolution import evolution
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.evolution import (
     Candidate,
     CandidateArchive,
     CandidateDraft,

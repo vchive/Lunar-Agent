@@ -5,7 +5,7 @@ Run the focused runtime checks before the shared regression:
 ```sh
 .venv/bin/python -m pytest tests/test_agent_loop.py tests/test_runtime.py tests/test_interactive.py \
   tests/test_agent_evolution.py tests/test_master_planning_role_integration.py
-.venv/bin/ruff check src/famou/agent_loop.py tests/test_agent_loop.py tests/test_runtime.py
+.venv/bin/ruff check src/lunar_evolution/agent_loop.py tests/test_agent_loop.py tests/test_runtime.py
 .venv/bin/python -m compileall -q src tests
 ```
 

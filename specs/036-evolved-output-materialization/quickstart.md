@@ -5,7 +5,7 @@ candidate protocol is intentionally small: a self-contained Python program reads
 and writes the exact declared files under `output/` when invoked directly.
 
 ```bash
-lunar-agent solve "read orders.csv, optimize routes, and return output/routes.csv with item_id and route_id" \
+lunar-evolution solve "read orders.csv, optimize routes, and return output/routes.csv with item_id and route_id" \
   --input ./orders.csv \
   --runtime openai-compatible \
   --endpoint http://127.0.0.1:11434/v1 \
@@ -33,8 +33,8 @@ The response contains stable parent outputs only after materialization succeeds:
 Inspect and deliver the parent run:
 
 ```bash
-lunar-agent status <intake-run-id> --json --home .lunar
-lunar-agent deliver <intake-run-id> --json --home .lunar
+lunar-evolution status <intake-run-id> --json --home .lunar
+lunar-evolution deliver <intake-run-id> --json --home .lunar
 ```
 
 On failure, inspect the linked materialization result and bounded process evidence before deciding

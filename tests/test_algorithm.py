@@ -4,16 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import (
+from lunar_evolution.algorithm import (
     AlgorithmProblemContract,
     EvaluationReport,
     OutputSpec,
     materialize_algorithm_workspace,
 )
-from famou.config import Config
-from famou.controller import LocalController
-from famou.policy import PlanDocument
-from famou.runtime import MockRuntime
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.policy import PlanDocument
+from lunar_evolution.runtime import MockRuntime
 
 
 def _contract(problem_type: str = "routing", **overrides: object) -> dict[str, object]:
@@ -253,7 +253,7 @@ def test_algorithm_problem_is_preserved_and_materialized_on_run(tmp_path: Path) 
     )
     assert document.algorithm_problem is not None
     assert document.algorithm_problem["evolution"]["strategy"] == "population"
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.start_plan(document)
     manifest = run.workspace / "algorithm-workspace.json"
     assert run.status.value == "succeeded"

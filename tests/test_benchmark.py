@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from famou import ACTIVE_BENCHMARK_STRATEGIES as PUBLIC_ACTIVE_BENCHMARK_STRATEGIES
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.benchmark import (
+from lunar_evolution import ACTIVE_BENCHMARK_STRATEGIES as PUBLIC_ACTIVE_BENCHMARK_STRATEGIES
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.benchmark import (
     ACTIVE_BENCHMARK_STRATEGIES,
     BenchmarkConfig,
     BenchmarkError,
     BenchmarkRun,
     BenchmarkRunner,
 )
-from famou.evolution import CandidateDraft
+from lunar_evolution.evolution import CandidateDraft
 
 
 def _contract() -> AlgorithmProblemContract:

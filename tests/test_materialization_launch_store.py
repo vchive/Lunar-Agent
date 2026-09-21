@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from famou.store import Store
+from lunar_evolution.store import Store
 
 
 @pytest.fixture

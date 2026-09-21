@@ -88,8 +88,8 @@ PYTHONPATH=. .venv/bin/pytest -q \
   tests/test_agent_evolution.py tests/test_agents.py \
   tests/test_agent_loop.py tests/test_candidate_generation_receipt.py \
   tests/test_measurement139_*.py
-.venv/bin/ruff check src/famou/cli.py src/famou/agents.py \
-  src/famou/agent_evolution.py tests
+.venv/bin/ruff check src/lunar_evolution/cli.py src/lunar_evolution/agents.py \
+  src/lunar_evolution/agent_evolution.py tests
 .venv/bin/python -m compileall -q src tests
 SPECIFY_FEATURE_DIRECTORY=specs/141-native-multifile-cli-budget \
   bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks

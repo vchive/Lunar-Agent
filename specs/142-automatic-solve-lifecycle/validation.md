@@ -1,5 +1,66 @@
 # Validation
 
+## Cancellation cleanup race found during Feature 145 regression
+
+2026-09-21: the completed current-product regression identified an intermittent failure in
+`test_subprocess_runtime_releases_all_terminal_paths[timeout]`: only the started callback was
+recorded, with no release callback. That run recorded **6574 passed / 1 failed / 1 skipped**.
+An earlier estimate from progress dots incorrectly selected the cancel parameter; the final
+traceback supersedes that estimate. A separate deterministic reproduction with a real private
+process group identified a cleanup race: another thread can reap the leader after the group
+probe but before `getpgid`, while `Popen` still holds its wait lock and has not published the
+return code. `getpgid` then reports a missing leader and nonblocking `poll()` returns `None`.
+The existing cleanup branch reports unconfirmed cleanup even when the group has disappeared.
+This reproduction is established independently. The timeout traceback does not expose cleanup's
+OS observations and does not establish that the timeout failure has the same cause; that
+attribution remains unproven.
+
+The bounded repair re-probes this same owned group at that boundary. Only observed group
+absence may confirm cleanup and emit release; a surviving group still fails closed. No extra
+termination signal, timeout increase, permission, retry or weakened process-release assertion is
+introduced. Acceptance covers the real reaping/publication interleaving, surviving-group refusal,
+and release only after group absence, followed by the runtime/process/worker suites. The original
+failure and pre-fix regression result remain part of this checkpoint's evidence.
+
+The three new deterministic cases produced **2 failed / 1 passed before the product repair**:
+actual group absence was falsely unconfirmed, release was missing after confirmed absence, and
+the surviving-group refusal already passed. After the one-branch repair, **228 tests passed**
+across all 12 selected runtime/process/cancellation/worker suites. Ruff, compileall and diff
+whitespace checks passed. Existing real-process release assertions remain unchanged. No provider,
+historical candidate or full campaign was executed by this diagnosis or focused verification.
+
+### Transient permission denial during timeout cleanup
+
+A separate instrumented repetition of the existing real timeout fixture reproduced a second
+failure after the reaping/publication repair, on iteration 9. The private group probe and leader
+identity check succeeded, followed by a successful `SIGTERM`; the next `poll()` returned `None`
+and `killpg(pgid, 0)` raised `PermissionError` (`errno=1`). Both cleanup attempts immediately
+reported false. A follow-up observation after 1 ms found return code `-15` and group absence
+(`ProcessLookupError`, `errno=3`). This establishes a transient probe-denial failure independently
+of the reaping/publication interleaving; the uninstrumented full-run traceback alone cannot prove
+which OS interleaving occurred in that earlier run.
+
+Acceptance keeps permission denial unknown. Only a probe inside the existing 250 ms wait window
+after an already-authorized signal may be retried with `poll()`; the deadline must not reset. A
+window ending with an unknown probe must fail closed without a new signal or wait window. Initial
+probe denial, leader-identity denial and termination-signal denial still fail immediately. Release
+requires observed group absence, even when the leader return code has been published. Deterministic
+cases cover transient denial followed by absence, persistent denial, a surviving group, and each
+pre-signal/signal permission boundary. Existing real timeout/cancel release assertions remain
+unchanged, and repeated timeout/cancel fixtures verify the fix without provider or campaign work.
+
+The seven new permission-boundary cases produced **3 failed / 4 passed before the repair**:
+transient denial prevented release, while persistent denial and recovered-live observations
+incorrectly abandoned the existing wait immediately; all four pre-signal/signal denial refusals
+already passed. After the bounded-loop repair, all seven cases passed and the same 12 focused
+runtime/process/cancellation/worker suites passed **235 tests**. A separate repetition passed
+**100 real timeout and 100 real cancellation checks**, including concurrent cancellation and
+run-finally cleanup, with the original process-release assertions unchanged. These repetitions
+are observed regression evidence, not proof that every possible OS interleaving is covered.
+Independent review confirmed the unknown-state and signal-authority boundaries. Ruff, compileall
+and diff whitespace checks passed. No execution timeout, cleanup window, release assertion or
+provider/campaign boundary was relaxed.
+
 ## Scope of this checkpoint
 
 2026-09-20: Phase A foreground implementation and Phase B cancellation/process cleanup are
@@ -106,7 +167,7 @@ No provider, real campaign, retained generated program, or WebAgent was executed
 ## Release boundary
 
 The 2026-09-21 readiness audit additionally checked the pushed product `65d9ae2` on
-[GitHub Actions run 35522272395](https://github.com/vchive/Lunar-Agent/actions/runs/35522272395).
+[GitHub Actions run 35522272395](https://github.com/vchive/Lunar-Evolution/actions/runs/35522272395).
 Its Linux/Python 3.11 installation steps passed, but `Run tests` exited 1 and static checks were
 skipped. Python 3.12 and 3.13 were cancelled by matrix fail-fast after that failure. Public metadata
 does not identify a failing test or distinguish current from frozen123 failure; full logs require

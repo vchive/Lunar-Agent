@@ -42,11 +42,11 @@ CLI args
 
 ## Module changes
 
-- Add `famou.effect_preflight` with bounded dependency-spec parsing, interpreter probing,
+- Add `lunar_evolution.effect_preflight` with bounded dependency-spec parsing, interpreter probing,
   report validation/serialization, and a `run_effect_preflight` entry point.
-- Add `effect-preflight` parser and dispatch in `famou.cli`; reuse `_parse_command`,
+- Add `effect-preflight` parser and dispatch in `lunar_evolution.cli`; reuse `_parse_command`,
   `_effect_mapping`, `_effect_environment`, and `_load_model_profile`.
-- Export the preflight error/report/runner symbols from `famou.__init__`.
+- Export the preflight error/report/runner symbols from `lunar_evolution.__init__`.
 - Add focused tests for ready reports, suite/source failures, missing env, profile changes,
   command/interpreter binding, missing imports, package version mismatch, output atomicity, and
   the no-trial/no-credential boundary.

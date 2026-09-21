@@ -1,7 +1,7 @@
 # Offline validation
 
 ```sh
-lunar-agent benchmark-task validate task.json \
+lunar-evolution benchmark-task validate task.json \
   --contract contract.json --input-root ./public-input --json
 ```
 

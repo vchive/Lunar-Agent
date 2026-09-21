@@ -119,14 +119,14 @@ The 2026-09-21 code audit confirms the remaining implementation order for T018â€
 
 | Area | Existing attachment point |
 | --- | --- |
-| CLI policy and routing | `src/famou/cli.py`: parsers, `_validate_automatic_bundle_options`, `_evolution_request_payload`, `_evolution_args`, `_solve`, `_answer`, resume dispatch |
-| Detached worker | `src/famou/cli.py`: `_detach_solve`, runner setup and handle projection |
+| CLI policy and routing | `src/lunar_evolution/cli.py`: parsers, `_validate_automatic_bundle_options`, `_evolution_request_payload`, `_evolution_args`, `_solve`, `_answer`, resume dispatch |
+| Detached worker | `src/lunar_evolution/cli.py`: `_detach_solve`, runner setup and handle projection |
 | Shared execution control | Small product helper used by automatic orchestration; no measurement-module dependency |
-| Parent lifecycle and cancellation | `src/famou/controller.py`: conversational intake, `run_evolution`, `deliver_bundle_to_parent`, `cancel`, existing budget/cleanup helpers |
-| Durable state | `src/famou/store.py`: existing task, event, fail-budget, cancellation, and runner/process ownership operations |
-| Preparation | `src/famou/automatic_solve_bundle.py`, `src/famou/evaluator_bundle.py`: deadline composition, lock wait, phase guards, process observation |
-| Candidate generation | `src/famou/agent_evolution.py`, `src/famou/agent_bundle_generation.py`: request-local remaining timeout and stop propagation |
-| Execution and scoring | `src/famou/bundle_evolution.py`, `candidate_execution_evidence.py`, `candidate_execution_runner.py`, `candidate_evaluation.py`: narrower operational limits and local process cleanup |
+| Parent lifecycle and cancellation | `src/lunar_evolution/controller.py`: conversational intake, `run_evolution`, `deliver_bundle_to_parent`, `cancel`, existing budget/cleanup helpers |
+| Durable state | `src/lunar_evolution/store.py`: existing task, event, fail-budget, cancellation, and runner/process ownership operations |
+| Preparation | `src/lunar_evolution/automatic_solve_bundle.py`, `src/lunar_evolution/evaluator_bundle.py`: deadline composition, lock wait, phase guards, process observation |
+| Candidate generation | `src/lunar_evolution/agent_evolution.py`, `src/lunar_evolution/agent_bundle_generation.py`: request-local remaining timeout and stop propagation |
+| Execution and scoring | `src/lunar_evolution/bundle_evolution.py`, `candidate_execution_evidence.py`, `candidate_execution_runner.py`, `candidate_evaluation.py`: narrower operational limits and local process cleanup |
 | Validation | New lifecycle fixtures plus existing automatic preparation, Controller, CLI, process, receipt, and delivery regressions |
 
 Expected touch points are design guidance, not authorization to change all listed modules without

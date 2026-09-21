@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from test_frozen_evaluator_bundle import EVALUATOR_SOURCE, BundleRuntime, _contract, _envelope
 
-from famou import candidate_execution_runner as runner
-from famou.candidate_evaluation import _request_values
-from famou.evaluator_bundle import (
+from lunar_evolution import candidate_execution_runner as runner
+from lunar_evolution.candidate_evaluation import _request_values
+from lunar_evolution.evaluator_bundle import (
     BUNDLE_FILES,
     COMPILED_BUNDLE_EVALUATOR_ID,
     SNAPSHOT_BUNDLE_PROTOCOL,
@@ -18,7 +18,7 @@ from famou.evaluator_bundle import (
     compile_evaluator_bundle,
     load_evaluator_bundle,
 )
-from famou.evolution import CandidateInputArtifact
+from lunar_evolution.evolution import CandidateInputArtifact
 
 SNAPSHOT_SOURCE = EVALUATOR_SOURCE.replace(
     '"frozen-exact-cost"', '"compiled-bundle"',

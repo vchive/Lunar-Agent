@@ -8,14 +8,14 @@
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [x] T001 Add feature-006 storage/domain module placeholders and export paths in `src/famou/` per `specs/006-master-policy-plan-contract/plan.md`
+- [x] T001 Add feature-006 storage/domain module placeholders and export paths in `src/lunar_evolution/` per `specs/006-master-policy-plan-contract/plan.md`
 - [x] T002 [P] Add contract fixture JSON examples under `tests/fixtures/feature006/`
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-- [x] T003 [P] Define bounded plan and policy dataclasses plus validation helpers in `src/famou/policy.py`
+- [x] T003 [P] Define bounded plan and policy dataclasses plus validation helpers in `src/lunar_evolution/policy.py`
 - [x] T004 [P] Add policy, plan, patch, and delivery JSON contract tests in `tests/test_policy.py`
-- [x] T005 Add additive SQLite migration for `plan_revisions`, `policy_decisions`, and current-plan columns in `src/famou/store.py`
+- [x] T005 Add additive SQLite migration for `plan_revisions`, `policy_decisions`, and current-plan columns in `src/lunar_evolution/store.py`
 
 ## Phase 3: User Story 1 - Choose the Smallest Useful Action (Priority: P1) 🎯 MVP
 
@@ -23,9 +23,9 @@
 
 **Independent Test**: Deterministic fixture policy returns `answer`, `execute_plan`, or `ask_user` as appropriate and persists decisions only when a run exists.
 
-- [x] T006 [P] [US1] Add heuristic `MasterPolicy.decide` implementation in `src/famou/policy.py`
-- [x] T007 [US1] Add `decide` CLI command and stable JSON output in `src/famou/cli.py`
-- [x] T008 [US1] Persist run-associated policy decisions idempotently and expose them in status JSON in `src/famou/store.py` and `src/famou/cli.py`
+- [x] T006 [P] [US1] Add heuristic `MasterPolicy.decide` implementation in `src/lunar_evolution/policy.py`
+- [x] T007 [US1] Add `decide` CLI command and stable JSON output in `src/lunar_evolution/cli.py`
+- [x] T008 [US1] Persist run-associated policy decisions idempotently and expose them in status JSON in `src/lunar_evolution/store.py` and `src/lunar_evolution/cli.py`
 - [x] T009 [US1] Add unit and CLI acceptance tests for direct answer, plan routing, bounded questions, and secret rejection in `tests/test_policy.py` and `tests/test_cli.py`
 
 ## Phase 4: User Story 2 - Execute an Auditable Versioned Plan (Priority: P1)
@@ -34,10 +34,10 @@
 
 **Independent Test**: A valid multi-task plan executes through the existing scheduler; invalid plans leave zero orphan rows; restart returns the same plan ID/version.
 
-- [x] T010 [P] [US2] Implement plan normalization and revision serialization in `src/famou/policy.py`
-- [x] T011 [US2] Implement atomic `create_planned_run` and `get_current_plan` store operations in `src/famou/store.py`
-- [x] T012 [US2] Add `plan` CLI command and current revision/status payload in `src/famou/cli.py`
-- [x] T013 [US2] Wire planned-run creation into `LocalController` while preserving legacy `run --plan` behavior in `src/famou/controller.py`
+- [x] T010 [P] [US2] Implement plan normalization and revision serialization in `src/lunar_evolution/policy.py`
+- [x] T011 [US2] Implement atomic `create_planned_run` and `get_current_plan` store operations in `src/lunar_evolution/store.py`
+- [x] T012 [US2] Add `plan` CLI command and current revision/status payload in `src/lunar_evolution/cli.py`
+- [x] T013 [US2] Wire planned-run creation into `LocalController` while preserving legacy `run --plan` behavior in `src/lunar_evolution/controller.py`
 - [x] T014 [US2] Add scheduler, migration, restart, and atomic-invalid-plan tests in `tests/test_plan.py` and `tests/test_store.py`
 
 ## Phase 5: User Story 3 - Patch or Replan After New Evidence (Priority: P1)
@@ -46,9 +46,9 @@
 
 **Independent Test**: A patch from version 1 produces version 2, stale patches fail atomically, and replan preserves both revisions and evidence.
 
-- [x] T015 [P] [US3] Implement typed patch operations and resulting-plan validation in `src/famou/policy.py`
-- [x] T016 [US3] Implement transactional patch/replan revision methods with optimistic base-version checks in `src/famou/store.py`
-- [x] T017 [US3] Add `patch` and `replan` CLI commands with JSON errors and version output in `src/famou/cli.py`
+- [x] T015 [P] [US3] Implement typed patch operations and resulting-plan validation in `src/lunar_evolution/policy.py`
+- [x] T016 [US3] Implement transactional patch/replan revision methods with optimistic base-version checks in `src/lunar_evolution/store.py`
+- [x] T017 [US3] Add `patch` and `replan` CLI commands with JSON errors and version output in `src/lunar_evolution/cli.py`
 - [x] T018 [US3] Add patch/replan integration and concurrency tests in `tests/test_plan.py` and `tests/test_store.py`
 
 ## Phase 6: User Story 4 - Deliver Verified Results (Priority: P2)
@@ -57,8 +57,8 @@
 
 **Independent Test**: Successful evaluated runs yield a `deliver` decision with artifact evidence; failed runs never do.
 
-- [x] T019 [US4] Implement evidence-based delivery decision in `src/famou/controller.py` and `src/famou/policy.py`
-- [x] T020 [US4] Add `deliver` CLI command and parent-Agent JSON contract in `src/famou/cli.py`
+- [x] T019 [US4] Implement evidence-based delivery decision in `src/lunar_evolution/controller.py` and `src/lunar_evolution/policy.py`
+- [x] T020 [US4] Add `deliver` CLI command and parent-Agent JSON contract in `src/lunar_evolution/cli.py`
 - [x] T021 [US4] Add positive/negative delivery and artifact-evidence tests in `tests/test_plan.py` and `tests/test_cli.py`
 
 ## Phase 7: Polish & Cross-Cutting Concerns

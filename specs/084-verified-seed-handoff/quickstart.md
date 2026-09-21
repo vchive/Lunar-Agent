@@ -9,4 +9,4 @@ This scenario uses only temporary files, bounded fake producer output, and deter
 5. Change the source, evaluator fingerprint, or normalized producer declaration and resume again. Confirm a handoff mismatch before selection and no duplicate archive entry.
 6. Feed a fake remote result that contains material references and an external score but no local receipt. Confirm it is retained as provenance-only. Route the synchronized material through the same seed adapter and confirm it can be admitted only after a successful matching local receipt.
 
-The quickstart must not invoke OpenEvolve or another external evolution framework and must not contact famou-v2, WebAgent, a provider, a company platform, or a model.
+The quickstart must not invoke OpenEvolve or another external evolution framework and must not contact reference-engine-v2, WebAgent, a provider, a company platform, or a model.

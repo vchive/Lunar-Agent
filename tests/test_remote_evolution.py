@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from famou.remote_evolution import (
+from lunar_evolution.remote_evolution import (
     MAX_REMOTE_ATTEMPTS,
     MAX_REMOTE_ITERATIONS,
     MAX_REMOTE_MATERIAL_BYTES,
@@ -30,7 +30,7 @@ from famou.remote_evolution import (
 
 DIGEST = "a" * 64
 OTHER_DIGEST = "b" * 64
-PRODUCER_ID = "famou-v2"
+PRODUCER_ID = "reference-engine-v2"
 PRODUCER_FINGERPRINT = "c" * 64
 
 

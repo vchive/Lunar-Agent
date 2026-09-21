@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from famou import candidate_execution_runner as runner
+from lunar_evolution import candidate_execution_runner as runner
 
 REPORT_LIMIT = 32 * 1024
 

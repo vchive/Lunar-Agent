@@ -10,12 +10,12 @@ import pytest
 from test_effect_adapters import SubjectModel, _subject_request
 from test_effect_trial import _fixture
 
-from famou.effect_adapters import EffectAdapterError, run_subject_adapter
-from famou.effect_trial import EffectTrialConfig, EffectTrialRunner
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
-from famou.staged_workflow import StagedWorkflowConfig, StagePolicy
-from famou.workflow_checkpoint import WorkflowManifest
+from lunar_evolution.effect_adapters import EffectAdapterError, run_subject_adapter
+from lunar_evolution.effect_trial import EffectTrialConfig, EffectTrialRunner
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, ToolCall
+from lunar_evolution.staged_workflow import StagedWorkflowConfig, StagePolicy
+from lunar_evolution.workflow_checkpoint import WorkflowManifest
 
 
 def _sha(raw: bytes) -> str:

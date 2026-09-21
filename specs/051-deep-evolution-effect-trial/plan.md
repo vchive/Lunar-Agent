@@ -58,7 +58,7 @@ suite + baseline + public sources
 
 ## Module changes
 
-- Add `famou.deep_effect_trial` with `DeepEffectTrialConfig` and `DeepEffectTrialRunner`.
+- Add `lunar_evolution.deep_effect_trial` with `DeepEffectTrialConfig` and `DeepEffectTrialRunner`.
 - Extend `run_subject_adapter` with the score-free deep request/receipt mode while preserving the
   normal schema and prompt.
 - Add `effect-deep-trial` CLI wiring and public package exports.

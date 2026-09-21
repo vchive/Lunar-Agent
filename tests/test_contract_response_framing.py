@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.conversational import (
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.conversational import (
     MAX_RESPONSE_BYTES,
     ContractCompilationError,
     RuntimeContractCompiler,
     _parse_response,
 )
-from famou.runtime import ModelTurn
+from lunar_evolution.runtime import ModelTurn
 
 
 def _contract() -> dict[str, object]:

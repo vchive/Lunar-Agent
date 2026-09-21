@@ -34,5 +34,5 @@ controller like other runtime artifacts.
 ## Harness implications
 
 Codex `exec`, DeepSeek Harness headless/ACP, Claude Code CLI, Hermes, and OpenClaw can provide the
-explicit runner process later. They remain execution-plane providers. Lunar-Agent retains ownership
+explicit runner process later. They remain execution-plane providers. Lunar Evolution retains ownership
 of candidate identity, evidence paths, evaluator authority, archive selection, and durable resume.

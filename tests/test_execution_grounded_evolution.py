@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport, OutputSpec
-from famou.cli import main
-from famou.evolution import (
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport, OutputSpec
+from lunar_evolution.cli import main
+from lunar_evolution.evolution import (
     CandidateExecution,
     CandidateInputArtifact,
     ContractCandidateRunner,
@@ -14,8 +14,8 @@ from famou.evolution import (
     ExecutionAwareCandidateEvaluator,
     contract_candidate_runner_fingerprint,
 )
-from famou.runtime import RuntimeResult
-from famou.store import Store
+from lunar_evolution.runtime import RuntimeResult
+from lunar_evolution.store import Store
 
 
 def _contract() -> AlgorithmProblemContract:
@@ -81,7 +81,7 @@ class GroundedRuntime:
             return RuntimeResult(
                 "import os\n"
                 "from pathlib import Path\n"
-                "assert 'FAMOU_API_KEY' not in os.environ\n"
+                "assert 'LUNAR_EVOLUTION_API_KEY' not in os.environ\n"
                 "rows = Path('data/raw/orders.csv').read_text().splitlines()[1:]\n"
                 "Path('output').mkdir(exist_ok=True)\n"
                 "body = 'item_id,route_id\\n' + ''.join(f'{row},route-a\\n' for row in rows)\n"
@@ -106,8 +106,8 @@ def test_conversational_evolution_executes_and_gates_each_native_candidate(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = GroundedRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
-    monkeypatch.setenv("FAMOU_API_KEY", "sk-must-not-reach-candidate")
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setenv("LUNAR_EVOLUTION_API_KEY", "sk-must-not-reach-candidate")
     orders = tmp_path / "orders.csv"
     orders.write_text("id\nsecret-order-42\n", encoding="utf-8")
     home = tmp_path / "home"
@@ -304,7 +304,7 @@ def test_conversational_population_uses_the_same_execution_gate(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = GroundedRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     orders = tmp_path / "orders.csv"
     orders.write_text("id\norder-1\n", encoding="utf-8")
     home = tmp_path / "home"
@@ -395,7 +395,7 @@ def test_conversational_resume_rejects_tampered_child_input(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:
     runtime = GroundedRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     orders = tmp_path / "orders.csv"
     orders.write_text("id\norder-1\n", encoding="utf-8")
     home = tmp_path / "home"

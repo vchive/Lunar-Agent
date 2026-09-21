@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 from test_materialization_launch_store import launch as launch_fixture
 
-from famou.evolution import CandidateExecution
-from famou.store import Store
+from lunar_evolution.evolution import CandidateExecution
+from lunar_evolution.store import Store
 
 JOURNAL = "d" * 64
 

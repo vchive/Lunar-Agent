@@ -10,16 +10,16 @@ from pathlib import Path
 
 import pytest
 
-from famou import cli
-from famou.candidate_bundle import CandidateSourceBundle
-from famou.candidate_execution import (
+from lunar_evolution import cli
+from lunar_evolution.candidate_bundle import CandidateSourceBundle
+from lunar_evolution.candidate_execution import (
     MAX_EXECUTION_ADMISSION_BYTES,
     CandidateEvaluatorPin,
     CandidateExecutionBudget,
     CandidateExecutionInput,
     build_candidate_execution_admission,
 )
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 
 
 def _fixture(tmp_path):
@@ -168,7 +168,7 @@ def test_cli_changed_input_returns_fixed_error_without_partial_tree(tmp_path, ca
 
 def test_installed_cli_stages_inputs_without_launch_or_home(tmp_path):
     args, plan, admission, body, _source, staging, marker, home = _fixture(tmp_path)
-    launcher = Path(sys.executable).parent / "lunar-agent"
+    launcher = Path(sys.executable).parent / "lunar-evolution"
     assert launcher.is_file(), "run tests using the repository's installed .venv"
     completed = subprocess.run(
         [str(launcher), *args], cwd=tmp_path, capture_output=True, text=True, timeout=15, check=False,

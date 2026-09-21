@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from famou.cli import main
-from famou.store import Store
+from lunar_evolution.cli import main
+from lunar_evolution.store import Store
 
 PRODUCER_FINGERPRINT = "b" * 64
 GOOD_SOURCE = "# producer-good\ndef solve():\n    return 42\n"

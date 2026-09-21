@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from test_candidate_evaluation import fixture
 
-from famou import candidate_evaluation as evaluation
-from famou.candidate_evaluation_spec import CandidateEvaluationError, canonical_json
+from lunar_evolution import candidate_evaluation as evaluation
+from lunar_evolution.candidate_evaluation_spec import CandidateEvaluationError, canonical_json
 
 
 def original_path(request, role):

@@ -25,7 +25,7 @@
 ## Data and contracts
 
 AgentRequest gains optional `response_protocol`. AgentLoop invocation accepts the same optional
-keyword. The known value is `lunar-agent-bundle-generation-v1`; omitted values retain old behavior.
+keyword. The known value is `lunar-evolution-bundle-generation-v1`; omitted values retain old behavior.
 The existing bundle response fields (`entrypoint`, `files`, optional `metadata`, `experiment`)
 and parser are unchanged. Generation receipts retain schema 1 and identity derivation, adding
 only validated optional phase/cause observations. Consumers may not treat either as completion.

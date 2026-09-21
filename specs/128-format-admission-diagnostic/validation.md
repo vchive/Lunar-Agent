@@ -52,7 +52,7 @@ Summary publication ran once. All 63 retained files match the inventory, all reg
 11 frozen implementation/test hashes match, and both request bodies reconstruct offline to the
 recorded hashes. Historical evidence and the 1701-file preservation baseline remain unchanged.
 No generated code or holdout was re-executed during post-run analysis. See the
-[report](postrun/report.md), [results](postrun/results.json) and [inventory](postrun/evidence.json).
+[report](../../docs/history-archive.md), [results](../../docs/history-archive.md) and [inventory](../../docs/history-archive.md).
 Independent post-run review also verified all 74305 retained bytes, each holdout's input/output
 and independent mathematical result (five valid, three invalid), the read-only frozen files and
 recomputed fingerprint, accounting, push-before-start order and process cleanup. No issue found.

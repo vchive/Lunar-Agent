@@ -37,7 +37,7 @@ feature.
 PYTHONPATH=. .venv/bin/pytest -q tests/test_controller.py tests/test_agents.py \
   tests/test_runtime.py tests/test_budget_failure_evidence.py tests/test_budget_aware_tools.py \
   tests/test_run_wall_clock_budget.py
-.venv/bin/ruff check src/famou/controller.py src/famou/agents.py \
+.venv/bin/ruff check src/lunar_evolution/controller.py src/lunar_evolution/agents.py \
   tests/test_controller.py tests/test_run_wall_clock_budget.py
 .venv/bin/python -m compileall -q src tests
 bash .specify/scripts/bash/check-prerequisites.sh

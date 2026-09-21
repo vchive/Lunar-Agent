@@ -3,7 +3,7 @@
 `--input SOURCE[=DEST]` is accepted by `solve` and `run`:
 
 ```bash
-lunar-agent solve "route these orders" \
+lunar-evolution solve "route these orders" \
   --input /absolute/path/orders.csv \
   --input /absolute/path/vehicles.json=vehicles.json \
   --runtime openai-compatible --agent-loop --json

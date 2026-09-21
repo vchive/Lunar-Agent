@@ -4,7 +4,7 @@
 
 ## Summary
 
-Introduce a small standard-library-only adapter layer that lets Lunar-Agent delegate to explicit
+Introduce a small standard-library-only adapter layer that lets Lunar Evolution delegate to explicit
 local workers while preserving the existing Runtime, SQLite, evaluator, artifact, and detached-run
 boundaries. Add a machine-readable `delegate` CLI for parent Agents.
 
@@ -22,9 +22,9 @@ boundaries. Add a machine-readable `delegate` CLI for parent Agents.
 ## Structure
 
 ```text
-src/famou/agents.py       # request/result protocols, registry, runtime and CLI adapters
-src/famou/controller.py   # optional registry and one durable delegation entry point
-src/famou/cli.py          # `delegate --json` parent-Agent interface
+src/lunar_evolution/agents.py       # request/result protocols, registry, runtime and CLI adapters
+src/lunar_evolution/controller.py   # optional registry and one durable delegation entry point
+src/lunar_evolution/cli.py          # `delegate --json` parent-Agent interface
 tests/test_agents.py      # adapter and protocol tests
 tests/test_controller.py  # SQLite delegation and cancellation tests
 tests/test_cli.py         # delegate CLI regression tests

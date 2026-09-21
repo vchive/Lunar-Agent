@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-import famou
-import famou.evolution as evolution_module
-from famou.algorithm import AlgorithmProblemContract, EvaluationReport
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import (
+import lunar_evolution
+import lunar_evolution.evolution as evolution_module
+from lunar_evolution.algorithm import AlgorithmProblemContract, EvaluationReport
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import (
     LEGACY_CANDIDATE_INTEGRITY_ERROR,
     MAX_ARCHIVE_LINE_BYTES,
     MAX_SOURCE_BYTES,
@@ -35,7 +35,7 @@ from famou.evolution import (
     PopulationStrategy,
     WorkerUnknownError,
 )
-from famou.runtime import MockRuntime
+from lunar_evolution.runtime import MockRuntime
 
 GENERATOR_SHA = "1" * 64
 EVALUATOR_SHA = "2" * 64
@@ -179,7 +179,7 @@ def test_ordinary_integrity_public_api_exports_are_consistent() -> None:
         "resolve_candidate_integrity_authority",
     }
     assert names <= set(evolution_module.__all__)
-    assert all(hasattr(famou, name) for name in names)
+    assert all(hasattr(lunar_evolution, name) for name in names)
 
 
 def test_population_persists_canonical_receipts_and_lineage_projection(
@@ -2754,7 +2754,7 @@ def test_context_and_config_authority_conflict_is_rejected_before_callbacks(
 
 
 def test_controller_indexes_ordinary_sidecars_idempotently(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     contract = _contract()
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = _config()

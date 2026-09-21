@@ -15,23 +15,23 @@ from pathlib import Path
 
 import pytest
 
-from famou.algorithm import (
+from lunar_evolution.algorithm import (
     LOOP_STRATEGY_RETIRED_MESSAGE,
     AlgorithmProblemContract,
     EvaluationReport,
 )
-from famou.benchmark import BenchmarkRun
-from famou.cli import main
-from famou.config import Config
-from famou.controller import LocalController
-from famou.conversational import (
+from lunar_evolution.benchmark import BenchmarkRun
+from lunar_evolution.cli import main
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.conversational import (
     CallableContractCompiler,
     CompilationResult,
     ContractCompilationError,
     RuntimeContractCompiler,
     build_algorithm_plan,
 )
-from famou.evolution import (
+from lunar_evolution.evolution import (
     Candidate,
     CandidateArchive,
     CandidateDraft,
@@ -42,9 +42,9 @@ from famou.evolution import (
     PopulationStrategy,
     StrategyResult,
 )
-from famou.policy import PlanDocument, PlanPatch
-from famou.runtime import MockRuntime, RuntimeResult
-from famou.store import Store
+from lunar_evolution.policy import PlanDocument, PlanPatch
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.store import Store
 
 
 def _contract_payload() -> dict[str, object]:
@@ -265,7 +265,7 @@ def test_solve_projects_compiler_selected_loop_and_terminal_resume(
             )
 
     runtime = LoopContractRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     home = tmp_path / "home"
     fresh = [
         "solve",
@@ -342,7 +342,7 @@ def test_answer_projects_compiler_selected_loop(tmp_path: Path, capsys, monkeypa
             )
 
     runtime = ClarifyingLoopRuntime()
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: runtime)
     home = tmp_path / "home"
     common = ["--runtime", "mock", "--json", "--home", str(home)]
 
@@ -474,7 +474,7 @@ def test_solve_evolve_cannot_relabel_historical_loop_plan(
             del prompt, workspace, timeout
             raise AssertionError("historical loop plan reached a runtime boundary")
 
-    monkeypatch.setattr("famou.cli.build_runtime", lambda *args, **kwargs: MustNotRunRuntime())
+    monkeypatch.setattr("lunar_evolution.cli.build_runtime", lambda *args, **kwargs: MustNotRunRuntime())
 
     assert main(
         [

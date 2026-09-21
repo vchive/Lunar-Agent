@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from famou import workers
-from famou.agents import AgentRegistry, AgentResult, RuntimeAgentAdapter
-from famou.models import WorkerOutcome, WorkerPhase, WorkerStopReason
-from famou.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
-from famou.runtime import SubprocessRuntime
-from famou.store import Store
-from famou.worker_ownership import WorkerOwnerLock
-from famou.workers import WorkerService
+from lunar_evolution import workers
+from lunar_evolution.agents import AgentRegistry, AgentResult, RuntimeAgentAdapter
+from lunar_evolution.models import WorkerOutcome, WorkerPhase, WorkerStopReason
+from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
+from lunar_evolution.runtime import SubprocessRuntime
+from lunar_evolution.store import Store
+from lunar_evolution.worker_ownership import WorkerOwnerLock
+from lunar_evolution.workers import WorkerService
 
 
 class ControlledAdapter:

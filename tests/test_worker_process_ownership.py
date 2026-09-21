@@ -7,12 +7,12 @@ import time
 
 import pytest
 
-from famou import workers
-from famou.agents import AgentRegistry, CommandAgentAdapter
-from famou.models import WorkerOutcome, WorkerPhase, WorkerStopReason
-from famou.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
-from famou.store import Store
-from famou.workers import WorkerService
+from lunar_evolution import workers
+from lunar_evolution.agents import AgentRegistry, CommandAgentAdapter
+from lunar_evolution.models import WorkerOutcome, WorkerPhase, WorkerStopReason
+from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
+from lunar_evolution.store import Store
+from lunar_evolution.workers import WorkerService
 
 
 def eventually(predicate):

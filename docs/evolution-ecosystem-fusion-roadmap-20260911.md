@@ -45,7 +45,7 @@ Feature 139 的固定测量预算不替代通用产品能力；随后 Feature 14
 活动执行预算、父编排、运行中本地取消和清理。当前剩余生命周期工作是 Phase C 自动后台
 执行，外部 producer 多文件接线及真实效果验收也仍在后续范围。
 
-本文记录 Lunar-Agent 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
+本文记录 Lunar Evolution 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、远端服务或新的 WebAgent 对比；Feature 139 的
 模型 provider 真实槽仅验证了准备和失败诊断。普通流程效果只参考已有 Lunar 历史分数，不再
 安排 WebAgent 重跑或深度演化对比。
@@ -76,7 +76,7 @@ evaluated/valid candidates均0，child以offspring_batch_failed结束；尚未�
 准备阶段没有触发这些分支。
 
 262项测量测试通过；全量双阶段当前7924 passed/1 skipped/24 deselected、固定历史
-24 passed。见[134报告](../specs/134-budgeted-multifile-acceptance/postrun/report.md)。下一步
+24 passed。见[134报告](history-archive.md)。下一步
 按SDD设计足够且显式的每候选工具预算与完成诊断，先离线验证，再决定任何新真实测量
 的独立登记条件，不预设新预算数值。不能追加旧槽工具、修改guard语义或重试补分，
 也不能用准备成功替代真实闭环交付或一般稳定性证据。旧分母与WebAgent历史保持不变。
@@ -118,7 +118,7 @@ evaluator compiler随后在等待响应头时于600.004秒`transport_timeout`；
 
 结果primary/preparation/joint均0/1，0/8 holdout执行，没有冻结evaluator、candidate或
 delivery；quality/gap为null，清理和21份证据复验通过。见
-[131报告](../specs/131-small-multifile-recheck/postrun/report.md)。原始transport台账保留
+[131报告](history-archive.md)。原始transport台账保留
 首请求HTTP200，公开`results.json`未投影该字段；CLI/worker失败且runner pid/pgid为空后，
 SQLite父run仍为`running`、任务为1 ready/3 waiting/1 succeeded。它们未导致成功误判或
 残留进程；当时列出安全HTTP状态投影与持久终态一致性。Feature132复核后确认后者是116的
@@ -140,7 +140,7 @@ Feature129固定产品b951857，先push独立登记08624f5后执行唯一原生�
 45.509秒HTTP200、4076tokens，但响应漏必需status=compiled，严格parser拒绝；没有进入
 evaluator、候选或交付，primary/preparation/joint均0/1，0/8holdout执行。总47.339秒，清理
 通过，官方quality/gap为null；没有重试、修补或额外请求。183项新测量测试、353项相关
-回归及112恢复通过；见[129报告](../specs/129-small-multifile-acceptance/postrun/report.md)。
+回归及112恢复通过；见[129报告](history-archive.md)。
 下一步补完整compiled/needs_input封装示例与离线请求检查，保持strict parser，不推断缺失
 状态。128及更早结果不变，新真实验证仍需新登记；外部producer多文件接线与全链路取消后置。
 
@@ -150,7 +150,7 @@ Feature 128 固定产品b951857，独立登记38c323c先push后运行唯一槽�
 HTTP200，3项自测与5项独立探针通过，冻结1/1、预声明holdout8/8、联合1/1；总墙钟
 507.148秒、记录用量完整43630tokens、费用未知、清理通过。209项测量测试、325项相关
 回归与112恢复通过，63份保留证据、固定pins和历史字节复验通过。详见
-[128报告](../specs/128-format-admission-diagnostic/postrun/report.md)。
+[128报告](history-archive.md)。
 这仅证明一次小型准备和整数留出一致性；没有solver/多文件交付，不证明通用正确性、
 类型规则完整覆盖或126/127因果收益。下一步独立登记支持范围内的小型真实多文件任务，
 贯穿自动合同准备、生成、执行、评分、选优和父任务交付。外部producer多文件接线与
@@ -187,7 +187,7 @@ compiler326.682秒后通过自测，auditor50.640秒返回，均HTTP200；本地
 首个有效对象会被源码类型检查拒绝。audit阻止错误冻结，不重放或修补本次源码。
 下一步复用真实输入的格式准入验证合成probe，补精确本地失败阶段；不推断任意业务schema，
 不放宽审查。123与125保持各自0/1，旧四轮/2不改；尚无真实多文件交付或因果收益。
-详见[125报告](../specs/125-snapshot-protocol-diagnostic/postrun/report.md)。
+详见[125报告](history-archive.md)。
 
 ## 2026-09-17：补齐 snapshot 请求结构并验证实际路径
 
@@ -208,7 +208,7 @@ Feature 123 固定519fea5并先推送登记，单独/1诊断在242.848秒收到c
 静态检查发现生成代码在inputs[]寻找path而非实际target，导致有效probe提前被判无效；
 此前提示没有明确该嵌套字段，也未区分contract/profile中的path。下一步补齐真实snapshot
 request示例并与本地产生的对象验证一致，保留此次失败且不重放旧槽。该证据不能解释120
-超时或声称多文件闭环成功。见 [123报告](../specs/123-small-evaluator-diagnostic/postrun/report.md)。
+超时或声称多文件闭环成功。见 [123报告](history-archive.md)。
 
 ## 2026-09-17：本地 HTTP 里程碑诊断
 
@@ -230,7 +230,7 @@ Feature 121 将完整 probe/file/ordering、报告嵌套结构与实际源码限
 
 ## 2026-09-17：支持范围真实验收仍为 0/2
 
-Feature 120 先推送独立登记后运行两题，任务只要求可验证的 `python_file_count minimum=2` source check，保留数学输入/输出与117预算。两题合同编译成功，但 evaluator preparation 均在600秒 `open_response` 超时；无候选、交付或质量，已知用量16,161 tokens，费用和超时消费未知。113/115/117/120 各自0/2保持独立。不能把这次结果解释为旧 helper/import/input-read 语义或 WebAgent 对照。见 [120报告](../specs/120-supported-scope-acceptance/postrun/report.md)。
+Feature 120 先推送独立登记后运行两题，任务只要求可验证的 `python_file_count minimum=2` source check，保留数学输入/输出与117预算。两题合同编译成功，但 evaluator preparation 均在600秒 `open_response` 超时；无候选、交付或质量，已知用量16,161 tokens，费用和超时消费未知。113/115/117/120 各自0/2保持独立。不能把这次结果解释为旧 helper/import/input-read 语义或 WebAgent 对照。见 [120报告](history-archive.md)。
 
 ## 2026-09-17：源码文件数独立验证与完整交付
 
@@ -260,7 +260,7 @@ Feature 117 先以 `17a0ad2` 提交推送登记，在产品 `9a26a73` 上把单�
 11309 tokens，超时消费未知；无 evaluator、候选或交付。116 的完整失败 JSON、准备事件
 和非用户等待状态在真实调用中生效。下一步优先合同输出协议可靠性及 evaluator 可验证
 约束范围的离线检查；冻结旧槽，不用逐次加时替代定位。见
-[117 报告](../specs/117-extended-deadline-acceptance/postrun/report.md)。
+[117 报告](history-archive.md)。
 
 ## 2026-09-16：准备失败状态与显式恢复
 
@@ -276,7 +276,7 @@ Feature 116 修复依赖等待误报用户待答，`answer` 只接收真实问�
 
 Feature 115 固定 `5e2568f`，沿用 113 全部任务/模型/预算条件独立登记，两例完成仍为
 **0/2**。预算选择通过合同编译后 evaluator 请求超时；工作分配合同请求超时。仅已知
-8625 tokens，超时消费未知。见 [115 报告](../specs/115-isolated-intake-acceptance/postrun/report.md)。
+8625 tokens，超时消费未知。见 [115 报告](history-archive.md)。
 下一步先修复 dependency waiting 误报用户等待和准备失败缺持久诊断的问题，不补旧槽。
 
 ## 2026-09-16：合同编译入口修复
@@ -290,7 +290,7 @@ Feature 114 将合同编译接到已有 stateless runtime 协议入口，消除�
 
 Feature 113 在提交/推送独立登记后，对 `c977eb4` 运行两例 GLM-5.2 自动多文件任务。
 两例均在合同编译失败，完成 **0/2**，没有 evaluator、候选或交付。保留完整分母和已知
-15958 tokens，不补槽、不重跑 WebAgent。见 [113 报告](../specs/113-real-multifile-acceptance/postrun/report.md)。
+15958 tokens，不补槽、不重跑 WebAgent。见 [113 报告](history-archive.md)。
 下一步先修复 compiler 误用普通 Agent 总结提示/工具的入口接线与 schema 指引，再以
 新登记继续验收；外部 producer 接线继续后置。
 
@@ -506,7 +506,7 @@ LLM 生成、MAP-Elites、quality-diversity、多岛迁移、外部 evaluator �
 它与 AlphaEvolve 方向一致，适合作为 Lunar 的首个本地 subprocess producer，但其分数、
 数据库和 checkpoint 都不自动成为 Lunar 的权威状态。
 
-ShinkaEvolve 的 native 结果可通过 `src/famou/shinka_handoff.py` 导出到同一 envelope。该
+ShinkaEvolve 的 native 结果可通过 `src/lunar_evolution/shinka_handoff.py` 导出到同一 envelope。该
 exporter 只读查询 `programs` 表中固定的 `id`、`code`、`language`、`parent_id`、`generation`、
 `combined_score`、`correct` 字段，并显式兼容 `programs.sqlite` 与旧的 `evolution_db.sqlite`
 文件名；有 live `-wal`/`-shm`/rollback-journal sidecar 的数据库会被拒绝，避免只读打开产生
@@ -551,7 +551,7 @@ score-like evidence 只保留摘要；bridge 不含网络、subprocess、schedul
 
 ### 1. Material producer adapter
 
-`src/famou/producer_handoff.py` 提供通用的 `ProducerResultEnvelope`、`ProducerMaterial`、
+`src/lunar_evolution/producer_handoff.py` 提供通用的 `ProducerResultEnvelope`、`ProducerMaterial`、
 `admit_producer_envelope` 和文件入口 `admit_producer_result`；它为有稳定 CLI/runner 的框架定义一个共享 material 边界，不要为每个
 框架增加一套 Lunar strategy 状态。请求只包含固定 contract digest、bounded budget、run-scoped
 output root 和 producer identity；结果只允许包含 terminal/unknown 状态、opaque producer run ID、
@@ -594,7 +594,7 @@ Feature 086 的 bridge 是这一回路的离线最后一跳：它只接受 calle
 completed state 和本地同步文件，不执行 `sync`，也不把 completed 生命周期状态解释成
 `EvaluationReport`。因此 remote backend 的未知、失败或取消状态仍然只能停在生命周期层。
 
-famou-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远端实验适合这一层。
+reference-engine-v2/WebAgent 风格控制面、Slurm ShinkaEvolve、MLEvolve 或其他远端实验适合这一层。
 默认 population 构造不能自动联网、发现服务或实例化 remote backend。
 
 ## 两种 OpenEvolve 用法必须分开

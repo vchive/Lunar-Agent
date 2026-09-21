@@ -10,7 +10,7 @@ Feature 040 compiles, probes, and freezes one evaluator from the problem contrac
 inputs frequently contradict or refine a declared schema: columns differ in case, nulls exist,
 numeric-looking values are textual identifiers, JSON roots vary, or a supposedly unique key is not
 unique. WebAgent's planning/evaluator guidance explicitly reads data before designing the judge.
-Lunar-Agent currently gives its evaluator compiler only the contract, so it can still guess wrong.
+Lunar Evolution currently gives its evaluator compiler only the contract, so it can still guess wrong.
 
 This feature computes a deterministic, privacy-preserving profile of the exact digest-checked input
 files and binds it into evaluator compilation and the frozen bundle. The profile exposes structural

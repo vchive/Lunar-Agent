@@ -76,7 +76,7 @@ promoted to repair the failed result.
 
 ## Independent postrun audit
 
-Audit status is **passed with no blocking findings**: [audit.json](postrun/audit.json). It verified
+Audit status is **passed with no blocking findings**: [audit.json](../../docs/history-archive.md). It verified
 push-before-start chronology, all 79/20/178 registered pins, the 97-file / 327394-byte result
 inventory, 11 single-exchange HTTP200 requests and complete 98714-token usage, preparation 1/1,
 holdouts 8/8, primary/joint 0/1, native/process exit 1, cleanup and no matching retained process.
@@ -84,7 +84,7 @@ Historical evidence remains 131 files / 377335 bytes with unchanged sets, sizes 
 audit made no provider requests, did not rerun summarization or generated code, and read SQLite
 only through a disposable private copy.
 
-The bounded candidate diagnosis is [diagnosis.json](postrun/diagnosis.json). It binds manifest,
+The bounded candidate diagnosis is [diagnosis.json](../../docs/history-archive.md). It binds manifest,
 result and evidence hashes and records three in-run generation invocations stopped by `max_steps=4`
 before candidate parsing: 4+2, 4+2 and 3+2 consumed/requested tool calls. All previously executed
 tools succeeded; evaluated and valid candidates, execution evidence and delivery events remained

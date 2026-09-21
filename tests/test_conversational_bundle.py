@@ -10,11 +10,11 @@ import pytest
 from test_bundle_population import draft_for_score
 from test_bundle_population_cli import command
 
-from famou import cli
-from famou.config import Config
-from famou.runtime import MockRuntime, RuntimeResult
-from famou.solve_bundle import bundle_pipeline_sha256
-from famou.store import Store
+from lunar_evolution import cli
+from lunar_evolution.config import Config
+from lunar_evolution.runtime import MockRuntime, RuntimeResult
+from lunar_evolution.solve_bundle import bundle_pipeline_sha256
+from lunar_evolution.store import Store
 
 
 class ConversationalBundleRuntime(MockRuntime):

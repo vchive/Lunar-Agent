@@ -3,15 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.budget import BudgetSpec
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evaluator import Evaluation, NonEmptyEvaluator
-from famou.policy import PlanDocument, PlanTask
-from famou.profiles import EvaluatorProfile, ProfileRegistry
-from famou.routing import DomainRouter
-from famou.runtime import MockRuntime, ModelTurn, ToolCall
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.budget import BudgetSpec
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evaluator import Evaluation, NonEmptyEvaluator
+from lunar_evolution.policy import PlanDocument, PlanTask
+from lunar_evolution.profiles import EvaluatorProfile, ProfileRegistry
+from lunar_evolution.routing import DomainRouter
+from lunar_evolution.runtime import MockRuntime, ModelTurn, ToolCall
 
 
 def test_deterministic_domain_router_classifies_english_and_chinese_goals() -> None:
@@ -31,7 +31,7 @@ def test_routed_run_persists_status_metadata_and_uses_injected_evaluator(tmp_pat
             return Evaluation(False, (), "fixture profile rejected result")
 
     profiles = ProfileRegistry(evaluators=(EvaluatorProfile("coding", "fixture", RejectingEvaluator),))
-    controller = LocalController(Config(tmp_path / ".famou", max_retries=1), MockRuntime(), profiles=profiles)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution", max_retries=1), MockRuntime(), profiles=profiles)
     run = controller.start("fix this code bug and run tests")
 
     assert run.status.value == "failed"
@@ -46,7 +46,7 @@ def test_routed_run_persists_status_metadata_and_uses_injected_evaluator(tmp_pat
 
 def test_missing_route_profile_is_rejected_before_a_run_is_created(tmp_path: Path) -> None:
     profiles = ProfileRegistry(evaluators=(EvaluatorProfile("general", "only general", NonEmptyEvaluator),))
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime(), profiles=profiles)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime(), profiles=profiles)
 
     with pytest.raises(ValueError, match="unknown evaluator profile: coding"):
         controller.create("fix this code bug")
@@ -56,7 +56,7 @@ def test_missing_route_profile_is_rejected_before_a_run_is_created(tmp_path: Pat
 
 
 def test_plan_budget_fails_closed_before_claiming_work(tmp_path: Path) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     document = PlanDocument(
         goal="write a report",
         plan_id="budget-tasks",
@@ -96,7 +96,7 @@ class _ToolFixture:
 
 def test_tool_step_budget_is_auditable_and_prevents_delivery(tmp_path: Path) -> None:
     runtime = AgentLoopRuntime(_ToolFixture(), max_steps=3)
-    controller = LocalController(Config(tmp_path / ".famou"), runtime)
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), runtime)
     document = PlanDocument(
         goal="fix code",
         plan_id="budget-tools",

@@ -9,17 +9,21 @@ import pytest
 from test_frozen_evaluator_bundle import EVALUATOR_SOURCE, BundleRuntime, _contract, _envelope
 from test_snapshot_evaluator_bundle import SNAPSHOT_SOURCE
 
-from famou import evaluator_bundle
-from famou.algorithm import AlgorithmProblemContract, ConstraintSpec
-from famou.conversational import ContractCompilationError, RuntimeContractCompiler, _parse_response
-from famou.evaluator_bundle import (
+from lunar_evolution import evaluator_bundle
+from lunar_evolution.algorithm import AlgorithmProblemContract, ConstraintSpec
+from lunar_evolution.conversational import (
+    ContractCompilationError,
+    RuntimeContractCompiler,
+    _parse_response,
+)
+from lunar_evolution.evaluator_bundle import (
     EvaluatorBundleError,
     UnsupportedEvaluatorConstraintsError,
     compile_evaluator_bundle,
     load_evaluator_bundle,
     validate_evaluator_capabilities,
 )
-from famou.evolution import CandidateInputArtifact
+from lunar_evolution.evolution import CandidateInputArtifact
 
 
 def scoped_contract(scope, *, group="hard_constraints", verification="partial"):

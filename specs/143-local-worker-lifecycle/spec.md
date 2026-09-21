@@ -3,7 +3,7 @@
 **Created**: 2026-09-20
 **Status**: Local lifecycle hardening validated on 2026-09-21;
 explicit delegation migration remains deferred
-**Input**: WebAgent famou-v2.5 multiagent review and Lunar capability comparison
+**Input**: WebAgent reference-engine-v2.5 multiagent review and Lunar capability comparison
 
 ## Problem
 
@@ -93,7 +93,7 @@ response bodies, or filesystem paths in worker status.
   codes. They exclude prompts, secrets, provider text, and unbounded tracebacks.
 - **FR-014**: Existing `run_agent()`, ordinary `resume`, population evolution, and detached
   ordinary solves retain their current behavior until explicitly migrated to this API.
-- **FR-015**: No OpenCode plugin, remote FamouClient, SSE protocol, GPU sandbox, or multi-tenant
+- **FR-015**: No OpenCode plugin, remote reference-engine client, SSE protocol, GPU sandbox, or multi-tenant
   service is introduced by this feature.
 
 ### Reopened lifecycle acceptance, 2026-09-21

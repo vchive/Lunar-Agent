@@ -7,9 +7,9 @@ import json
 import pytest
 from test_automatic_solve_bundle import _fixture
 
-from famou import automatic_solve_bundle as automatic
-from famou import candidate_execution_runner, evaluator_bundle
-from famou.runtime import ModelRequestFailure, ModelRequestObservation
+from lunar_evolution import automatic_solve_bundle as automatic
+from lunar_evolution import candidate_execution_runner, evaluator_bundle
+from lunar_evolution.runtime import ModelRequestFailure, ModelRequestObservation
 
 
 class Clock:

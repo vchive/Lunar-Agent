@@ -39,4 +39,4 @@ Independent postrun audit verified the complete 40-file evidence inventory, all 
 16 measurement and 15 historical pins, the call journals and stored contract. The single 5768-byte
 private response strictly reparses to the saved contract. Product and frozen historical bytes
 are unchanged. The audit independently confirmed the first slot's misleading awaiting_input state
-without an actual question and absent preparation-failure event. See [the report](postrun/report.md).
+without an actual question and absent preparation-failure event. See [the report](../../docs/history-archive.md).

@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from famou import _benchmark_files as files
-from famou.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
-from famou.candidate_execution import (
+from lunar_evolution import _benchmark_files as files
+from lunar_evolution.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
+from lunar_evolution.candidate_execution import (
     MAX_EXECUTION_ADMISSION_BYTES,
     MAX_EXECUTION_INPUT_BYTES,
     MAX_EXECUTION_OUTPUT_BYTES,
@@ -28,7 +28,7 @@ from famou.candidate_execution import (
     parse_candidate_execution_admission,
     validate_candidate_execution_admission,
 )
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 
 CONTRACT = "a" * 64
 DEPENDENCY = "b" * 64

@@ -4,23 +4,23 @@ from pathlib import Path
 
 import pytest
 
-from famou import OffspringOutcome as PublicOffspringOutcome
-from famou.agent_evolution import (
+from lunar_evolution import OffspringOutcome as PublicOffspringOutcome
+from lunar_evolution.agent_evolution import (
     AgentCandidateEvaluator,
     AgentCandidateGenerator,
     AgentEvaluatorEnsemble,
     AgentPortfolioGenerator,
 )
-from famou.agent_loop import AgentLoopRuntime
-from famou.agents import AgentResult, CandidateGenerationBudget, RuntimeAgentAdapter
-from famou.algorithm import (
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.agents import AgentResult, CandidateGenerationBudget, RuntimeAgentAdapter
+from lunar_evolution.algorithm import (
     LOOP_STRATEGY_RETIRED_MESSAGE,
     AlgorithmProblemContract,
     EvaluationReport,
 )
-from famou.config import Config
-from famou.controller import LocalController
-from famou.evolution import (
+from lunar_evolution.config import Config
+from lunar_evolution.controller import LocalController
+from lunar_evolution.evolution import (
     Candidate,
     CandidateDraft,
     EvolutionConfig,
@@ -30,10 +30,10 @@ from famou.evolution import (
     OffspringOutcome,
     PopulationStrategy,
 )
-from famou.profiles import ModelProfile
-from famou.runtime import MockRuntime, ModelTurn, ToolCall
-from famou.store import Store
-from famou.tools import LocalToolRegistry
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import MockRuntime, ModelTurn, ToolCall
+from lunar_evolution.store import Store
+from lunar_evolution.tools import LocalToolRegistry
 
 
 def _contract(strategy: str = "population") -> AlgorithmProblemContract:
@@ -262,7 +262,7 @@ def test_profile_limited_generation_retains_authority_in_durable_receipt(
     tmp_path: Path, used: int,
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     turns = []
     for candidate in range(2):
@@ -772,7 +772,7 @@ def test_agent_evaluator_indexes_transcript_artifact(tmp_path: Path) -> None:
 
 def test_controller_indexes_runtime_agent_evidence_and_redacts_transcript(tmp_path: Path) -> None:
     contract = _contract()
-    config = Config(tmp_path / ".famou")
+    config = Config(tmp_path / ".lunar-evolution")
     controller = LocalController(config, MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     solver_model = EventModel(
@@ -864,7 +864,7 @@ def test_controller_indexes_runtime_agent_evidence_and_redacts_transcript(tmp_pa
 def test_controller_rejects_new_legacy_loop_run_before_workspace_creation(
     tmp_path: Path,
 ) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     workspace = tmp_path / "retired-loop"
 
     with pytest.raises(EvolutionError, match="loop_strategy_retired"):
@@ -892,7 +892,7 @@ def test_controller_rejects_preexisting_evolution_evidence_before_run_creation(
     evidence: str,
     expected: str,
 ) -> None:
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     workspace = tmp_path / evidence
     root = workspace / "evolution"
     root.mkdir(parents=True)
@@ -979,7 +979,7 @@ def test_controller_records_one_deterministic_failure_event_for_malformed_seed_m
     tmp_path: Path,
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(
         max_rounds=1,
@@ -1062,7 +1062,7 @@ def test_controller_cancelled_before_start_cannot_create_evolution_state(
     tmp_path: Path,
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     assert controller.cancel(run.id)
     generated: list[object] = []
@@ -1085,7 +1085,7 @@ def test_controller_rejects_seed_identity_flags_without_manifest_before_claim(
     tmp_path: Path,
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
 
     with pytest.raises(EvolutionError, match="^seed_manifest_required_for_seed_identity$"):
@@ -1111,7 +1111,7 @@ def test_controller_terminal_resume_wraps_unexpected_strategy_exception(
     tmp_path: Path, monkeypatch
 ) -> None:
     contract = _contract()
-    controller = LocalController(Config(tmp_path / ".famou"), MockRuntime())
+    controller = LocalController(Config(tmp_path / ".lunar-evolution"), MockRuntime())
     run = controller.create_evolution_run(contract, workspace=tmp_path / "run")
     config = EvolutionConfig(max_rounds=1, population_size=1)
     settled, _ = controller.run_evolution(
@@ -1151,7 +1151,7 @@ def test_controller_terminal_resume_wraps_unexpected_strategy_exception(
             raise RuntimeError("private terminal exception")
 
     monkeypatch.setattr(
-        "famou.controller.build_strategy", lambda context: BrokenResumeStrategy()
+        "lunar_evolution.controller.build_strategy", lambda context: BrokenResumeStrategy()
     )
     with pytest.raises(EvolutionError, match="^terminal_evolution_resume_failed$"):
         controller.run_evolution(

@@ -16,8 +16,8 @@
 ## Structure
 
 ```text
-src/famou/evolution.py  # optional provenance fields and validation
-src/famou/cli.py        # canonical adapter fingerprint construction
+src/lunar_evolution/evolution.py  # optional provenance fields and validation
+src/lunar_evolution/cli.py        # canonical adapter fingerprint construction
 tests/test_evolution.py # config/state compatibility tests
 tests/test_cli.py       # resume drift tests
 README.md               # detached/resume guarantee

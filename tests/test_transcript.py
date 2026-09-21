@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.runtime import ModelTurn, ToolCall
-from famou.tools import LocalToolRegistry
-from famou.transcript import SessionTranscript
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.runtime import ModelTurn, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
+from lunar_evolution.transcript import SessionTranscript
 
 
 class TranscriptModel:

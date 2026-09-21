@@ -15,7 +15,7 @@ meaning, and require all later rounds to improve the solution rather than relax 
 This feature adds an explicit `--compile-evaluator` mode for native conversational evolution. A
 separate runtime turn produces a strict local bundle: human-readable objective, restricted Python
 evaluator, declared hard-constraint coverage, synthetic validity probes, and score-order probes.
-Lunar-Agent statically validates the evaluator, executes every probe, hashes and freezes the bundle,
+Lunar Evolution statically validates the evaluator, executes every probe, hashes and freezes the bundle,
 then uses it as the independent candidate evaluator. Resume reloads the same digest-bound bundle;
 it never asks the model to silently rewrite scoring semantics.
 

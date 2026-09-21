@@ -19,7 +19,7 @@ needed.
 3. **Same adapters** — runtime-backed generation/evaluation use the existing strict bridge classes,
    not benchmark-specific parsing.
 4. **Explicit secrets** — API key resolves from the benchmark flag or
-   `FAMOU_AGENT_RUNTIME_API_KEY`, and only its redacted runtime behavior is tested.
+   `LUNAR_EVOLUTION_AGENT_RUNTIME_API_KEY`, and only its redacted runtime behavior is tested.
 
 ## Constitution check
 

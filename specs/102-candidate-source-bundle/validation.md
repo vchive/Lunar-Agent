@@ -13,7 +13,7 @@
 - Combined Feature 102 and all benchmark tests: **346 passed in 0.73s**.
 - Independent final review: no blocking findings in core, CLI, exports or documentation.
 
-The installed `.venv/bin/lunar-agent` ran the exact quickstart fixture: two files / 131 source
+The installed `.venv/bin/lunar-evolution` ran the exact quickstart fixture: two files / 131 source
 bytes validated; a same-size helper modification failed with `candidate_bundle_source_changed`;
 home and the source execution marker remained absent. Bundle digest was
 `d3ae1c7ac6eef7b047734a16bdd12a9810441e23c132636b7f6b9936b4196935`.

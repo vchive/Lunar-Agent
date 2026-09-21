@@ -9,7 +9,7 @@
 Add a runtime-neutral local evolution layer on top of Feature 012's algorithm contract and
 validity-first evaluator. The first slice provides a durable filesystem archive and native loop and
 population strategies; an optional adapter runs an explicitly configured OpenEvolve command without
-making that package mandatory. The run ledger remains owned by Lunar-Agent and all strategy results
+making that package mandatory. The run ledger remains owned by Lunar Evolution and all strategy results
 use one JSON contract.
 
 ## Technical Context
@@ -51,7 +51,7 @@ candidate and report sizes; evaluator is frozen per run
 
 1. Add `openevolve` to the strategy selector as an optional execution mode while retaining the
    Feature 012 default of `loop`. Existing contracts without an evolution field remain unchanged.
-2. Keep strategy code in a new `src/famou/evolution.py` module. It owns candidate value objects,
+2. Keep strategy code in a new `src/lunar_evolution/evolution.py` module. It owns candidate value objects,
    archive persistence, selection, and the OpenEvolve process adapter, but not task scheduling.
 3. Use injected `CandidateGenerator` and `CandidateEvaluator` protocols. The existing Runtime
    Adapter can be wrapped later, while deterministic tests can supply pure callbacks.
@@ -80,7 +80,7 @@ specs/013-evolution-strategies/
 ### Source Code (repository root)
 
 ```text
-src/famou/
+src/lunar_evolution/
 ├── algorithm.py          # existing contract/evaluation boundaries
 ├── evolution.py          # candidate, archive, loop/population, OpenEvolve adapter
 ├── policy.py             # existing plan contract and additive strategy value

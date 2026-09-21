@@ -1,4 +1,4 @@
-# Feature Specification: Standalone Local Famou Agent
+# Feature Specification: Standalone Local Lunar Evolution Agent
 
 **Feature Branch**: `001-standalone-local-agent`
 
@@ -6,7 +6,7 @@
 
 **Status**: Complete
 
-**Input**: User description: "Create a standalone local Famou Agent that does not depend on a
+**Input**: User description: "Create a standalone local Lunar Evolution Agent that does not depend on a
 machine-wide Hermes environment and can resume long-running work."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -16,7 +16,7 @@ machine-wide Hermes environment and can resume long-running work."
 As a single user, I can submit a goal from a local CLI and later resume it after the terminal or
 controller process stops, without losing the task state or generated files.
 
-**Why this priority**: Durable execution is the minimum value of a local Famou Agent. Without it,
+**Why this priority**: Durable execution is the minimum value of a local Lunar Evolution Agent. Without it,
 the agent is only a chat wrapper and cannot handle long-running work.
 
 **Independent Test**: Start a run with the deterministic test runtime, interrupt it after state is
@@ -37,7 +37,7 @@ persisted, invoke `resume` with the run ID, and observe a terminal success plus 
 As a user, I can execute a plan composed of dependent tasks, keep outputs as local artifacts, and
 require a verifier to confirm each task before the run is considered complete.
 
-**Why this priority**: Planning and independent verification turn durable execution into a Famou
+**Why this priority**: Planning and independent verification turn durable execution into a Lunar Evolution
 workflow instead of a single opaque model call.
 
 **Independent Test**: Provide a two-task plan where the second task depends on the first, run the
@@ -90,7 +90,7 @@ and confirm that no `.hermes` directory, global executable, network, or model cr
 
 ### User Story 4 - Call a Configured Model Directly (Priority: P2)
 
-As a local user, I can point Lunar-Agent at an OpenAI-compatible endpoint (including a local model
+As a local user, I can point Lunar Evolution at an OpenAI-compatible endpoint (including a local model
 server) and execute tasks without installing Hermes, OpenCode, or Codex.
 
 The endpoint and model are explicit configuration. The adapter sends one non-streaming chat request
@@ -136,7 +136,7 @@ attempt failure subject to the normal retry policy.
 - **FR-011**: Every operational CLI command MUST support a machine-readable `--json` mode in which
   stdout contains one JSON value and diagnostics are written to stderr.
 - **FR-012**: The `run` command MUST accept `-` as the goal argument and read the goal from stdin so
-  a parent Agent can invoke Lunar-Agent without shell-escaping long prompts.
+  a parent Agent can invoke Lunar Evolution without shell-escaping long prompts.
 - **FR-013**: The `run --detach --json` command MUST persist the run and return its durable run ID
   before task execution begins; the child controller MUST write its output under the run workspace.
 - **FR-014**: A plan MUST be persisted before execution, and its dependency graph MUST be acyclic;
@@ -181,7 +181,7 @@ attempt failure subject to the normal retry policy.
 - **SC-005**: The P1 workflow can be demonstrated using no network, model credentials, or user-global
   Hermes files.
 - **SC-006**: A parent Agent can start a run and inspect its terminal state by parsing one JSON line
-  from `run --json` and one JSON value from `status --json`, without importing Lunar-Agent Python
+  from `run --json` and one JSON value from `status --json`, without importing Lunar Evolution Python
   modules.
 - **SC-007**: A parent Agent can start a detached mock run and receive a valid run ID in under one
   second, then observe the run transition through `status --json` without keeping the parent process

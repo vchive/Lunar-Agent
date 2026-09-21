@@ -6,7 +6,7 @@ regression:
 ```sh
 .venv/bin/pytest -q tests/test_run_wall_clock_budget.py \
   tests/test_controller.py tests/test_agents.py tests/test_runtime.py
-.venv/bin/ruff check src/famou/controller.py src/famou/agents.py \
+.venv/bin/ruff check src/lunar_evolution/controller.py src/lunar_evolution/agents.py \
   tests/test_run_wall_clock_budget.py
 .venv/bin/python -m compileall -q src tests
 ```

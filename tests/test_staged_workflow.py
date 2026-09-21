@@ -6,10 +6,10 @@ from dataclasses import replace
 import pytest
 from test_staged_effect_adapter import StagedSubject, _config, _profile, _request
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.runtime import ModelTurn, RuntimeExecutionError
-from famou.staged_workflow import StagedWorkflowConfig, StagedWorkflowRunner, StagePolicy
-from famou.workflow_checkpoint import WorkflowCheckpointError, WorkflowController
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError
+from lunar_evolution.staged_workflow import StagedWorkflowConfig, StagedWorkflowRunner, StagePolicy
+from lunar_evolution.workflow_checkpoint import WorkflowCheckpointError, WorkflowController
 
 
 def rig(tmp_path, *, model=None, policy=None):
@@ -73,7 +73,7 @@ def test_changed_checkpoint_context_blocks_resume_without_provider_request(tmp_p
 
 def test_resume_deadline_does_not_restart_and_idle_time_counts(tmp_path, monkeypatch):
     now = [0.0]
-    monkeypatch.setattr("famou.staged_workflow.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("lunar_evolution.staged_workflow.time.monotonic", lambda: now[0])
     runner, agent, _request_path = rig(tmp_path)
     now[0] = 100  # Construction time is not attempt time.
     runner.run("public task")
@@ -141,7 +141,7 @@ def test_reconstructed_runner_cannot_reset_an_existing_attempt(tmp_path):
 @pytest.mark.parametrize("target", ["config", "master"])
 @pytest.mark.parametrize("at_turn", [2, 3])
 def test_control_evidence_changed_during_model_turn_cannot_publish_receipt(tmp_path, target, at_turn):
-    from famou.effect_adapters import EffectAdapterError, run_subject_adapter
+    from lunar_evolution.effect_adapters import EffectAdapterError, run_subject_adapter
 
     profile = _profile()
     request = _request(tmp_path / "subject", profile)

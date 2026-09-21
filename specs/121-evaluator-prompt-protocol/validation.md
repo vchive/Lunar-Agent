@@ -21,7 +21,7 @@ request hashes exactly. The old evaluator request sizes were 9,723/11,366 bytes;
 occur once each, with exactly system+user messages, no tools/history and no application retry.
 The new prompts add explicit protocol details; constructing requests with the same inputs yields
 17,058/18,734 bytes, without sending them. There is no demonstrated latency gain or known timeout
-cause. See [diagnostics](diagnostics/README.md).
+cause. See [diagnostics](../../docs/history-archive.md).
 
 Prompt protocol tests: 34 passed, including actual snapshot/legacy preflight on filled examples,
 strict report parsing, source coverage, read operations/import restrictions, and conservative

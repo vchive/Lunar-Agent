@@ -11,7 +11,7 @@ part of this feature. A separate future registration is required to measure solu
 
 Verification on 2026-09-10:
 
-- Explicit `PYTHONPATH` import resolves to this isolated worktree's `src/famou/workflow_checkpoint.py`.
+- Explicit `PYTHONPATH` import resolves to this isolated worktree's `src/lunar_evolution/workflow_checkpoint.py`.
 - Before filter removal, controller vocabulary tests produced 16 failures and 68 passes: the
   failures directly cover plan words, ordinary output names, stored reads, and new-name artifact
   validation blocked before reaching the actual symlink check. After removal all 84 passed.

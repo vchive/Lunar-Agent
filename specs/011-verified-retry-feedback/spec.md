@@ -7,7 +7,7 @@
 ## Goal
 
 Make bounded retries useful for long-running local work by carrying the previous attempt's
-structured verification outcome into the next attempt prompt. Lunar-Agent should close the
+structured verification outcome into the next attempt prompt. Lunar Evolution should close the
 solve→evaluate→correct loop without allowing a runtime to mutate a plan, relax acceptance, or see
 unbounded/private failure data.
 

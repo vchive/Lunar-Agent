@@ -12,7 +12,7 @@ must rediscover elementary routing, scheduling, packing, assignment, network-flo
 forecasting algorithm families on every fresh turn. Population seeds can therefore be textually
 different while remaining algorithmically identical.
 
-WebAgent v2.5 improves this with large OR/ML specialist prompts and skills. Lunar-Agent needs the
+WebAgent v2.5 improves this with large OR/ML specialist prompts and skills. Lunar Evolution needs the
 quality effect, but not an OpenCode installation, mutable skill directory, third-party solver
 assumption, or service plane. This feature projects a small repository-owned `algorithm_playbook`
 from the canonical problem contract, selected search mode, lineage, and verified experiment

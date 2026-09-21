@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from famou import effect_preflight
-from famou.cli import main
-from famou.effect_preflight import EffectPreflightError, run_effect_preflight
+from lunar_evolution import effect_preflight
+from lunar_evolution.cli import main
+from lunar_evolution.effect_preflight import EffectPreflightError, run_effect_preflight
 
 _trial_spec = importlib.util.spec_from_file_location(
     "effect_trial_fixture", Path(__file__).with_name("test_effect_trial.py")
@@ -38,7 +38,7 @@ def test_effect_preflight_validates_without_running_trial_processes(tmp_path: Pa
     )
 
     assert report["status"] == "ready"
-    assert report["protocol"] == "famou-bench-effect-preflight-v1"
+    assert report["protocol"] == "reference-benchmark-effect-preflight-v1"
     assert report["harness"]["imports"] == {"json": True}
     assert report["harness"]["environment_names"] == []
     assert report_path.exists()
@@ -312,7 +312,7 @@ def test_effect_preflight_rejects_symlinked_model_profile(tmp_path: Path) -> Non
             {
                 "model": "gpt-5.6-sol",
                 "endpoint": "https://example.invalid/v1",
-                "api_key_env": "FAMOU_API_KEY",
+                "api_key_env": "LUNAR_EVOLUTION_API_KEY",
                 "max_turns": 1,
                 "max_tokens": 1,
                 "timeout_seconds": 1,

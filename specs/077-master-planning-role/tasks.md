@@ -12,7 +12,7 @@ of successful real planning.
 
 Verification on 2026-09-10:
 
-- Confirmed `famou.staged_workflow.__file__` resolves to this isolated worktree using explicit
+- Confirmed `lunar_evolution.staged_workflow.__file__` resolves to this isolated worktree using explicit
   `PYTHONPATH` with the root development virtualenv.
 - Before changing source, the new actual-message suite had **12 failures and 2 passes**: staged
   cases failed because the planning role was absent at the front; the non-staged normal/deep

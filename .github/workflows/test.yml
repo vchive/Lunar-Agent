@@ -30,20 +30,21 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p .lunar/test-results
-          python tools/run_tests.py --junit-dir .lunar/test-results 2>&1 | tee .lunar/test-results/pytest.log
+          mkdir -p .lunar-evolution/test-results
+          python tools/run_tests.py --junit-dir .lunar-evolution/test-results 2>&1 | tee .lunar-evolution/test-results/pytest.log
       - name: Annotate test failures
         if: ${{ always() }}
-        run: python tools/annotate_test_failures.py .lunar/test-results/current.xml .lunar/test-results/frozen123.xml
+        run: python tools/annotate_test_failures.py .lunar-evolution/test-results/current.xml .lunar-evolution/test-results/archived.xml .lunar-evolution/test-results/frozen123.xml
       - name: Preserve test results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: test-results-python-${{ matrix.python-version }}
           path: |
-            .lunar/test-results/current.xml
-            .lunar/test-results/frozen123.xml
-            .lunar/test-results/pytest.log
+            .lunar-evolution/test-results/current.xml
+            .lunar-evolution/test-results/archived.xml
+            .lunar-evolution/test-results/frozen123.xml
+            .lunar-evolution/test-results/pytest.log
           include-hidden-files: true
           retention-days: 14
           if-no-files-found: warn

@@ -9,15 +9,15 @@ from test_agent_bundle_generation import BundleFixtureAgent
 from test_agent_loop import FixtureModel
 from test_bundle_population import build_context
 
-from famou.agent_bundle_generation import _prompt, parse_bundle_agent_draft
-from famou.agent_evolution import AgentCandidateGenerator
-from famou.agent_loop import (
+from lunar_evolution.agent_bundle_generation import _prompt, parse_bundle_agent_draft
+from lunar_evolution.agent_evolution import AgentCandidateGenerator
+from lunar_evolution.agent_loop import (
     BUNDLE_FINAL_RESPONSE_INSTRUCTION,
     HERMES_SYSTEM_PROMPT,
     AgentLoopRuntime,
     AgentStepLimitReached,
 )
-from famou.agents import (
+from lunar_evolution.agents import (
     BUNDLE_RESPONSE_PROTOCOL,
     AgentError,
     AgentInvocationError,
@@ -26,9 +26,9 @@ from famou.agents import (
     CandidateGenerationDiagnostic,
     RuntimeAgentAdapter,
 )
-from famou.evolution import EvolutionError, GenerationRequest
-from famou.runtime import ModelTurn, RuntimeResult, ToolCall
-from famou.transcript import SessionTranscript
+from lunar_evolution.evolution import EvolutionError, GenerationRequest
+from lunar_evolution.runtime import ModelTurn, RuntimeResult, ToolCall
+from lunar_evolution.transcript import SessionTranscript
 
 VALID = '{"entrypoint":"main.py","files":{"main.py":"pass\\n"}}'
 

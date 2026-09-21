@@ -12,8 +12,8 @@ campaign.
 | Ordinary candidate/controller/evolution focused suites | 212 passed in 3.69 seconds |
 | Controller failure-path and ledger regression | 15 passed |
 | Full repository regression | 2408 passed in 65.02 seconds |
-| Ruff (`src/famou`, related tests) | pass |
-| Python compileall (`src/famou`, `tests`) | pass |
+| Ruff (`src/lunar_evolution`, related tests) | pass |
+| Python compileall (`src/lunar_evolution`, `tests`) | pass |
 | Specify prerequisites with tasks | pass |
 | `git diff --check` | pass |
 | Sealed 074/076/078/082 trees | 595 tracked files unchanged |
@@ -27,9 +27,9 @@ Commands used for the final checks:
   tests/test_controller_candidate_integrity.py \
   tests/test_evolution.py
 .venv/bin/pytest -o addopts='' -q
-.venv/bin/ruff check src/famou tests/test_candidate_integrity.py \
+.venv/bin/ruff check src/lunar_evolution tests/test_candidate_integrity.py \
   tests/test_controller_candidate_integrity.py tests/test_evolution.py
-.venv/bin/python -m compileall -q src/famou tests
+.venv/bin/python -m compileall -q src/lunar_evolution tests
 SPECIFY_FEATURE_DIRECTORY="$PWD/specs/087-ordinary-candidate-integrity" \
   bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 git diff --check

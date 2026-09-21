@@ -7,7 +7,7 @@
 ## Context and scope
 
 Features 048 and 049 can execute and score a frozen one/two-case trial, but they still require a
-hand-authored suite manifest and public projection. The local Famou benchmark checkout may have a
+hand-authored suite manifest and public projection. The local external reference-benchmark checkout may have a
 different release label from an older experiment even when the owner has verified that the
 selected case contents are equivalent. A release number alone must therefore neither block the
 local experiment nor be presented as proof of byte equality.
@@ -77,7 +77,7 @@ owner attestation into formal benchmark evidence.
   and unsafe/LFS/existing-output cases fail closed.
 - **SC-5003**: An attested converted baseline is accepted by EffectTrial and reports
   `descriptive_owner_attested_content_equivalent` with formal eligibility `ineligible`.
-- **SC-5004**: A real current local Famou case passes kit construction and the Feature 049 exact
+- **SC-5004**: A real case from the current local reference-benchmark checkout passes kit construction and the Feature 049 exact
   harness preflight without requiring model credentials.
 - **SC-5005**: Focused/full tests, lint, compileall, Specify prerequisites, and diff checks pass.
 

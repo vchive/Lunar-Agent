@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from famou.process_ownership import (
+from lunar_evolution.process_ownership import (
     ProcessCleanupResult,
     ProcessCleanupStatus,
     RegisteredProcess,
@@ -19,10 +19,10 @@ from famou.process_ownership import (
 
 def test_ownership_loss_prevents_sigterm(monkeypatch: pytest.MonkeyPatch) -> None:
     registration = RegisteredProcess(321, 654, owner_check=lambda: False, label="lost")
-    monkeypatch.setattr("famou.process_ownership.os.getpgid", lambda _pid: 654)
-    monkeypatch.setattr("famou.process_ownership._group_alive", lambda _pgid: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", lambda _pid: 654)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
     sent: list[tuple[int, int]] = []
-    monkeypatch.setattr("famou.process_ownership.os.killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda pgid, sig: sent.append((pgid, sig)))
     result = cleanup_registered_process(registration)
     assert result.status is ProcessCleanupStatus.OWNERSHIP_LOST
     assert not sent
@@ -33,18 +33,18 @@ def test_owner_callback_failure_is_classified_without_signalling(monkeypatch: py
         raise RuntimeError("private")
 
     registration = RegisteredProcess(321, 654, owner_check=owner_check)
-    monkeypatch.setattr("famou.process_ownership.os.getpgid", lambda _pid: 654)
-    monkeypatch.setattr("famou.process_ownership._group_alive", lambda _pgid: True)
-    monkeypatch.setattr("famou.process_ownership.os.killpg", lambda *_args: pytest.fail("must not signal"))
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", lambda _pid: 654)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda *_args: pytest.fail("must not signal"))
     result = cleanup_registered_process(registration)
     assert result.status is ProcessCleanupStatus.OWNER_CHECK_FAILED
 
 
 def test_database_owner_cannot_override_os_process_group_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     registration = RegisteredProcess(321, 654, owner_check=lambda: True)
-    monkeypatch.setattr("famou.process_ownership.os.getpgid", lambda _pid: 655)
-    monkeypatch.setattr("famou.process_ownership._group_alive", lambda _pgid: True)
-    monkeypatch.setattr("famou.process_ownership.os.killpg", lambda *_args: pytest.fail("must not signal"))
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", lambda _pid: 655)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda *_args: pytest.fail("must not signal"))
 
     result = cleanup_registered_process(registration)
 
@@ -53,11 +53,11 @@ def test_database_owner_cannot_override_os_process_group_mismatch(monkeypatch: p
 
 def test_term_then_kill_after_grace(monkeypatch: pytest.MonkeyPatch) -> None:
     registration = RegisteredProcess(321, 654, owner_check=lambda: True)
-    monkeypatch.setattr("famou.process_ownership.os.getpgid", lambda _pid: 654)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", lambda _pid: 654)
     alive = iter([True, True, True, False])
-    monkeypatch.setattr("famou.process_ownership._group_alive", lambda _pgid: next(alive))
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: next(alive))
     sent: list[tuple[int, int]] = []
-    monkeypatch.setattr("famou.process_ownership.os.killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda pgid, sig: sent.append((pgid, sig)))
     clock = iter([0.0, 0.0, 1.0, 1.0])
     result = cleanup_registered_process(registration, grace_seconds=0.5, sleep=lambda _delay: None,
                                         monotonic=lambda: next(clock))
@@ -91,7 +91,7 @@ def test_invalid_or_exited_registration_is_classified(monkeypatch: pytest.Monkey
         registration = RegisteredProcess(1, 2)
     else:
         registration = RegisteredProcess(321, 654, owner_check=lambda: True)
-        monkeypatch.setattr("famou.process_ownership._group_alive", lambda _pgid: False)
+        monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: False)
     assert cleanup_registered_process(registration).status is status
 
 
@@ -99,9 +99,9 @@ def test_missing_leader_never_grants_initial_signal_authority(monkeypatch):
     def missing(_pid):
         raise ProcessLookupError
 
-    monkeypatch.setattr("famou.process_ownership.os.getpgid", missing)
-    monkeypatch.setattr("famou.process_ownership._group_alive", lambda _pgid: True)
-    monkeypatch.setattr("famou.process_ownership.os.killpg", lambda *_args: pytest.fail("must not signal"))
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", missing)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda *_args: pytest.fail("must not signal"))
 
     result = cleanup_registered_process(RegisteredProcess(321, 321, owner_check=lambda: True))
 
@@ -126,10 +126,10 @@ def test_exited_leader_escalation_requires_unchanged_authority(monkeypatch, auth
     registration = RegisteredProcess(
         pid, pgid, owner_check=None if authority == "missing_callback" else lambda: next(owned),
     )
-    monkeypatch.setattr("famou.process_ownership.os.getpgid", getpgid)
-    monkeypatch.setattr("famou.process_ownership._group_alive", lambda _pgid: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", getpgid)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
     sent = []
-    monkeypatch.setattr("famou.process_ownership.os.killpg", lambda _pgid, sig: sent.append(sig))
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda _pgid, sig: sent.append(sig))
     clock = iter([0.0, 1.0])
 
     result = cleanup_registered_process(

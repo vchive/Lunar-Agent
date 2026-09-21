@@ -4,7 +4,7 @@
 
 ## Technical approach
 
-Keep the change inside `src/famou/agent_loop.py`. Generalize `_budget_messages` to build the
+Keep the change inside `src/lunar_evolution/agent_loop.py`. Generalize `_budget_messages` to build the
 existing request advisory whenever a normal loop has a finite tool-step ceiling, using a nullable
 ledger for profile spend fields. Preserve the current JSON keys, guidance text, rounding and
 system-message placement. Always return a shallow request copy and copy the system message before

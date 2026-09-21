@@ -9,15 +9,15 @@ from test_bundle_population import draft_for_score
 from test_conversational_automatic_bundle import automatic_setup
 from test_conversational_bundle import counts
 
-from famou import candidate_evaluation, cli
-from famou.algorithm import AlgorithmProblemContract
-from famou.bundle_delivery import inspect_bundle_delivery
-from famou.candidate_evaluation import inspect_candidate_evaluation
-from famou.config import Config
-from famou.evolution import CandidateArchive
-from famou.runtime import RuntimeResult
-from famou.source_constraints import validate_source_check_evidence
-from famou.store import Store
+from lunar_evolution import candidate_evaluation, cli
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.bundle_delivery import inspect_bundle_delivery
+from lunar_evolution.candidate_evaluation import inspect_candidate_evaluation
+from lunar_evolution.config import Config
+from lunar_evolution.evolution import CandidateArchive
+from lunar_evolution.runtime import RuntimeResult
+from lunar_evolution.source_constraints import validate_source_check_evidence
+from lunar_evolution.store import Store
 
 
 def _source_aware_setup(tmp_path, monkeypatch):

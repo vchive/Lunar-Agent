@@ -16,7 +16,7 @@
 ## Structure
 
 ```text
-src/famou/cli.py                 # runtime profile options, adapters, fingerprints, detach
+src/lunar_evolution/cli.py                 # runtime profile options, adapters, fingerprints, detach
 tests/test_cli.py                # runtime-backed and provenance acceptance tests
 README.md                        # standalone runtime evolution quickstart
 docs/architecture.md             # runtime adapter topology

@@ -9,19 +9,19 @@ import pytest
 from test_effect_trial import _fixture
 from test_staged_effect_adapter import _config, _profile, _request
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.effect_adapters import EffectAdapterError, run_subject_adapter
-from famou.effect_trial import EffectTrialConfig, EffectTrialRunner
-from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
-from famou.staged_workflow import StagedWorkflowRunner
-from famou.workflow_checkpoint import WorkflowCheckpointError, WorkflowController
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.effect_adapters import EffectAdapterError, run_subject_adapter
+from lunar_evolution.effect_trial import EffectTrialConfig, EffectTrialRunner
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, ToolCall
+from lunar_evolution.staged_workflow import StagedWorkflowRunner
+from lunar_evolution.workflow_checkpoint import WorkflowCheckpointError, WorkflowController
 
 
 @pytest.fixture
 def clock(monkeypatch):
     now = [0.0]
-    monkeypatch.setattr("famou.staged_workflow.time.monotonic", lambda: now[0])
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("lunar_evolution.staged_workflow.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", lambda: now[0])
     return now
 
 
@@ -185,7 +185,7 @@ def run_native_trial(
         native_runners.append(runner)
         return runner
 
-    monkeypatch.setattr("famou.effect_adapters.StagedWorkflowRunner", capture_runner)
+    monkeypatch.setattr("lunar_evolution.effect_adapters.StagedWorkflowRunner", capture_runner)
 
     def execute(command, *, cwd, env, timeout):
         del env, timeout

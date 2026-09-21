@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 from test_workflow_checkpoint import _manifest
 
-from famou.workflow_checkpoint import AggregateUsage, WorkflowCheckpointError, WorkflowController
+from lunar_evolution.workflow_checkpoint import (
+    AggregateUsage,
+    WorkflowCheckpointError,
+    WorkflowController,
+)
 
 
 def _rewrite_master(controller: WorkflowController, **changes: object) -> None:

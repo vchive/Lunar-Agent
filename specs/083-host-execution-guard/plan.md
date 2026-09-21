@@ -40,7 +40,7 @@ runtime/HTTP/outer deadlines remain as implemented; this is host policy and obse
 
 See data-model.md. The native assertion evidence is backend=macos_iokit,
 assertion_type=PreventUserIdleSystemSleep, assertion_id=nonzero uint32, owner_pid=current PID,
-level=255, verified=true. The fixed name is Lunar Agent evaluation; no task text enters OS metadata.
+level=255, verified=true. The fixed name is Lunar Evolution evaluation; no task text enters OS metadata.
 
 The journal is ancillary evidence, never a subject/harness receipt. Context entry is the only
 dispatch gate. Context exit verifies the assertion where possible, attempts release, persists

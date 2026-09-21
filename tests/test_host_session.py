@@ -9,7 +9,7 @@ from contextlib import suppress
 
 import pytest
 
-import famou.host_session as session
+import lunar_evolution.host_session as session
 
 
 class Guard:

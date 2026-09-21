@@ -93,12 +93,12 @@ registration_store 与静态/最终清单核验通过，不声称全量重新加
 
 | 项目 | 本次只读复验结果 | 实现定位 |
 | --- | --- | --- |
-| 登记输入绑定 | 在 manifest 保持不变时，execution 使用 `"9" * 64` 的错误 input digest 被 `execution_input_mismatch` 拒绝；交付继续绑定执行摘要。 | [campaign.py](measurement/campaign.py)，`candidate_execution()`，约 510–533 行 |
-| 有效评分不可缺失 | `valid=True, score=None` 被 `evaluation_score_invalid` 拒绝；有效 score 必须为有限数值，selection 再次检查。 | [campaign.py](measurement/campaign.py)，`independent_scoring()` / `selection()`，约 535–575 行 |
-| 零请求、pending、unknown 请求 | 替换为零请求、pending 或 unknown outcome ledger，primary/joint 均保持 `0/1`。未知 usage 继续为 null；这与未知 request outcome 不同。 | [campaign.py](measurement/campaign.py)，`RequestLedger.audit()` / `public_result()` |
-| 请求重叠与请求超时 | 已有 pending 时再 `begin()` 被拒绝；单请求超时完成被记为 unknown 并关闭，`ledger_finalized=False`。failed/unknown 请求后不能正常申请新请求。 | [campaign.py](measurement/campaign.py)，`RequestLedger.begin()` / `finish()`，约 216–295 行 |
-| 阶段乱序 | 将 holdout 移到 generation 之前，即使重算所有 receipt/hash chain 并更新合成 anchor，仍被 `receipt_order_mismatch` 拒绝。 | [campaign.py](measurement/campaign.py)，`ClosureCampaign.audit()`，约 626–674 行 |
-| Feature 140 原生 generation receipt | 当前 [native_receipts.py](measurement/native_receipts.py) 已按 canonical Store event 核验 event ID、run/task/budget/candidate identity、登记工具上限及 bundle digest；旧瞬态 diagnostic 不再被当作完成证据。 | [test_measurement139_native_receipts.py](../../tests/test_measurement139_native_receipts.py) |
+| 登记输入绑定 | 在 manifest 保持不变时，execution 使用 `"9" * 64` 的错误 input digest 被 `execution_input_mismatch` 拒绝；交付继续绑定执行摘要。 | [campaign.py](../../docs/history-archive.md)，`candidate_execution()`，约 510–533 行 |
+| 有效评分不可缺失 | `valid=True, score=None` 被 `evaluation_score_invalid` 拒绝；有效 score 必须为有限数值，selection 再次检查。 | [campaign.py](../../docs/history-archive.md)，`independent_scoring()` / `selection()`，约 535–575 行 |
+| 零请求、pending、unknown 请求 | 替换为零请求、pending 或 unknown outcome ledger，primary/joint 均保持 `0/1`。未知 usage 继续为 null；这与未知 request outcome 不同。 | [campaign.py](../../docs/history-archive.md)，`RequestLedger.audit()` / `public_result()` |
+| 请求重叠与请求超时 | 已有 pending 时再 `begin()` 被拒绝；单请求超时完成被记为 unknown 并关闭，`ledger_finalized=False`。failed/unknown 请求后不能正常申请新请求。 | [campaign.py](../../docs/history-archive.md)，`RequestLedger.begin()` / `finish()`，约 216–295 行 |
+| 阶段乱序 | 将 holdout 移到 generation 之前，即使重算所有 receipt/hash chain 并更新合成 anchor，仍被 `receipt_order_mismatch` 拒绝。 | [campaign.py](../../docs/history-archive.md)，`ClosureCampaign.audit()`，约 626–674 行 |
+| Feature 140 原生 generation receipt | 当前 [native_receipts.py](../../docs/history-archive.md) 已按 canonical Store event 核验 event ID、run/task/budget/candidate identity、登记工具上限及 bundle digest；旧瞬态 diagnostic 不再被当作完成证据。 | [test_measurement139_native_receipts.py](../../docs/history-archive.md) |
 
 上述修复都不替代真实请求、固定预算和保留产物的绑定。特别是，固定 manifest 下的输入检查已
 成立，但 manifest 自身可被修改的问题仍见 B005。
@@ -107,9 +107,9 @@ registration_store 与静态/最终清单核验通过，不声称全量重新加
 
 ### B001 — [P1] 完整成功仍只需要任意一个已完成普通请求
 
-**定位**：[campaign.py](measurement/campaign.py) 的 `RequestLedger.audit()`（约 397–400 行）
+**定位**：[campaign.py](../../docs/history-archive.md) 的 `RequestLedger.audit()`（约 397–400 行）
 和 `public_result()`（约 750–751 行）；
-[measurement139_support.py](../../tests/measurement139_support.py) 的 `complete_campaign()`。
+[measurement139_support.py](../../docs/history-archive.md) 的 `complete_campaign()`。
 
 **复现**：现有 `complete_campaign()` 只登记一个 `request_kind="ordinary"` 请求，随后关闭
 ledger；没有 preparation 请求、generation 请求或它们的 identity/digest 绑定，却能返回
@@ -126,7 +126,7 @@ run/task/budget 请求放入台账；同一请求重复支持不相容阶段。�
 
 ### B002 — [P1] ledger 的实际策略没有绑定 manifest 的登记预算
 
-**定位**：[campaign.py](measurement/campaign.py) 的 `ClosureCampaign.__post_init__()`
+**定位**：[campaign.py](../../docs/history-archive.md) 的 `ClosureCampaign.__post_init__()`
 （约 447–452 行）、`audit()`（约 671 行）和 `RequestLedger.audit()`。
 
 **复现**：在成功合成 campaign 中替换 ledger 为
@@ -143,7 +143,7 @@ timeout，且构建在扩容条件下自洽的 ledger。即使 ledger 自身 aud
 
 ### B003 — [P1] 总墙钟终止被当作成功关闭，准备总墙钟未被审计
 
-**定位**：[campaign.py](measurement/campaign.py) 的 `RequestLedger.begin()`
+**定位**：[campaign.py](../../docs/history-archive.md) 的 `RequestLedger.begin()`
 （约 228–230 行）、`_close()`（约 212–214 行）及 `audit()` 的 `ledger_finalized`
 （约 397–400 行）。stage receipt 当前没有时间字段。
 
@@ -166,7 +166,7 @@ close。每次请求小于 900 秒且在 total wall 内，因此 audit 接受，
 
 ### B004 — [P1] 重复 close 可以覆盖首次关闭位置
 
-**定位**：[campaign.py](measurement/campaign.py) 的 `RequestLedger.close()`
+**定位**：[campaign.py](../../docs/history-archive.md) 的 `RequestLedger.close()`
 （约 297–300 行）及 `_close()`（约 212–214 行）。
 
 **复现**：正常关闭成功 ledger 后，在内存合成 retained rows 中追加一条 completed post-slot
@@ -182,7 +182,7 @@ row，并同步 known token sum。第一次 audit 因 `closed_at_index` 与 rows
 
 ### B005 — [P1] mutable manifest 可改变输入和分母，public 仍硬编码一槽
 
-**定位**：[campaign.py](measurement/campaign.py) 的 `ClosureCampaign.__post_init__()`
+**定位**：[campaign.py](../../docs/history-archive.md) 的 `ClosureCampaign.__post_init__()`
 （约 447–452 行）、`audit()`（约 673 行）和 `public_result()`（约 750、759–760 行）。
 
 **复现**：构建 campaign 后修改 `c.manifest["input_sha256"] = "9" * 64` 和
@@ -199,7 +199,7 @@ root 或 budget；调用 record、audit 和 public projection 均不能让修改
 
 ### B006 — [P1] unknown holdout 仍可获得 joint success
 
-**定位**：[campaign.py](measurement/campaign.py) 的 `public_result()`（约 754–755 行）。
+**定位**：[campaign.py](../../docs/history-archive.md) 的 `public_result()`（约 754–755 行）。
 
 **复现**：六个主阶段合法成功后调用
 `record("holdouts", outcome="unknown", delivery_receipt_sha256=正确摘要,
@@ -220,7 +220,7 @@ unknown；native/process 非零退出。匹配数量不能覆盖失败或未知�
 检查点仍需在 T008 独立核验具体登记和唯一运行槽。
 
 1. **冻结真正要运行的产品和任务。** 固定包含 Feature 140/141 所需行为的已推送产品版本；
-   当前 [case.py](measurement/case.py) 的离线产品引用 `87d86d9` 和 synthetic task 不可直接
+   当前 [case.py](../../docs/history-archive.md) 的离线产品引用 `87d86d9` 和 synthetic task 不可直接
    代替最终真实 registration。固定原生入口、runtime/provider/model 身份、候选工具上限、
    population/seed、输入、受支持的 evaluator/八项 holdout、request/preparation/total wall
    和 source/artifact 限制。若 evaluator 是自动生成的，登记其生成/冻结协议及身份验收规则，
@@ -233,7 +233,7 @@ unknown；native/process 非零退出。匹配数量不能覆盖失败或未知�
    durable 写入 started/finished/terminal；进程失败、重启或中断后不能 retry/resume/replace
    该槽。所有 provider 请求均由统一 admission 路径计数并绑定身份，记录未知请求而不丢弃。
 4. **完成请求与原生六阶段的双向绑定。** 接入
-   [native_receipts.py](measurement/native_receipts.py)，把原生 Store 的 generation event ID、
+   [native_receipts.py](../../docs/history-archive.md)，把原生 Store 的 generation event ID、
    run/task/budget/candidate/source identity 和每个模型 turn/request digest 对齐；验证实际
    preparation、execution、score、selection、parent delivery 的 native receipts。每个
    必需阶段均有来源，每个请求均归属同一登记/槽，后续产物不能补造缺失前置证据。

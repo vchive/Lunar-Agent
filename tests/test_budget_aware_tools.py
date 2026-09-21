@@ -10,12 +10,12 @@ from threading import Barrier
 
 import pytest
 
-from famou.agent_loop import AgentLoopRuntime
-from famou.model_profile import UsageLedger
-from famou.profiles import ModelProfile
-from famou.runtime import ModelTurn, RuntimeExecutionError, ToolCall
-from famou.tools import LocalToolRegistry
-from famou.transcript import SessionTranscript
+from lunar_evolution.agent_loop import AgentLoopRuntime
+from lunar_evolution.model_profile import UsageLedger
+from lunar_evolution.profiles import ModelProfile
+from lunar_evolution.runtime import ModelTurn, RuntimeExecutionError, ToolCall
+from lunar_evolution.tools import LocalToolRegistry
+from lunar_evolution.transcript import SessionTranscript
 
 
 class Clock:
@@ -52,7 +52,7 @@ def snapshot(messages):
 
 def test_profile_snapshot_tracks_time_steps_spend_and_does_not_persist(tmp_path, monkeypatch):
     clock = Clock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
     transcript = SessionTranscript(tmp_path / "transcript.jsonl")
     profile = ModelProfile(
         "bounded", "fixture", timeout_seconds=10, max_steps=5, max_total_tokens=50,
@@ -91,7 +91,7 @@ def test_snapshot_has_null_spend_without_ceilings_and_unprofiled_steps_time(
     tmp_path, monkeypatch,
 ):
     clock = Clock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
     tools = LocalToolRegistry(allow_exec=True, command_timeout=3)
     transcript = SessionTranscript(tmp_path / "transcript.jsonl")
     model = Model([
@@ -146,7 +146,7 @@ def test_explicit_ledger_carries_usage_across_staged_invocations(tmp_path):
 
 def test_profile_commands_recompute_deadline_without_mutating_registry(tmp_path, monkeypatch):
     clock = Clock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
     observed = []
 
     def run(command, **kwargs):
@@ -154,7 +154,7 @@ def test_profile_commands_recompute_deadline_without_mutating_registry(tmp_path,
         clock.now += 2
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", run)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", run)
     tools = LocalToolRegistry(allow_exec=True, command_timeout=30)
     calls = tuple(ToolCall(str(i), "run_command", {"command": ["fixture"]}) for i in range(2))
     model = Model([ModelTurn("", calls), ModelTurn("done")], clock)
@@ -170,7 +170,7 @@ def test_profile_commands_recompute_deadline_without_mutating_registry(tmp_path,
 
 def test_expired_profile_does_not_spawn_later_command_or_accept_final(tmp_path, monkeypatch):
     clock = Clock()
-    monkeypatch.setattr("famou.agent_loop.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.agent_loop.time.monotonic", clock.monotonic)
     spawned = []
 
     def run(command, **kwargs):
@@ -178,7 +178,7 @@ def test_expired_profile_does_not_spawn_later_command_or_accept_final(tmp_path, 
         clock.now = 10
         raise subprocess.TimeoutExpired(command, kwargs["timeout"], output=b"saved")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", run)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", run)
     calls = tuple(ToolCall(str(i), "run_command", {"command": ["fixture"]}) for i in range(2))
     tools = LocalToolRegistry(allow_exec=True)
     model = Model([ModelTurn("", calls), ModelTurn("forbidden success")], clock)
@@ -192,14 +192,14 @@ def test_expired_profile_does_not_spawn_later_command_or_accept_final(tmp_path, 
 
 def test_deadline_scope_rejects_expired_and_restores_nested_exception(tmp_path, monkeypatch):
     clock = Clock()
-    monkeypatch.setattr("famou.tools.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("lunar_evolution.tools.time.monotonic", clock.monotonic)
     observed = []
 
     def run(command, **kwargs):
         observed.append(kwargs["timeout"])
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", run)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", run)
     tools = LocalToolRegistry(allow_exec=True, command_timeout=3)
     with tools.execution_deadline(2):
         with pytest.raises(RuntimeError), tools.execution_deadline(5):
@@ -214,13 +214,13 @@ def test_deadline_scope_rejects_expired_and_restores_nested_exception(tmp_path, 
 
 
 def test_deadlines_are_context_local_for_shared_registry(tmp_path, monkeypatch):
-    monkeypatch.setattr("famou.tools.time.monotonic", lambda: 0)
+    monkeypatch.setattr("lunar_evolution.tools.time.monotonic", lambda: 0)
     barrier = Barrier(2)
 
     def run(command, **kwargs):
         return subprocess.CompletedProcess(command, 0, stdout=str(kwargs["timeout"]), stderr="")
 
-    monkeypatch.setattr("famou.tools.subprocess.run", run)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", run)
     tools = LocalToolRegistry(allow_exec=True)
 
     def invoke(limit):
@@ -241,7 +241,7 @@ def test_command_timeout_preserves_available_streams(tmp_path, monkeypatch, stdo
     def run(command, **kwargs):
         raise subprocess.TimeoutExpired(command, kwargs["timeout"], output=stdout, stderr=stderr)
 
-    monkeypatch.setattr("famou.tools.subprocess.run", run)
+    monkeypatch.setattr("lunar_evolution.tools.subprocess.run", run)
     result = LocalToolRegistry(allow_exec=True).execute("run_command", {"command": ["fixture"]}, tmp_path)
     assert not result.success
     assert result.output.startswith("command timed out")

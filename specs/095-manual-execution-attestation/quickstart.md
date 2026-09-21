@@ -16,7 +16,7 @@ text = json.dumps(reviewed_receipt, ensure_ascii=False, sort_keys=True, indent=2
 Then submit it explicitly:
 
 ```sh
-lunar-agent attest-materialization-execution PARENT CHILD \
+lunar-evolution attest-materialization-execution PARENT CHILD \
   --receipt /absolute/path/reviewed-receipt.json --home .lunar --json
 ```
 

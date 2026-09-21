@@ -10,14 +10,14 @@ required by the existing plan command. A task can use the `algorithm_problem` ob
 JSON document:
 
 ```bash
-lunar-agent plan /tmp/lunar-routing-plan.json --runtime mock --home .lunar --json
+lunar-evolution plan /tmp/lunar-routing-plan.json --runtime mock --home .lunar --json
 ```
 
 The result returns a run ID. Inspect the durable projection:
 
 ```bash
-lunar-agent status <run-id> --home .lunar --json
-lunar-agent plan <run-id> --home .lunar --json
+lunar-evolution status <run-id> --home .lunar --json
+lunar-evolution plan <run-id> --home .lunar --json
 ```
 
 The current plan includes the canonical `algorithm_problem` object. Its run workspace contains:
@@ -44,11 +44,11 @@ reuse the same SQLite ledger, plan revision, workspace, and manifest.
 
 ```bash
 # Child-process JSON invocation
-printf '%s' 'solve this routing problem' | lunar-agent run - --runtime mock --json --home .lunar
+printf '%s' 'solve this routing problem' | lunar-evolution run - --runtime mock --json --home .lunar
 
 # Detached/resumed invocation
-lunar-agent run "search for a feasible schedule" --runtime mock --detach --json --home .lunar
-lunar-agent resume <run-id> --runtime mock --json --home .lunar
+lunar-evolution run "search for a feasible schedule" --runtime mock --detach --json --home .lunar
+lunar-evolution resume <run-id> --runtime mock --json --home .lunar
 ```
 
 ## 2. Validate rejection paths

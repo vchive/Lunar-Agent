@@ -7,7 +7,7 @@
 
 ## Context and scope
 
-Lunar-Agent persists an evolution contract and strategy state, but loop/population state currently
+Lunar Evolution persists an evolution contract and strategy state, but loop/population state currently
 does not identify the generator/evaluator invocation that produced its archive. A resumed process
 can therefore be pointed at a different executable, role, or capability set while appearing to be
 the same run. This feature records credential-safe fingerprints for the explicit generator and

@@ -5,7 +5,7 @@ returns candidate source as plain text or `{\"source\": \"...\"}` JSON. An indep
 command is still required:
 
 ```bash
-lunar-agent evolve contract.json --strategy loop \
+lunar-evolution evolve contract.json --strategy loop \
   --agent-command "/absolute/path/to/agent-wrapper --json" \
   --agent-role solver --agent-capability read_files \
   --evaluator-command "/absolute/path/to/evaluator-wrapper" \

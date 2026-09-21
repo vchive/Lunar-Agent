@@ -17,7 +17,7 @@ import test_http_transport_tls as tls_fixtures
 from test_http_transport_deadline import clear_proxy_environment, local_http
 from test_model_failure_evidence import SECRET
 
-from famou import http_transport as transport
+from lunar_evolution import http_transport as transport
 
 STALL_TIMEOUT = 0.6
 local_certificate = tls_fixtures.local_certificate

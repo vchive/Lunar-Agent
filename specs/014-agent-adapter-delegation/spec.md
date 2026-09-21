@@ -3,13 +3,13 @@
 **Feature Branch**: `014-agent-adapter-delegation`
 **Created**: 2026-09-02
 **Status**: Implemented
-**Input**: Give Lunar-Agent a runtime-neutral Agent Adapter and Role Registry so Hermes, OpenCode,
-Codex wrappers, OpenClaw, and local commands can act as explicit sub-agents while Lunar-Agent
+**Input**: Give Lunar Evolution a runtime-neutral Agent Adapter and Role Registry so Hermes, OpenCode,
+Codex wrappers, OpenClaw, and local commands can act as explicit sub-agents while Lunar Evolution
 remains the local control-plane authority.
 
 ## Context and scope
 
-Lunar-Agent already has a generic Runtime boundary and native evolution strategies, but it does not
+Lunar Evolution already has a generic Runtime boundary and native evolution strategies, but it does not
 yet model an external Agent as a first-class role-bearing worker. This feature adds that missing
 seam without making any external Agent, package, service, or global configuration a dependency.
 An adapter is explicitly registered by the caller, selected by role/capability requirements, and
@@ -20,7 +20,7 @@ invoked inside a run-scoped workspace. SQLite and the workspace remain the sourc
 ### User Story 1 - Register and select a local sub-agent (Priority: P1)
 
 As a local owner or parent Agent, I want to register explicit Agent adapters with roles and
-capabilities so that Lunar-Agent can choose a suitable worker without discovering machine-global
+capabilities so that Lunar Evolution can choose a suitable worker without discovering machine-global
 Agent installations.
 
 **Why this priority**: Without a stable adapter/selection contract, Hermes, OpenCode, and other
@@ -39,7 +39,7 @@ unsatisfied request before invoking any worker.
 
 ### User Story 2 - Delegate a durable task to a sub-agent (Priority: P1)
 
-As a local user, I want Lunar-Agent to delegate a task to a selected sub-agent while retaining
+As a local user, I want Lunar Evolution to delegate a task to a selected sub-agent while retaining
 workspace, timeout, cancellation, retry, and artifact authority so a worker cannot silently settle
 the run.
 
@@ -63,7 +63,7 @@ failure/cancellation leaves an auditable terminal state.
 
 As a parent Agent or script, I want to use an explicit OpenCode, OpenClaw, Codex wrapper, or other
 CLI command as a sub-agent through one bounded JSON protocol without installing a specific Agent
-runtime in Lunar-Agent.
+runtime in Lunar Evolution.
 
 **Why this priority**: The project must interoperate with several Agent ecosystems while keeping
 the base installation standalone and local-first.
@@ -83,7 +83,7 @@ and absence of PATH/global discovery.
 ### User Story 4 - Preserve parent-Agent and direct CLI usage (Priority: P2)
 
 As a caller such as Codex, Hermes, or OpenClaw, I want to invoke the same adapter boundary directly
-or through Lunar-Agent's JSON CLI and receive stable role, adapter, status, and artifact metadata.
+or through Lunar Evolution's JSON CLI and receive stable role, adapter, status, and artifact metadata.
 
 **Why this priority**: Interoperability is valuable only if direct and nested invocation produce the
 same durable evidence and machine-readable response.
@@ -176,6 +176,6 @@ their normalized result fields and workspace artifacts.
 - A CLI worker can obey the local JSON stdin/stdout protocol and writes declared artifacts below the
   supplied workspace.
 - The local owner trusts explicitly launched worker processes, while path, output, timeout, and
-  secret boundaries remain enforced by Lunar-Agent.
+  secret boundaries remain enforced by Lunar Evolution.
 - Dynamic remote Agent-to-Agent messaging, billing, queues, and multi-user service concerns remain
   out of scope for this feature.

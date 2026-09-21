@@ -1,8 +1,8 @@
 # Quickstart
 
 ```bash
-famou run "analyze this CSV and write a report" --runtime mock --json --home .lunar
-famou status <run-id> --json --home .lunar
+lunar_evolution run "analyze this CSV and write a report" --runtime mock --json --home .lunar
+lunar_evolution status <run-id> --json --home .lunar
 ```
 
 The status object includes `route` and `budget` metadata. A custom evaluator can still be injected

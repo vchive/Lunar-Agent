@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from famou.candidate_generation_receipt import (
+from lunar_evolution.candidate_generation_receipt import (
     CandidateGenerationReceiptError,
     build_candidate_generation_receipt,
     generation_event_id,
     inspect_candidate_generation_events,
 )
-from famou.store import Store
+from lunar_evolution.store import Store
 
 RUN_ID = "a" * 32
 TASK_ID = "task-generation-001"

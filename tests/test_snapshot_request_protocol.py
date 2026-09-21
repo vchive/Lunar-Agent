@@ -10,24 +10,24 @@ from pathlib import Path
 import pytest
 from test_frozen_evaluator_bundle import BundleRuntime
 
-from famou import candidate_execution_runner as runner
-from famou import evaluator_bundle as bundle
-from famou.algorithm import AlgorithmProblemContract
-from famou.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
-from famou.candidate_evaluation import _request_values, evaluate_candidate_execution
-from famou.candidate_evaluation_spec import (
+from lunar_evolution import candidate_execution_runner as runner
+from lunar_evolution import evaluator_bundle as bundle
+from lunar_evolution.algorithm import AlgorithmProblemContract
+from lunar_evolution.candidate_bundle import CandidateSourceBundle, CandidateSourceFile
+from lunar_evolution.candidate_evaluation import _request_values, evaluate_candidate_execution
+from lunar_evolution.candidate_evaluation_spec import (
     candidate_output_contract_sha256,
     canonical_json,
     parse_candidate_evaluation_spec,
 )
-from famou.candidate_execution import (
+from lunar_evolution.candidate_execution import (
     CandidateExecutionBudget,
     CandidateExecutionInput,
     build_candidate_execution_admission,
 )
-from famou.candidate_execution_evidence import run_candidate_execution_recorded
-from famou.candidate_workspace_plan import build_candidate_workspace_plan
-from famou.evolution import CandidateInputArtifact
+from lunar_evolution.candidate_execution_evidence import run_candidate_execution_recorded
+from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
+from lunar_evolution.evolution import CandidateInputArtifact
 
 REQUEST_HEADER = (
     "Snapshot request shape (illustrative metadata; contract is expanded at runtime):\n"
