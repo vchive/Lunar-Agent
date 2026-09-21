@@ -3046,19 +3046,32 @@ class Store:
         except Exception:  # noqa: BLE001 - unavailable state cannot authorize an evidence downgrade.
             raise ValueError("materialization_execution_ledger_mismatch") from None
 
-    def discard_attempt_outputs(self, run_id: str, task_id: str, attempt_id: str) -> list[str]:
-        """Remove late result/runtime metadata while retaining the prompt and audit event."""
+    def discard_attempt_outputs(
+        self,
+        run_id: str,
+        task_id: str,
+        attempt_id: str,
+        output_artifact_ids: Sequence[str] = (),
+    ) -> list[str]:
+        """Remove late attempt metadata while retaining the prompt and audit event."""
         prefix = f"tasks/{task_id}/{attempt_id}/"
         with self._connect() as connection:
+            output_clause = ""
+            args: list[object] = [run_id, task_id, prefix + "%", "result", "runtime"]
+            if output_artifact_ids:
+                placeholders = ", ".join("?" for _ in output_artifact_ids)
+                output_clause = f" OR (kind = 'output' AND id IN ({placeholders}))"
+                args.extend(output_artifact_ids)
             rows = connection.execute(
-                "SELECT path FROM artifacts WHERE run_id = ? AND task_id = ? AND path LIKE ? "
-                "AND kind IN (?, ?)",
-                (run_id, task_id, prefix + "%", "result", "runtime"),
+                "SELECT path FROM artifacts WHERE run_id = ? AND task_id = ? AND "
+                f"(path LIKE ? AND kind IN (?, ?)){output_clause}",
+                args,
             ).fetchall()
+            delete_args = list(args)
             connection.execute(
-                "DELETE FROM artifacts WHERE run_id = ? AND task_id = ? AND path LIKE ? "
-                "AND kind IN (?, ?)",
-                (run_id, task_id, prefix + "%", "result", "runtime"),
+                "DELETE FROM artifacts WHERE run_id = ? AND task_id = ? AND "
+                f"(path LIKE ? AND kind IN (?, ?)){output_clause}",
+                delete_args,
             )
         return [row["path"] for row in rows]
 
@@ -3357,6 +3370,145 @@ class Store:
                 (status, utc_now(), worker_id, "active"),
             ).rowcount
         return changed == 1
+
+    def complete_worker_binding(
+        self,
+        *,
+        worker_id: str,
+        worker_attempt_id: str,
+        run_id: str,
+        task_id: str,
+        task_attempt_id: str,
+        outcome: str,
+        result_path: str | None,
+        error: str | None,
+        agent_event_type: str,
+        agent_payload: Mapping[str, Any],
+        evaluation_payload: Mapping[str, Any],
+    ) -> bool:
+        """Atomically deliver one finished worker result to its exact active task binding.
+
+        Result files are staged by the controller before this call.  This is the single durable
+        delivery point: cancellation, recovery, or a stale binding makes the transaction a
+        no-op, allowing the caller to discard staged output instead of publishing it late.
+        """
+        transitions = {
+            "succeeded": (TaskStatus.SUCCEEDED.value, "succeeded", "task_succeeded"),
+            "failed": (TaskStatus.FAILED.value, "failed", "task_failed"),
+            "retry": (TaskStatus.READY.value, "failed", "task_retry_scheduled"),
+        }
+        if outcome not in transitions:
+            raise ValueError("invalid worker binding completion outcome")
+        if agent_event_type not in {"agent_finished", "agent_failed"}:
+            raise ValueError("invalid worker binding agent event type")
+        if not all(isinstance(value, str) and value for value in (
+            worker_id, worker_attempt_id, run_id, task_id, task_attempt_id,
+        )):
+            raise ValueError("worker binding completion identities must be non-empty strings")
+        task_state, attempt_state, task_event_type = transitions[outcome]
+        timestamp = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            binding = connection.execute(
+                "SELECT * FROM worker_bindings WHERE worker_id = ?",
+                (worker_id,),
+            ).fetchone()
+            task = connection.execute(
+                "SELECT run_id, state FROM tasks WHERE id = ?", (task_id,),
+            ).fetchone()
+            task_attempt = connection.execute(
+                "SELECT task_id, status FROM attempts WHERE id = ?", (task_attempt_id,),
+            ).fetchone()
+            worker_attempt = connection.execute(
+                "SELECT worker_id, status, service_owner_id FROM worker_attempts WHERE id = ?",
+                (worker_attempt_id,),
+            ).fetchone()
+            worker = connection.execute(
+                "SELECT owner_id, phase FROM workers WHERE id = ?", (worker_id,),
+            ).fetchone()
+            run = connection.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if (
+                binding is None
+                or task is None
+                or task_attempt is None
+                or worker_attempt is None
+                or worker is None
+                or run is None
+                or binding["worker_attempt_id"] != worker_attempt_id
+                or binding["run_id"] != run_id
+                or binding["task_id"] != task_id
+                or binding["task_attempt_id"] != task_attempt_id
+                or binding["status"] != "active"
+                or task["run_id"] != run_id
+                or task["state"] != TaskStatus.RUNNING.value
+                or task_attempt["task_id"] != task_id
+                or task_attempt["status"] != "running"
+                or worker_attempt["worker_id"] != worker_id
+                or worker_attempt["status"] != "finished"
+                or worker_attempt["service_owner_id"] != binding["service_owner_id"]
+                or worker["owner_id"] != run_id
+                or worker["phase"] != WorkerPhase.IDLE.value
+                or run["status"] in {
+                    RunStatus.SUCCEEDED.value,
+                    RunStatus.FAILED.value,
+                    RunStatus.CANCELLED.value,
+                }
+            ):
+                return False
+            updated_task = connection.execute(
+                "UPDATE tasks SET state = ?, result_path = ?, last_error = ?, updated_at = ? "
+                "WHERE id = ? AND state = ?",
+                (task_state, result_path, error, timestamp, task_id, TaskStatus.RUNNING.value),
+            ).rowcount
+            updated_attempt = connection.execute(
+                "UPDATE attempts SET status = ?, finished_at = ?, heartbeat_at = ?, error = ? "
+                "WHERE id = ? AND task_id = ? AND status = ?",
+                (attempt_state, timestamp, timestamp, error, task_attempt_id, task_id, "running"),
+            ).rowcount
+            updated_binding = connection.execute(
+                "UPDATE worker_bindings SET status = ?, updated_at = ? "
+                "WHERE worker_id = ? AND status = ?",
+                ("settled", timestamp, worker_id, "active"),
+            ).rowcount
+            if updated_task != 1 or updated_attempt != 1 or updated_binding != 1:
+                raise RuntimeError("worker binding completion lost its transaction guard")
+            self._append_event(connection, run_id, task_id, agent_event_type, dict(agent_payload))
+            self._append_event(connection, run_id, task_id, "task_evaluated", dict(evaluation_payload))
+            if outcome == "retry":
+                self._append_event(
+                    connection, run_id, task_id, task_event_type,
+                    {"attempt_id": task_attempt_id, "error": error},
+                )
+            else:
+                self._append_event(
+                    connection, run_id, task_id, task_event_type,
+                    {"attempt_id": task_attempt_id, "result_path": result_path, "error": error},
+                )
+            # Keep the one-task foreground delegate linearizable with cancellation: once the
+            # delivery commits the resulting run terminal state is committed in the same lock.
+            rows = connection.execute(
+                "SELECT state, input_question FROM tasks WHERE run_id = ?", (run_id,),
+            ).fetchall()
+            states = {row["state"] for row in rows}
+            if TaskStatus.FAILED.value in states or TaskStatus.BLOCKED.value in states:
+                run_state = RunStatus.FAILED.value
+            elif (states and states.issubset({TaskStatus.SUCCEEDED.value, TaskStatus.SUPERSEDED.value})
+                  and TaskStatus.SUCCEEDED.value in states):
+                run_state = RunStatus.SUCCEEDED.value
+            elif any(row["state"] == TaskStatus.WAITING.value
+                     and _has_input_question(row["input_question"]) for row in rows):
+                run_state = RunStatus.AWAITING_INPUT.value
+            elif TaskStatus.CANCELLED.value in states:
+                run_state = RunStatus.CANCELLED.value
+            else:
+                run_state = RunStatus.RUNNING.value
+            connection.execute(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE id = ? AND status != ?",
+                (run_state, timestamp, run_id, RunStatus.CANCELLED.value),
+            )
+            if run_state in {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value}:
+                self._append_event(connection, run_id, None, f"run_{run_state}", {})
+        return True
 
     def persist_worker_result(
         self,
@@ -3846,6 +3998,15 @@ class Store:
                     "controller restarted before worker completed", timestamp, worker_id, owner_id,
                     WorkerPhase.RUNNING.value,
                 ),
+            )
+            # A delegated task binding is part of this exact worker attempt's durable
+            # ownership record.  Recover it in the same transaction so callers never
+            # observe a lost worker paired with a still-active binding.
+            connection.execute(
+                "UPDATE worker_bindings SET status = ?, updated_at = ? "
+                "WHERE worker_id = ? AND worker_attempt_id = ? AND service_owner_id = ? "
+                "AND status = ?",
+                ("lost", timestamp, worker_id, attempt_id, service_owner_id, "active"),
             )
             self._append_worker_event(
                 connection, worker_id, "worker_lost", {"outcome": "lost", "reason": "restart"}, attempt_id,

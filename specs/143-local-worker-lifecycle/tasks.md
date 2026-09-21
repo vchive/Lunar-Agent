@@ -4,7 +4,8 @@ The initial 2026-09-20 implementation history is preserved in [validation.md](va
 The 2026-09-21 audit reopened T006 and T007 after three local counterexamples. Their repairs
 and T011–T016 are now complete: final shared 260 passed; complete current regression 8708 passed,
 1 skipped, 24 deselected; frozen123 24 passed. T008/T010 retain the original delivery history.
-T009 remains deferred and is not completed by these local API checks.
+The original local API checkpoint below predates the T009 consumer migration; it did not complete
+the CLI integration.
 
 - [x] T001 Freeze the worker record, ownership, phase/outcome, stop-reason, depth, waiter, and
       bounded result contracts.
@@ -16,8 +17,9 @@ T009 remains deferred and is not completed by these local API checks.
       with real local process fixtures, after T011, T013, and T014.
 - [x] T007 Complete owner-scoped restart reconciliation and `lost` acceptance after T012.
 - [x] T008 Add initial focused worker lifecycle fixtures and run shared regressions/inventory checks.
-- [ ] T009 Migrate one explicit delegation consumer only after T006, T007, and T011–T015 pass.
-      The CLI and AgentLoop currently do not consume this worker API.
+- [x] T009 Migrate one explicit delegation consumer after T006, T007, and T011–T015 passed.
+      The bounded scope is one foreground single-task `delegate` path; detached delegation,
+      AgentLoop, automatic solve and recursive workers remain unchanged.
 - [x] T010 Review, update HANDOFF, commit, and push the initial implementation.
 
 ## Reopened acceptance completed, 2026-09-21
@@ -41,5 +43,22 @@ T009 remains deferred and is not completed by these local API checks.
       and relevant shared regressions, static checks, and historical inventory checks. Record
       actual results and any migration exercised without claiming a provider end-to-end pass.
 - [x] T016 Review and document the completed hardening, update HANDOFF, and commit/push only the
-      verified changes. Keep T009 deferred until its own consumer integration is implemented and
-      validated; do not mark it complete through API tests alone.
+      verified changes. The later T017–T022 acceptance completes T009 through the CLI consumer
+      rather than API tests alone.
+
+## T009 bounded consumer tasks
+
+- [x] T017 Add a versioned durable worker binding for one run/task/task-attempt and require the
+      binding to commit before releasing the worker executor; preserve explicit crash recovery.
+- [x] T018 Construct the worker service with the selected delegation registry and persist a bounded
+      result envelope containing AgentResult identity, status/error, metadata, text and artifacts.
+- [x] T019 Route foreground `delegate` through claim → bind → start → wait, with an independent
+      observation timeout; keep ordinary `run_agent`, detached delegation and AgentLoop unchanged.
+- [x] T020 Materialize and verify worker result artifacts in the bound task-attempt workspace,
+      then reuse existing evaluation/settlement. Reject traversal, symlink escape, missing or
+      tampered artifacts and late results without overwriting terminal state.
+- [x] T021 Wire exact-bound cancellation, budget stop and owner-scoped explicit recovery; add
+      provider-free command fixtures for success/failure, cancellation, timeout, crash windows,
+      registry isolation and idempotent result delivery.
+- [x] T022 Run focused T009, shared worker/controller/CLI regressions, static checks, SDD/link
+      checks and retained-evidence inventory; only then mark T009 complete and push.

@@ -141,6 +141,14 @@ class _AutomaticCancelDecision:
     verified: bool = False
 
 
+class WorkerObservationTimeout(AgentInvocationError):
+    """A foreground caller stopped observing a still-active bound worker."""
+
+    def __init__(self, worker_id: str) -> None:
+        super().__init__("worker wait timeout; execution remains running")
+        self.worker_id = worker_id
+
+
 class LocalController:
     _RETRY_FEEDBACK_RULES = frozenset(
         {
@@ -160,6 +168,7 @@ class LocalController:
     _MAX_RETRY_FEEDBACK_VALUES = 16
     _MAX_RETRY_FEEDBACK_BYTES = 8_000
     _MAX_MATERIALIZATION_RESULT_BYTES = 64 * 1024
+    _MAX_WORKER_MATERIALIZED_ARTIFACT_BYTES = 8 * 1024 * 1024
     _MATERIALIZATION_CANDIDATE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
     def __init__(
@@ -188,7 +197,10 @@ class LocalController:
         self.runtime = runtime
         self.runtime_factory = runtime_factory
         self.max_workers = max_workers
-        self._active_lock = threading.Lock()
+        # Result delivery and parent cancellation share this lock.  This gives the controller a
+        # single winner at the task boundary: cancellation either happens before any handoff
+        # artifact is published, or after the task has settled.
+        self._active_lock = threading.RLock()
         self._active_runtimes: dict[str, Runtime] = {}
         self._active_agents: dict[str, AgentAdapter] = {}
         self.evaluator = evaluator
@@ -3693,7 +3705,7 @@ class LocalController:
                 error = result.error or f"agent returned {result.status}"
                 self.store.finish_task(task.id, attempt.id, False, str(result_path.relative_to(run.workspace)), error)
             elif evaluation.passed:
-                self._promote_algorithm_outputs(run, task, task_root)
+                self._promote_algorithm_outputs(run, task, task_root, attempt_id=attempt.id)
                 self.store.finish_task(task.id, attempt.id, True, str(result_path.relative_to(run.workspace)))
             elif self._can_retry(task.attempts + 1):
                 self.store.retry_task(task.id, attempt.id, evaluation.reason)
@@ -3749,6 +3761,269 @@ class LocalController:
                 del cleanup_error
             with self._active_lock:
                 self._active_agents.pop(attempt.id, None)
+
+    def run_worker_agent(
+        self,
+        run_id: str,
+        *,
+        role: str = "solver",
+        prompt: str | None = None,
+        required_capabilities: tuple[str, ...] | list[str] = (),
+        preferred_adapter: str | None = None,
+        task_id: str | None = None,
+        timeout: float | None = None,
+        wait_timeout: float | None = None,
+    ) -> tuple[Run, AgentResult]:
+        """Run one explicitly delegated task through the durable worker control plane."""
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise ValueError(f"unknown run: {run_id}")
+        if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            raise ValueError(f"run is already terminal: {run_id}")
+        self._reconcile_worker_run(run_id)
+        run = self.store.get_run(run_id)
+        assert run is not None
+        started = time.monotonic()
+        budget = run.budget or BudgetSpec()
+        active_bindings = self.store.list_worker_bindings(run_id, status="active")
+        if len(active_bindings) > 1:
+            raise AgentInvocationError("run has more than one active worker binding")
+        existing_binding = active_bindings[0] if active_bindings else None
+        if existing_binding is not None:
+            if task_id is not None and task_id != existing_binding.task_id:
+                raise ValueError("run already has an active worker for a different task")
+            task = self.store.get_task(existing_binding.task_id)
+            attempt = self.store.get_attempt(existing_binding.task_attempt_id)
+            worker = self.store.get_worker(existing_binding.worker_id)
+            if task is None or attempt is None or worker is None or task.run_id != run_id:
+                raise AgentInvocationError("active worker binding is incomplete")
+            if task.state.value != "running" or attempt.task_id != task.id or attempt.status != "running":
+                raise AgentInvocationError("active worker binding is not paired with a running attempt")
+            role = worker.role
+            adapter_name = worker.agent_type
+            adapter = None
+        else:
+            task = self.store.get_task(task_id) if task_id else self.store.next_task(run_id)
+            if task is None or task.run_id != run_id:
+                raise ValueError("run has no ready task to delegate")
+            if task.state.value not in {"ready", "uncertain"}:
+                raise ValueError("task is not ready for delegation")
+            requested = tuple(required_capabilities) or tuple(run.route_required_capabilities)
+            adapter = self.agent_registry.select(role, requested, preferred_adapter)
+            adapter_name = adapter.name
+            effective_prompt = prompt if prompt is not None else self._build_task_prompt(run, task)
+            if not effective_prompt.strip() or "\x00" in effective_prompt:
+                raise ValueError("delegation prompt must be non-empty and NUL-free")
+            if len(effective_prompt.encode("utf-8")) > 64 * 1024:
+                raise ValueError("delegation prompt exceeds 65536 bytes")
+            effective_timeout = self.config.runtime_timeout if timeout is None else timeout
+            if (
+                isinstance(effective_timeout, bool)
+                or not isinstance(effective_timeout, (int, float))
+                or effective_timeout <= 0
+                or effective_timeout > 24 * 60 * 60
+            ):
+                raise ValueError("delegation timeout must be between 0 and 86400 seconds")
+        if wait_timeout is not None and (isinstance(wait_timeout, bool) or not isinstance(wait_timeout, (int, float)) or wait_timeout < 0):
+            raise ValueError("wait timeout must be non-negative")
+        if existing_binding is not None:
+            active_timeout = existing_binding.active_timeout
+        else:
+            self._check_budget(run.id, budget, started, before_claim=True)
+            active_timeout = self._remaining_runtime_timeout(run.id, budget, started, effective_timeout)
+            attempt = self.store.claim_task(task.id, adapter_name)
+            if attempt is None:
+                raise ValueError("task was claimed or cancelled concurrently; retry after inspecting status")
+        if existing_binding is None:
+            worker = None
+        delivery_lock_held = False
+
+        def active_bound_worker_id() -> str | None:
+            """Find a binding created before worker dispatch returned to this caller."""
+            for candidate in self.store.list_worker_bindings(run.id, status="active"):
+                if candidate.task_attempt_id == attempt.id:
+                    return candidate.worker_id
+            return None
+
+        try:
+            def bind(created, worker_attempt):
+                self.store.bind_worker(
+                    worker_id=created.id,
+                    worker_attempt_id=worker_attempt.id,
+                    run_id=run.id,
+                    task_id=task.id,
+                    task_attempt_id=attempt.id,
+                    service_owner_id=worker_attempt.service_owner_id or self.workers.service_owner_id,
+                    active_timeout=active_timeout,
+                )
+                worker_root = self.workers.workspace / "workers" / created.id / worker_attempt.id
+                self._materialize_task_input_data(run, worker_root)
+
+            if existing_binding is None:
+                worker = self.workers.dispatch(
+                    run.id,
+                    role=role,
+                    prompt=effective_prompt,
+                    description=task.title,
+                    required_capabilities=requested,
+                    preferred_adapter=preferred_adapter,
+                    timeout=active_timeout,
+                    before_start=bind,
+                )
+                self.store.append_event(
+                    run.id, "agent_selected",
+                    {"attempt_id": attempt.id, "adapter": adapter_name, "role": role,
+                     "required_capabilities": list(requested)}, task_id=task.id,
+                )
+                self.store.append_event(
+                    run.id, "agent_started",
+                    {"attempt_id": attempt.id, "adapter": adapter_name, "role": role}, task_id=task.id,
+                )
+            observed = self.workers.wait(run.id, worker.id, timeout=wait_timeout)
+            if observed.phase.value == "running":
+                raise WorkerObservationTimeout(worker.id)
+            # Cancellation and result materialization share one controller boundary.  The
+            # durable Store guard below remains authoritative across processes; this lock keeps
+            # local cancellation from interleaving with staged output promotion.
+            self._active_lock.acquire()
+            delivery_lock_held = True
+            self.store.append_event(
+                run.id, "worker_finished_observed", {"attempt_id": attempt.id}, task_id=task.id,
+            )
+            binding = existing_binding or self.store.get_worker_binding(worker.id)
+            if binding is None or binding.task_attempt_id != attempt.id:
+                raise AgentInvocationError("worker binding is missing or mismatched")
+            envelope = self.store.get_worker_result(
+                worker.id, binding.worker_attempt_id, owner_id=run.id,
+            )
+            if envelope is None:
+                raise AgentInvocationError("worker result envelope is missing")
+            result = envelope.to_agent_result()
+            if result.adapter_name != adapter_name or result.role != role:
+                raise AgentInvocationError("worker result identity does not match the selected adapter")
+            task_root = Path(run.workspace) / "tasks" / task.id / attempt.id
+            task_root.mkdir(parents=True, exist_ok=True)
+            artifacts = ArtifactStore(run.workspace, self.store, run.id)
+            # Refuse a budget-expired delivery before publishing task artifacts.
+            self._check_budget(run.id, budget, started)
+            result_path = artifacts.write_text(
+                f"tasks/{task.id}/{attempt.id}/result.txt", result.text, task.id, kind="result"
+            )
+            worker_root = self.workers.workspace / "workers" / worker.id / binding.worker_attempt_id
+            manifest = {item["path"]: item for item in envelope.artifact_manifest}
+            for relative_path in result.artifacts:
+                item = manifest.get(relative_path)
+                size = item.get("size") if item else None
+                digest = item.get("sha256") if item else None
+                if (
+                    not isinstance(size, int)
+                    or isinstance(size, bool)
+                    or size < 0
+                    or size > self._MAX_WORKER_MATERIALIZED_ARTIFACT_BYTES
+                    or not isinstance(digest, str)
+                ):
+                    raise ArtifactError(f"worker artifact manifest is invalid: {relative_path}")
+                source = self._confined_regular_file(worker_root, relative_path)
+                if source is None:
+                    raise ArtifactError(f"worker artifact is missing or not regular: {relative_path}")
+                content = source.read_bytes()
+                if len(content) != size or hashlib.sha256(content).hexdigest() != digest:
+                    raise ArtifactError(f"worker artifact integrity check failed: {relative_path}")
+                raw_destination = Path(run.workspace) / "tasks" / task.id / attempt.id / relative_path
+                if self._raw_path_has_symlink(Path(run.workspace).resolve(), raw_destination):
+                    raise ArtifactError(f"worker artifact destination is symlinked: {relative_path}")
+                destination = artifacts.safe_path(f"tasks/{task.id}/{attempt.id}/{relative_path}")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(content)
+                artifacts.record(destination, task.id, kind="runtime")
+            self._record_role_evidence(run, task, task_root)
+            evaluation = self._evaluate(run, task, result.text, task_root)
+            evaluation_payload = {
+                "attempt_id": attempt.id, "passed": evaluation.passed,
+                "reason": evaluation.reason, "evidence": list(evaluation.evidence),
+                "details": evaluation.details,
+            }
+            agent_event_type = "agent_finished" if result.status == "succeeded" else "agent_failed"
+            agent_payload = {
+                "attempt_id": attempt.id, "adapter": result.adapter_name, "role": result.role,
+                "status": result.status, "artifacts": list(result.artifacts),
+                "metadata": result.metadata, "error": result.error,
+            }
+            if result.status != "succeeded":
+                completion = "failed"
+                completion_error = result.error
+            elif evaluation.passed:
+                self._promote_algorithm_outputs(run, task, task_root, attempt_id=attempt.id)
+                completion = "succeeded"
+                completion_error = None
+            elif self._can_retry(task.attempts + 1):
+                completion = "retry"
+                completion_error = evaluation.reason
+            else:
+                completion = "failed"
+                completion_error = evaluation.reason
+            delivered = self.store.complete_worker_binding(
+                worker_id=worker.id,
+                worker_attempt_id=binding.worker_attempt_id,
+                run_id=run.id,
+                task_id=task.id,
+                task_attempt_id=attempt.id,
+                outcome=completion,
+                result_path=str(result_path.relative_to(run.workspace)),
+                error=completion_error,
+                agent_event_type=agent_event_type,
+                agent_payload=agent_payload,
+                evaluation_payload=evaluation_payload,
+            )
+            if not delivered:
+                self._discard_late_result(run.id, task.id, attempt.id)
+                self.store.settle_worker_binding(worker.id, "discarded")
+                raise AgentInvocationError("worker result discarded because its binding is no longer active")
+            settled = self.store.get_run(run.id)
+            if settled is None:
+                raise ValueError(f"run disappeared while delegating: {run.id}")
+            self._active_lock.release()
+            delivery_lock_held = False
+            return settled, result
+        except WorkerObservationTimeout:
+            # Observation timeout is deliberately non-terminal: the binding and the exact
+            # worker remain active for an explicit later wait, cancel, or recovery action.
+            raise
+        except BudgetExceeded:
+            if delivery_lock_held:
+                self._active_lock.release()
+                delivery_lock_held = False
+            worker_id = worker.id if worker is not None else active_bound_worker_id()
+            if worker_id is not None:
+                try:
+                    self.workers.cancel(run.id, worker_id)
+                except (PermissionError, ValueError):
+                    pass
+                self.store.settle_worker_binding(worker_id, "discarded")
+            self._discard_late_result(run.id, task.id, attempt.id)
+            self.store.settle_run(run.id)
+            raise
+        except Exception as exc:
+            if delivery_lock_held:
+                self._active_lock.release()
+                delivery_lock_held = False
+            error = self._sanitize_error(exc)
+            worker_id = worker.id if worker is not None else active_bound_worker_id()
+            if worker_id is not None:
+                try:
+                    self.workers.cancel(run.id, worker_id)
+                except (PermissionError, ValueError):
+                    pass
+                self.store.settle_worker_binding(worker_id, "discarded")
+            if self._task_is_running(task.id):
+                self.store.finish_task(task.id, attempt.id, False, error=error)
+                # Validation failures can occur after result/runtime rows were staged.  Always
+                # remove this attempt's staged evidence, even when the task transition wins.
+                self._discard_late_result(run.id, task.id, attempt.id, error)
+            else:
+                self._discard_late_result(run.id, task.id, attempt.id, error)
+            self.store.settle_run(run.id)
+            raise
 
     def resume(self, run_id: str) -> Run:
         run = self.store.get_run(run_id)
@@ -3930,12 +4205,18 @@ class LocalController:
                     return
                 relative_result = str(result_path.relative_to(Path(run.workspace)))
                 if evaluation.passed:
-                    self._promote_algorithm_outputs(run, task, task_root)
-                    self.store.finish_task(task.id, attempt.id, True, relative_result)
+                    self._promote_algorithm_outputs(run, task, task_root, attempt_id=attempt.id)
+                    finished = self.store.finish_task(task.id, attempt.id, True, relative_result)
+                    if not finished:
+                        self._discard_late_result(run.id, task.id, attempt.id)
                 elif self._can_retry(task.attempts + 1):
                     self.store.retry_task(task.id, attempt.id, evaluation.reason)
                 else:
-                    self.store.finish_task(task.id, attempt.id, False, relative_result, evaluation.reason)
+                    finished = self.store.finish_task(
+                        task.id, attempt.id, False, relative_result, evaluation.reason
+                    )
+                    if not finished:
+                        self._discard_late_result(run.id, task.id, attempt.id, evaluation.reason)
             except BudgetExceeded:
                 raise
             except AgentInputRequired as exc:
@@ -4161,10 +4442,19 @@ class LocalController:
         self._cleanup_process_registrations(runners)
 
     def cancel(self, run_id: str) -> bool:
-        cancelled = self.store.cancel_run(run_id)
-        run = self.store.get_run(run_id)
-        if not cancelled and (run is None or run.status != RunStatus.CANCELLED):
-            return False
+        with self._active_lock:
+            cancelled = self.store.cancel_run(run_id)
+            run = self.store.get_run(run_id)
+            if not cancelled and (run is None or run.status != RunStatus.CANCELLED):
+                return False
+            # A delegated scheduler attempt has one durable reciprocal binding.  Stop only those
+            # workers rather than treating every worker owned by the run as a cancellation target.
+            for binding in self.store.list_worker_bindings(run_id, status="active"):
+                try:
+                    self.workers.cancel(run_id, binding.worker_id)
+                except (PermissionError, ValueError):
+                    continue
+                self.store.settle_worker_binding(binding.worker_id, "discarded")
         # Snapshot after stopping admission. Late registrations independently recheck the stop.
         scope = self._automatic_cancel_targets(run_id)
         if scope is None:
@@ -4286,6 +4576,24 @@ class LocalController:
     def _task_is_running(self, task_id: str) -> bool:
         task = self.store.get_task(task_id)
         return task is not None and task.state.value == "running"
+
+    def _reconcile_worker_run(self, run_id: str) -> None:
+        """Recover abandoned worker ownership and settle its scheduler binding."""
+        self.workers.reconcile(run_id)
+        for binding in self.store.list_worker_bindings(run_id, status="lost"):
+            task = self.store.get_task(binding.task_id)
+            attempt = self.store.get_attempt(binding.task_attempt_id)
+            if task is None or attempt is None or task.state.value != "running":
+                continue
+            error = "worker_lost"
+            if self.store.finish_task(task.id, attempt.id, False, error=error):
+                self.store.append_event(
+                    run_id,
+                    "worker_lost_settled",
+                    {"worker_id": binding.worker_id, "attempt_id": attempt.id, "error": error},
+                    task_id=task.id,
+                )
+        self.store.settle_run(run_id)
 
     @staticmethod
     def _runner_is_stale(run: Run) -> bool:
@@ -4492,7 +4800,7 @@ class LocalController:
         return resolved
 
     def _promote_algorithm_outputs(
-        self, run: Run, task: Any, task_root: Path
+        self, run: Run, task: Any, task_root: Path, *, attempt_id: str | None = None
     ) -> tuple[dict[str, Any], ...]:
         """Copy verified Solver data files to stable run-level output paths and hash them.
 
@@ -4538,10 +4846,13 @@ class LocalController:
                 }
             )
         if promoted:
+            payload: dict[str, Any] = {"outputs": promoted}
+            if attempt_id is not None:
+                payload["attempt_id"] = attempt_id
             self.store.append_event(
                 run.id,
                 "algorithm_outputs_promoted",
-                {"outputs": promoted},
+                payload,
                 task_id=task.id,
             )
         return tuple(promoted)
@@ -4656,7 +4967,22 @@ class LocalController:
     ) -> None:
         run = self.store.get_run(run_id)
         if run is not None:
-            for relative_path in self.store.discard_attempt_outputs(run_id, task_id, attempt_id):
+            output_artifact_ids = []
+            for event in self.store.list_events(run_id):
+                if event.get("type") != "algorithm_outputs_promoted" or event.get("task_id") != task_id:
+                    continue
+                payload = event.get("payload")
+                if not isinstance(payload, dict) or payload.get("attempt_id") != attempt_id:
+                    continue
+                outputs = payload.get("outputs")
+                if isinstance(outputs, list):
+                    output_artifact_ids.extend(
+                        item["artifact_id"] for item in outputs
+                        if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+                    )
+            for relative_path in self.store.discard_attempt_outputs(
+                run_id, task_id, attempt_id, tuple(dict.fromkeys(output_artifact_ids))
+            ):
                 path = (Path(run.workspace) / relative_path).resolve(strict=False)
                 try:
                     path.relative_to(Path(run.workspace).resolve())

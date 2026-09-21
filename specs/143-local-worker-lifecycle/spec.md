@@ -1,8 +1,8 @@
 # Feature Specification: Local multi-agent worker lifecycle
 
 **Created**: 2026-09-20
-**Status**: Local lifecycle hardening validated on 2026-09-21;
-explicit delegation migration remains deferred
+**Status**: Local lifecycle hardening validated on 2026-09-21; T009 explicit delegation
+migration is in progress under the bounded single-task scope below
 **Input**: WebAgent reference-engine-v2.5 multiagent review and Lunar capability comparison
 
 ## Problem
@@ -163,5 +163,34 @@ Queued messages are snapshotted for resume; their existence is checked and only 
 are consumed atomically with the attempt claim. A stale snapshot is rejected before invocation,
 and a message arriving during the new execution remains available for its next continuation.
 
-See [quickstart.md](quickstart.md) for the explicit local API and recovery limits. T009 remains
-required before claiming integration with CLI delegation or model-facing worker tools.
+See [quickstart.md](quickstart.md) for the explicit local API and recovery limits.
+
+## T009 bounded consumer: explicit foreground `delegate`
+
+The first consumer is deliberately one foreground CLI path: `lunar-evolution delegate`. It is
+opt-in and single-task. Ordinary `run_agent`, AgentLoop, automatic multi-file solve, detached
+delegation, recursive worker creation, and model-facing worker tools remain unchanged until a
+later acceptance expands this scope.
+
+Before a worker starts, the controller claims one ready task and durably binds the worker to the
+parent run, task, and task attempt in one binding record. A crash before the binding is committed
+must leave no worker execution; a crash after it is committed leaves an auditable binding for
+explicit reconciliation. The worker receives the task's effective prompt and a bounded active
+execution timeout; `wait` timeout is only a caller observation limit and never settles the worker.
+
+The worker result is converted back to the existing `AgentResult` contract, including adapter and
+role identity, status/error, bounded metadata, and every declared artifact. Artifacts are copied or
+materialized into the bound task-attempt workspace through `ArtifactStore.safe_path`; traversal,
+symlink escape, missing files, digest mismatch, and unsupported result shapes fail closed. The
+existing controller evaluator, task settlement, run settlement, and artifact ledger remain the
+authority: a worker success alone never marks a task successful.
+
+Parent cancellation and budget exhaustion look up the exact binding and cancel only its worker
+tree. A late worker result is recorded as discarded when the task is no longer running and cannot
+replace a terminal task/run. Explicit recovery first proves the service owner is inactive and
+cleanup is complete, then settles the bound attempt as `lost`; recovery is idempotent and never
+starts a new attempt automatically.
+
+T009 acceptance is provider-free. It requires successful and failed local command consumers,
+correct registry construction, durable pre-start binding, complete result/artifact handoff,
+parent cancellation and timeout isolation, late-result rejection, and owner-scoped recovery.

@@ -1,8 +1,10 @@
 import hashlib
 import json
 import shlex
+import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
@@ -417,6 +419,58 @@ def test_cli_delegate_detach_preserves_explicit_worker_request(tmp_path: Path, c
     assert payload["detached"] is True
     assert calls and "--run-id" in calls[0][0]
     assert f"{sys.executable} {worker}" in calls[0][0]
+
+
+def test_cli_delegate_wait_timeout_returns_before_worker_host_finishes(tmp_path: Path) -> None:
+    """A bounded observation must not wait for the executor during interpreter shutdown."""
+    worker = tmp_path / "slow_worker.py"
+    worker.write_text(
+        "import json, pathlib, sys, time\n"
+        "request = json.loads(sys.stdin.read())\n"
+        "time.sleep(0.35)\n"
+        "pathlib.Path(request['workspace'], 'answer.md').write_text('evidence')\n"
+        "print(json.dumps({'status':'succeeded','text':'delegated', 'artifacts':['answer.md']}))\n",
+        encoding="utf-8",
+    )
+    worker.chmod(worker.stat().st_mode | 0o100)
+    home = tmp_path / "home"
+    started = time.monotonic()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "lunar_evolution",
+            "delegate",
+            "slow task",
+            "--agent-command",
+            f"{sys.executable} {worker}",
+            "--wait-timeout",
+            "0.03",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        cwd=Path.cwd(),
+        capture_output=True,
+        text=True,
+        timeout=1.0,
+        check=False,
+    )
+    elapsed = time.monotonic() - started
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "running"
+    assert elapsed < 0.30
+
+    store = Store(Config(home).database)
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        current = store.get_run(payload["run_id"])
+        if current is not None and current.status.value == "succeeded":
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("detached delegate worker did not settle")
 
 
 def test_cli_evolve_population_uses_sqlite_authority_and_resume_metadata(tmp_path: Path, capsys) -> None:

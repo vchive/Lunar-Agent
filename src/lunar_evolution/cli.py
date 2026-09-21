@@ -10,6 +10,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 import unicodedata
 import uuid
 from collections.abc import Callable
@@ -57,7 +58,7 @@ from .automatic_solve_lifecycle import (
 from .benchmark import BenchmarkConfig, BenchmarkRunner
 from .budget import BudgetSpec
 from .config import Config
-from .controller import LocalController
+from .controller import LocalController, WorkerObservationTimeout
 from .conversational import RuntimeContractCompiler, build_algorithm_role_plan
 from .deep_effect_trial import DeepEffectTrialConfig, DeepEffectTrialRunner
 from .effect_adapters import (
@@ -312,6 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     delegate_parser.add_argument("--preferred-agent")
     delegate_parser.add_argument("--timeout", type=float, default=None)
+    delegate_parser.add_argument(
+        "--wait-timeout", type=float, default=None,
+        help="maximum seconds to wait for the worker; does not stop active execution",
+    )
     delegate_parser.add_argument(
         "--detach",
         action="store_true",
@@ -4924,11 +4929,20 @@ def _effect_baseline(args: argparse.Namespace) -> dict[str, object]:
 def _delegate(config: Config, args: argparse.Namespace) -> dict[str, object]:
     """Delegate one task through an explicitly supplied command adapter."""
     command = _parse_command(args.agent_command, "--agent-command")
+    declared_capabilities = set(args.capabilities)
+    initial_adapter = CommandAgentAdapter(
+        command,
+        roles=(args.agent_role,),
+        capabilities=tuple(sorted(declared_capabilities)),
+        name=args.agent_name,
+    )
     # The command adapter is the worker; the mock runtime is retained only to satisfy the
-    # controller's backwards-compatible Runtime constructor and is never invoked here.
+    # controller's backwards-compatible Runtime constructor and is never invoked here. Pass the
+    # selected registry at construction time so WorkerService cannot retain a stale registry.
     controller = LocalController(
         config,
         build_runtime("mock", None, None, None, None),
+        agent_registry=AgentRegistry([initial_adapter]),
     )
     if args.run_id:
         run = controller.store.get_run(args.run_id)
@@ -4944,16 +4958,25 @@ def _delegate(config: Config, args: argparse.Namespace) -> dict[str, object]:
         if args.run_id:
             raise ValueError("--detach is only valid when creating a new delegated run")
         return _detach_delegate(config, args, run)
-    declared_capabilities = set(args.capabilities) | set(run.route_required_capabilities)
-    adapter = CommandAgentAdapter(
-        command,
-        roles=(args.agent_role,),
-        capabilities=tuple(sorted(declared_capabilities)),
-        name=args.agent_name,
-    )
-    controller.agent_registry = AgentRegistry([adapter])
+    # ``WorkerService`` owns a non-daemon executor.  Running a bounded observation in
+    # this process would therefore make the interpreter wait for the worker at shutdown,
+    # defeating ``--wait-timeout``.  Move the durable execution to a child host and only
+    # keep the short observation loop in the caller.
+    if args.wait_timeout is not None:
+        return _delegate_wait_timeout(config, args, run)
+    declared_capabilities.update(run.route_required_capabilities)
+    if declared_capabilities != set(args.capabilities):
+        adapter = CommandAgentAdapter(
+            command,
+            roles=(args.agent_role,),
+            capabilities=tuple(sorted(declared_capabilities)),
+            name=args.agent_name,
+        )
+        registry = AgentRegistry([adapter])
+        controller.agent_registry = registry
+        controller.workers.registry = registry
     try:
-        settled, result = controller.run_agent(
+        settled, result = controller.run_worker_agent(
             run.id,
             role=args.agent_role,
             prompt=args.prompt.strip() if isinstance(args.prompt, str) and args.prompt.strip() else None,
@@ -4961,7 +4984,26 @@ def _delegate(config: Config, args: argparse.Namespace) -> dict[str, object]:
             preferred_adapter=args.preferred_agent,
             task_id=args.task_id,
             timeout=args.timeout,
+            wait_timeout=args.wait_timeout,
         )
+    except WorkerObservationTimeout as exc:
+        current = controller.store.get_run(run.id)
+        if current is None:
+            raise ValueError(f"run disappeared while observing worker: {run.id}") from exc
+        return {
+            "run_id": current.id,
+            "task_id": args.task_id or controller.store.list_tasks(current.id)[0].id,
+            "worker_id": exc.worker_id,
+            "status": "running",
+            "run_status": current.status.value,
+            "adapter": args.agent_name,
+            "role": args.agent_role,
+            "text": None,
+            "artifacts": [],
+            "metadata": {},
+            "error": None,
+            "workspace": str(current.workspace),
+        }
     finally:
         controller.store.clear_runner_process(run.id, os.getpid())
     return {
@@ -4988,6 +5030,10 @@ def _detach_delegate(config: Config, args: argparse.Namespace, run: Run) -> dict
         "-m",
         "lunar_evolution",
         "delegate",
+    ]
+    if isinstance(args.prompt, str) and args.prompt.strip():
+        command.append(args.prompt)
+    command.extend([
         "--run-id",
         run.id,
         "--agent-command",
@@ -4999,13 +5045,19 @@ def _detach_delegate(config: Config, args: argparse.Namespace, run: Run) -> dict
         "--home",
         str(config.home),
         "--json",
-    ]
-    for capability in args.capabilities:
+    ])
+    delegated_capabilities = set(args.capabilities) | set(run.route_required_capabilities)
+    for capability in sorted(delegated_capabilities):
         command.extend(("--capability", capability))
     if args.preferred_agent:
         command.extend(("--preferred-agent", args.preferred_agent))
+    if args.task_id:
+        command.extend(("--task-id", args.task_id))
     if args.timeout is not None:
         command.extend(("--timeout", str(args.timeout)))
+    # The child is the durable worker host.  It must observe to completion so the
+    # binding is eventually settled; a caller's wait budget only applies to the
+    # parent observation window.
     try:
         with log_path.open("a", encoding="utf-8") as log:
             process = subprocess.Popen(
@@ -5038,6 +5090,104 @@ def _detach_delegate(config: Config, args: argparse.Namespace, run: Run) -> dict
         "workspace": str(run.workspace),
         "detached": True,
     }
+
+
+def _delegate_result_projection(
+    store: Store, args: argparse.Namespace, run: Run,
+) -> dict[str, object]:
+    """Project the durable worker result into the delegate CLI response shape."""
+    tasks = store.list_tasks(run.id)
+    task = store.get_task(args.task_id) if args.task_id else None
+    if task is None:
+        bindings = store.list_worker_bindings(run.id)
+        binding = next(
+            (item for item in reversed(bindings) if item.status in {"active", "settled", "discarded", "lost"}),
+            None,
+        )
+        if binding is not None:
+            task = store.get_task(binding.task_id)
+    if task is None and tasks:
+        task = tasks[0]
+    binding = None
+    if task is not None:
+        bindings = store.list_worker_bindings(run.id)
+        binding = next((item for item in reversed(bindings) if item.task_id == task.id), None)
+    envelope = None
+    if binding is not None:
+        envelope = store.get_worker_result(
+            binding.worker_id,
+            binding.worker_attempt_id,
+            owner_id=run.id,
+        )
+    result = envelope.to_agent_result() if envelope is not None else None
+    status = result.status if result is not None else (
+        "succeeded" if task is not None and task.state.value == "succeeded" else "failed"
+        if task is not None and task.state.value == "failed" else run.status.value
+    )
+    return {
+        "run_id": run.id,
+        "task_id": task.id if task is not None else args.task_id,
+        "worker_id": binding.worker_id if binding is not None else None,
+        "status": status,
+        "run_status": run.status.value,
+        "adapter": result.adapter_name if result is not None else args.agent_name,
+        "role": result.role if result is not None else args.agent_role,
+        "text": result.text if result is not None else None,
+        "artifacts": list(result.artifacts) if result is not None else [],
+        "metadata": result.metadata if result is not None else {},
+        "error": (result.error if result is not None else (task.last_error if task is not None else None)),
+        "workspace": str(run.workspace),
+    }
+
+
+def _delegate_wait_timeout(config: Config, args: argparse.Namespace, run: Run) -> dict[str, object]:
+    """Host a durable delegation in a child while observing it for a bounded period."""
+    store = Store(config.database)
+    # A later invocation with ``--run-id`` must attach to the existing durable runner.  The
+    # runner PID is written immediately after spawn; the binding may appear a little later while
+    # the child imports the application and claims its task.
+    active = store.list_worker_bindings(run.id, status="active")
+    runner_pid = run.runner_pid
+    if not active and not (isinstance(runner_pid, int) and runner_pid > 1):
+        _detach_delegate(config, args, run)
+    wait_seconds = max(0.0, float(args.wait_timeout))
+    started = time.monotonic()
+    deadline = started + wait_seconds
+    # Keep startup allowance short so a tiny caller wait budget remains a bounded foreground
+    # observation.  Once a binding is visible, the normal deadline is authoritative.
+    startup_deadline = started + min(0.08, max(0.02, wait_seconds * 2.0))
+    terminal = {"succeeded", "failed", "cancelled"}
+    while True:
+        current = store.get_run(run.id)
+        if current is None:
+            raise ValueError(f"run disappeared while observing worker: {run.id}")
+        if current.status.value in terminal:
+            return _delegate_result_projection(store, args, current)
+        active = store.list_worker_bindings(run.id, status="active")
+        if not active and time.monotonic() < startup_deadline:
+            time.sleep(0.01)
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            bindings = store.list_worker_bindings(run.id)
+            binding = next((item for item in reversed(bindings) if item.status == "active"), None)
+            tasks = store.list_tasks(run.id)
+            task_id = binding.task_id if binding is not None else (args.task_id or (tasks[0].id if tasks else None))
+            return {
+                "run_id": current.id,
+                "task_id": task_id,
+                "worker_id": binding.worker_id if binding is not None else None,
+                "status": "running",
+                "run_status": current.status.value,
+                "adapter": args.agent_name,
+                "role": args.agent_role,
+                "text": None,
+                "artifacts": [],
+                "metadata": {},
+                "error": None,
+                "workspace": str(current.workspace),
+            }
+        time.sleep(min(0.05, remaining))
 
 
 def _detach_evolution(
@@ -5948,7 +6098,7 @@ def main(argv: list[str] | None = None, *, _automatic_owner=None) -> int:
         if args.command == "delegate":
             payload = _delegate(config, args)
             _emit(payload, args.json)
-            return 0 if payload["run_status"] in {"succeeded", "pending"} else 1
+            return 0 if payload["run_status"] in {"succeeded", "pending", "running"} else 1
         if args.command == "resume":
             evolution_request = _latest_evolution_request(Store(config.database), args.run_id)
             _validate_automatic_detach(args, evolution_request)

@@ -1,8 +1,8 @@
 # Implementation Plan: Local multi-agent worker lifecycle
 
 **Date**: 2026-09-20
-**Status**: Local lifecycle hardening validated on 2026-09-21;
-explicit delegation migration remains deferred
+**Status**: Local lifecycle hardening validated on 2026-09-21; T009 bounded foreground
+delegation migration is in progress
 
 ## Phase A: Durable model and pure lifecycle rules
 
@@ -54,8 +54,28 @@ Phase C consumer migration; do not treat the existing APIs as completed integrat
    coverage, and run focused plus relevant shared regressions. Update validation with actual
    results and migration checks before considering T009 complete. Preserve frozen evidence.
 
-T009 remains a later opt-in integration step. The worker hardening and consumer migration do not
-replace or block Feature 142's separate foreground automatic multi-file acceptance.
+## T009 implementation slice: one foreground delegated task
+
+1. Add a versioned worker-binding record linking exactly one run, task, and claimed task attempt
+   to one worker and worker attempt. Commit the binding before the worker executor is released;
+   bind failures leave the task claim recoverable without starting an adapter.
+2. Construct `Controller` with the explicit delegation registry before creating `WorkerService`.
+   Add a provider-neutral worker result envelope carrying the existing `AgentResult` identity,
+   bounded metadata, status/error, and declared artifacts. Persist only bounded JSON and digests.
+3. Let the foreground `delegate` consumer claim a task, create/bind an idle worker, start it, and
+   wait with a separate observation timeout. Materialize result text and declared files into the
+   existing task-attempt artifact workspace through the existing confinement checks.
+4. Reuse controller evaluation and terminal settlement after worker completion. Check the binding
+   and authoritative task state immediately before delivery; late or cancelled results are
+   discarded and cannot settle a task or run. Parent cancellation and explicit recovery resolve
+   the exact binding, cancel/reconcile only that worker, and remain idempotent.
+5. Keep ordinary synchronous `run_agent`, detached delegation, AgentLoop, automatic solve and
+   recursive workers unchanged. Add local command fixtures for success, typed failure, timeout,
+   cancellation, artifact traversal/tampering, binding crash windows, registry isolation and
+   recovery. No provider request or campaign is part of this slice.
+
+The worker hardening and consumer migration do not replace or block Feature 142's separate
+foreground automatic multi-file acceptance.
 
 ## Guardrails
 

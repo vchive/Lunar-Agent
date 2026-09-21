@@ -154,6 +154,17 @@ Python 3.12 另有一项间歇性快照失败。后续已修：CI 创建与身�
 
 ## Feature 143：本地多 Agent worker 生命周期（2026-09-21，本地生命周期验收完成）
 
+T009 foreground consumer is now complete in the same SDD. `lunar-evolution delegate` claims one
+ready task, durably binds it to a worker attempt before execution, persists a bounded result
+envelope, verifies and materializes artifacts, reuses existing evaluation/settlement, and
+serializes cancellation against delivery. CLI `--wait-timeout` uses a durable child host and
+returns `running` without stopping execution; a later invocation can reuse the active binding.
+Bind failures, path traversal, ancestor symlinks, missing/tampered artifacts, late delivery,
+cancel races and owner-scoped lost recovery have provider-free regression coverage. The focused
+T009 suite passed 43 tests; Ruff, compileall and diff checks passed. This does not claim provider,
+campaign, WebAgent or automatic solve end-to-end success. AgentLoop, recursive workers and the
+separate automatic-solve background phase remain out of scope.
+
 首版本地 provider-neutral 控制面提供 `dispatch/send/list/wait/resume/cancel`、独立
 Worker/WorkerAttempt、owner/depth、双维 phase/outcome、结果单出口、大结果 SHA-256 引用、
 级联取消和 `lost` 恢复。首轮 focused 为 8 项，后续基线为 9 项；原 fixture 未覆盖共享 adapter

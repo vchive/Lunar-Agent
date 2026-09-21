@@ -1,10 +1,32 @@
 # Validation: Local multi-agent worker lifecycle
 
-**Current status, 2026-09-21**: Lifecycle hardening passed its final shared and complete two-stage
-local regressions: 260 shared; current 8708 passed, 1 skipped, 24 deselected; frozen123 24 passed.
-The close-before-spawn repair is included. Final Linux CI also passed on Python 3.11, 3.12 and
-3.13 at commit `8e1e089`; details are recorded at the end. Explicit consumer migration (T009)
-remains incomplete. Earlier implementation and counterexample history is retained below.
+**Current status, 2026-09-21**: T009 foreground `delegate` consumer is implemented and its
+provider-free acceptance is complete. Focused worker/controller/CLI regression: **43 passed**;
+Ruff, compileall and `git diff --check` passed. The broader lifecycle hardening remains covered by
+260 shared tests; the last complete two-stage baseline was current 8708 passed, 1 skipped,
+24 deselected, frozen123 24 passed. Final Linux CI also passed on Python 3.11, 3.12 and 3.13 at
+commit `8e1e089`; details are recorded at the end. No provider request, campaign, or WebAgent run
+was made. Earlier implementation and counterexample history is retained below.
+
+## T009 foreground consumer validation
+
+The explicit `lunar-evolution delegate` path now uses the durable worker lifecycle:
+
+- claims one ready/uncertain task and commits a versioned run/task/attempt binding before adapter execution;
+- persists a bounded, hashed `AgentResult` envelope and reconstructs the selected registry in the
+  worker service;
+- supports an independent observation timeout, durable child host for CLI `--wait-timeout`, and
+  active-binding reuse after a timed-out observation;
+- verifies artifact paths, ancestor symlinks, size and SHA-256 before materialization into the
+  task-attempt workspace, then reuses existing evaluation and settlement;
+- serializes delivery with cancellation, rejects late results, cleans staged result/runtime/output
+  evidence, and recovers owner-scoped lost bindings as failed tasks.
+
+Acceptance fixtures cover success, typed failure, bind failure before adapter invocation, dependency
+task rejection, artifact traversal/symlink/tamper rejection, cancellation and delivery races, active
+binding reuse, lost recovery, registry isolation, and detached CLI timeout/settlement. The command
+path remains intentionally bounded to one foreground task; AgentLoop, automatic solve, recursive
+workers and detached delegation remain outside this feature slice.
 
 ## Initial implementation validation, 2026-09-20
 
@@ -66,8 +88,8 @@ the temporary scripts above do not establish their corrected behavior.
 
 Current `send` behavior is queued input for a later explicit `resume`; it does not inject input
 into the running adapter invocation. This is a scope clarification, not a new live-interruption
-requirement. CLI `delegate` still calls the existing synchronous `run_agent` path, and AgentLoop
-has no worker tool integration. T009 remains deferred until T006/T007 and T011–T015 pass.
+requirement. AgentLoop has no worker tool integration; it remains outside the bounded T009 consumer
+scope. The foreground `delegate` migration is validated in the current section above.
 
 ## Required repair validation
 
@@ -178,7 +200,9 @@ worker regression proceeds. That matrix must confirm whether all 96 failures sha
 no complete cross-platform pass is inferred from the local reproduction. The new
 [run 35525074826](https://github.com/vchive/Lunar-Evolution/actions/runs/35525074826) is in progress.
 
-T009 remains deferred: CLI `delegate` and AgentLoop do not yet consume these worker APIs.
+This historical checkpoint predates the completed T009 consumer. AgentLoop and Feature 142 Phase C
+automatic background execution remain separate work; the foreground `delegate` path is validated
+above. Passing local fixtures cannot change Feature 139's primary/joint `0/1`.
 Feature 142 Phase C automatic background execution and new real-model foreground acceptance
 remain separate work. Passing local fixtures cannot change Feature 139's primary/joint `0/1`.
 
