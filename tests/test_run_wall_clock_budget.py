@@ -1,10 +1,11 @@
 import time
 from dataclasses import replace
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 
 import pytest
 
+import lunar_evolution.controller as controller_module
 from lunar_evolution.budget import BudgetExceeded, BudgetSpec
 from lunar_evolution.config import Config
 from lunar_evolution.controller import LocalController
@@ -63,6 +64,30 @@ class BlockingRuntime:
 
     def set_process_observer(self, observer) -> None:
         del observer
+
+
+class _ControllerClock:
+    """Deterministic monotonic clock for budget ordering tests.
+
+    Runtime fixtures still use the real clock for thread synchronization.  Only the
+    controller's elapsed-budget observations are advanced by the test, so CI startup
+    latency cannot decide which terminal state wins.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._now = 100.0
+
+    def monotonic(self) -> float:
+        with self._lock:
+            return self._now
+
+    def advance(self, seconds: float) -> None:
+        with self._lock:
+            self._now += seconds
+
+    def sleep(self, seconds: float) -> None:
+        self.advance(seconds)
 
 
 def _route_with_budget(controller: LocalController, budget: BudgetSpec) -> RouteDecision:
@@ -197,12 +222,18 @@ def test_exhausted_run_records_budget_before_claiming_next_task(tmp_path: Path) 
     assert any(event["payload"]["limit"] == "max_runtime_seconds" for event in events if event["type"] == "budget_exceeded")
 
 
-def test_cancellation_first_discards_result_returned_after_wall_budget(tmp_path: Path) -> None:
+def test_cancellation_first_discards_result_returned_after_wall_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _ControllerClock()
+    monkeypatch.setattr(controller_module, "time", clock)
     runtime = BlockingRuntime()
     controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     run = controller.store.create_run(
         "cancel before the wall budget",
-        route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=0.05)),
+        # Leave enough startup headroom for hosted CI; the test advances past the
+        # deadline only after the runtime has signalled that it started.
+        route=_route_with_budget(controller, BudgetSpec(max_runtime_seconds=1.0)),
     )
     settled: list[object] = []
     worker = Thread(target=lambda: settled.append(controller.resume(run.id)))
@@ -212,7 +243,9 @@ def test_cancellation_first_discards_result_returned_after_wall_budget(tmp_path:
     assert controller.cancel(run.id)
     assert runtime.cancel_calls == 1
     assert runtime.timeouts[0] is not None
-    time.sleep(float(runtime.timeouts[0]) + 0.02)
+    # Cancellation owns the terminal transition even after the controller clock crosses
+    # the wall budget while the runtime is unwinding.
+    clock.advance(0.10)
     runtime.release.set()
     worker.join(timeout=2)
 
@@ -231,6 +264,8 @@ def test_cancellation_first_discards_result_returned_after_wall_budget(tmp_path:
 def test_budget_first_rejects_later_cancellation_without_rewriting_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    clock = _ControllerClock()
+    monkeypatch.setattr(controller_module, "time", clock)
     runtime = BlockingRuntime()
     controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     run = controller.store.create_run(
@@ -256,7 +291,9 @@ def test_budget_first_rejects_later_cancellation_without_rewriting_failure(
     worker.start()
     assert runtime.started.wait(timeout=2)
     assert runtime.timeouts[0] is not None
-    time.sleep(float(runtime.timeouts[0]) + 0.02)
+    # Advance only the controller's wall clock.  This deterministically crosses the
+    # configured budget without waiting for process startup or scheduler timing.
+    clock.advance(0.10)
     runtime.release.set()
     assert budget_recorded.wait(timeout=2)
     assert not controller.cancel(run.id)

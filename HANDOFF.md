@@ -38,14 +38,12 @@ SQLite 自发 checkpoint 被严格快照正确拒绝，但未捕获首次 CI 的
 [quickstart](specs/142-automatic-solve-lifecycle/quickstart.md)。
 
 131/134/139 的 188 个文件、781341 字节和全部 SHA-256 再次复核一致；没有真实 provider
-请求、历史生成代码执行、新 campaign 或 WebAgent 重跑。真实完整交付验收和 143 T009
-实际 worker consumer 接线仍未完成，139 的 preparation 1/1、primary/joint 0/1 不变。
+请求、历史生成代码执行、新 campaign 或 WebAgent 重跑。真实完整交付验收仍未完成；143 T009
+单任务前台 worker consumer 已完成，139 的 preparation 1/1、primary/joint 0/1 不变。
 
-后续 143 T009 建议延续原 SDD，先收敛到显式选择的前台 CLI `delegate` 单任务消费路径。
-实施前需补清 run/task/worker 持久关联、输入与产物交接、活动预算与等待超时、父取消和中断
-恢复。不能只将 `run_agent()` 替换成 `dispatch()`：当前 worker 使用独立 workspace，结果
-仅保存 text/outcome，尚不完整承接 `AgentResult.artifacts/metadata`；registry 也应在 Controller
-构造时传入，避免 WorkerService 保留旧对象。本轮只做了只读盘点，没有实现这条消费路径。
+143 T009 已按原 SDD 完成显式选择的前台 CLI `delegate` 单任务消费路径：run/task/worker
+持久关联、输入与产物交接、独立等待预算、父取消、中断恢复、结果 envelope 和重复观察者
+幂等交付均已接入并验证。AgentLoop、自动 solve 和递归 worker 仍不在此 bounded slice 内。
 
 ## 2026-09-21 项目统一命名（Feature 145）
 
@@ -108,8 +106,8 @@ runtime 仅在本次请求副本中应用；普通调用、自定义约束和持
 最终产品 `c6947fd` 的 [Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35556293182)
 也已确认 Python 3.11、3.12、3.13 完整测试和静态检查全部通过。
 本轮没有 provider 请求或新 campaign，也不修复或重放历史生成代码；131/134/139 冻结结果不变。
-下一步是新固定条件下的真实候选完成与前台完整交付验收。142 Phase C 自动后台入口和
-143 T009 实际 worker consumer 接线仍未完成；不能把这轮离线通过描述成真实成功率提升。
+下一步是新固定条件下的真实候选完成与前台完整交付验收。142 Phase C 自动后台入口已完成，
+143 T009 单任务前台 consumer 也已完成；不能把这轮离线通过描述成真实成功率提升。
 
 ## 2026-09-21 worker 修复与发布验证
 
@@ -121,8 +119,8 @@ runtime 仅在本次请求副本中应用；普通调用、自定义约束和持
 
 Store migration 8 保留旧记录；旧记录缺少 owner 或锁证据时不自动判为中断。新 factory 接口、
 显式本地 API 与恢复限制见 [143 quickstart](specs/143-local-worker-lifecycle/quickstart.md)。
-`send` 仍是排队供显式 resume 消费。T009 实际 delegation consumer 尚未迁移，CLI/AgentLoop
-不会因为本轮本地 API 修复就自动具备多 worker 工具。
+`send` 仍是排队供显式 resume 消费。T009 单任务前台 `delegate` 已迁移；CLI 的 AgentLoop
+和递归 worker 不会因为本轮接线就自动具备多 worker 工具。
 
 最终共享回归 260 项通过；独立审查通过；完整当前回归 8708 passed、1 skipped、24 deselected，
 冻结 Feature 123 阶段 24 passed，双阶段 exit 0。报告目录为
@@ -161,7 +159,7 @@ serializes cancellation against delivery. CLI `--wait-timeout` uses a durable ch
 returns `running` without stopping execution; a later invocation can reuse the active binding.
 Bind failures, path traversal, ancestor symlinks, missing/tampered artifacts, late delivery,
 cancel races and owner-scoped lost recovery have provider-free regression coverage. The focused
-T009 suite passed 43 tests; Ruff, compileall and diff checks passed. This does not claim provider,
+T009 suite passed 44 tests; Ruff, compileall and diff checks passed. This does not claim provider,
 campaign, WebAgent or automatic solve end-to-end success. AgentLoop, recursive workers and the
 separate automatic-solve background phase remain out of scope.
 

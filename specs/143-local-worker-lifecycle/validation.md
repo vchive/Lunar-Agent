@@ -1,7 +1,7 @@
 # Validation: Local multi-agent worker lifecycle
 
 **Current status, 2026-09-21**: T009 foreground `delegate` consumer is implemented and its
-provider-free acceptance is complete. Focused worker/controller/CLI regression: **43 passed**;
+provider-free acceptance is complete. Focused worker/controller/CLI regression: **46 passed**;
 Ruff, compileall and `git diff --check` passed. The broader lifecycle hardening remains covered by
 260 shared tests; the last complete two-stage baseline was current 8708 passed, 1 skipped,
 24 deselected, frozen123 24 passed. Final Linux CI also passed on Python 3.11, 3.12 and 3.13 at
@@ -19,12 +19,14 @@ The explicit `lunar-evolution delegate` path now uses the durable worker lifecyc
   active-binding reuse after a timed-out observation;
 - verifies artifact paths, ancestor symlinks, size and SHA-256 before materialization into the
   task-attempt workspace, then reuses existing evaluation and settlement;
-- serializes delivery with cancellation, rejects late results, cleans staged result/runtime/output
+- serializes delivery with cancellation, reserves a delivery owner lease, refuses to steal a live
+  `delivering` binding, and recovers only stale crashed reservations; rejects late results, cleans staged result/runtime/output
   evidence, and recovers owner-scoped lost bindings as failed tasks.
 
 Acceptance fixtures cover success, typed failure, bind failure before adapter invocation, dependency
-task rejection, artifact traversal/symlink/tamper rejection, cancellation and delivery races, active
-binding reuse, lost recovery, registry isolation, and detached CLI timeout/settlement. The command
+task rejection, artifact traversal/symlink/tamper rejection, cancellation and delivery races,
+duplicate-observer idempotent delivery, active binding reuse, lost recovery, registry isolation,
+and detached CLI timeout/settlement. The command
 path remains intentionally bounded to one foreground task; AgentLoop, automatic solve, recursive
 workers and detached delegation remain outside this feature slice.
 

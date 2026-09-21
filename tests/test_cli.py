@@ -422,48 +422,66 @@ def test_cli_delegate_detach_preserves_explicit_worker_request(tmp_path: Path, c
 
 
 def test_cli_delegate_wait_timeout_returns_before_worker_host_finishes(tmp_path: Path) -> None:
-    """A bounded observation must not wait for the executor during interpreter shutdown."""
+    """A bounded observation returns while the detached worker is still executing."""
+    started_marker = tmp_path / "worker-started"
+    release_marker = tmp_path / "worker-release"
+    finished_marker = tmp_path / "worker-finished"
     worker = tmp_path / "slow_worker.py"
     worker.write_text(
         "import json, pathlib, sys, time\n"
         "request = json.loads(sys.stdin.read())\n"
-        "time.sleep(0.35)\n"
-        "pathlib.Path(request['workspace'], 'answer.md').write_text('evidence')\n"
+        "workspace = pathlib.Path(request['workspace'])\n"
+        f"pathlib.Path({str(started_marker)!r}).write_text('started')\n"
+        "deadline = time.monotonic() + 20\n"
+        f"while not pathlib.Path({str(release_marker)!r}).exists():\n"
+        "    if time.monotonic() >= deadline:\n"
+        "        raise TimeoutError('fixture worker was not released')\n"
+        "    time.sleep(0.02)\n"
+        f"pathlib.Path({str(finished_marker)!r}).write_text('finished')\n"
+        "(workspace / 'answer.md').write_text('evidence')\n"
         "print(json.dumps({'status':'succeeded','text':'delegated', 'artifacts':['answer.md']}))\n",
         encoding="utf-8",
     )
     worker.chmod(worker.stat().st_mode | 0o100)
     home = tmp_path / "home"
-    started = time.monotonic()
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "lunar_evolution",
-            "delegate",
-            "slow task",
-            "--agent-command",
-            f"{sys.executable} {worker}",
-            "--wait-timeout",
-            "0.03",
-            "--json",
-            "--home",
-            str(home),
-        ],
-        cwd=Path.cwd(),
-        capture_output=True,
-        text=True,
-        timeout=1.0,
-        check=False,
-    )
-    elapsed = time.monotonic() - started
-    assert completed.returncode == 0, completed.stderr
-    payload = json.loads(completed.stdout)
-    assert payload["status"] == "running"
-    assert elapsed < 0.30
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "lunar_evolution",
+                "delegate",
+                "slow task",
+                "--agent-command",
+                shlex.join((sys.executable, str(worker))),
+                "--wait-timeout",
+                "0.03",
+                "--json",
+                "--home",
+                str(home),
+            ],
+            cwd=Path.cwd(),
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        payload = json.loads(completed.stdout)
+        assert payload["status"] == "running"
+
+        started_deadline = time.monotonic() + 5.0
+        while time.monotonic() < started_deadline and not started_marker.exists():
+            time.sleep(0.02)
+        assert started_marker.exists(), "detached worker never started"
+        # Only the test can release execution. Foreground exit before that release
+        # proves observation did not wait for the worker or interpreter shutdown.
+        assert not finished_marker.exists()
+    finally:
+        release_marker.write_text("release", encoding="utf-8")
 
     store = Store(Config(home).database)
-    deadline = time.monotonic() + 3.0
+    deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
         current = store.get_run(payload["run_id"])
         if current is not None and current.status.value == "succeeded":
@@ -471,6 +489,7 @@ def test_cli_delegate_wait_timeout_returns_before_worker_host_finishes(tmp_path:
         time.sleep(0.05)
     else:
         pytest.fail("detached delegate worker did not settle")
+    assert finished_marker.exists()
 
 
 def test_cli_evolve_population_uses_sqlite_authority_and_resume_metadata(tmp_path: Path, capsys) -> None:

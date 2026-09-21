@@ -106,7 +106,9 @@ bounded by tool-step, workspace, timeout, and artifact limits.
    `loop` tag remains readable, but new plans and evolution runs reject it. Optional `OutputSpec`
    entries make Solver data files explicit and inject independent `output_valid` checks into
    generated algorithm plans.
-5. A caller may use `delegate`/`LocalController.run_agent` for a role-bearing worker. The explicit
+5. A caller may use `delegate`/`LocalController.run_agent` for a role-bearing worker. The foreground
+   single-task `delegate` path now uses the durable worker lifecycle; AgentLoop worker tools remain
+   outside this bounded consumer slice. The explicit
    `AgentRegistry` selects only registered adapters satisfying every requested capability. A
    `RuntimeAgentAdapter` preserves the existing Runtime contract; `CommandAgentAdapter` invokes an
    absolute executable with one bounded JSON stdin/stdout exchange. No adapter is discovered from

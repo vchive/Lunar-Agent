@@ -1,8 +1,8 @@
 # Implementation Plan: Local multi-agent worker lifecycle
 
 **Date**: 2026-09-20
-**Status**: Local lifecycle hardening validated on 2026-09-21; T009 bounded foreground
-delegation migration is in progress
+**Status**: Local lifecycle hardening and T009 bounded foreground delegation migration validated
+on 2026-09-21
 
 ## Phase A: Durable model and pure lifecycle rules
 

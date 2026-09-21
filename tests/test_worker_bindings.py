@@ -45,6 +45,65 @@ def test_worker_binding_requires_reciprocal_running_records(tmp_path):
     assert store.settle_worker_binding(worker.id, "discarded") is False
 
 
+def test_delivery_reservation_recovers_only_after_stale_timestamp(tmp_path):
+    store, run, task, task_attempt, worker, worker_attempt = _claimed_records(
+        tmp_path, "worker-owner-" + "b" * 32
+    )
+    store.bind_worker(
+        worker_id=worker.id,
+        worker_attempt_id=worker_attempt.id,
+        run_id=run.id,
+        task_id=task.id,
+        task_attempt_id=task_attempt.id,
+        service_owner_id=worker_attempt.service_owner_id,
+        active_timeout=2,
+    )
+    assert store.claim_worker_binding_delivery(
+        worker_id=worker.id,
+        worker_attempt_id=worker_attempt.id,
+        run_id=run.id,
+        task_id=task.id,
+        task_attempt_id=task_attempt.id,
+    )
+    assert store.recover_worker_binding_delivery(
+        worker_id=worker.id, worker_attempt_id=worker_attempt.id, stale_after=60
+    ) is False
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE worker_bindings SET updated_at = datetime('now', '-120 seconds') WHERE worker_id = ?",
+            (worker.id,),
+        )
+    assert store.recover_worker_binding_delivery(
+        worker_id=worker.id, worker_attempt_id=worker_attempt.id, stale_after=60
+    ) is True
+    assert store.get_worker_binding(worker.id).status == "active"
+
+
+def test_live_delivery_owner_lock_cannot_be_stolen(tmp_path):
+    service_owner_id = "worker-owner-" + "c" * 32
+    store, run, task, task_attempt, worker, worker_attempt = _claimed_records(tmp_path, service_owner_id)
+    store.bind_worker(
+        worker_id=worker.id, worker_attempt_id=worker_attempt.id, run_id=run.id,
+        task_id=task.id, task_attempt_id=task_attempt.id, service_owner_id=service_owner_id,
+        active_timeout=2,
+    )
+    assert store.claim_worker_binding_delivery(
+        worker_id=worker.id, worker_attempt_id=worker_attempt.id, run_id=run.id,
+        task_id=task.id, task_attempt_id=task_attempt.id,
+    )
+    owner = "worker-owner-" + __import__("hashlib").sha256(worker.id.encode()).hexdigest()[:32]
+    lock = WorkerOwnerLock.acquire(store.database, owner, create=True)
+    assert lock is not None
+    try:
+        assert WorkerOwnerLock.acquire(store.database, owner) is None
+        assert store.recover_worker_binding_delivery(
+            worker_id=worker.id, worker_attempt_id=worker_attempt.id, stale_after=60,
+        ) is False
+        assert store.get_worker_binding(worker.id).status == "delivering"
+    finally:
+        lock.close()
+
+
 def test_worker_binding_rejects_wrong_owner_or_duplicate_task_attempt(tmp_path):
     store, run, task, task_attempt, worker, worker_attempt = _claimed_records(tmp_path)
     with pytest.raises(ValueError, match="reciprocal"):

@@ -3366,10 +3366,78 @@ class Store:
             raise ValueError("invalid worker binding status")
         with self._connect() as connection:
             changed = connection.execute(
-                "UPDATE worker_bindings SET status = ?, updated_at = ? WHERE worker_id = ? AND status = ?",
-                (status, utc_now(), worker_id, "active"),
+                "UPDATE worker_bindings SET status = ?, updated_at = ? WHERE worker_id = ? AND status IN (?, ?)",
+                (status, utc_now(), worker_id, "active", "delivering"),
             ).rowcount
         return changed == 1
+
+    def claim_worker_binding_delivery(
+        self,
+        *,
+        worker_id: str,
+        worker_attempt_id: str,
+        run_id: str,
+        task_id: str,
+        task_attempt_id: str,
+    ) -> bool:
+        """Reserve one active binding for result materialization.
+
+        A worker may be observed by more than one foreground process after it becomes idle.
+        Reserving the binding before writing task artifacts keeps only one observer responsible
+        for staging and committing the result; later observers can return the committed envelope
+        without creating duplicate ledger rows.
+        """
+        timestamp = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            changed = connection.execute(
+                "UPDATE worker_bindings SET status = ?, updated_at = ? "
+                "WHERE worker_id = ? AND worker_attempt_id = ? AND run_id = ? AND task_id = ? "
+                "AND task_attempt_id = ? AND status = ?",
+                (
+                    "delivering", timestamp, worker_id, worker_attempt_id, run_id, task_id,
+                    task_attempt_id, "active",
+                ),
+            ).rowcount
+        return changed == 1
+
+    def recover_worker_binding_delivery(
+        self, *, worker_id: str, worker_attempt_id: str, stale_after: float,
+    ) -> bool:
+        """Re-open a delivery reservation only after its owner lease is stale.
+
+        The caller must already hold the binding's delivery liveness lock.  The timestamp
+        guard keeps a live observer's ``delivering`` reservation from being stolen merely
+        because a second observer arrived.
+        """
+        if isinstance(stale_after, bool) or not isinstance(stale_after, (int, float)) or stale_after <= 0:
+            raise ValueError("stale_after must be a positive number")
+        now = datetime.now(UTC)
+        cutoff = now.timestamp() - float(stale_after)
+        timestamp = now.isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT updated_at FROM worker_bindings WHERE worker_id = ? AND worker_attempt_id = ? "
+                "AND status = ?",
+                (worker_id, worker_attempt_id, "delivering"),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                parsed = datetime.fromisoformat(row["updated_at"])
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=UTC)
+                updated = parsed.timestamp()
+            except (TypeError, ValueError, OverflowError):
+                return False
+            if updated > cutoff:
+                return False
+            return connection.execute(
+                "UPDATE worker_bindings SET status = ?, updated_at = ? "
+                "WHERE worker_id = ? AND worker_attempt_id = ? AND status = ? AND updated_at = ?",
+                ("active", timestamp, worker_id, worker_attempt_id, "delivering", row["updated_at"]),
+            ).rowcount == 1
 
     def complete_worker_binding(
         self,
@@ -3438,7 +3506,7 @@ class Store:
                 or binding["run_id"] != run_id
                 or binding["task_id"] != task_id
                 or binding["task_attempt_id"] != task_attempt_id
-                or binding["status"] != "active"
+                or binding["status"] not in {"active", "delivering"}
                 or task["run_id"] != run_id
                 or task["state"] != TaskStatus.RUNNING.value
                 or task_attempt["task_id"] != task_id
@@ -3467,8 +3535,8 @@ class Store:
             ).rowcount
             updated_binding = connection.execute(
                 "UPDATE worker_bindings SET status = ?, updated_at = ? "
-                "WHERE worker_id = ? AND status = ?",
-                ("settled", timestamp, worker_id, "active"),
+                "WHERE worker_id = ? AND status IN (?, ?)",
+                ("settled", timestamp, worker_id, "active", "delivering"),
             ).rowcount
             if updated_task != 1 or updated_attempt != 1 or updated_binding != 1:
                 raise RuntimeError("worker binding completion lost its transaction guard")
@@ -4005,8 +4073,8 @@ class Store:
             connection.execute(
                 "UPDATE worker_bindings SET status = ?, updated_at = ? "
                 "WHERE worker_id = ? AND worker_attempt_id = ? AND service_owner_id = ? "
-                "AND status = ?",
-                ("lost", timestamp, worker_id, attempt_id, service_owner_id, "active"),
+                "AND status IN (?, ?)",
+                ("lost", timestamp, worker_id, attempt_id, service_owner_id, "active", "delivering"),
             )
             self._append_worker_event(
                 connection, worker_id, "worker_lost", {"outcome": "lost", "reason": "restart"}, attempt_id,

@@ -125,6 +125,7 @@ from .routing import DomainRouter, RouteDecision
 from .runtime import Runtime, RuntimeExecutionError
 from .seed_handoff import SeedAdmissionError, SeedManifest, admit_seed_manifest
 from .store import Store
+from .worker_ownership import WorkerOwnerLock
 from .workers import WorkerService
 
 if TYPE_CHECKING:
@@ -3785,7 +3786,10 @@ class LocalController:
         assert run is not None
         started = time.monotonic()
         budget = run.budget or BudgetSpec()
-        active_bindings = self.store.list_worker_bindings(run_id, status="active")
+        active_bindings = [
+            item for item in self.store.list_worker_bindings(run_id)
+            if item.status in {"active", "delivering"}
+        ]
         if len(active_bindings) > 1:
             raise AgentInvocationError("run has more than one active worker binding")
         existing_binding = active_bindings[0] if active_bindings else None
@@ -3837,6 +3841,11 @@ class LocalController:
         if existing_binding is None:
             worker = None
         delivery_lock_held = False
+        delivery_owner_lock = None
+
+        def acquire_delivery_owner_lock(worker_id: str):
+            owner = "worker-owner-" + hashlib.sha256(worker_id.encode("utf-8")).hexdigest()[:32]
+            return WorkerOwnerLock.acquire(self.store.database, owner, create=True)
 
         def active_bound_worker_id() -> str | None:
             """Find a binding created before worker dispatch returned to this caller."""
@@ -3890,9 +3899,99 @@ class LocalController:
             self.store.append_event(
                 run.id, "worker_finished_observed", {"attempt_id": attempt.id}, task_id=task.id,
             )
-            binding = existing_binding or self.store.get_worker_binding(worker.id)
+            # Re-read the binding after waiting.  ``existing_binding`` is only the admission
+            # snapshot; another observer/controller may have settled or discarded it while this
+            # caller was waiting.  Using the stale snapshot here would stage duplicate result
+            # and output artifacts before discovering that delivery lost the Store race.
+            binding = self.store.get_worker_binding(worker.id)
             if binding is None or binding.task_attempt_id != attempt.id:
                 raise AgentInvocationError("worker binding is missing or mismatched")
+            if binding.status == "settled":
+                envelope = self.store.get_worker_result(
+                    worker.id, binding.worker_attempt_id, owner_id=run.id,
+                )
+                if envelope is None:
+                    raise AgentInvocationError("settled worker result envelope is missing")
+                settled = self.store.get_run(run.id)
+                if settled is None:
+                    raise ValueError(f"run disappeared while delegating: {run.id}")
+                self._active_lock.release()
+                delivery_lock_held = False
+                return settled, envelope.to_agent_result()
+            if binding.status == "delivering":
+                # Another controller owns result materialization.  The stable delivery lock
+                # distinguishes a live owner from a crashed owner before reopening a stale
+                # reservation; a live reservation is never stolen by a second observer.
+                candidate_lock = acquire_delivery_owner_lock(worker.id)
+                if candidate_lock is not None:
+                    recovered = self.store.recover_worker_binding_delivery(
+                        worker_id=worker.id,
+                        worker_attempt_id=binding.worker_attempt_id,
+                        stale_after=max(1.0, min(binding.active_timeout or 30.0, 30.0)),
+                    )
+                    if recovered:
+                        delivery_owner_lock = candidate_lock
+                        binding = self.store.get_worker_binding(worker.id)
+                        if binding is None or binding.status != "active":
+                            delivery_owner_lock.close()
+                            delivery_owner_lock = None
+                        else:
+                            # Continue through the normal active reservation path.
+                            pass
+                    else:
+                        candidate_lock.close()
+                if binding.status != "active":
+                    # A live owner will publish the result; wait for its durable transition.
+                    # Never stage duplicate result/runtime artifacts here.
+                    deadline = time.monotonic() + max(
+                        1.0, min(binding.active_timeout or 30.0, 30.0)
+                    )
+                    while time.monotonic() < deadline:
+                        time.sleep(0.01)
+                        current = self.store.get_worker_binding(worker.id)
+                        if current is None or current.status == "delivering":
+                            continue
+                        if current.status == "settled":
+                            envelope = self.store.get_worker_result(
+                                worker.id, current.worker_attempt_id, owner_id=run.id,
+                            )
+                            if envelope is None:
+                                raise AgentInvocationError("settled worker result envelope is missing")
+                            settled = self.store.get_run(run.id)
+                            if settled is None:
+                                raise ValueError(f"run disappeared while delegating: {run.id}")
+                            self._active_lock.release()
+                            delivery_lock_held = False
+                            return settled, envelope.to_agent_result()
+                        raise AgentInvocationError("worker binding is no longer active")
+                    raise WorkerObservationTimeout(worker.id)
+            if binding.status != "active":
+                raise AgentInvocationError("worker binding is no longer active")
+            if delivery_owner_lock is None:
+                delivery_owner_lock = acquire_delivery_owner_lock(worker.id)
+                if delivery_owner_lock is None:
+                    raise WorkerObservationTimeout(worker.id)
+            if not self.store.claim_worker_binding_delivery(
+                worker_id=worker.id,
+                worker_attempt_id=binding.worker_attempt_id,
+                run_id=run.id,
+                task_id=task.id,
+                task_attempt_id=attempt.id,
+            ):
+                current = self.store.get_worker_binding(worker.id)
+                if current is not None and current.status == "settled":
+                    envelope = self.store.get_worker_result(
+                        worker.id, current.worker_attempt_id, owner_id=run.id,
+                    )
+                    if envelope is None:
+                        raise AgentInvocationError("settled worker result envelope is missing")
+                    settled = self.store.get_run(run.id)
+                    if settled is None:
+                        raise ValueError(f"run disappeared while delegating: {run.id}")
+                    self._active_lock.release()
+                    delivery_lock_held = False
+                    return settled, envelope.to_agent_result()
+                raise AgentInvocationError("worker binding is no longer active")
             envelope = self.store.get_worker_result(
                 worker.id, binding.worker_attempt_id, owner_id=run.id,
             )
@@ -3936,6 +4035,9 @@ class LocalController:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(content)
                 artifacts.record(destination, task.id, kind="runtime")
+            # Result/runtime artifacts are ledgered before evaluation.  Re-check the run budget
+            # after those writes so an artifact ceiling cannot be bypassed by one worker delivery.
+            self._check_budget(run.id, budget, started)
             self._record_role_evidence(run, task, task_root)
             evaluation = self._evaluate(run, task, result.text, task_root)
             evaluation_payload = {
@@ -3976,6 +4078,24 @@ class LocalController:
                 evaluation_payload=evaluation_payload,
             )
             if not delivered:
+                # A second observer may arrive after another controller has already committed
+                # this exact worker attempt.  Treat that case as idempotent delivery: preserve
+                # the winner's result/runtime/output evidence instead of deleting it as late.
+                current_binding = self.store.get_worker_binding(worker.id)
+                current_attempt = self.store.get_attempt(attempt.id)
+                if (
+                    current_binding is not None
+                    and current_binding.worker_attempt_id == binding.worker_attempt_id
+                    and current_binding.status == "settled"
+                    and current_attempt is not None
+                    and current_attempt.status in {"succeeded", "failed"}
+                ):
+                    settled = self.store.get_run(run.id)
+                    if settled is None:
+                        raise ValueError(f"run disappeared while delegating: {run.id}")
+                    self._active_lock.release()
+                    delivery_lock_held = False
+                    return settled, result
                 self._discard_late_result(run.id, task.id, attempt.id)
                 self.store.settle_worker_binding(worker.id, "discarded")
                 raise AgentInvocationError("worker result discarded because its binding is no longer active")
@@ -4024,6 +4144,9 @@ class LocalController:
                 self._discard_late_result(run.id, task.id, attempt.id, error)
             self.store.settle_run(run.id)
             raise
+        finally:
+            if delivery_owner_lock is not None:
+                delivery_owner_lock.close()
 
     def resume(self, run_id: str) -> Run:
         run = self.store.get_run(run_id)
@@ -4449,7 +4572,9 @@ class LocalController:
                 return False
             # A delegated scheduler attempt has one durable reciprocal binding.  Stop only those
             # workers rather than treating every worker owned by the run as a cancellation target.
-            for binding in self.store.list_worker_bindings(run_id, status="active"):
+            for binding in self.store.list_worker_bindings(run_id):
+                if binding.status not in {"active", "delivering"}:
+                    continue
                 try:
                     self.workers.cancel(run_id, binding.worker_id)
                 except (PermissionError, ValueError):

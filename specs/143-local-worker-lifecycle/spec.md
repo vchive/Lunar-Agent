@@ -129,14 +129,17 @@ response bodies, or filesystem paths in worker status.
    for it. A late callback from an earlier attempt cannot release a resumed attempt's handle.
 10. Local subprocess fixtures verify that actual PID/PGID observations belong to the right
     attempt, cancellation reaches its owned process group, unrelated processes survive, and
-    cleanup failure remains visible. These checks precede explicit consumer migration (T009).
+    cleanup failure remains visible. The bounded T009 consumer additionally verifies durable
+    delegate binding, result/artifact delivery, cancellation races, and duplicate-observer
+    idempotency.
 
 ## Non-goals
 
 No dynamic role prompt catalog, approval gate, remote cancellation promise, cumulative budget,
 automatic retry, live message interruption, WebAgent effect/parity claim, or real provider campaign
-is included. T009 remains deferred until the reopened lifecycle acceptance passes; its absence
-does not block Feature 142's separate foreground automatic multi-file acceptance.
+is included. AgentLoop worker tools, recursive workers, and automatic solve integration remain
+outside the bounded T009 consumer; their absence does not block Feature 142's separate foreground
+automatic multi-file acceptance.
 
 ## Execution and migration contract
 
@@ -183,7 +186,11 @@ role identity, status/error, bounded metadata, and every declared artifact. Arti
 materialized into the bound task-attempt workspace through `ArtifactStore.safe_path`; traversal,
 symlink escape, missing files, digest mismatch, and unsupported result shapes fail closed. The
 existing controller evaluator, task settlement, run settlement, and artifact ledger remain the
-authority: a worker success alone never marks a task successful.
+authority: a worker success alone never marks a task successful. Result materialization reserves
+the binding as `delivering`. The owner holds a stable per-worker liveness lock through artifact
+staging, evaluation, and commit. A second observer waits while that lock is live; it may reopen
+`delivering` only after the timestamp is stale and the owner lock is available, so a live delivery
+is never reset by a later observer.
 
 Parent cancellation and budget exhaustion look up the exact binding and cancel only its worker
 tree. A late worker result is recorded as discarded when the task is no longer running and cannot

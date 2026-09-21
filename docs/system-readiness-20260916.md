@@ -9,7 +9,9 @@
 完整三阶段回归、报告保存和静态检查全部通过。产品与 tools 字节保持 `ff1edcb`，首次失败保留。
 自动后台发布验收已收尾，精确结果见
 [142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。以下历史提交的计数
-不替代本次验收；真实模型完整交付和 143 T009 consumer 仍是剩余重点。
+不替代本次验收；真实模型完整交付仍是剩余重点。143 T009 的前台 `delegate` consumer
+已实现；`9213f01` 检查点为当前 6703 passed / 1 skipped、历史 2294 passed、注册 24 passed。
+已补齐交付并发审计，重复观察者不会删除先前成功交付的证据；范围仍限定为单任务前台路径。
 
 评估创建于 2026-09-16，2026-09-21 更新补充候选响应可靠性（144）与统一命名（145）。
 当前产品统一使用 Lunar Evolution；包/命令、用户配置、默认 home 与后台入口同步迁移，
@@ -41,13 +43,14 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 
 当前具备可开发和本地使用的实现基础，尚不能宣称“所有功能可用、完整版本已验收”。
 自动多文件的前台与后台链路已通过离线完整回归和 Linux CI，真实模型完整交付仍未成功；
-并发 worker 的实际用户入口还待接通。不能把未接入的可选框架当作所有发布范围的前置条件。
+143 已接通单任务前台 `delegate` consumer，交付并发审计已通过；AgentLoop、自动 solve
+和递归 worker 仍不在该 `bounded slice` 内。不能把未接入的可选框架当作所有发布范围的前置条件。
 
 | 优先级/范围 | 尚未完成 | 完成条件 |
 | --- | --- | --- |
 | P0：前台自动多文件验收 | 当前产品的真实完整交付；新验收只有计划，还没有新登记、执行证据或结果 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：真实候选完成率 | 144 已补明确响应协议、消除通用总结指令冲突并保留细分失败诊断；真实成功率仍未确认 | 在新的固定条件验收中检验；保留严格解析和失败分母，不把离线 fixture 通过当作真实可靠性提升 |
-| P1：包含并发多 Agent 的发布 | 143 T009 consumer 接线；本地生命周期修复已通过完整回归 | 将一个实际 delegation 入口接入已隔离的 worker API，验证用户操作、结果回流、取消和恢复 |
+| P1：更广泛并发多 Agent 的发布 | 143 T009 单任务前台 `delegate` consumer 已接线并通过交付并发审计；AgentLoop、自动 solve、递归 worker 仍在范围外 | 若纳入发布范围，再为这些入口接入同一 worker API，并分别验证用户操作、结果回流、取消和恢复 |
 | 后续能力 | OpenEvolve/Shinka 多文件接入、Shinka 启动调度及真实框架验收 | 外部候选走同一执行/评分/交付链，在新独立登记中验证；不重跑 WebAgent |
 | 后续扩展 | 更复杂输入、跨文件依赖、通用仓库/workflow 与远端运行 | 明确支持范围和代表性验收，不从一个双文件样例外推 |
 
@@ -76,7 +79,10 @@ attempt；登记异常会停止对应执行，清理未确认时保留进程记�
 owner 已中断并完成清理。`send` 仍排队到显式 resume，与启动认领在同一事务消费。
 共享回归 260 项通过；完整当前 8708 passed、1 skipped、24 deselected，冻结 24 passed。
 完整证据见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
-T009 实际用户入口仍待接入，不能把本地 API 验收当作模型多 Agent 产品链已完成。
+T009 的实际用户入口已接入：前台 `delegate` 现在执行 claim → bind → start → wait →
+result envelope → artifact handoff → evaluate → settle。`9213f01` 检查点的实现回归为当前
+6703 passed / 1 skipped、历史 2294 passed、注册 24 passed，另有重复观察者交付回归通过；这仍是
+provider-free 的实现验收，不能把它扩展为真实模型多 Agent 效果已完成。
 
 Feature 144 延续候选生成链路，给多文件请求增加本次调用专用的 JSON 响应协议，明确
 `experiment` 两个数组的形状和可省略性；普通任务、历史会话与外部旧 runtime 保持兼容。
@@ -87,8 +93,9 @@ Feature 144 延续候选生成链路，给多文件请求增加本次调用专�
 最终产品 `c6947fd` 的 Linux/Python 3.11、3.12、3.13 完整 CI 也已通过。
 这些改动不增加真实模型样本，139 的 preparation 1/1、primary/joint 0/1 不变。
 
-当前 CLI `delegate` 仍走同步 `run_agent()`，142 前台自动多文件也不依赖该 WorkerService；
-这些 worker 修复不改变 142 Phase A/B 的验收。142 Phase C 已接通独立后台协调进程；真实前台验收准备和 143 集成可分轨推进，
+当前 CLI `delegate` 已走 durable worker lifecycle；普通任务的 `run_agent()`、142 前台自动多文件仍不依赖该 WorkerService；
+这些 worker 修复不改变 142 Phase A/B 的验收。142 Phase C 已接通独立后台协调进程；真实前台验收准备与 143 consumer
+验收已分轨完成，
 但在新真实验收登记时必须固定产品，不能运行途中换代码。143 T009 不阻塞 142。
 
 本轮包含 worker 产品修复、永久回归与 CI 诊断；没有 provider 请求或新增真实效果结果。
@@ -304,7 +311,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 多文件候选 | command/Agent/native runtime 生成 → bundle → 执行/独立评测 → receipt/archive/population → 父任务交付/terminal resume 已完成 | 普通 intake、完整父代上下文、helper-only 改进、有效性选优、迁移、失败保留、完整交付与不重跑 fixture |
 | 自动 evaluator/profile | 自动 compiler/auditor、输出探针、独立 preparation 请求/墙钟预算与冻结恢复已接通；源码文件数另做确定性检查；其他 source/execution 提前报不支持 | 128及134真实准备通过，各自8/8留出；134完整交付仍为0/1 |
 | 自动 solve 前台生命周期 | 一次活动执行的共享 deadline、durable parent orchestration、统一入口、排他继续、只读状态和实际进程取消/清理已实现 | Feature 142 Phase A/B 定向与最终双阶段离线回归通过；自动 detach 和新的真实完整交付尚未验收 |
-| 显式 worker API | 有独立 worker/attempt、owner 活性、六项操作、进程清理和结果引用；实际 delegation 尚未迁入 | 并发隔离、恢复和排队取消缺陷已补修复，共享回归 260 项通过；T009 尚未验收 |
+| 显式 worker API | 有独立 worker/attempt、owner 活性、六项操作、进程清理和结果引用；前台单任务 `delegate` 已迁入 | `9213f01` 检查点为当前 6703 passed / 1 skipped、历史 2294 passed、注册 24 passed；重复观察者交付回归已通过，AgentLoop/自动 solve/递归 worker 仍在范围外 |
 | OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现 | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证 |
 | ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现 | 本地 fixture；尚无 Shinka launcher/调度实现 |
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |

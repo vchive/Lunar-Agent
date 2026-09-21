@@ -18,8 +18,9 @@ Feature 139 的 preparation `1/1`、primary/joint `0/1` 保持不变。
 [Feature 143](../specs/143-local-worker-lifecycle/spec.md) 已修复审计发现的共享取消、误判中断
 和排队取消缺陷，补上独立 adapter/runtime、精确 attempt 进程登记清理、owner 活性锁与消息
 原子消费。共享回归 260 项通过，最终验证见 [validation](../specs/143-local-worker-lifecycle/validation.md)。
-T009 尚未接入实际 delegation consumer，不能把本地 API 验收等同于用户入口已接通；该接线
-不是 Feature 142 的依赖。
+T009 单任务前台 `delegate` consumer 已接入；`9213f01` 检查点记录当前 6703 passed / 1 skipped、
+历史 2294 passed、注册 24 passed，重复观察者交付审计已通过。AgentLoop 未迁移，且该接线不是
+Feature 142 的依赖。
 
 以下按日期保留实现和测量过程；旧条目中的“下一步”以上述状态和最新 HANDOFF 为准。
 
@@ -48,7 +49,7 @@ run 墙钟传播和取消竞态，以及公开 transport status 和 persisted/ef
 核验仍保持通过；真实槽不重开、不修复、不追加请求。
 Feature 139 的固定测量预算不替代通用产品能力；随后 Feature 142 Phase A/B 已补齐前台
 活动执行预算、父编排、运行中本地取消和清理。Phase C 已接通自动后台执行并通过本机夹具，
-提交及 Linux CI 已收尾；外部 producer 多文件接线、143 T009 consumer 及真实效果验收仍在后续范围。
+提交及 Linux CI 已收尾；外部 producer 多文件接线、AgentLoop/递归 worker 扩展及真实效果验收仍在后续范围。
 
 本文记录 Lunar Evolution 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、远端服务或新的 WebAgent 对比；Feature 139 的

@@ -49,5 +49,7 @@ legacy attempts without an owner, missing lock evidence and uncertain cleanup ar
 Do not delete owner lock files to force recovery. A retained process registration blocks a new
 attempt until cleanup is verified.
 
-This is the typed local API. CLI `delegate` and AgentLoop worker tools are still T009 integration
-work; automatic multi-file background execution remains Feature 142 Phase C.
+This is the typed local API. The foreground CLI `lunar-evolution delegate` now uses the durable
+worker binding and result-delivery path described in the Feature 143 specification. AgentLoop
+worker tools, recursive workers, and automatic solve integration remain outside this bounded
+consumer; automatic multi-file background execution is Feature 142 Phase C.

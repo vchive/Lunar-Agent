@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from threading import Event
+from threading import Barrier, Event, Thread
 
 import pytest
 
 from lunar_evolution.agents import AgentRegistry, AgentResult
 from lunar_evolution.algorithm import OutputSpec
+from lunar_evolution.budget import BudgetExceeded, BudgetSpec
 from lunar_evolution.config import Config
 from lunar_evolution.controller import (
     AgentInvocationError,
@@ -183,6 +185,97 @@ def test_worker_delegate_discards_result_when_cancel_wins_delivery_race(tmp_path
     event_types = [event["type"] for event in controller.store.list_events(run.id)]
     assert "agent_finished" not in event_types
     assert "task_evaluated" not in event_types
+
+
+def test_worker_delegate_duplicate_observer_preserves_first_delivery(tmp_path: Path, monkeypatch):
+    controller = _controller(tmp_path, _ArtifactAdapter())
+    run = controller.create("duplicate observer")
+    original_complete = controller.store.complete_worker_binding
+    calls = 0
+
+    def complete_then_reobserve(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            assert original_complete(**kwargs)
+            # Simulate a second observer seeing the same finished worker after the first commit.
+            return False
+        return original_complete(**kwargs)
+
+    monkeypatch.setattr(controller.store, "complete_worker_binding", complete_then_reobserve)
+    settled, result = controller.run_worker_agent(run.id)
+
+    assert settled.status.value == "succeeded"
+    assert result.text == "completed"
+    artifacts = controller.store.list_artifacts(run.id)
+    assert any(item["kind"] == "result" for item in artifacts)
+    assert any(item["kind"] == "runtime" for item in artifacts)
+    assert controller.store.list_tasks(run.id)[0].state.value == "succeeded"
+
+
+@pytest.mark.parametrize("separate_controller", [False, True])
+def test_worker_delegate_two_observers_write_one_artifact_batch(
+    tmp_path: Path, monkeypatch, separate_controller: bool,
+):
+    _BlockingAdapter.reset()
+    first = _controller(tmp_path, _BlockingAdapter())
+    run = first.create("two observers")
+    with pytest.raises(WorkerObservationTimeout):
+        first.run_worker_agent(run.id, wait_timeout=0.01)
+    second = _controller(tmp_path, _BlockingAdapter()) if separate_controller else first
+    gate = Barrier(2)
+    observers = [first, second]
+    for observer in dict.fromkeys(observers):
+        original_wait = observer.workers.wait
+
+        def wait_for_both(owner_id, worker_id, timeout=None, original_wait=original_wait):
+            result = original_wait(owner_id, worker_id, timeout)
+            gate.wait(timeout=2)
+            return result
+
+        monkeypatch.setattr(observer.workers, "wait", wait_for_both)
+    _BlockingAdapter.released.set()
+    results = []
+    errors: list[Exception] = []
+
+    def invoke(observer):
+        try:
+            results.append(observer.run_worker_agent(run.id))
+        except Exception as exc:  # noqa: BLE001 - retain both concurrent observer failures
+            errors.append(exc)
+
+    threads = [Thread(target=invoke, args=(observer,)) for observer in observers]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=4)
+    assert not any(thread.is_alive() for thread in threads)
+    assert errors == []
+    assert len(results) == 2
+    assert all(settled.status.value == "succeeded" for settled, _ in results)
+    artifacts = first.store.list_artifacts(run.id)
+    assert [item["kind"] for item in artifacts].count("result") == 1
+    assert [item["kind"] for item in artifacts].count("runtime") == 1
+    for item in artifacts:
+        assert (run.workspace / item["path"]).is_file()
+    assert sum(event["type"] == "task_succeeded" for event in first.store.list_events(run.id)) == 1
+    assert not any(event["type"] == "task_result_discarded" for event in first.store.list_events(run.id))
+
+
+def test_worker_delegate_enforces_artifact_budget_after_materialization(tmp_path: Path):
+    controller = _controller(tmp_path, _ArtifactAdapter())
+    route = replace(controller.router.route("artifact result"), budget=BudgetSpec(max_artifact_bytes=1))
+    run = controller.store.create_run("artifact result", route=route)
+
+    with pytest.raises(BudgetExceeded, match="max_artifact_bytes"):
+        controller.run_worker_agent(run.id)
+
+    assert controller.store.get_run(run.id).status.value == "failed"
+    assert controller.store.list_worker_bindings(run.id)[0].status == "discarded"
+    assert not any(item["kind"] in {"result", "runtime"} for item in controller.store.list_artifacts(run.id))
+    events = controller.store.list_events(run.id)
+    assert sum(event["type"] == "budget_exceeded" for event in events) == 1
+    assert not any(event["type"] in {"agent_finished", "task_evaluated"} for event in events)
 
 
 def test_worker_delegate_reuses_active_binding_after_observation_timeout(tmp_path: Path):

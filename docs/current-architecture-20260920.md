@@ -1,11 +1,11 @@
 # Lunar Evolution：当前架构与执行链路
 
-创建日期：2026-09-20；2026-09-21 更新包含 Feature 142 Phase C 与已完成本地验收的 143 修复。
+创建日期：2026-09-20；2026-09-21 更新包含 Feature 142 Phase C 与已完成交付并发审计的 143 修复。
 142 Phase A/B 的已推送历史基线为 `65d9ae2`。Phase C 自动多文件后台入口现已实现，真实
 本机子进程与回环 HTTP 夹具、完整三阶段回归及 `ad89b50` 的 Linux/Python 3.11–3.13 CI
 均已通过，具体检查点见 [142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。
-Feature 143 已补本地 worker 的并发隔离、精确进程清理与 owner 活性恢复；T009 实际 consumer 仍待接入。
-下文分别说明已经实现的路径和仍待验收的边界。
+Feature 143 已补本地 worker 的并发隔离、精确进程清理与 owner 活性恢复；T009 单任务前台
+`delegate` consumer 已接入，交付并发审计已通过。下文分别说明已经实现的路径和仍待验收的边界。
 
 ## 1. 系统定位
 
@@ -70,15 +70,15 @@ outcome 分开记录；直接 owner 才能操作，父取消会传播到已验�
 owner 中断且完成进程清理的未完成 attempt 标记为 `lost`，缺少 owner/锁证据的记录保持原状。
 结果默认内联截断，大结果写入 worker attempt 目录并由带 SHA-256 的引用读取。
 
-这条链路尚未接入 CLI `delegate` 或 AgentLoop 的工具。2026-09-21 审计发现的共享取消、
+这条链路现已接入 CLI `delegate` 的单任务前台路径，尚未迁移 AgentLoop 工具。2026-09-21 审计发现的共享取消、
 误判中断和排队取消缺陷已补修复：每个 attempt 由 factory 创建独立 adapter/runtime，
 执行前核对 Store 状态，回调与关闭绑定精确 attempt，实际 PID/PGID 由 observer 登记和清理。
 Store migration 8 增加可空 service owner 和独立进程表；服务持有本地锁证明活性，打开第二个
 服务不触发全库恢复。`send` 消息到显式 resume 时与启动认领原子消费，后来消息留到下次。
 修复共享回归 260 项通过，完整验证见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
 普通 DAG 的独立 runtime 并发与这里的 worker session 仍是不同路径。
-这条链路复用现有 AgentAdapter，但尚未迁移普通 delegation，也没有改变 task DAG 或自动多文件
-入口的生命周期。
+这条链路复用现有 AgentAdapter；仍没有迁移 AgentLoop、自动 solve 或递归 worker，也没有改变
+task DAG 或自动多文件入口的生命周期；重复观察者交付不会删除已提交证据。
 
 ## 3. 普通任务怎样执行
 
@@ -209,7 +209,8 @@ Phase B 已完成父 run 到已验证 child 的停止传播、candidate/evaluato
 这些结论来自本地 fixture 和进程组回归，不代表远端 provider 已停止计算。Phase C 已通过
 本机真实子进程验收，覆盖前后台交付一致性、等待输入退出、取消独立候选进程组、异常退出恢复
 和并发续跑争用；完整回归也已通过，精确结果见 142 validation。Feature 143 的 worker 隔离与恢复缺陷已修复，其
-T009 consumer 尚未接入；它没有成为这条流程的后台执行器，142 不依赖该迁移。
+T009 单任务前台 `delegate` consumer 已接入；它没有成为这条流程的后台执行器，142 不依赖该迁移，
+交付并发审计已通过。
 
 Feature 139 的 50 分钟属于历史真实验收的外层监控预算，该槽已结束。新产品可以明确设置
 `--solve-wall-timeout 3000`。新的真实验收仍使用新登记和目录，区分产品活动预算与验收监督预算。
@@ -241,7 +242,7 @@ Phase C 的本机完整三阶段回归、独立复核和 `ad89b50` 的 Linux 三
 建议按以下顺序继续，不把大重构作为可用性的前置条件：
 
 1. 补齐新的 50 分钟真实验收实现、登记与启动前检查；将 144 已离线验证的候选响应协议纳入固定产品，不能运行中修代码。
-2. 在 143 已修复的独立 worker 生命周期上迁移一个实际 delegation consumer；T009 不阻塞 142 生命周期实现和前台验收。
+2. 保持 T009 单任务前台 `delegate` 的实现回归；若扩大范围，再迁移 AgentLoop/自动 solve/递归 worker。该扩展不阻塞 142 生命周期实现和前台验收。
 3. 后续将 OpenEvolve/Shinka 的多文件候选接到现有流水线，逐个做有界真实验收，再扩展复杂输入、跨文件依赖、执行方式和通用仓库任务；用代表性任务验证能力。
 
 ## 9. 阅读源码的入口
