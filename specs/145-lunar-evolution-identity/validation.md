@@ -31,6 +31,8 @@ preserved outside the checkout at:
 Read-only rechecks of the relocated Feature 131/134/139 inventories matched all **21 / 97 / 70
 files**, **155485 / 327394 / 298462 bytes**, and every original size and SHA-256, with no missing
 or extra files. The report is `validation-145/archive-integrity.json` below that external archive.
+After all local regression phases, `validation-145/archive-integrity-final.json` independently
+rechecked the same 188 files / 781341 bytes and again found no difference, omission or extra file.
 This proves preservation of file contents, not inode preservation or resumability. Ordinary CLI
 use of `--home` may initialize selected state; it is not a read-only archive inspection method.
 
@@ -47,8 +49,34 @@ use of `--home` may initialize selected state; it is not a read-only archive ins
 - Focused CLI/effect suites: **146 passed**.
 - Independent reviews covered namespace/API migration, clean packaging, existing-state limits,
   archived test isolation, exact test denominators, and pre/post historical integrity checks.
-- Full three-phase regression and final static/name/link/SDD results are being recorded below
-  after the active run finishes. No passing full-run result is claimed yet.
+- Ruff, compileall, `uv lock --check --offline`, Specify prerequisites, whitespace checks, and
+  independent local link/renamed-target checks pass. A case-insensitive scan of all **1137 tracked
+  files** and paths at the final product commit finds no predecessor identity. Generated local
+  paths were also checked, while Git history is deliberately retained.
+
+### Final product checkpoint
+
+Product commit **`3307fcce0f413304ae63462b90fc0c4060dea146`** was pushed to `origin/main`.
+The final current suite was collected and executed from that committed product, after both
+cleanup repairs: **6585 passed, 1 existing skipped, 0 failed** in **512.61s**, exit **0**.
+The independent wheel installation and ten new cleanup cases are included in that count.
+Reports are `release-current.xml` and `release-current.log` in the external validation directory.
+
+| Final local phase | Exact revision | Result |
+| --- | --- | --- |
+| Current product | `3307fcc` | 6585 passed, 1 existing skipped |
+| Archived historical | `c6947fd` | 2294 passed, 24 deferred, 0 skipped |
+| Original registration | `5560eb9` | 24 passed, 0 skipped |
+
+After the initial findings below, the current and archived phases were rechecked independently;
+the initial combined runner's failure record remains intact. These phase results are not a claim
+that the first combined run returned success. The final commit's complete
+[Linux matrix](https://github.com/vchive/Lunar-Evolution/actions/runs/35559887780) passed on
+**Python 3.11, 3.12 and 3.13**, confirmed at **2026-09-21 04:30:58 UTC**. Every version passed
+installation, the full three-phase runner, failure annotations, report preservation and Ruff.
+This confirms the final product commit through the complete runner as well as the separately
+retained local phase results. Public CI metadata is preserved in `linux-ci-final.json` below the
+external validation directory. The closeout commit updates documentation only.
 
 ### Initial full-run findings
 

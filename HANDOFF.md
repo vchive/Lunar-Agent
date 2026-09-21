@@ -36,7 +36,14 @@ Git blob 也全部一致。搬移不证明原绝对路径或 inode 绑定可续�
 工作状态，不应拿唯一归档副本当可写工作区。
 
 全新 wheel 在仓库外环境的 5 项安装验收已通过，包含真实 detached mock 子进程；runner
-34 项、CLI/effect 146 项通过。完整回归及最终静态检查正在收尾，精确结果记录在
+34 项、CLI/effect 146 项通过。最终产品 `3307fcc` 已推送，本机当前套件 6585 passed、
+1 existing skipped；历史 2294 passed，原固定注册 24 passed。回归中发现并补修了进程清理
+的两处竞态，235 项相关回归和 100 次真实超时、100 次真实取消均通过。当前 1137 个受控文件
+及路径的旧名称匹配为零，链接、静态检查和 SDD 检查通过。
+原首跑失败与历史观察器的偶发诊断缺失均如实保留，历史源码不改写。
+最终 [Linux CI](https://github.com/vchive/Lunar-Evolution/actions/runs/35559887780) 已于
+2026-09-21 04:30:58 UTC 确认 Python 3.11、3.12、3.13 的安装、完整三阶段回归、报告保存
+和静态检查全部成功。精确结果记录在
 [145 validation](specs/145-lunar-evolution-identity/validation.md)。本轮无 provider 请求或新
 campaign，139 仍为 preparation 1/1、primary/joint 0/1；142 Phase C、143 T009 和真实完整
 交付验收仍是后续开发工作。

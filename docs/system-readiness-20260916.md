@@ -4,7 +4,10 @@
 当前产品统一使用 Lunar Evolution；包/命令、用户配置、默认 home 与后台入口同步迁移，
 无旧身份兼容别名。历史封存资料和原测量测试改由[固定归档索引](history-archive.md)定位，
 原始 hash、分数和 Git 历史不改写。全新安装和真实 detached mock 验收已通过，完整回归
-结果见 [145 validation](../specs/145-lunar-evolution-identity/validation.md)。名称迁移不增加
+产品 `3307fcc` 已推送，本机当前 6585 项通过、1 项原有跳过；历史 2294 项和固定注册 24 项
+均通过，回归后的 188 个私有证据文件仍与原始清单完全一致。结果见
+[145 validation](../specs/145-lunar-evolution-identity/validation.md)。该产品提交的 Linux CI
+也已确认 Python 3.11、3.12、3.13 全部通过完整三阶段回归及静态检查。名称迁移不增加
 真实模型成功样本，也不关闭下面列出的实现和发布验收缺口。
 
 已推送的 142 历史产品

@@ -1,7 +1,7 @@
 # Feature 145: Lunar Evolution identity migration
 
 **Created**: 2026-09-21
-**Status**: Implemented; final regression and publication verification in progress
+**Status**: Implemented and accepted; local and Linux matrix verification complete
 
 ## User objective
 

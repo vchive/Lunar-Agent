@@ -6,5 +6,5 @@
 - [x] T004 Rename package, commands, environment, paths, protocols and current test imports.
 - [x] T005 Update documentation and external-reference terminology without altering history claims.
 - [x] T006 Add and run clean-wheel CLI/configuration/background smoke coverage.
-- [ ] T007 Complete independent review, all regression phases, archive/name/static/SDD checks.
-- [ ] T008 Record evidence and compatibility limits, commit and push the completed migration.
+- [x] T007 Complete independent review, all regression phases, archive/name/static/SDD checks.
+- [x] T008 Record evidence and compatibility limits, commit and push the completed migration.
