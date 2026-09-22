@@ -22,6 +22,16 @@ closed。审计不打开 SQLite、不执行候选源码/evaluator、不调用 pr
 inventory 相符。Feature 147 新增 focused **38 passed**；与本轮 worker/Store/AgentLoop 选择
 集组合 **206 passed**；Ruff、compileall、diff 和旧名称扫描通过。
 
+后续独立审查补修一次性 generation iterator 绕过第二轮摘要检查、failed/unknown 混淆和
+异常类型泄露；目录扫描增加 8192 总目录项上限、第二遍全树元数据核验及完整 fd 释放。
+新 focused **58 passed**、同一组合 **226 passed**。inventory 要求静止目录，并非原子快照。
+本次三阶段回归实际为当前 **6777 passed、1 skipped**，归档 **2294 passed**，冻结注册
+**24 passed**，整体 exit 0；JUnit 和日志保存在
+`.lunar-evolution/test-results/feature147-hardening/`。
+Feature 148 的 artifact/lifecycle + 8 holdout 语义审计规格已完成，代码尚未实现；准确测试与
+后续任务见 [147 validation](specs/147-acceptance-evidence-observer/validation.md) 和
+[148 tasks](specs/148-artifact-lifecycle-holdout-auditor/tasks.md)。
+
 真实 artifact/lifecycle semantic auditor、八个 holdout auditor、launch preflight 和真实
 provider acceptance 仍未完成；Feature 139 的 preparation `1/1`、primary/joint `0/1` 及
 历史冻结证据保持不变。本轮没有 provider、campaign、WebAgent 或生成源码执行。

@@ -1,6 +1,6 @@
 # Tasks
 
-- [x] T001 Define a strict manifest schema with fresh attempt identity, product/task/input/
+- [x] T001 Define a strict observation-manifest schema with attempt format, product/task/input/
       evaluator digests, and the registered fixed budget values.
 - [x] T002 Add canonical manifest digest construction and read-only parsing with private-field
       rejection and budget-drift rejection.
@@ -12,4 +12,7 @@
 - [x] T006 Add a provider-free campaign-directory byte inventory and read-only audit with bounded
       files/bytes, no-follow file reads, and directory-entry race checks.
 - [ ] T007 Add independent artifact/lifecycle and holdout semantic auditors before any real
-      acceptance launch. This feature does not authorize or perform a provider attempt.
+      acceptance launch; specification is in [Feature 148](../148-artifact-lifecycle-holdout-auditor/spec.md).
+      This feature does not authorize or perform a provider attempt.
+- [x] T008 Reject one-use generation iterators, malformed containers, cyclic manifests and
+      failed/unknown mismatches; verify directory limits, late mutations and descriptor cleanup.

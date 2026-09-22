@@ -3,7 +3,8 @@
 The inventory is intentionally a byte-level observation only.  It never imports or executes
 campaign material, opens SQLite, invokes an evaluator, starts a subprocess, or mutates the
 directory.  A caller can retain the returned canonical record outside the campaign tree and use
-``audit_campaign_directory`` later to recompute it read-only.
+``audit_campaign_directory`` later to recompute it read-only. The directory must be quiescent;
+metadata rechecks detect observed changes but do not provide an atomic filesystem snapshot.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from ._candidate_workspace_io import DirectoryChain
 INVENTORY_PROTOCOL = "lunar-acceptance-campaign-inventory-v1"
 INVENTORY_SCHEMA_VERSION = "1"
 MAX_INVENTORY_FILES = 4096
+MAX_INVENTORY_ENTRIES = 8192
 MAX_INVENTORY_FILE_BYTES = 32 * 1024 * 1024
 MAX_INVENTORY_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_INVENTORY_PATH_BYTES = 1024
@@ -40,7 +42,7 @@ class CampaignInventoryError(ValueError):
     _CODES = frozenset({
         "invalid", "root_unsafe", "root_missing", "root_changed", "file_unsafe", "file_missing",
         "file_changed", "file_too_large", "total_too_large", "too_many_files", "schema_invalid",
-        "digest_invalid", "digest_mismatch", "inventory_mismatch",
+        "digest_invalid", "digest_mismatch", "inventory_mismatch", "too_many_entries",
     })
 
     def __init__(self, code: str) -> None:
@@ -177,11 +179,15 @@ def _read_file(parent: int, name: str) -> tuple[int, str]:
         os.close(descriptor)
 
 
-def _directory_snapshot(parent: int) -> dict[str, tuple[int, tuple[int, ...]]]:
+def _directory_snapshot(
+    parent: int, remaining: int, *, limit_code: str = "too_many_entries",
+) -> dict[str, tuple[int, tuple[int, ...]]]:
     try:
         with os.scandir(parent) as entries:
             snapshot = {}
             for entry in entries:
+                if len(snapshot) >= remaining:
+                    _fail(limit_code)
                 name = entry.name
                 if not isinstance(name, str) or not name or "/" in name or name in {".", ".."}:
                     _fail("file_unsafe")
@@ -200,10 +206,20 @@ def _identity(info: os.stat_result) -> tuple[int, ...]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[int], *, depth: int = 0) -> None:
+def _walk(
+    parent: int, prefix: str, records: list[dict[str, Any]], total: list[int],
+    snapshots: dict[str, dict[str, tuple[int, tuple[int, ...]]]], entries_seen: list[int],
+    *, depth: int = 0, verify: bool = False,
+) -> None:
     if depth > MAX_INVENTORY_DEPTH:
         _fail("too_many_files")
-    initial = _directory_snapshot(parent)
+    initial = _directory_snapshot(parent, MAX_INVENTORY_ENTRIES - entries_seen[0])
+    entries_seen[0] += len(initial)
+    if verify:
+        if snapshots.get(prefix) != initial:
+            _fail("root_changed")
+    else:
+        snapshots[prefix] = initial
     for name in sorted(initial):
         relative = f"{prefix}/{name}" if prefix else name
         _relative(relative)
@@ -213,14 +229,17 @@ def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[i
             _fail("root_changed")
         except OSError:
             _fail("file_unsafe")
+        if (stat.S_IFMT(info.st_mode), _identity(info)) != initial[name]:
+            _fail("root_changed")
         if stat.S_ISDIR(info.st_mode):
             try:
                 child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
-                opened = os.fstat(child)
-                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
-                    _fail("root_changed")
                 try:
-                    _walk(child, relative, records, total, depth=depth + 1)
+                    opened = os.fstat(child)
+                    if not stat.S_ISDIR(opened.st_mode) or _identity(opened) != _identity(info):
+                        _fail("root_changed")
+                    _walk(child, relative, records, total, snapshots, entries_seen,
+                          depth=depth + 1, verify=verify)
                 finally:
                     os.close(child)
                 current = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -233,6 +252,8 @@ def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[i
             continue
         if not stat.S_ISREG(info.st_mode):
             _fail("file_unsafe")
+        if verify:
+            continue
         size, digest = _read_file(parent, name)
         records.append({"path": relative, "size": size, "sha256": digest})
         total[0] += size
@@ -240,7 +261,7 @@ def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[i
             _fail("total_too_large")
         if len(records) > MAX_INVENTORY_FILES:
             _fail("too_many_files")
-    if _directory_snapshot(parent) != initial:
+    if _directory_snapshot(parent, len(initial), limit_code="root_changed") != initial:
         _fail("root_changed")
 
 
@@ -253,12 +274,18 @@ def inventory_campaign_directory(root: str | os.PathLike[str]) -> dict[str, Any]
         chain = DirectoryChain(path, "root_unsafe")
     except CampaignInventoryError:
         raise
-    except (OSError, TypeError, ValueError, RuntimeError):
+    except FileNotFoundError:
         _fail("root_missing")
+    except (OSError, TypeError, ValueError, RuntimeError):
+        _fail("root_unsafe")
     try:
         records: list[dict[str, Any]] = []
         total = [0]
-        _walk(chain.fd, "", records, total)
+        snapshots: dict[str, dict[str, tuple[int, tuple[int, ...]]]] = {}
+        _walk(chain.fd, "", records, total, snapshots, [0])
+        # Revisit every child after all byte reads: writing an earlier file does not change
+        # its parent directory mtime. Keep the original per-file inode/size/mtime/ctime pins.
+        _walk(chain.fd, "", records, total, snapshots, [0], verify=True)
         chain.check()
         payload = {
             "schema_version": INVENTORY_SCHEMA_VERSION,
@@ -274,7 +301,10 @@ def inventory_campaign_directory(root: str | os.PathLike[str]) -> dict[str, Any]
     except (OSError, RuntimeError, ValueError):
         _fail("root_changed")
     finally:
-        chain.close()
+        try:
+            chain.close()
+        except (OSError, ValueError, RuntimeError):
+            _fail("root_changed")
 
 
 def audit_campaign_directory(root: str | os.PathLike[str], expected: dict[str, Any]) -> dict[str, Any]:
@@ -297,6 +327,7 @@ __all__ = [
     "INVENTORY_PROTOCOL",
     "INVENTORY_SCHEMA_VERSION",
     "MAX_INVENTORY_DEPTH",
+    "MAX_INVENTORY_ENTRIES",
     "MAX_INVENTORY_FILES",
     "MAX_INVENTORY_FILE_BYTES",
     "MAX_INVENTORY_TOTAL_BYTES",

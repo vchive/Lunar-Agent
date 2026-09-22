@@ -83,15 +83,17 @@ def _bounded_int(value: object, code: str, *, maximum: int) -> int:
     return value
 
 
-def _reject_private(value: object) -> None:
+def _reject_private(value: object, *, depth: int = 0) -> None:
+    if depth > 2:
+        _fail("manifest_schema_invalid")
     if isinstance(value, Mapping):
         for key, nested in value.items():
             if isinstance(key, str) and key not in _BUDGET_KEYS and _PRIVATE.search(key):
                 _fail("private_manifest_field")
-            _reject_private(nested)
+            _reject_private(nested, depth=depth + 1)
     elif isinstance(value, (list, tuple)):
         for nested in value:
-            _reject_private(nested)
+            _reject_private(nested, depth=depth + 1)
 
 
 def _manifest_payload(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -121,6 +123,8 @@ def _manifest_payload(value: Mapping[str, Any]) -> dict[str, Any]:
 
 def manifest_sha256(manifest: Mapping[str, Any]) -> str:
     """Return the digest of a manifest payload without its self-referential digest."""
+    if not isinstance(manifest, Mapping):
+        _fail("manifest_schema_invalid")
     payload = _manifest_payload({key: value for key, value in manifest.items() if key != "manifest_sha256"})
     return hashlib.sha256(_canonical(payload)).hexdigest()
 
@@ -228,29 +232,33 @@ def observe_acceptance_evidence(
         preceding = item["receipt_id"]
     generation_summary: dict[str, Any] | None = None
     if generation_events is not None:
+        if not isinstance(generation_events, Sequence) or isinstance(generation_events, (str, bytes)):
+            _fail("generation_receipt_invalid")
+        events = list(generation_events)
+        if any(not isinstance(event, Mapping) for event in events):
+            _fail("generation_receipt_invalid")
         if not isinstance(generation_run_id, str) or not isinstance(generation_task_id, str):
             _fail("generation_identity_missing")
         try:
             generation_summary = inspect_candidate_generation_events(
-                list(generation_events), run_id=generation_run_id, task_id=generation_task_id,
+                events, run_id=generation_run_id, task_id=generation_task_id,
             )
         except CandidateGenerationReceiptError as exc:
             raise AcceptanceObservationError("generation_receipt_invalid") from exc
         generation = observed.get("generation")
         if generation is None:
             _fail("generation_stage_missing")
-        if generation is not None:
-            for event in generation_events:
-                if not isinstance(event, Mapping):
-                    _fail("generation_receipt_invalid")
-                if event.get("type") == "agent_candidate_generation":
-                    payload = event["payload"]
-                    if payload["max_tool_steps"] != 12:
-                        _fail("generation_budget_mismatch")
-                    if payload["outcome"] == "completed" and payload["source_bundle_sha256"] != generation["artifact_sha256"]:
-                        _fail("generation_source_mismatch")
-            completed = generation_summary["completed"] == 1
-            if (generation["outcome"] == "succeeded") != completed:
+        for event in events:
+            if event.get("type") != "agent_candidate_generation":
+                continue
+            payload = event["payload"]
+            if payload["max_tool_steps"] != 12:
+                _fail("generation_budget_mismatch")
+            if (payload["outcome"] == "completed"
+                    and payload["source_bundle_sha256"] != generation["artifact_sha256"]):
+                _fail("generation_source_mismatch")
+            expected_outcome = "succeeded" if payload["outcome"] == "completed" else payload["outcome"]
+            if generation["outcome"] != expected_outcome:
                 _fail("generation_outcome_mismatch")
     stages = {
         stage: {

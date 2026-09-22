@@ -25,6 +25,15 @@ remain byte-for-byte immutable.
 
 ### Current preparation checklist, 2026-09-21
 
+2026-09-22 update: [Feature 147](../147-acceptance-evidence-observer/spec.md) now supplies a
+provider-free observation-manifest/ordered-receipt parser and a retained-directory byte inventory.
+The parser reuses canonical native generation receipts and checks source digest, 12-step budget
+and exact outcome. Its scope remains structural; every acceptance counter stays at `0/1`.
+The inventory verifies bytes in a quiescent directory, not lifecycle semantics.
+[Feature 148](../148-artifact-lifecycle-holdout-auditor/spec.md) specifies the next semantic/holdout auditor;
+implementation is pending. The launch preflight, real Store/artifact binding and actual
+preregistration gates below remain open. These helpers do not register or launch an attempt.
+
 Feature 144 supplies the next candidate-response product checkpoint: invocation-local bundle
 instructions, unchanged strict parsing, and canonical failed receipts with optional `phase` and
 `failure_cause`. This does not register or launch the next real attempt. Before the manifest gate,

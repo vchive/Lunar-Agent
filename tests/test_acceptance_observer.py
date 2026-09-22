@@ -11,6 +11,7 @@ from lunar_evolution.acceptance_observer import (
     STAGES,
     AcceptanceObservationError,
     build_acceptance_manifest,
+    manifest_sha256,
     observe_acceptance_evidence,
     parse_acceptance_manifest,
 )
@@ -202,3 +203,48 @@ def test_generation_events_reject_non_mapping_entries() -> None:
             registration, receipts(registration), generation_events=[generation_event(), None],
             generation_run_id=RUN_ID, generation_task_id=TASK_ID,
         )
+
+
+@pytest.mark.parametrize("bad", [1, "events", b"events", iter([generation_event()])])
+def test_generation_events_require_a_reusable_sequence(bad):
+    registration = manifest()
+    with pytest.raises(AcceptanceObservationError, match="generation_receipt_invalid"):
+        observe_acceptance_evidence(
+            registration, receipts(registration), generation_events=bad,
+            generation_run_id=RUN_ID, generation_task_id=TASK_ID,
+        )
+
+
+def test_generator_cannot_bypass_generation_source_binding():
+    registration = manifest()
+    event = generation_event()
+    event["payload"]["source_bundle_sha256"] = "9" * 64
+    with pytest.raises(AcceptanceObservationError, match="generation_receipt_invalid"):
+        observe_acceptance_evidence(
+            registration, receipts(registration), generation_events=iter([event]),
+            generation_run_id=RUN_ID, generation_task_id=TASK_ID,
+        )
+
+
+@pytest.mark.parametrize("stage_outcome,native_outcome", [("failed", "unknown"), ("unknown", "failed")])
+def test_unknown_and_failed_generation_are_not_interchangeable(stage_outcome, native_outcome):
+    registration = manifest()
+    chain = receipts(registration, 2)
+    chain[1]["outcome"] = stage_outcome
+    event = generation_event(completed=False)
+    event["payload"]["outcome"] = native_outcome
+    event["payload"]["reason"] = "unknown" if native_outcome == "unknown" else "worker_failed"
+    with pytest.raises(AcceptanceObservationError, match="generation_outcome_mismatch"):
+        observe_acceptance_evidence(
+            registration, chain, generation_events=[event],
+            generation_run_id=RUN_ID, generation_task_id=TASK_ID,
+        )
+
+
+def test_digest_rejects_non_mapping_and_cyclic_manifest_uses_safe_error():
+    with pytest.raises(AcceptanceObservationError, match="manifest_schema_invalid"):
+        manifest_sha256(None)
+    registration = manifest()
+    registration["budgets"]["request_ceiling"] = registration
+    with pytest.raises(AcceptanceObservationError, match="manifest_schema_invalid"):
+        parse_acceptance_manifest(registration)

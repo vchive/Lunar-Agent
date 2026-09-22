@@ -91,3 +91,172 @@ def test_inventory_rejects_excessive_directory_depth(tmp_path):
         current.mkdir()
     with pytest.raises(CampaignInventoryError, match="^too_many_files$"):
         inventory_campaign_directory(root)
+
+
+@pytest.mark.parametrize("change", ["add", "remove", "replace", "late_nested_write"])
+def test_inventory_rejects_changes_during_byte_reads(tmp_path, monkeypatch, change):
+    root = _campaign(tmp_path)
+    nested = root / "evidence" / "receipt.json"
+    target = root / "z-target.bin"
+    target.write_bytes(b"retained")
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(b"retained")
+    old_nested = nested.stat()
+    old_directory = nested.parent.stat()
+    original_read = os.read
+    changed = False
+    manifest_identity = (root / "manifest.json").stat().st_ino
+
+    def read(descriptor, size):
+        nonlocal changed
+        chunk = original_read(descriptor, size)
+        # manifest is read after the nested directory has already been walked and closed.
+        if chunk and not changed and os.fstat(descriptor).st_ino == manifest_identity:
+            changed = True
+            if change == "add":
+                (root / "new.bin").write_bytes(b"new")
+            elif change == "remove":
+                target.unlink()
+            elif change == "replace":
+                replacement.replace(target)
+            else:
+                nested.write_bytes(b"x" * old_nested.st_size)
+                os.utime(nested, ns=(old_nested.st_atime_ns, old_nested.st_mtime_ns))
+                assert nested.parent.stat().st_mtime_ns == old_directory.st_mtime_ns
+        return chunk
+
+    monkeypatch.setattr(os, "read", read)
+    with pytest.raises(CampaignInventoryError, match="^root_changed$"):
+        inventory_campaign_directory(root)
+    assert changed
+
+
+@pytest.mark.parametrize("fault", ["fstat_error", "identity_mismatch"])
+def test_child_descriptor_is_closed_when_initial_fstat_fails(tmp_path, monkeypatch, fault):
+    root = _campaign(tmp_path)
+    original_open, original_fstat = os.open, os.fstat
+    opened = []
+    child = None
+    failed = False
+    replacement = tmp_path / "different-directory"
+    replacement.mkdir()
+    other_info = replacement.stat()
+
+    def open_file(name, flags, *args, **kwargs):
+        nonlocal child
+        descriptor = original_open(name, flags, *args, **kwargs)
+        opened.append(descriptor)
+        if name == "evidence":
+            child = descriptor
+        return descriptor
+
+    def fstat(descriptor):
+        nonlocal failed
+        if descriptor == child and not failed:
+            failed = True
+            if fault == "fstat_error":
+                raise OSError("private diagnostic must not escape")
+            return other_info
+        return original_fstat(descriptor)
+
+    monkeypatch.setattr(os, "open", open_file)
+    monkeypatch.setattr(os, "fstat", fstat)
+    with pytest.raises(CampaignInventoryError) as error:
+        inventory_campaign_directory(root)
+    assert error.value.code in {"file_unsafe", "root_changed"}
+    assert failed
+    for descriptor in opened:
+        with pytest.raises(OSError):
+            original_fstat(descriptor)
+
+
+def test_renamed_root_maps_directory_chain_error_to_inventory_error(tmp_path, monkeypatch):
+    root = _campaign(tmp_path)
+    original_read = os.read
+    changed = False
+
+    def read(descriptor, size):
+        nonlocal changed
+        chunk = original_read(descriptor, size)
+        if chunk and not changed:
+            changed = True
+            root.rename(root.with_name("retained"))
+            root.mkdir()
+        return chunk
+
+    monkeypatch.setattr(os, "read", read)
+    with pytest.raises(CampaignInventoryError, match="^root_changed$"):
+        inventory_campaign_directory(root)
+    assert changed
+
+
+@pytest.mark.parametrize("kind", ["missing", "linked"])
+def test_root_failures_use_fixed_inventory_errors(tmp_path, kind):
+    root = tmp_path / "campaign-root"
+    if kind == "linked":
+        target = tmp_path / "target"
+        target.mkdir()
+        root.symlink_to(target, target_is_directory=True)
+    with pytest.raises(CampaignInventoryError, match="^root_" + ("missing" if kind == "missing" else "unsafe") + "$"):
+        inventory_campaign_directory(root)
+
+
+def test_entry_limit_stops_scandir_before_materializing_all_names(tmp_path, monkeypatch):
+    from lunar_evolution import campaign_inventory as module
+
+    root = tmp_path / "campaign-root"
+    root.mkdir()
+    for index in range(20):
+        (root / f"d{index}").mkdir()
+    monkeypatch.setattr(module, "MAX_INVENTORY_ENTRIES", 3)
+    original_scandir = os.scandir
+    visited = 0
+
+    class CountEntries:
+        def __init__(self, path):
+            self.iterator = original_scandir(path)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            self.iterator.close()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            nonlocal visited
+            item = next(self.iterator)
+            visited += 1
+            return item
+
+    monkeypatch.setattr(os, "scandir", CountEntries)
+    with pytest.raises(CampaignInventoryError, match="^too_many_entries$"):
+        inventory_campaign_directory(root)
+    assert visited == 4
+
+
+def test_entry_limit_counts_empty_directories_across_entire_tree(tmp_path, monkeypatch):
+    from lunar_evolution import campaign_inventory as module
+
+    root = tmp_path / "campaign-root"
+    (root / "a" / "nested").mkdir(parents=True)
+    (root / "b" / "nested").mkdir(parents=True)
+    monkeypatch.setattr(module, "MAX_INVENTORY_ENTRIES", 4)
+    assert inventory_campaign_directory(root)["file_count"] == 0
+    monkeypatch.setattr(module, "MAX_INVENTORY_ENTRIES", 3)
+    with pytest.raises(CampaignInventoryError, match="^too_many_entries$"):
+        inventory_campaign_directory(root)
+
+
+def test_depth_limit_accepts_boundary_and_rejects_one_more_directory(tmp_path, monkeypatch):
+    from lunar_evolution import campaign_inventory as module
+
+    root = tmp_path / "campaign-root"
+    (root / "a" / "b").mkdir(parents=True)
+    monkeypatch.setattr(module, "MAX_INVENTORY_DEPTH", 2)
+    assert inventory_campaign_directory(root)["file_count"] == 0
+    (root / "a" / "b" / "c").mkdir()
+    with pytest.raises(CampaignInventoryError, match="^too_many_files$"):
+        inventory_campaign_directory(root)
