@@ -43,14 +43,15 @@ preparation 为 `1/1`，primary/joint 为 `0/1`，没有 completed candidate 或
 
 当前具备可开发和本地使用的实现基础，尚不能宣称“所有功能可用、完整版本已验收”。
 自动多文件的前台与后台链路已通过离线完整回归和 Linux CI，真实模型完整交付仍未成功；
-143 已接通单任务前台 `delegate` consumer，交付并发审计已通过；AgentLoop、自动 solve
-和递归 worker 仍不在该 `bounded slice` 内。不能把未接入的可选框架当作所有发布范围的前置条件。
+143 已接通单任务前台 `delegate` consumer，交付并发审计已通过；AgentLoop 的 worker-tool
+façade 与递归 WorkerService 生命周期已有 opt-in、provider-free 实现，但自动 solve 尚未接入
+WorkerService，仍不属于该 `bounded slice`。不能把未接入的可选框架当作所有发布范围的前置条件。
 
 | 优先级/范围 | 尚未完成 | 完成条件 |
 | --- | --- | --- |
 | P0：前台自动多文件验收 | 当前产品的真实完整交付；新验收只有计划，还没有新登记、执行证据或结果 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：真实候选完成率 | 144 已补明确响应协议、消除通用总结指令冲突并保留细分失败诊断；真实成功率仍未确认 | 在新的固定条件验收中检验；保留严格解析和失败分母，不把离线 fixture 通过当作真实可靠性提升 |
-| P1：更广泛并发多 Agent 的发布 | 143 T009 单任务前台 `delegate` consumer 已接线并通过交付并发审计；AgentLoop、自动 solve、递归 worker 仍在范围外 | 若纳入发布范围，再为这些入口接入同一 worker API，并分别验证用户操作、结果回流、取消和恢复 |
+| P1：更广泛并发多 Agent 的发布 | 143 T009 单任务前台 `delegate` consumer 已接线并通过交付并发审计；AgentLoop façade 与递归 WorkerService 已有 opt-in 实现，自动 solve 尚未接入，也没有真实模型效果验收 | 若纳入发布范围，再把 AgentLoop façade 与递归 worker 接入目标用户入口（包括自动 solve），并分别验证用户操作、结果回流、取消和恢复 |
 | 后续能力 | OpenEvolve/Shinka 多文件接入、Shinka 启动调度及真实框架验收 | 外部候选走同一执行/评分/交付链，在新独立登记中验证；不重跑 WebAgent |
 | 后续扩展 | 更复杂输入、跨文件依赖、通用仓库/workflow 与远端运行 | 明确支持范围和代表性验收，不从一个双文件样例外推 |
 
@@ -312,7 +313,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 多文件候选 | command/Agent/native runtime 生成 → bundle → 执行/独立评测 → receipt/archive/population → 父任务交付/terminal resume 已完成 | 普通 intake、完整父代上下文、helper-only 改进、有效性选优、迁移、失败保留、完整交付与不重跑 fixture |
 | 自动 evaluator/profile | 自动 compiler/auditor、输出探针、独立 preparation 请求/墙钟预算与冻结恢复已接通；源码文件数另做确定性检查；其他 source/execution 提前报不支持 | 128及134真实准备通过，各自8/8留出；134完整交付仍为0/1 |
 | 自动 solve 前台生命周期 | 一次活动执行的共享 deadline、durable parent orchestration、统一入口、排他继续、只读状态和实际进程取消/清理已实现 | Feature 142 Phase A/B 定向与最终双阶段离线回归通过；自动 detach 和新的真实完整交付尚未验收 |
-| 显式 worker API | 有独立 worker/attempt、owner 活性、六项操作、进程清理和结果引用；前台单任务 `delegate` 已迁入 | `9213f01` 检查点为当前 6703 passed / 1 skipped、历史 2294 passed、注册 24 passed；重复观察者交付回归已通过，AgentLoop/自动 solve/递归 worker 仍在范围外 |
+| 显式 worker API | 有独立 worker/attempt、owner 活性、六项操作、进程清理和结果引用；前台单任务 `delegate` 已迁入；WorkerService 内有 opt-in AgentLoop worker-tool façade 与递归生命周期 | `9213f01` 检查点为当前 6703 passed / 1 skipped、历史 2294 passed、注册 24 passed；重复观察者交付回归已通过；自动 solve 尚未接入这些 worker API，真实多 Agent 效果仍未验收 |
 | OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现 | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证 |
 | ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现 | 本地 fixture；尚无 Shinka launcher/调度实现 |
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |

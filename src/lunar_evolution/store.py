@@ -3247,6 +3247,10 @@ class Store:
         worker_id = f"worker-{uuid.uuid4().hex}"
         timestamp = utc_now()
         with self._connect() as connection:
+            # Parent admission is a check-then-insert operation.  Serialize the read with
+            # cancellation and other worker-tree mutations so a child cannot observe a running
+            # parent and commit after that parent has been stopped by another Store connection.
+            connection.execute("BEGIN IMMEDIATE")
             depth = 0
             if parent_worker_id is not None:
                 parent = connection.execute(

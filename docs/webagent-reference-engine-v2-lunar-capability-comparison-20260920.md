@@ -32,8 +32,10 @@ SSE replay 和多租户服务。这些不是当前本地路线的默认依赖。
 Feature 143 已修复本地 worker 的并发取消、活性恢复和排队取消缺陷，补上独立执行工厂、
 精确 attempt 进程清理及消息原子消费，共享回归 260 项通过。T009 已将单任务前台
 `delegate` 接入 durable worker lifecycle；`9213f01` 检查点为当前 6703 passed / 1 skipped、
-历史 2294 passed、注册 24 passed，重复观察者交付审计已通过。AgentLoop、自动 solve 和递归
-worker 仍不在该 bounded consumer 范围内，本地验收也不等于真实模型效果已验证。
+历史 2294 passed、注册 24 passed，重复观察者交付审计已通过。WorkerService attempt 内已有
+opt-in AgentLoop worker-tool façade，递归 WorkerService 生命周期也已实现；自动 solve 尚未
+接入该 worker API，bounded consumer 仍只覆盖单任务 `delegate`，本地验收也不等于真实模型
+效果已验证。
 最终验证记录见 [143 validation](../specs/143-local-worker-lifecycle/validation.md)。
 
 ## 能力矩阵
@@ -56,7 +58,7 @@ worker 仍不在该 bounded consumer 范围内，本地验收也不等于真实�
 | 失败分类、unknown、checkpoint/resume | **部分覆盖**。候选失败、timeout、unknown、run failure 和 preparation failure 有固定记录。 | 与 reference-engine-v2 的 retry queue/正式 iteration 语义不同；不能宣称恢复语义完全相同。 |
 | 全链路 wall-clock、父子取消、后台自动多文件 | **已覆盖（本地活动执行）**。Feature 142 统一一次活动执行的共享墙钟、父编排、父子取消与进程清理；Phase C 已接通后台入口，前后台一致性等本机夹具通过，完整回归已通过。 | 不累计人工等待和多次显式续跑的时间；本地清理不证明远端 provider 已停止计算，也不是远程实验控制面。 |
 | WebAgent 持久 approval gate | **部分覆盖**。Lunar 有 policy、event ledger、recovery 和 cancel，但没有完整的 `pending/approved/failed/timed_out/abandoned/not_confirmed` 状态机、同会话阻断和 bypass 防护。 | 应吸收状态机和未知终态原则，不必复制 OpenCode hook。 |
-| WebAgent WorkerRegistry | **部分覆盖**。Feature 143 已有持久 Worker/WorkerAttempt、`dispatch/send/list/wait/resume/cancel`、owner/depth 校验和结果投递 API；已补独立执行、活性锁、精确进程清理、排队取消和重复观察者交付修复，T009 已接入单任务前台 `delegate`，并在 WorkerService attempt 内提供 opt-in AgentLoop `spawn/wait/cancel/read-result` façade。 | 不能宣称完整产品集成等价或真实效果持平；自动 solve、递归深度、子产物 materialization 和远程 WorkerRegistry 语义仍在范围外。 |
+| WebAgent WorkerRegistry | **部分覆盖**。Feature 143 已有持久 Worker/WorkerAttempt、`dispatch/send/list/wait/resume/cancel`、owner/depth 校验和结果投递 API；已补独立执行、活性锁、精确进程清理、排队取消和重复观察者交付修复，T009 已接入单任务前台 `delegate`，并在 WorkerService attempt 内提供 opt-in AgentLoop `spawn/wait/cancel/read-result` façade；Feature 146 增加了有界递归生命周期。 | 不能宣称完整产品集成等价或真实效果持平；自动 solve 尚未接入这些 worker API，子产物 materialization 和远程 WorkerRegistry 语义仍在范围外。 |
 | WebAgent `evolve_*` / 外部实验服务客户端 / 外部服务 CLI | **未覆盖，且当前不迁移**。Lunar 默认使用本地 population 和本地 Store。 | 对方是远程实验控制面；Lunar 只保留 transport-neutral 的协议边界。 |
 | 远程 GPU、sandbox、upload/download、project relay | **未覆盖**。Lunar 当前是本地受控子进程和本地 workspace。 | 属于 WebAgent/reference-engine-v2 服务部署能力，当前产品没有这个运行前提。 |
 | Provider HTTP trace、SSE stall replay、OpenCode plugin compatibility | **未覆盖等价实现**。Lunar 有 transcript、usage 和事件诊断，但没有 provider fetch hook 或 OpenCode 1.3.10 插件兼容层。 | 只能吸收脱敏、可审计和 unknown 不自动重试的原则。 |
@@ -85,8 +87,8 @@ WebAgent 持平，也不能把 Feature 139 描述为端到端成功。
 如果目标是“本地可验证的 Agent + 程序演化系统”，Lunar 已经覆盖参考仓库最值得迁移的核心，
 并在 evaluator receipt、候选身份和交付证据上走得更严格。下一步的高价值工作是新的真实
 闭环验收，以及提高严格最终响应协议在真实模型下产出可执行候选的成功率。Feature 143
-本地生命周期和单任务前台 consumer 接线已完成实现回归及交付并发审计。若需要更广泛多 Agent 发布，
-再扩展到 AgentLoop、自动 solve 和递归 worker。Feature 142 Phase C 已完成本机
+本地生命周期、递归 worker 和单任务前台 consumer 接线已分别形成 provider-free 实现范围，单任务交付并发审计已完成；自动 solve 仍未接入 worker API。若需要更广泛多 Agent 发布，
+再把这些 opt-in 能力接入目标入口并进行独立验收。Feature 142 Phase C 已完成本机
 三阶段回归，`ad89b50` 的 Linux/Python 3.11、3.12、3.13 安装、完整三阶段回归、报告保存和
 静态检查均通过；首次 CI 失败及修复范围见 [142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。
 具体剩余工作见[系统评估](system-readiness-20260916.md)，真实模型完整交付仍待新验收。

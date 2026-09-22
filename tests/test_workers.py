@@ -1,9 +1,11 @@
+import sqlite3
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
+import lunar_evolution.store as store_module
 from lunar_evolution.agents import AgentRegistry, AgentResult
 from lunar_evolution.models import WorkerOutcome, WorkerPhase, WorkerStopReason
 from lunar_evolution.store import Store
@@ -63,6 +65,43 @@ def test_worker_store_enforces_owner_depth_and_idempotent_settlement(tmp_path: P
     again = store.settle_worker(root.id, attempt.id, WorkerOutcome.FAILURE, result="late")
     assert again is not None and again.outcome is WorkerOutcome.SUCCESS
     assert len(store.list_worker_events(root.id)) == 3
+
+
+def test_child_admission_serializes_parent_check_with_tree_mutations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The parent phase read must be inside the Store write transaction."""
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+    parent = store.create_worker("owner", "worker", "parent", max_depth=1)
+    store.start_worker_attempt(parent.id, "owner", "run", service_owner_id="service-a")
+
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+
+    class TraceConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):  # type: ignore[no-untyped-def]
+            statements.append(str(sql))
+            return super().execute(sql, parameters)
+
+    def connect(*args, **kwargs):  # type: ignore[no-untyped-def]
+        kwargs["factory"] = TraceConnection
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(store_module.sqlite3, "connect", connect)
+    store.create_worker(
+        "owner", "worker", "child", parent_worker_id=parent.id,
+        max_depth=1, require_parent_running=True,
+    )
+
+    begin = next(index for index, sql in enumerate(statements) if sql == "BEGIN IMMEDIATE")
+    parent_read = next(
+        (
+            index for index, sql in enumerate(statements)
+            if sql.startswith("SELECT owner_id, depth, phase FROM workers")
+        ),
+    )
+    assert begin < parent_read
 
 
 def test_worker_service_dispatch_send_wait_resume_and_cancel(tmp_path: Path) -> None:

@@ -12,13 +12,14 @@
 
 沿现有 Feature 143 SDD 完成 `specs/146-recursive-worker-lifecycle/`。WorkerService 和 Store
 统一将递归深度限制为 32；递归配置要求 `max_workers >= max_depth + 1`。AgentLoop worker
-工具现在只能在运行中的父 worker 下创建子 worker，取消竞态不会重新启动已停止的 child；
-祖先遍历使用服务配置深度，`wait_worker` 受 AgentLoop 总执行截止时间约束。结果读取仍只
-允许当前 worker 的后代，子 workspace 和 envelope 保持隔离。
+工具现在只能在运行中的父 worker 下创建子 worker，父状态检查与 child 插入在 Store 的
+`BEGIN IMMEDIATE` 写事务中串行化，取消竞态不会重新启动已停止的 child；祖先遍历使用
+服务配置深度，`wait_worker` 受 AgentLoop 总执行截止时间约束。结果读取仍只允许当前
+worker 的后代，子 workspace 和 envelope 保持隔离。
 
 新增三层 AgentLoop spawn/wait、深度和容量拒绝、父状态准入、递归取消、结果隔离、私有
-workspace 及 deadline 回归。Feature 146 focused **17 passed**；相关 worker/Store/AgentLoop
-选择集 **165 passed**。Ruff、compileall、diff 检查通过；SQLite 仅使用现有 schema 的新鲜
+workspace 及 deadline 回归，并固定父准入写事务顺序。Feature 146 focused **18 passed**；
+相关 worker/Store/AgentLoop 选择集 **166 passed**。Ruff、compileall、diff 检查通过；SQLite 仅使用现有 schema 的新鲜
 fixture，无新增 migration。准确结果见
 [`specs/146-recursive-worker-lifecycle/validation.md`](specs/146-recursive-worker-lifecycle/validation.md)。
 本轮未调用 provider、campaign、WebAgent 或外部 producer，自动 solve 和真实模型端到端仍未
