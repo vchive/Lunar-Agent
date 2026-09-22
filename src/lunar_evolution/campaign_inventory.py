@@ -23,6 +23,7 @@ MAX_INVENTORY_FILES = 4096
 MAX_INVENTORY_FILE_BYTES = 32 * 1024 * 1024
 MAX_INVENTORY_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_INVENTORY_PATH_BYTES = 1024
+MAX_INVENTORY_DEPTH = 64
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ROOT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _FIELDS = frozenset({
@@ -199,7 +200,9 @@ def _identity(info: os.stat_result) -> tuple[int, ...]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[int]) -> None:
+def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[int], *, depth: int = 0) -> None:
+    if depth > MAX_INVENTORY_DEPTH:
+        _fail("too_many_files")
     initial = _directory_snapshot(parent)
     for name in sorted(initial):
         relative = f"{prefix}/{name}" if prefix else name
@@ -217,7 +220,7 @@ def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[i
                 if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
                     _fail("root_changed")
                 try:
-                    _walk(child, relative, records, total)
+                    _walk(child, relative, records, total, depth=depth + 1)
                 finally:
                     os.close(child)
                 current = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -268,7 +271,7 @@ def inventory_campaign_directory(root: str | os.PathLike[str]) -> dict[str, Any]
         return {**payload, "inventory_sha256": hashlib.sha256(_canonical(payload)).hexdigest()}
     except CampaignInventoryError:
         raise
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         _fail("root_changed")
     finally:
         chain.close()
@@ -293,6 +296,7 @@ def audit_campaign_directory(root: str | os.PathLike[str], expected: dict[str, A
 __all__ = [
     "INVENTORY_PROTOCOL",
     "INVENTORY_SCHEMA_VERSION",
+    "MAX_INVENTORY_DEPTH",
     "MAX_INVENTORY_FILES",
     "MAX_INVENTORY_FILE_BYTES",
     "MAX_INVENTORY_TOTAL_BYTES",

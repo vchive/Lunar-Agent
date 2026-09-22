@@ -8,6 +8,7 @@ import os
 import pytest
 
 from lunar_evolution.campaign_inventory import (
+    MAX_INVENTORY_DEPTH,
     MAX_INVENTORY_FILE_BYTES,
     CampaignInventoryError,
     audit_campaign_directory,
@@ -80,3 +81,13 @@ def test_inventory_does_not_execute_executable_material(tmp_path):
     script.chmod(0o755)
     result = inventory_campaign_directory(root)
     assert any(item["path"] == "evidence/candidate.py" for item in result["files"])
+
+
+def test_inventory_rejects_excessive_directory_depth(tmp_path):
+    root = _campaign(tmp_path)
+    current = root
+    for index in range(MAX_INVENTORY_DEPTH + 2):
+        current = current / f"d{index}"
+        current.mkdir()
+    with pytest.raises(CampaignInventoryError, match="^too_many_files$"):
+        inventory_campaign_directory(root)

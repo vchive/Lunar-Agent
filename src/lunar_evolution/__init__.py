@@ -1,5 +1,16 @@
 """Standalone local Hermes-inspired agent controller."""
 
+from .acceptance_observer import (
+    DEFAULT_ACCEPTANCE_BUDGETS,
+    AcceptanceObservationError,
+    build_acceptance_manifest,
+    manifest_sha256,
+    observe_acceptance_evidence,
+    parse_acceptance_manifest,
+)
+from .acceptance_observer import (
+    STAGES as ACCEPTANCE_STAGES,
+)
 from .agent_evolution import (
     AgentCandidateEvaluator,
     AgentCandidateGenerator,
@@ -68,6 +79,17 @@ from .bundle_evolution import (
     load_bundle_pipeline,
     read_bundle_delivery_materials,
     read_candidate_source_files,
+)
+from .campaign_inventory import (
+    INVENTORY_PROTOCOL,
+    INVENTORY_SCHEMA_VERSION,
+    MAX_INVENTORY_DEPTH,
+    MAX_INVENTORY_FILE_BYTES,
+    MAX_INVENTORY_FILES,
+    MAX_INVENTORY_TOTAL_BYTES,
+    CampaignInventoryError,
+    audit_campaign_directory,
+    inventory_campaign_directory,
 )
 from .candidate_bundle import (
     CANDIDATE_BUNDLE_PROTOCOL,
@@ -329,6 +351,7 @@ from .workflow_checkpoint import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "ACCEPTANCE_STAGES",
     "ACTIVE_BENCHMARK_STRATEGIES",
     "BENCHMARK_STRATEGIES",
     "BENCHMARK_TASK_PROTOCOL",
@@ -338,10 +361,18 @@ __all__ = [
     "CANDIDATE_EXECUTION_PROTOCOL",
     "CANDIDATE_EXECUTION_SCHEMA_VERSION",
     "CANDIDATE_INPUT_ROOT_ENV",
+    "DEFAULT_ACCEPTANCE_BUDGETS",
     "EXECUTION_PROTOCOL",
     "EXECUTION_SCHEMA_VERSION",
+    "INVENTORY_PROTOCOL",
+    "INVENTORY_SCHEMA_VERSION",
+    "MAX_INVENTORY_DEPTH",
+    "MAX_INVENTORY_FILES",
+    "MAX_INVENTORY_FILE_BYTES",
+    "MAX_INVENTORY_TOTAL_BYTES",
     "WORKSPACE_PLAN_PROTOCOL",
     "WORKSPACE_PLAN_SCHEMA_VERSION",
+    "AcceptanceObservationError",
     "AdmittedBenchmarkComparison",
     "AdmittedBenchmarkTask",
     "AdmittedSeed",
@@ -372,6 +403,7 @@ __all__ = [
     "BenchmarkTaskEvaluatorIdentity",
     "BundleDeliveryResult",
     "CallableContractCompiler",
+    "CampaignInventoryError",
     "Candidate",
     "CandidateArchive",
     "CandidateBundleError",
@@ -516,8 +548,10 @@ __all__ = [
     "admit_remote_materials",
     "admit_remote_state",
     "admit_seed_manifest",
+    "audit_campaign_directory",
     "benchmark_case_content_digest",
     "bind_benchmark_comparison_result_evidence",
+    "build_acceptance_manifest",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_candidate_execution_admission",
@@ -545,10 +579,14 @@ __all__ = [
     "inspect_bundle_delivery",
     "inspect_candidate_evaluation",
     "inspect_candidate_execution_record",
+    "inventory_campaign_directory",
     "load_bundle_pipeline",
     "load_evaluator_bundle",
+    "manifest_sha256",
     "materialize_candidate_source_bundle",
     "normalize_feedback",
+    "observe_acceptance_evidence",
+    "parse_acceptance_manifest",
     "parse_benchmark_comparison_plan",
     "parse_benchmark_comparison_result",
     "parse_benchmark_task_envelope",

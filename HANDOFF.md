@@ -8,6 +8,24 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## 2026-09-22 Feature 147 验收证据观察与目录审计
+
+沿 Feature 142 的 real-acceptance plan 增加 provider-free 的 observation manifest 和只读
+六阶段 receipt observer。它固定登记计划中的请求/墙钟/token 预算，要求 canonical JSON、
+manifest digest、生成 receipt 绑定、12 tool-step 上限、顺序前缀和失败终态；结构链闭合只
+返回 `chain_complete`，`validation_scope=receipt_chain_only`，preparation/primary/joint
+均保持 `0/1`，不能作为真实 launch preregistration。
+
+同时增加 campaign directory byte inventory/audit：descriptor-relative no-follow 读取，逐文件
+inode/大小/mtime/ctime/SHA-256 复核，目录项竞态、软链接、FIFO、超大文件和过深目录均 fail
+closed。审计不打开 SQLite、不执行候选源码/evaluator、不调用 provider，只确认保留字节仍与
+inventory 相符。Feature 147 新增 focused **38 passed**；与本轮 worker/Store/AgentLoop 选择
+集组合 **206 passed**；Ruff、compileall、diff 和旧名称扫描通过。
+
+真实 artifact/lifecycle semantic auditor、八个 holdout auditor、launch preflight 和真实
+provider acceptance 仍未完成；Feature 139 的 preparation `1/1`、primary/joint `0/1` 及
+历史冻结证据保持不变。本轮没有 provider、campaign、WebAgent 或生成源码执行。
+
 ## 2026-09-22 Feature 146 有界递归 worker 生命周期
 
 沿现有 Feature 143 SDD 完成 `specs/146-recursive-worker-lifecycle/`。WorkerService 和 Store
