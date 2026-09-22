@@ -8,6 +8,10 @@ from pathlib import Path
 
 from .budget import BudgetSpec
 
+# Worker-tool traversal is deliberately bounded.  This is a protocol limit rather than a
+# database migration so every local service agrees on the maximum recursive depth.
+MAX_WORKER_DEPTH = 32
+
 
 class RunStatus(StrEnum):
     PENDING = "pending"

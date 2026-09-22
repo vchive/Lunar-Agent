@@ -394,13 +394,14 @@ class LocalToolRegistry:
             raise ToolError("worker parent context is missing")
         current = service.store.get_worker(worker_id)
         visited: set[str] = set()
-        while current is not None and current.id not in visited:
+        max_hops = getattr(service, "max_depth", 32) + 1
+        while current is not None and current.id not in visited and len(visited) <= max_hops:
             if current.owner_id != owner_id:
                 raise ToolError("worker is owned by another caller")
             if current.parent_worker_id == self._worker_parent_id:
                 return worker_id
             visited.add(current.id)
-            if current.parent_worker_id is None or len(visited) >= 32:
+            if current.parent_worker_id is None:
                 break
             current = service.store.get_worker(current.parent_worker_id)
         raise ToolError("worker is outside the current worker subtree")
@@ -462,6 +463,9 @@ class LocalToolRegistry:
             raise ToolError("timeout must be a non-negative finite number")
         timeout = min(float(timeout), 300.0)
         deadline = time.monotonic() + timeout
+        execution_deadline = self._execution_deadline.get()
+        if execution_deadline is not None:
+            deadline = min(deadline, execution_deadline)
         while True:
             if self._continuation_guard is not None:
                 self._continuation_guard()

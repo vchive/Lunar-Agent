@@ -486,7 +486,7 @@ class AgentLoopRuntime:
                 try:
                     deadline_scope = (
                         self.tools.execution_deadline(started + effective_timeout)
-                        if self.profile is not None and effective_timeout is not None
+                        if effective_timeout is not None
                         else nullcontext()
                     )
                     with deadline_scope:

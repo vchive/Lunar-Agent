@@ -6,6 +6,17 @@ Implementation complete and focused offline-validated as of 2026-09-18. No provi
 campaign, evaluator call, generated-source execution, or Feature 134 resume is part of this
 feature.
 
+## CI fixture follow-up, 2026-09-22
+
+The prior Linux matrix exposed one Python 3.12 failure in the synchronous two-task fixture:
+the test used a real 0.25-second wall budget, so CI startup and filesystem scheduling could
+consume the budget before the second request. The controller path remained within the feature
+contract, which defines one deadline per `resume()` execution. The fixture now injects the
+existing deterministic controller clock and advances it from the simulated runtime delay. This
+preserves the assertions that both requests share one deadline and that the second timeout is
+smaller, without making the outcome depend on host load. The focused wall-clock module passes
+locally; the post-fix Linux matrix is pending and must be recorded separately.
+
 ## Required focused checks
 
 - `run_agent()` validates the existing explicit/configured timeout, clips it to the run remainder,

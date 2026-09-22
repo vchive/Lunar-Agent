@@ -23,6 +23,7 @@ from .algorithm import MAX_OUTPUTS, OutputSpec
 from .budget import BudgetSpec
 from .evaluator import validate_acceptance
 from .models import (
+    MAX_WORKER_DEPTH,
     Attempt,
     Run,
     RunStatus,
@@ -3231,6 +3232,7 @@ class Store:
         parent_worker_id: str | None = None,
         agent_type: str = "runtime",
         max_depth: int = 1,
+        require_parent_running: bool = False,
     ) -> Worker:
         if not owner_id.strip() or not role.strip() or not description.strip():
             raise ValueError("worker owner, role, and description must be non-empty")
@@ -3238,18 +3240,24 @@ class Store:
             raise ValueError("worker description exceeds 8 KiB")
         if isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 0:
             raise ValueError("max_depth must be a non-negative integer")
+        if max_depth > MAX_WORKER_DEPTH:
+            raise ValueError(f"worker maximum depth must be at most {MAX_WORKER_DEPTH}")
+        if not isinstance(require_parent_running, bool):
+            raise TypeError("require_parent_running must be a boolean")
         worker_id = f"worker-{uuid.uuid4().hex}"
         timestamp = utc_now()
         with self._connect() as connection:
             depth = 0
             if parent_worker_id is not None:
                 parent = connection.execute(
-                    "SELECT owner_id, depth FROM workers WHERE id = ?", (parent_worker_id,)
+                    "SELECT owner_id, depth, phase FROM workers WHERE id = ?", (parent_worker_id,)
                 ).fetchone()
                 if parent is None:
                     raise ValueError("unknown parent worker")
                 if parent["owner_id"] != owner_id:
                     raise PermissionError("parent worker is owned by another caller")
+                if require_parent_running and parent["phase"] != WorkerPhase.RUNNING.value:
+                    raise ValueError("parent worker is not running")
                 depth = int(parent["depth"]) + 1
             if depth > max_depth:
                 raise ValueError("worker maximum depth exceeded")
@@ -3704,6 +3712,8 @@ class Store:
         *,
         service_owner_id: str | None = None,
         input_ids: Sequence[str] = (),
+        require_parent_running: bool = False,
+        allow_stopped_resume: bool = True,
     ) -> WorkerAttempt:
         if not prompt.strip() or len(prompt.encode("utf-8")) > 64 * 1024:
             raise ValueError("worker prompt must be non-empty and at most 64 KiB")
@@ -3713,6 +3723,8 @@ class Store:
             or len(service_owner_id) > 128
         ):
             raise ValueError("worker service owner must be a non-empty bounded identifier")
+        if not isinstance(require_parent_running, bool) or not isinstance(allow_stopped_resume, bool):
+            raise TypeError("worker attempt policy flags must be booleans")
         if isinstance(input_ids, (str, bytes)):
             raise TypeError("worker input identities must be a sequence of strings")
         consumed_ids = tuple(input_ids)
@@ -3731,6 +3743,19 @@ class Store:
                 raise PermissionError("worker is not owned by caller")
             if worker["phase"] == WorkerPhase.RUNNING.value:
                 raise ValueError("worker is already running")
+            if not allow_stopped_resume and worker["stop_reason"] is not None:
+                raise ValueError("worker was stopped before its attempt could start")
+            if require_parent_running:
+                parent_id = worker["parent_worker_id"]
+                if parent_id is None:
+                    raise ValueError("worker parent is required")
+                parent = connection.execute(
+                    "SELECT owner_id, phase FROM workers WHERE id = ?", (parent_id,)
+                ).fetchone()
+                if parent is None or parent["owner_id"] != owner_id:
+                    raise PermissionError("worker parent is not owned by caller")
+                if parent["phase"] != WorkerPhase.RUNNING.value:
+                    raise ValueError("parent worker is not running")
             if connection.execute(
                 "SELECT 1 FROM worker_attempts a WHERE a.worker_id = ? AND "
                 "(a.status = 'running' OR EXISTS (SELECT 1 FROM worker_attempt_processes p "

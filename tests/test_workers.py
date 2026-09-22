@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from lunar_evolution.agents import AgentRegistry, AgentResult
-from lunar_evolution.models import WorkerOutcome, WorkerPhase
+from lunar_evolution.models import WorkerOutcome, WorkerPhase, WorkerStopReason
 from lunar_evolution.store import Store
 from lunar_evolution.workers import WorkerService
 
@@ -115,6 +115,29 @@ def test_parent_cancel_cascades_without_touching_unrelated_worker(tmp_path: Path
     assert service.wait("owner", unrelated.id, timeout=2).outcome is WorkerOutcome.SUCCESS
     service.cancel("owner", parent.id)
     assert len([event for event in store.list_worker_events(parent.id) if event["type"] == "worker_cancelled"]) == 1
+    service.close()
+
+
+def test_recursive_parent_cancel_reaches_grandchild(tmp_path: Path) -> None:
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+    service = WorkerService(
+        store,
+        registry(FixtureAdapter(delay=0.25)),
+        tmp_path / "sessions",
+        max_depth=2,
+        max_workers=4,
+    )
+    root = service.dispatch("owner", prompt="root")
+    child = service.dispatch("owner", prompt="child", parent_worker_id=root.id)
+    grandchild = service.dispatch("owner", prompt="grandchild", parent_worker_id=child.id)
+    unrelated = service.dispatch("owner", prompt="unrelated")
+    stopped = service.cancel("owner", root.id)
+    assert stopped.stop_reason is WorkerStopReason.CANCELLED
+    assert service.wait("owner", root.id, timeout=2).outcome is WorkerOutcome.STOPPED
+    assert service.wait("owner", child.id, timeout=2).stop_reason is WorkerStopReason.PARENT_CANCELLED
+    assert service.wait("owner", grandchild.id, timeout=2).stop_reason is WorkerStopReason.PARENT_CANCELLED
+    assert service.wait("owner", unrelated.id, timeout=2).outcome is WorkerOutcome.SUCCESS
     service.close()
 
 

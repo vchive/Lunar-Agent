@@ -17,15 +17,19 @@ from lunar_evolution.runtime import MockRuntime, RuntimeResult
 class CapturingRuntime:
     name = "capturing-runtime"
 
-    def __init__(self, delay: float = 0.0) -> None:
+    def __init__(self, delay: float = 0.0, clock=None) -> None:
         self.delay = delay
+        self.clock = clock
         self.timeouts: list[float | None] = []
 
     def run(self, prompt: str, workspace: Path, timeout: float | None = None) -> RuntimeResult:
         del prompt
         self.timeouts.append(timeout)
         if self.delay:
-            time.sleep(self.delay)
+            if self.clock is None:
+                time.sleep(self.delay)
+            else:
+                self.clock.advance(self.delay)
         workspace.mkdir(parents=True, exist_ok=True)
         return RuntimeResult("done")
 
@@ -156,8 +160,12 @@ class _CapturingAdapter:
         del observer
 
 
-def test_resume_workers_share_one_wall_clock_budget(tmp_path: Path) -> None:
-    runtime = CapturingRuntime(delay=0.05)
+def test_resume_workers_share_one_wall_clock_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _ControllerClock()
+    monkeypatch.setattr(controller_module, "time", clock)
+    runtime = CapturingRuntime(delay=0.05, clock=clock)
     controller = LocalController(Config(tmp_path / ".lunar-evolution", runtime_timeout=10), runtime)
     plan = PlanDocument(
         goal="write two reports",

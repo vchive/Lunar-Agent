@@ -14,11 +14,19 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 from .agents import AgentAdapter, AgentRegistry, AgentRequest, AgentResult
-from .models import Worker, WorkerAttempt, WorkerOutcome, WorkerPhase, WorkerStopReason
+from .models import (
+    MAX_WORKER_DEPTH,
+    Worker,
+    WorkerAttempt,
+    WorkerOutcome,
+    WorkerPhase,
+    WorkerStopReason,
+)
 from .process_ownership import ProcessCleanupStatus, RegisteredProcess, cleanup_registered_processes
 from .store import Store
 from .worker_ownership import WorkerOwnerLock
@@ -89,6 +97,12 @@ class WorkerService:
     ) -> None:
         if isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 0:
             raise ValueError("max_depth must be a non-negative integer")
+        if max_depth > MAX_WORKER_DEPTH:
+            raise ValueError(f"max_depth must be at most {MAX_WORKER_DEPTH}")
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        if max_depth > 1 and max_workers < max_depth + 1:
+            raise ValueError("recursive workers require max_workers >= max_depth + 1")
         self.store = store
         self.registry = registry
         self.workspace = Path(workspace).expanduser().resolve()
@@ -123,11 +137,23 @@ class WorkerService:
             worker = self.store.create_worker(
                 owner_id, role, description or prompt[:512], parent_worker_id=parent_worker_id,
                 agent_type=adapter.name, max_depth=self.max_depth,
+                require_parent_running=parent_worker_id is not None,
             )
-            return self._start(
-                worker, owner_id, prompt, required_capabilities, adapter, timeout,
-                before_start=before_start,
-            )
+            try:
+                return self._start(
+                    worker, owner_id, prompt, required_capabilities, adapter, timeout,
+                    before_start=before_start, require_parent_running=parent_worker_id is not None,
+                    allow_stopped_resume=False,
+                )
+            except Exception:
+                # Only close a child that lost the parent-running admission race. Other startup
+                # failures intentionally remain idle so the existing owner-scoped reconcile path
+                # can recover them.
+                parent = self.store.get_worker(parent_worker_id) if parent_worker_id else None
+                if parent_worker_id and (parent is None or parent.phase is not WorkerPhase.RUNNING):
+                    with suppress(Exception):
+                        self.store.cancel_worker_tree(worker.id, owner_id)
+                raise
 
     def send(self, owner_id: str, worker_id: str, content: str) -> Worker:
         worker = self._owned(owner_id, worker_id)
@@ -209,6 +235,7 @@ class WorkerService:
             return self._start(
                 worker, owner_id, effective, required_capabilities, adapter, timeout,
                 input_ids=[identity for identity, _ in queued],
+                allow_stopped_resume=True,
             )
 
     def reconcile(self, owner_id: str) -> int:
@@ -304,6 +331,8 @@ class WorkerService:
         *,
         input_ids: Sequence[str] = (),
         before_start: Callable[[Worker, WorkerAttempt], None] | None = None,
+        require_parent_running: bool = False,
+        allow_stopped_resume: bool = True,
     ) -> Worker:
         with self._lock:
             self._ensure_open()
@@ -317,7 +346,8 @@ class WorkerService:
             try:
                 attempt = self.store.start_worker_attempt(
                     worker.id, owner_id, prompt, service_owner_id=self.service_owner_id,
-                    input_ids=input_ids,
+                    input_ids=input_ids, require_parent_running=require_parent_running,
+                    allow_stopped_resume=allow_stopped_resume,
                 )
                 execution = _Execution(worker, attempt.id, adapter)
                 self._active[attempt.id] = execution
