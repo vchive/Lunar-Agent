@@ -60,8 +60,9 @@ provider、campaign、WebAgent 和 139 primary/joint 结果均未改变。
 表现为 0.25 秒测试预算在 CI 文件写入和启动抖动下被提前耗尽；控制器实现仍符合 Feature 137 的
 “一次 resume 共用一个 deadline”约定。本地复核确认这是测试夹具的真实墙钟依赖，不是生产路径的
 新回归。现将该夹具改为已有受控单调时钟，并由模拟 runtime 显式推进 0.05 秒延迟，保留第二个
-请求获得剩余预算的断言，避免 Python 版本和机器负载决定终态。聚焦 7 项通过；新的 Linux 矩阵
-需在本次提交后重新确认，尚未提前宣称通过。
+请求获得剩余预算的断言，避免 Python 版本和机器负载决定终态。聚焦 7 项通过；提交 `3d26116`
+后的 [Linux CI Run 221](https://github.com/vchive/Lunar-Evolution/actions/runs/35692074592)
+已确认 Python 3.11、3.12、3.13 矩阵全部通过。
 
 本工作树完整回归收集 6726 项，结果为 **6725 passed、1 skipped**；Ruff、compileall、diff
 检查和旧名称扫描均通过。该回归仍是 provider-free 本地验证，尚未宣称真实模型或框架端到端

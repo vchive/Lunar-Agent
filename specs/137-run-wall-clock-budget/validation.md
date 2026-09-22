@@ -15,7 +15,8 @@ contract, which defines one deadline per `resume()` execution. The fixture now i
 existing deterministic controller clock and advances it from the simulated runtime delay. This
 preserves the assertions that both requests share one deadline and that the second timeout is
 smaller, without making the outcome depend on host load. The focused wall-clock module passes
-locally; the post-fix Linux matrix is pending and must be recorded separately.
+locally. The post-fix [Linux CI Run 221](https://github.com/vchive/Lunar-Evolution/actions/runs/35692074592)
+completed successfully for Python 3.11, 3.12, and 3.13.
 
 ## Required focused checks
 
