@@ -4032,7 +4032,8 @@ class Store:
                     ),
                 )
                 connection.execute(
-                    "UPDATE workers SET phase = ?, outcome = ?, stop_reason = ?, updated_at = ? WHERE id = ? AND phase = ?",
+                    "UPDATE workers SET phase = ?, outcome = ?, stop_reason = ?, updated_at = ? "
+                    "WHERE id = ? AND (phase = ? OR (phase = ? AND outcome IS NULL))",
                     (
                         WorkerPhase.IDLE.value,
                         WorkerOutcome.STOPPED.value,
@@ -4040,6 +4041,7 @@ class Store:
                         timestamp,
                         current,
                         WorkerPhase.RUNNING.value,
+                        WorkerPhase.IDLE.value,
                     ),
                 )
                 if connection.execute(

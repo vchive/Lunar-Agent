@@ -9,11 +9,11 @@ depth remains one. A configured recursive service accepts depths `0..N`, with a 
 the cancellation race leaves a terminal child that cannot be resumed. Worker ancestry, result
 reads, cancellation, and wait observations remain owner- and subtree-scoped.
 
-The focused recursive suite passed **18 tests**:
+The focused recursive suite passed **19 tests**:
 
 ```text
 ./.venv/bin/python -m pytest -q tests/test_agent_worker_tools.py tests/test_workers.py
-18 passed
+19 passed
 ```
 
 It covers a three-level AgentLoop spawn/wait chain, depth and executor bounds, stopped-parent
@@ -21,7 +21,7 @@ admission, ancestor cancellation through a grandchild while preserving an unrela
 subtree result isolation, private workspaces, and clamping `wait_worker` to the enclosing
 AgentLoop execution deadline.
 
-The related shared selection passed **166 tests**:
+The related shared selection passed **167 tests**:
 
 ```text
 ./.venv/bin/python -m pytest --disable-warnings -ra \
@@ -32,7 +32,7 @@ The related shared selection passed **166 tests**:
   tests/test_worker_result_envelope.py tests/test_worker_store_ownership.py \
   tests/test_store.py tests/test_agent_loop.py tests/test_staged_agent_loop.py \
   tests/test_run_wall_clock_budget.py
-166 passed
+167 passed
 ```
 
 Static checks also passed:
@@ -43,7 +43,9 @@ Static checks also passed:
 
 The parent-running admission check and child insertion now execute after an explicit SQLite
 `BEGIN IMMEDIATE`, serializing them with cancellation-tree mutations. A regression traces the
-transaction ordering so a child cannot commit from a stale running-parent observation.
+transaction ordering so a child cannot commit from a stale running-parent observation. Cancellation
+also settles an idle child record created before its first attempt, so it cannot be resumed through
+the startup path after its parent tree has been cancelled.
 
 The existing SQLite schema was exercised through fresh Store fixtures; Feature 146 adds no schema
 migration. No provider, campaign, remote worker, external producer, WebAgent, or generated source

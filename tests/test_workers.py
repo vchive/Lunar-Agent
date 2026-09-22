@@ -157,6 +157,35 @@ def test_parent_cancel_cascades_without_touching_unrelated_worker(tmp_path: Path
     service.close()
 
 
+def test_parent_cancel_closes_an_idle_descendant_before_its_first_attempt(tmp_path: Path) -> None:
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+    service = WorkerService(
+        store, registry(FixtureAdapter(delay=0.2)), tmp_path / "sessions", max_depth=1,
+    )
+    parent = service.dispatch("owner", prompt="parent")
+    child = store.create_worker(
+        "owner", "worker", "child", parent_worker_id=parent.id,
+        max_depth=1, require_parent_running=True,
+    )
+    assert child.phase is WorkerPhase.IDLE and child.outcome is None
+
+    service.cancel("owner", parent.id)
+
+    stopped = store.get_worker(child.id)
+    assert stopped is not None
+    assert stopped.outcome is WorkerOutcome.STOPPED
+    assert stopped.stop_reason is WorkerStopReason.PARENT_CANCELLED
+    with pytest.raises(ValueError, match="stopped before"):
+        store.start_worker_attempt(
+            child.id, "owner", "late child", service_owner_id="service-a",
+            require_parent_running=True, allow_stopped_resume=False,
+        )
+    with pytest.raises(ValueError, match="parent worker is not running"):
+        service.resume("owner", child.id)
+    service.close()
+
+
 def test_recursive_parent_cancel_reaches_grandchild(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()

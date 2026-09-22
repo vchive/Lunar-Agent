@@ -18,8 +18,8 @@
 worker 的后代，子 workspace 和 envelope 保持隔离。
 
 新增三层 AgentLoop spawn/wait、深度和容量拒绝、父状态准入、递归取消、结果隔离、私有
-workspace 及 deadline 回归，并固定父准入写事务顺序。Feature 146 focused **18 passed**；
-相关 worker/Store/AgentLoop 选择集 **166 passed**。Ruff、compileall、diff 检查通过；SQLite 仅使用现有 schema 的新鲜
+workspace 及 deadline 回归，并固定父准入写事务顺序及未启动 child 的取消终态。Feature 146
+focused **19 passed**；相关 worker/Store/AgentLoop 选择集 **167 passed**。Ruff、compileall、diff 检查通过；SQLite 仅使用现有 schema 的新鲜
 fixture，无新增 migration。准确结果见
 [`specs/146-recursive-worker-lifecycle/validation.md`](specs/146-recursive-worker-lifecycle/validation.md)。
 本轮未调用 provider、campaign、WebAgent 或外部 producer，自动 solve 和真实模型端到端仍未
