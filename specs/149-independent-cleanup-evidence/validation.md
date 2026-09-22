@@ -34,5 +34,6 @@ primary and joint eligibility closed. No historical evidence is migrated or rewr
 
 Ruff, compileall, diff checks, and the complete three-stage regression pass: current product
 **7238 passed, 1 skipped**, fixed archive **2294 passed**, and frozen registration **24 passed**,
-with overall exit 0. Commit/CI verification is the remaining release task; no provider or real
-campaign launch is part of this feature.
+with overall exit 0. Commit `806b97f` is pushed and GitHub Actions [Run 230](https://github.com/vchive/Lunar-Evolution/actions/runs/35749740921)
+passed on Python 3.11, 3.12 and 3.13. No provider or real campaign launch is part of this
+feature.

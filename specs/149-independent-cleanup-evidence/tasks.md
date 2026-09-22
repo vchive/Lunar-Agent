@@ -10,4 +10,6 @@
 - [x] T005 Reuse cleanup status in acceptance and slot auditors; reject relocation and descriptor
       tampering.
 - [x] T006 Add focused and related regressions, static checks, and independent review evidence.
-- [ ] T007 Commit/push the completed offline slice and verify the CI matrix.
+- [x] T007 Commit/push the completed offline slice and verify the CI matrix. Commit `806b97f`
+      and GitHub Actions [Run 230](https://github.com/vchive/Lunar-Evolution/actions/runs/35749740921)
+      passed on Python 3.11, 3.12 and 3.13.

@@ -29,7 +29,9 @@ Feature 149 parser/native/audit/slot 相关的九个文件选择集 **291 passed
 exit 0；Ruff、compileall、diff check 和旧名称扫描通过。没有 provider、campaign、WebAgent、
 evaluator 或历史生成源码执行。当前工作树已完成实现但尚未提交/推送，下一步是提交、推送并
 核对新 CI。真实自动多文件验收仍须先完成独立 registration seal/preflight 后再由用户明确授权，
-不能由本次离线 cleanup 证据代替。
+不能由本次离线 cleanup 证据代替。Feature 149 已提交为 `806b97f` 并推送；GitHub Actions
+[Run 230](https://github.com/vchive/Lunar-Evolution/actions/runs/35749740921) 已在 Python 3.11、
+3.12、3.13 全部通过，T007 已完成。
 
 ## 2026-09-22 Feature 142 provider-free registration preflight
 
