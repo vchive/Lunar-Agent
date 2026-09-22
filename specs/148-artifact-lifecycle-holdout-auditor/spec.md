@@ -1,7 +1,7 @@
 # Feature Specification: artifact/lifecycle and holdout receipt auditor
 
 **Created**: 2026-09-22
-**Status**: Specification only; implementation pending; provider execution remains outside scope
+**Status**: Implemented as a read-only Python API; provider execution remains outside scope
 
 ## Problem
 
@@ -36,6 +36,12 @@ return eligibility projections for primary and joint closure. These projections 
 future postrun decision. They do not increment Feature 142/147 counters, do not authorize a
 provider request, and do not claim a real-model result when no registered attempt exists.
 
+The current native execution-record schema has no independent cleanup observation. Consequently,
+even otherwise successful retained v1 execution evidence produces `execution_cleanup_unknown`;
+the combined API currently returns both eligibility fields as `false`. Adding native cleanup
+evidence is a separate prerequisite for real acceptance, not a reason to infer successful cleanup
+from an exit code or a later receipt.
+
 Feature 139 is a closed historical slot. Its evidence and frozen preparation/primary/joint
 values remain immutable. This feature may compare a historical inventory by digest when a release
 audit requires it, but it must not reopen, relaunch, import, or rewrite that slot or its helpers.
@@ -43,8 +49,9 @@ Feature 131 and Feature 134 evidence receives the same immutable treatment.
 
 ## Acceptance scenarios
 
-- **P1 — audit retained native evidence.** Given a fresh offline fixture with a complete native
-  chain, a read-only audit verifies all expected links. Changing one source, input, execution,
+- **P1 — audit retained native evidence.** Given a fresh offline fixture, a read-only audit
+  verifies the native links that have sufficient evidence and preserves absent cleanup as unknown.
+  Changing one source, input, execution,
   evaluation, selection, or delivery binding makes that boundary non-verified and cannot be
   repaired by a later successful-looking receipt.
 - **P1 — audit parent lifecycle.** Given a child that completed before parent delivery, a parent
@@ -94,6 +101,10 @@ unknown result:
 1. **Preparation:** reuse `validate_automatic_solve_bundle` and require the durable prepared event,
    profile/evaluator artifacts and declared inputs to exist and match. The validator can accept an
    intake that has not prepared yet, so its return without an exception is insufficient alone.
+   The retained request, preparation-request and preparation-wall policies must exactly match the
+   manifest's 600/900/1,860-second values; missing policy evidence is unverifiable and disagreement
+   fails the boundary. The manifest binds request/token ceilings as declarations; enforcement and
+   actual consumption accounting remain part of the separate launch/measurement implementation.
 2. **Generation:** require Feature 147's native generation receipt validation, one parser-complete
    admitted candidate, and matching source bundle, run, task, candidate and budget identities.
    Self-reported source, a success message, or a later artifact cannot fill a missing generation

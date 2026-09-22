@@ -1,5 +1,11 @@
 """Standalone local Hermes-inspired agent controller."""
 
+from .acceptance_audit import (
+    AcceptanceAuditError,
+    audit_acceptance_artifacts,
+    build_acceptance_audit_request,
+    parse_acceptance_audit_request,
+)
 from .acceptance_observer import (
     DEFAULT_ACCEPTANCE_BUDGETS,
     AcceptanceObservationError,
@@ -246,6 +252,24 @@ from .evolution import (
     resolve_candidate_integrity_authority,
     stage_candidate_inputs,
 )
+from .holdout_audit import (
+    MAX_DURATION_MS as HOLDOUT_MAX_DURATION_MS,
+)
+from .holdout_audit import (
+    MAX_HOLDOUTS,
+    HoldoutAuditError,
+    audit_holdout_receipts,
+    build_holdout_declaration,
+    build_holdout_receipt,
+    parse_holdout_declaration,
+    parse_holdout_receipt,
+)
+from .holdout_audit import (
+    MAX_SNAPSHOT_BYTES as HOLDOUT_MAX_SNAPSHOT_BYTES,
+)
+from .holdout_audit import (
+    SCHEMA_VERSION as HOLDOUT_AUDIT_SCHEMA_VERSION,
+)
 from .model_profile import UsageLedger, UsageSnapshot
 from .models import (
     Worker,
@@ -364,14 +388,19 @@ __all__ = [
     "DEFAULT_ACCEPTANCE_BUDGETS",
     "EXECUTION_PROTOCOL",
     "EXECUTION_SCHEMA_VERSION",
+    "HOLDOUT_AUDIT_SCHEMA_VERSION",
+    "HOLDOUT_MAX_DURATION_MS",
+    "HOLDOUT_MAX_SNAPSHOT_BYTES",
     "INVENTORY_PROTOCOL",
     "INVENTORY_SCHEMA_VERSION",
+    "MAX_HOLDOUTS",
     "MAX_INVENTORY_DEPTH",
     "MAX_INVENTORY_FILES",
     "MAX_INVENTORY_FILE_BYTES",
     "MAX_INVENTORY_TOTAL_BYTES",
     "WORKSPACE_PLAN_PROTOCOL",
     "WORKSPACE_PLAN_SCHEMA_VERSION",
+    "AcceptanceAuditError",
     "AcceptanceObservationError",
     "AdmittedBenchmarkComparison",
     "AdmittedBenchmarkTask",
@@ -469,6 +498,7 @@ __all__ = [
     "FeedbackError",
     "FrozenEvaluatorBundle",
     "GenerationRequest",
+    "HoldoutAuditError",
     "LoopStrategy",
     "ModelIdentity",
     "ModelProfile",
@@ -548,9 +578,12 @@ __all__ = [
     "admit_remote_materials",
     "admit_remote_state",
     "admit_seed_manifest",
+    "audit_acceptance_artifacts",
     "audit_campaign_directory",
+    "audit_holdout_receipts",
     "benchmark_case_content_digest",
     "bind_benchmark_comparison_result_evidence",
+    "build_acceptance_audit_request",
     "build_acceptance_manifest",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
@@ -558,6 +591,8 @@ __all__ = [
     "build_candidate_manifest",
     "build_candidate_workspace_plan",
     "build_effect_kit",
+    "build_holdout_declaration",
+    "build_holdout_receipt",
     "build_private_input_profile",
     "build_remote_producer_envelope",
     "build_round_feedback",
@@ -586,6 +621,7 @@ __all__ = [
     "materialize_candidate_source_bundle",
     "normalize_feedback",
     "observe_acceptance_evidence",
+    "parse_acceptance_audit_request",
     "parse_acceptance_manifest",
     "parse_benchmark_comparison_plan",
     "parse_benchmark_comparison_result",
@@ -595,6 +631,8 @@ __all__ = [
     "parse_candidate_execution_admission",
     "parse_candidate_source_bundle",
     "parse_candidate_workspace_plan",
+    "parse_holdout_declaration",
+    "parse_holdout_receipt",
     "parse_producer_envelope",
     "parse_seed_manifest",
     "prepare_producer_seed_manifest",

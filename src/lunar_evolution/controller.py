@@ -1325,7 +1325,7 @@ class LocalController:
             strategy = PopulationStrategy(EvolutionContext(
                 contract=contract, workspace=workspace, generate=inactive, evaluate=inactive,
                 config=config,
-            ))
+            ), read_only=True)
             strategy.validate_ordinary_resume_integrity()
             archive = strategy.archive
             canonical_result = archive.result(

@@ -8,6 +8,37 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## 2026-09-22 Feature 148 只读语义与 holdout 审计
+
+沿现有 SDD 完成 `audit_acceptance_artifacts` Python API：canonical request 固定 manifest、
+parent/child/task、原生 plan/admission/execution/evaluation pins 与八个 holdout 声明；
+只复制 SQLite/WAL 到私有快照，workspace 在原位置读取，保留 device/inode 约束。
+准备、生成、唯一执行/评测槽位、执行、独立评测、选择、父交付和生命周期分别审计，
+后续成功不能补齐更早的失败或未知证据。holdout 必须有有序且绑定的输入、预期与实际输出
+字节、两个退出码及清理观察；审计不运行这些材料。
+
+独立审查修复原生交付检查会隐式恢复 archive 的问题：只读 CandidateArchive/PopulationStrategy
+不创建目录、不恢复 seed、不绑定 runtime callback，并拒绝写入口。准备阶段额外严格核对
+登记的 600/900/1860 秒预算；父生命周期要求 explicit 3000 秒、唯一 orchestration attempt，
+并按 SQLite 插入顺序确认 child success → delivery → task success → parent success → terminal。
+取消或预算失败后的晚到成功不被接受。
+
+最终专项 **422 passed**，Feature 147 共享选择集 **58 passed**。中间专项一项失败已确定是
+fixture 的最后 SQLite writer 被 GC 回收触发真实 WAL checkpoint；保留原失败日志，增加
+强制 GC 复现并显式管理 fixture 连接，产品严格快照不放宽。完整当前阶段检查点
+**7146 passed、1 skipped**；归档历史 **2294 passed**；冻结注册 **24 passed**，三阶段 exit 0。
+当前产品阶段在最后的预算绑定、slot 补充和 fixture 修补前收集，这些改动由最终 422 项覆盖。
+详细检查点与 CI 状态见 [148 validation](specs/148-artifact-lifecycle-holdout-auditor/validation.md)，
+不能把早期完整回归描述成最终源码的完整回归。Ruff、compileall、SDD 只读检查、diff 和
+当前仓库旧名称扫描通过；`.specify/feature.json` 不变。
+
+当前 native execution v1 没有独立 cleanup observation，即使其余记录成功也必须返回
+`execution_cleanup_unknown`，因此本 API 当前不会返回 primary/joint eligible。下一步是
+独立清理证据、launch preflight/登记封存与新身份下的真实自动多文件端到端验收。审计本身
+不会调用 provider、启动 campaign、写数据库或修改验收计数。本轮无真实 provider、campaign、
+WebAgent 或历史生成源码执行；Feature 139 仍为 preparation `1/1`、primary/joint `0/1`。
+API 使用与约束见 [148 quickstart](specs/148-artifact-lifecycle-holdout-auditor/quickstart.md)。
+
 ## 2026-09-22 Feature 147 验收证据观察与目录审计
 
 沿 Feature 142 的 real-acceptance plan 增加 provider-free 的 observation manifest 和只读

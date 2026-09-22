@@ -2689,7 +2689,11 @@ class CandidateArchive:
         workspace: str | Path,
         *,
         requested_strategy: str | None = None,
+        read_only: bool = False,
     ) -> None:
+        if type(read_only) is not bool:
+            raise EvolutionError("evolution_archive_read_only_invalid")
+        self.read_only = read_only
         raw_workspace = Path(workspace).expanduser()
         if raw_workspace.is_symlink():
             raise EvolutionError("evolution workspace must not be a symlink")
@@ -2702,12 +2706,37 @@ class CandidateArchive:
         self.seed_commit_path = self.root / "seed-commit.json"
         self.seed_stage_path = self.workspace / _SEED_STAGE_NAME
         self.seed_backup_path = self.workspace / _SEED_BACKUP_NAME
+        if read_only:
+            self._inspect_read_only_layout()
         self._preflight_seed_recovery_strategy(requested_strategy)
-        raw_workspace.mkdir(parents=True, exist_ok=True)
-        self._recover_seed_publication()
+        if not read_only:
+            raw_workspace.mkdir(parents=True, exist_ok=True)
+            self._recover_seed_publication()
         for path in (self.root, self.candidates_root):
             if path.is_symlink():
                 raise EvolutionError("evolution archive directory must not be a symlink")
+
+    def _inspect_read_only_layout(self) -> None:
+        """Inspect an existing archive without allocating or recovering any directory."""
+        if not self.workspace.is_dir():
+            raise EvolutionError("evolution_archive_workspace_missing")
+        for path in (self.root, self.candidates_root):
+            if self._path_present(path) and (path.is_symlink() or not path.is_dir()):
+                raise EvolutionError("evolution_archive_directory_invalid")
+        try:
+            with os.scandir(self.workspace) as entries:
+                if any(
+                    entry.name.startswith(".evolution-seed-stage-")
+                    or entry.name.startswith(".evolution-seed-backup-")
+                    for entry in entries
+                ):
+                    raise EvolutionError("evolution_archive_recovery_required")
+        except OSError as exc:
+            raise EvolutionError("evolution_archive_directory_invalid") from exc
+
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise EvolutionError("evolution_archive_read_only")
 
     @staticmethod
     def _path_present(path: Path) -> bool:
@@ -3028,6 +3057,7 @@ class CandidateArchive:
             raise EvolutionError("verified_seed_recovery_failed") from exc
 
     def _recover_seed_publication(self) -> None:
+        self._require_writable()
         reserved = [
             path
             for path in self.workspace.iterdir()
@@ -3081,6 +3111,7 @@ class CandidateArchive:
         self._remove_recovery_tree(self.seed_stage_path)
 
     def _ensure_layout(self) -> None:
+        self._require_writable()
         for path in (self.root, self.candidates_root):
             if path.exists() and path.is_symlink():
                 raise EvolutionError("evolution archive directory must not be a symlink")
@@ -3514,6 +3545,7 @@ class CandidateArchive:
             raise EvolutionError("population_outcomes_invalid") from exc
 
     def append_offspring_outcome(self, outcome: OffspringOutcome) -> None:
+        self._require_writable()
         if not isinstance(outcome, OffspringOutcome):
             raise TypeError("outcome must be an OffspringOutcome")
         self._guard_active_write("population")
@@ -4093,6 +4125,7 @@ class CandidateArchive:
         execution_snapshot: _HeldRegularFileSnapshot | None = None,
         bundle_evidence: dict[str, Any] | None = None,
     ) -> Candidate:
+        self._require_writable()
         self._guard_active_write(strategy)
         if strategy == "openevolve":
             raise EvolutionError("openevolve_candidate_requires_verified_seed_commit")
@@ -4551,6 +4584,7 @@ class CandidateArchive:
         failed publication.
         """
 
+        self._require_writable()
         self._guard_active_write(canonical_strategy)
         self._guard_seed_state_strategy(state, canonical_strategy)
 
@@ -4864,6 +4898,7 @@ class CandidateArchive:
         return max(valid, key=lambda candidate: candidate.evaluation.combined_score)
 
     def write_state(self, payload: dict[str, Any]) -> None:
+        self._require_writable()
         strategy = payload.get("strategy", _MISSING_STRATEGY)
         selected_strategy = self._guard_active_write(strategy)
         selected_strategy = selected_strategy or "population"
@@ -5144,13 +5179,15 @@ def _drafts(value: CandidateDraft | Sequence[CandidateDraft]) -> tuple[Candidate
 class _BaseStrategy:
     name: Literal["population", "openevolve"]
 
-    def __init__(self, context: EvolutionContext) -> None:
+    def __init__(self, context: EvolutionContext, *, read_only: bool = False) -> None:
         if context.contract.evolution.strategy == "loop":
             raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
         if context.config.strategy != self.name:
             raise EvolutionError(_WORKSPACE_STRATEGY_MISMATCH)
         self.context = context
-        self.archive = CandidateArchive(context.workspace, requested_strategy=self.name)
+        self.archive = CandidateArchive(
+            context.workspace, requested_strategy=self.name, read_only=read_only,
+        )
         # Root-only evidence does not enter seed-recovery preflight. Inspect it before resolving
         # adapters or binding observers so a retired, malformed, or cross-strategy workspace can
         # never trigger generator/evaluator behavior on a fresh strategy object.
@@ -5163,6 +5200,8 @@ class _BaseStrategy:
         # process while persisting only the receipt-safe projection.  The map is deliberately
         # in-memory and is empty on resume, so evaluator prose cannot cross the durable boundary.
         self._transient_evaluations: dict[str, EvaluationReport] = {}
+        if read_only:
+            return
         self._bind_observer(context.generate)
         self._bind_observer(context.evaluate)
         self._bind_timeout(context.generate)
@@ -5702,8 +5741,8 @@ class PopulationStrategy(_BaseStrategy):
 
     name: Literal["population"] = "population"
 
-    def __init__(self, context: EvolutionContext) -> None:
-        super().__init__(context)
+    def __init__(self, context: EvolutionContext, *, read_only: bool = False) -> None:
+        super().__init__(context, read_only=read_only)
         self.rng = random.Random(self.config.rng_seed)
 
     @staticmethod
@@ -7001,6 +7040,7 @@ class PopulationStrategy(_BaseStrategy):
             raise EvolutionError("population_outcome_state_mismatch")
 
     def run(self) -> StrategyResult:
+        self.archive._require_writable()
         if self.context.bundle_pipeline is None and any(
             candidate.bundle_evidence is not None for candidate in self.archive.records()
         ):
@@ -7445,6 +7485,7 @@ class OpenEvolveStrategy(_BaseStrategy):
             raise EvolutionError("openevolve_resume_mismatch") from exc
 
     def run(self) -> StrategyResult:
+        self.archive._require_writable()
         # A producer launch is an external effect even though it uses a private temporary
         # directory. Validate any existing workspace identity before starting that process.
         self.archive._guard_active_write(self.name)

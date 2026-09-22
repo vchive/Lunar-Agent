@@ -30,9 +30,15 @@ provider-free observation-manifest/ordered-receipt parser and a retained-directo
 The parser reuses canonical native generation receipts and checks source digest, 12-step budget
 and exact outcome. Its scope remains structural; every acceptance counter stays at `0/1`.
 The inventory verifies bytes in a quiescent directory, not lifecycle semantics.
-[Feature 148](../148-artifact-lifecycle-holdout-auditor/spec.md) specifies the next semantic/holdout auditor;
-implementation is pending. The launch preflight, real Store/artifact binding and actual
-preregistration gates below remain open. These helpers do not register or launch an attempt.
+[Feature 148](../148-artifact-lifecycle-holdout-auditor/spec.md) now supplies a provider-free,
+read-only semantic/lifecycle and holdout auditor. Its bounded request/report schemas, private
+SQLite snapshot, rowid-ordered event reader, first-terminal-wins lifecycle checks, native artifact
+adapter, and holdout receipt checks have local regression coverage. The auditor never registers,
+launches, resumes, executes source/evaluators, or changes acceptance counters. An independent
+cleanup observation is still absent from the retained v1 execution record, so an otherwise
+complete native chain remains unverifiable for primary eligibility. Launch preflight/registration
+sealing and actual real-model acceptance remain pending. These helpers do not authorize a provider
+request.
 
 Feature 144 supplies the next candidate-response product checkpoint: invocation-local bundle
 instructions, unchanged strict parsing, and canonical failed receipts with optional `phase` and
@@ -45,11 +51,13 @@ the new acceptance implementation still needs the following work:
 2. Bind the current lifecycle-enabled parent orchestration task, its execution identity, reciprocal
    child link and final delivery receipt. Do not reuse the historical interpretation where an
    intake-only parent could already be succeeded while the child was still running.
-3. Verify canonical generation receipts with the current parser/Store contract. Preserve bounded
+3. Add and retain an independent native/process cleanup observation, then verify canonical
+   generation receipts with the current parser/Store contract. Preserve bounded
    failure phase/cause when present, and absence when unknown; neither field nor any later artifact
    can establish parser completion. Cover this observer with offline success, failure and tamper
    fixtures before preregistration.
-4. Retain fresh preflight, supervision, read-only status and six-stage summary evidence, with an
+4. Build the launch preflight and preregistration seal, then retain fresh supervision, read-only
+   status and six-stage summary evidence, with an
    independent inventory/audit path. Freeze the actual product/measurement commits and all launch
    conditions only after this implementation's own offline checks pass.
 

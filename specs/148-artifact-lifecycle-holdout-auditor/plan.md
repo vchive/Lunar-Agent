@@ -66,15 +66,11 @@ validation.
 
 ## Development quickstart
 
-Until implementation exists, these commands inspect and validate the specification slice only:
-
-```text
-git diff --check -- specs/148-artifact-lifecycle-holdout-auditor
-python3 -c "from pathlib import Path; root = Path('specs/148-artifact-lifecycle-holdout-auditor'); required = ('spec.md', 'plan.md', 'tasks.md', 'validation.md'); assert all((root / name).is_file() for name in required)"
-```
-
-T009 replaces this with the implemented provider-free focused test command and audit-only API/CLI
-example. No placeholder launch command, provider identity or measured product pin is supplied.
+See [quickstart.md](quickstart.md) for the implemented provider-free focused tests, the Python audit
+API, exact request fields, original-location requirements and report interpretation. The current
+native execution-record schema lacks independent cleanup evidence, so a successful execution
+record still leaves primary and joint eligibility false. No launch command or provider call is
+part of this feature.
 
 ## Complexity tracking
 

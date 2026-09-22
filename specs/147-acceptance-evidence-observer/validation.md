@@ -11,9 +11,10 @@ material being read without execution. Initial focused observer/generation/inven
 **38 passed**; initial worker/Store/AgentLoop compatibility selection: **206 passed**. Ruff for
 `src tests tools`, compileall and diff checks pass. This is provider-free local validation.
 
-The artifact/lifecycle semantic and holdout auditors, launch preflight and real provider acceptance
-remain open work under the Feature 142 real-acceptance plan. Structure closure and byte inventory
-do not promote preparation, primary or joint success.
+The artifact/lifecycle semantic and holdout auditors are implemented separately in Feature 148.
+Independent cleanup evidence, launch preflight and real provider acceptance remain open work under
+the Feature 142 real-acceptance plan. Structure closure and byte inventory do not promote
+preparation, primary or joint success.
 
 Independent review then found a consumed-iterator source-binding bypass, conflation of unknown and
 failed generation outcomes, raw malformed-input exceptions, and incomplete inventory mutation/fd
@@ -27,3 +28,7 @@ The complete three-stage regression then passed with current **6777 passed, 1 sk
 historical **2294 passed**, and frozen registration **24 passed**, with zero failures/errors and
 exit code 0. JUnit and logs are retained under
 `.lunar-evolution/test-results/feature147-hardening/`.
+
+GitHub Actions [**Run 227**](https://github.com/vchive/Lunar-Evolution/actions/runs/35712084794),
+for product commit **`e0bf8dc`**, completed successfully. This confirms
+the pushed Feature 147 checkpoint; it is CI evidence rather than a real-provider acceptance result.
