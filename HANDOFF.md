@@ -18,12 +18,14 @@
 worker 的后代，子 workspace 和 envelope 保持隔离。
 
 新增三层 AgentLoop spawn/wait、深度和容量拒绝、父状态准入、递归取消、结果隔离、私有
-workspace 及 deadline 回归，并固定父准入写事务顺序及未启动 child 的取消终态。Feature 146
-focused **19 passed**；相关 worker/Store/AgentLoop 选择集 **167 passed**。Ruff、compileall、diff 检查通过；SQLite 仅使用现有 schema 的新鲜
+workspace 及 deadline 回归，并固定父准入写事务顺序、未启动 child 的取消终态，以及取消父
+下的 child resume 拒绝（父成功后仍可恢复）。Feature 146 focused **20 passed**；相关
+worker/Store/AgentLoop 选择集 **168 passed**。Ruff、compileall、diff 检查通过；SQLite 仅使用现有 schema 的新鲜
 fixture，无新增 migration。准确结果见
 [`specs/146-recursive-worker-lifecycle/validation.md`](specs/146-recursive-worker-lifecycle/validation.md)。
 本轮未调用 provider、campaign、WebAgent 或外部 producer，自动 solve 和真实模型端到端仍未
-宣称完成。
+宣称完成。`ebde3a4` 的 GitHub Actions Run 225（[35698100175](https://github.com/vchive/Lunar-Evolution/actions/runs/35698100175)）
+已在 Python 3.11/3.12/3.13 全部通过；Run 224 的失败属于缺少 resume guard 的中间提交，已由本提交修复。
 
 ## 2026-09-22 T009 交付中断与 CI 修复
 

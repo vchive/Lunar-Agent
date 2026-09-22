@@ -19,11 +19,15 @@ remote providers, and external producer scheduling remain separate integrations.
 ## Contract
 
 - A service configured with `max_depth=N` permits worker depths `0..N`; the protocol maximum is 32.
-- Recursive configurations with `N > 1` require at least `N + 1` executor slots, preventing a
-  parent that synchronously waits for its descendants from starving the child chain.
+- Recursive configurations with `N > 1` require at least `N + 1` executor slots, providing capacity
+  for one isolated chain of parents synchronously waiting for descendants. Arbitrary branching
+  and concurrent roots require additional capacity; this lower bound does not guarantee them.
 - A worker-tool spawn requires its current parent to still be running. The parent check and child
   record creation are performed under Store write serialization; a cancellation race leaves a
   terminal child record and cannot start a new attempt under a cancelled parent.
+- Cancellation also settles idle children that have no first attempt yet. Explicit child resume
+  rejects a cancelled or parent-cancelled parent in the same Store admission transaction, while
+  remaining available after a successfully completed parent.
 - A worker may read, wait for, or cancel only its owned descendant subtree. Siblings, ancestors,
   and other owners are rejected without Store or runtime side effects.
 - `wait_worker` timeout is an observation result. It returns a bounded running projection and does

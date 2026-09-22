@@ -1,7 +1,7 @@
 # Validation: bounded recursive worker lifecycle
 
 **Validated**: 2026-09-22
-**Status**: Implemented and locally verified; provider-free only
+**Status**: Implemented and locally/CI verified; provider-free only
 
 Feature 146 is validated as a local WorkerService and AgentLoop extension. The default service
 depth remains one. A configured recursive service accepts depths `0..N`, with a protocol maximum of
@@ -9,11 +9,11 @@ depth remains one. A configured recursive service accepts depths `0..N`, with a 
 the cancellation race leaves a terminal child that cannot be resumed. Worker ancestry, result
 reads, cancellation, and wait observations remain owner- and subtree-scoped.
 
-The focused recursive suite passed **19 tests**:
+The focused recursive suite passed **20 tests**:
 
 ```text
-./.venv/bin/python -m pytest -q tests/test_agent_worker_tools.py tests/test_workers.py
-19 passed
+./.venv/bin/python -m pytest --disable-warnings -ra tests/test_agent_worker_tools.py tests/test_workers.py
+20 passed
 ```
 
 It covers a three-level AgentLoop spawn/wait chain, depth and executor bounds, stopped-parent
@@ -21,7 +21,7 @@ admission, ancestor cancellation through a grandchild while preserving an unrela
 subtree result isolation, private workspaces, and clamping `wait_worker` to the enclosing
 AgentLoop execution deadline.
 
-The related shared selection passed **167 tests**:
+The related shared selection passed **168 tests**:
 
 ```text
 ./.venv/bin/python -m pytest --disable-warnings -ra \
@@ -32,7 +32,7 @@ The related shared selection passed **167 tests**:
   tests/test_worker_result_envelope.py tests/test_worker_store_ownership.py \
   tests/test_store.py tests/test_agent_loop.py tests/test_staged_agent_loop.py \
   tests/test_run_wall_clock_budget.py
-167 passed
+168 passed
 ```
 
 Static checks also passed:
@@ -45,9 +45,21 @@ The parent-running admission check and child insertion now execute after an expl
 `BEGIN IMMEDIATE`, serializing them with cancellation-tree mutations. A regression traces the
 transaction ordering so a child cannot commit from a stale running-parent observation. Cancellation
 also settles an idle child record created before its first attempt, so it cannot be resumed through
-the startup path after its parent tree has been cancelled.
+the startup path after its parent tree has been cancelled. A child resume explicitly rejects a
+cancelled or parent-cancelled parent while preserving resume after a successfully completed
+parent; this check runs in the same admission transaction.
+
+The configured `max_workers >= max_depth + 1` capacity is sufficient for one isolated recursive
+chain that waits synchronously at each level. It does not guarantee arbitrary branching or multiple
+simultaneous roots; those workloads still require additional executor capacity.
 
 The existing SQLite schema was exercised through fresh Store fixtures; Feature 146 adds no schema
 migration. No provider, campaign, remote worker, external producer, WebAgent, or generated source
 execution was used. This validation does not claim automatic solve integration or a real-model
 end-to-end result.
+
+The GitHub Actions matrix for commit `ebde3a4` completed successfully as Run 225
+([35698100175](https://github.com/vchive/Lunar-Evolution/actions/runs/35698100175)) on Python 3.11,
+3.12, and 3.13. The preceding Run 224 for `c85cf01` failed because its cancellation regression
+was missing the resume guard; that incomplete commit is retained as history and is superseded by
+`ebde3a4`.
