@@ -1,5 +1,22 @@
 # Validation
 
+## Provider-free registration preparation (2026-09-22)
+
+The new canonical registration manifest/seal contract is implemented in
+`lunar_evolution.acceptance_registration`. It fixes the fresh `attempt-001` identity, product
+checkpoint and file pins, nested task/input/evaluator/profile materials, eight ordered holdout
+pins, one-island/one-candidate/one-round/12-step limits, and the registered Feature 142 budgets.
+The read-only preflight checks committed no-follow manifest/seal bytes, clean `HEAD == origin/main`,
+product checkpoint ancestry and bytes, frozen identity reuse, and an absent campaign root. It runs
+no provider, evaluator, candidate or campaign and creates no root or report.
+
+The focused registration suite passed **16 tests** (canonical/digest and private-field rejection,
+material and frozen-identity bindings, seal tamper, and a temporary Git checkout covering clean,
+dirty, unpushed, root-reuse, product-drift and identity-reuse rejection). This is an offline
+admission-boundary check; it does not authorize or perform the real attempt. Launch-time material
+bytes, a separately committed registration, independent cleanup evidence and the actual automatic
+multi-file acceptance remain pending.
+
 ## Phase C detached execution (2026-09-21)
 
 The current implementation adds automatic background fresh solve, both resume entry points and

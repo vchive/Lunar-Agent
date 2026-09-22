@@ -17,6 +17,14 @@ from .acceptance_observer import (
 from .acceptance_observer import (
     STAGES as ACCEPTANCE_STAGES,
 )
+from .acceptance_registration import (
+    AcceptanceRegistrationError,
+    build_acceptance_registration,
+    build_registration_seal,
+    parse_acceptance_registration,
+    parse_registration_seal,
+    preflight_acceptance_registration,
+)
 from .agent_evolution import (
     AgentCandidateEvaluator,
     AgentCandidateGenerator,
@@ -402,6 +410,7 @@ __all__ = [
     "WORKSPACE_PLAN_SCHEMA_VERSION",
     "AcceptanceAuditError",
     "AcceptanceObservationError",
+    "AcceptanceRegistrationError",
     "AdmittedBenchmarkComparison",
     "AdmittedBenchmarkTask",
     "AdmittedSeed",
@@ -585,6 +594,7 @@ __all__ = [
     "bind_benchmark_comparison_result_evidence",
     "build_acceptance_audit_request",
     "build_acceptance_manifest",
+    "build_acceptance_registration",
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_candidate_execution_admission",
@@ -594,6 +604,7 @@ __all__ = [
     "build_holdout_declaration",
     "build_holdout_receipt",
     "build_private_input_profile",
+    "build_registration_seal",
     "build_remote_producer_envelope",
     "build_round_feedback",
     "build_strategy",
@@ -623,6 +634,7 @@ __all__ = [
     "observe_acceptance_evidence",
     "parse_acceptance_audit_request",
     "parse_acceptance_manifest",
+    "parse_acceptance_registration",
     "parse_benchmark_comparison_plan",
     "parse_benchmark_comparison_result",
     "parse_benchmark_task_envelope",
@@ -634,7 +646,9 @@ __all__ = [
     "parse_holdout_declaration",
     "parse_holdout_receipt",
     "parse_producer_envelope",
+    "parse_registration_seal",
     "parse_seed_manifest",
+    "preflight_acceptance_registration",
     "prepare_producer_seed_manifest",
     "producer_bundle_dependency_sha256",
     "profile_sha256",

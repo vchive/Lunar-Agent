@@ -88,3 +88,12 @@ foreground/background equivalence remained outside acceptance; Phase C below clo
       evidence inventories without modifying or executing their contents.
 - [x] T028 Record exact Phase C results and remaining real-delivery / worker-consumer limits;
       commit and push the verified changes and inspect the Linux matrix.
+
+## Provider-free registration preparation
+
+- [x] T029 Define the canonical fresh `attempt-001` registration manifest, nested material and
+      holdout pins, fixed budgets, product file pins, frozen identity denylist and registration seal.
+- [x] T030 Implement no-follow, read-only checkout preflight for committed manifest/seal bytes,
+      pushed clean `HEAD`, product checkpoint ancestry and bytes, and an absent campaign root.
+- [x] T031 Add provider-free parser, seal, Git fixture, tamper, dirty, unpushed, drift, root-reuse
+      and identity-reuse tests; document the boundary without claiming launch or real acceptance.

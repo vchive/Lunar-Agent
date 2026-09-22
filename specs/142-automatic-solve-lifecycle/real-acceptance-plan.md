@@ -61,6 +61,13 @@ the new acceptance implementation still needs the following work:
    independent inventory/audit path. Freeze the actual product/measurement commits and all launch
    conditions only after this implementation's own offline checks pass.
 
+The provider-free registration contract is now specified in
+[acceptance-registration.md](acceptance-registration.md). Its canonical manifest/seal parser and
+read-only checkout preflight are implemented and covered by 16 tests. This closes the offline
+registration-preparation slice; it does not create a real manifest, campaign root, provider request,
+or launch authorization. The remaining work is to construct launch-time material bytes and run the
+preflight against a separately committed registration when a real attempt is explicitly authorized.
+
 The limits, one-slot denominator and no-repair rules below remain unchanged. Feature 143 T009 and
 Feature 142 Phase C are separate release work; this acceptance remains a foreground attempt.
 

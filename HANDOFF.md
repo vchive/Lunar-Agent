@@ -8,6 +8,27 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## 2026-09-22 Feature 142 provider-free registration preflight
+
+在 Feature 148 之后继续现有 142 SDD，新增 `acceptance_registration`：canonical registration
+manifest、独立 registration seal 和只读 checkout/Git preflight。manifest 固定新鲜
+`attempt-001`、product checkpoint 与受控 product 文件 digest、task/input/evaluator/profile
+材料、8 个有序 holdout 输入/预期字节、600/900/1860/3000 秒及 20/160k 预算、单岛单候选
+单轮和 12 步上限。三组历史身份 denylist 必须非空且有摘要绑定；材料路径唯一，不能包含
+registration/seal 文件或旧目录身份。
+
+preflight 只读取已提交的 manifest/seal，拒绝 symlink/FIFO、未跟踪或篡改字节、dirty checkout、
+`HEAD != origin/main`、product checkpoint 非祖先或源码 digest 漂移、身份复用和已存在 campaign
+root；不会创建 root、写报告、调用 git 之外的 provider/runtime、执行 evaluator/candidate，
+也不会授权 launch。manifest/seal 不包含 preflight 时间或状态，避免提交循环依赖。
+
+新增 [registration spec](specs/142-automatic-solve-lifecycle/acceptance-registration.md)，
+更新 142 real-acceptance plan/tasks/validation；provider-free registration/preflight focused
+**16 passed**，与 Feature 148 request/audit 组合选择 **98 passed**，Ruff/compile/diff/旧名称
+扫描通过。当前只完成离线 admission boundary；真实 launch-time material、独立 cleanup evidence、
+真实 automatic multi-file acceptance 和 postrun closure 仍未完成。本轮没有 provider、campaign、
+WebAgent 或生成源码执行，Feature 139 的 preparation `1/1`、primary/joint `0/1` 不变。
+
 ## 2026-09-22 Feature 148 只读语义与 holdout 审计
 
 沿现有 SDD 完成 `audit_acceptance_artifacts` Python API：canonical request 固定 manifest、
