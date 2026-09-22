@@ -3717,6 +3717,7 @@ class Store:
         service_owner_id: str | None = None,
         input_ids: Sequence[str] = (),
         require_parent_running: bool = False,
+        reject_cancelled_parent: bool = False,
         allow_stopped_resume: bool = True,
     ) -> WorkerAttempt:
         if not prompt.strip() or len(prompt.encode("utf-8")) > 64 * 1024:
@@ -3727,7 +3728,9 @@ class Store:
             or len(service_owner_id) > 128
         ):
             raise ValueError("worker service owner must be a non-empty bounded identifier")
-        if not isinstance(require_parent_running, bool) or not isinstance(allow_stopped_resume, bool):
+        if (not isinstance(require_parent_running, bool)
+                or not isinstance(reject_cancelled_parent, bool)
+                or not isinstance(allow_stopped_resume, bool)):
             raise TypeError("worker attempt policy flags must be booleans")
         if isinstance(input_ids, (str, bytes)):
             raise TypeError("worker input identities must be a sequence of strings")
@@ -3760,6 +3763,18 @@ class Store:
                     raise PermissionError("worker parent is not owned by caller")
                 if parent["phase"] != WorkerPhase.RUNNING.value:
                     raise ValueError("parent worker is not running")
+            elif reject_cancelled_parent and worker["parent_worker_id"] is not None:
+                parent = connection.execute(
+                    "SELECT owner_id, stop_reason FROM workers WHERE id = ?",
+                    (worker["parent_worker_id"],),
+                ).fetchone()
+                if parent is None or parent["owner_id"] != owner_id:
+                    raise PermissionError("worker parent is not owned by caller")
+                if parent["stop_reason"] in {
+                    WorkerStopReason.CANCELLED.value,
+                    WorkerStopReason.PARENT_CANCELLED.value,
+                }:
+                    raise ValueError("parent worker was cancelled")
             if connection.execute(
                 "SELECT 1 FROM worker_attempts a WHERE a.worker_id = ? AND "
                 "(a.status = 'running' OR EXISTS (SELECT 1 FROM worker_attempt_processes p "

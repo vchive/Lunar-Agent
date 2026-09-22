@@ -235,6 +235,7 @@ class WorkerService:
             return self._start(
                 worker, owner_id, effective, required_capabilities, adapter, timeout,
                 input_ids=[identity for identity, _ in queued],
+                reject_cancelled_parent=worker.parent_worker_id is not None,
                 allow_stopped_resume=True,
             )
 
@@ -332,6 +333,7 @@ class WorkerService:
         input_ids: Sequence[str] = (),
         before_start: Callable[[Worker, WorkerAttempt], None] | None = None,
         require_parent_running: bool = False,
+        reject_cancelled_parent: bool = False,
         allow_stopped_resume: bool = True,
     ) -> Worker:
         with self._lock:
@@ -347,6 +349,7 @@ class WorkerService:
                 attempt = self.store.start_worker_attempt(
                     worker.id, owner_id, prompt, service_owner_id=self.service_owner_id,
                     input_ids=input_ids, require_parent_running=require_parent_running,
+                    reject_cancelled_parent=reject_cancelled_parent,
                     allow_stopped_resume=allow_stopped_resume,
                 )
                 execution = _Execution(worker, attempt.id, adapter)

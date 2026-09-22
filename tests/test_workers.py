@@ -120,6 +120,22 @@ def test_worker_service_dispatch_send_wait_resume_and_cancel(tmp_path: Path) -> 
     service.close()
 
 
+def test_child_resume_remains_allowed_after_parent_success(tmp_path: Path) -> None:
+    store = Store(tmp_path / "state.db")
+    store.initialize()
+    service = WorkerService(
+        store, registry(FixtureAdapter(delay=0.05)), tmp_path / "sessions", max_depth=1,
+    )
+    parent = service.dispatch("owner", prompt="parent")
+    child = service.dispatch("owner", prompt="child", parent_worker_id=parent.id)
+    assert service.wait("owner", parent.id, timeout=2).outcome is WorkerOutcome.SUCCESS
+    assert service.wait("owner", child.id, timeout=2).outcome is WorkerOutcome.SUCCESS
+
+    resumed = service.resume("owner", child.id, prompt="continue after parent success")
+    assert service.wait("owner", resumed.id, timeout=2).outcome is WorkerOutcome.SUCCESS
+    service.close()
+
+
 def test_worker_send_requires_running_and_timeout_is_not_failure(tmp_path: Path) -> None:
     store = Store(tmp_path / "state.db")
     store.initialize()
@@ -181,7 +197,7 @@ def test_parent_cancel_closes_an_idle_descendant_before_its_first_attempt(tmp_pa
             child.id, "owner", "late child", service_owner_id="service-a",
             require_parent_running=True, allow_stopped_resume=False,
         )
-    with pytest.raises(ValueError, match="parent worker is not running"):
+    with pytest.raises(ValueError, match="parent worker was cancelled"):
         service.resume("owner", child.id)
     service.close()
 
