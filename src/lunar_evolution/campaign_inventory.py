@@ -176,15 +176,32 @@ def _read_file(parent: int, name: str) -> tuple[int, str]:
         os.close(descriptor)
 
 
-def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[int]) -> None:
+def _directory_snapshot(parent: int) -> dict[str, tuple[int, tuple[int, ...]]]:
     try:
         with os.scandir(parent) as entries:
-            names = sorted(entry.name for entry in entries)
-    except OSError:
+            snapshot = {}
+            for entry in entries:
+                name = entry.name
+                if not isinstance(name, str) or not name or "/" in name or name in {".", ".."}:
+                    _fail("file_unsafe")
+                info = entry.stat(follow_symlinks=False)
+                if not stat.S_ISDIR(info.st_mode) and not stat.S_ISREG(info.st_mode):
+                    _fail("file_unsafe")
+                snapshot[name] = (stat.S_IFMT(info.st_mode), _identity(info))
+            return snapshot
+    except FileNotFoundError:
         _fail("root_changed")
-    for name in names:
-        if not isinstance(name, str) or not name or "/" in name or name in {".", ".."}:
-            _fail("file_unsafe")
+    except OSError:
+        _fail("file_unsafe")
+
+
+def _identity(info: os.stat_result) -> tuple[int, ...]:
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[int]) -> None:
+    initial = _directory_snapshot(parent)
+    for name in sorted(initial):
         relative = f"{prefix}/{name}" if prefix else name
         _relative(relative)
         try:
@@ -220,6 +237,8 @@ def _walk(parent: int, prefix: str, records: list[dict[str, Any]], total: list[i
             _fail("total_too_large")
         if len(records) > MAX_INVENTORY_FILES:
             _fail("too_many_files")
+    if _directory_snapshot(parent) != initial:
+        _fail("root_changed")
 
 
 def inventory_campaign_directory(root: str | os.PathLike[str]) -> dict[str, Any]:
