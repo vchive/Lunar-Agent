@@ -33,6 +33,11 @@ evaluator 或历史生成源码执行。当前工作树已完成实现但尚未�
 [Run 230](https://github.com/vchive/Lunar-Evolution/actions/runs/35749740921) 已在 Python 3.11、
 3.12、3.13 全部通过，T007 已完成。
 
+随后仅同步文档的 Run 231 在 Python 3.12 的固定历史归档阶段偶发失败，唯一失败为
+`test_preparation_ceiling_does_not_leak_between_threads` 的线程时序断言；Python 3.11/3.13
+通过，且在固定历史 checkout 的 Python 3.12 上连续重跑该测试 10/10 通过。Run 230 已验证
+Feature 149 产品提交三版本全绿；该历史归档抖动不改变产品或冻结证据。
+
 ## 2026-09-22 Feature 142 provider-free registration preflight
 
 在 Feature 148 之后继续现有 142 SDD，新增 `acceptance_registration`：canonical registration
