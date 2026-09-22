@@ -29,6 +29,7 @@ from lunar_evolution.candidate_execution import (
     CandidateExecutionInput,
     build_candidate_execution_admission,
 )
+from lunar_evolution.candidate_execution_cleanup import build_candidate_execution_cleanup
 from lunar_evolution.candidate_execution_evidence import inspect_candidate_execution_record
 from lunar_evolution.candidate_workspace_plan import build_candidate_workspace_plan
 from lunar_evolution.controller import LocalController
@@ -61,7 +62,7 @@ def _tree(root):
     }
 
 
-def _write_execution(admission, request, *, outcome="succeeded", complete=True):
+def _write_execution(admission, request, *, outcome="succeeded", complete=True, cleanup=False):
     plan, admission, binding = evidence._request(admission, request["plan"], {})
     attempt = request["attempt_path"]
     attempt.mkdir()
@@ -83,14 +84,27 @@ def _write_execution(admission, request, *, outcome="succeeded", complete=True):
                               "duration_ms": 1, "stdout_bytes": 0, "stderr_bytes": 0,
                               "error": None if outcome == "succeeded" else "process_failed"},
             }
-            _, result_descriptor = evidence._write(chain, "result.json", {
+            result_bytes, result_descriptor = evidence._write(chain, "result.json", {
                 "protocol": "lunar-candidate-execution-result-v1", "schema_version": "1",
                 "launch_intent_sha256": _sha(intent), "runner_result": native,
                 "runner_result_sha256": _sha(evidence._encode(native)),
             })
+            cleanup_descriptor = None
+            if cleanup:
+                cleanup_value = build_candidate_execution_cleanup({
+                    "protocol": "lunar-candidate-execution-cleanup-v1", "schema_version": "1",
+                    "launch_intent_sha256": _sha(intent), "result_sha256": _sha(result_bytes),
+                    "native_exit_code": 0, "process_exit_code": 0,
+                    "observer_identity": {"pid": 101, "pgid": 101},
+                    "release_identity": {"pid": 101, "pgid": 101},
+                    "group_probe": "absent", "ownership_release": "observed",
+                    "cleanup": "verified", "observed_ms": 1,
+                })
+                _, cleanup_descriptor = evidence._write(chain, "cleanup.json", cleanup_value)
             evidence._write(chain, "completed.json", {
                 "protocol": "lunar-candidate-execution-completion-v1", "schema_version": "1",
                 "launch_intent": intent_descriptor, "result": result_descriptor,
+                **({"cleanup": cleanup_descriptor} if cleanup_descriptor is not None else {}),
             })
     finally:
         chain.close()
@@ -128,6 +142,16 @@ def test_native_successful_record_preserves_unknown_cleanup_without_execution(tm
     assert audit.capture("execution") == result
     assert _tree(tmp_path) == before
     assert not (request["workspace_path"] / "count").exists()
+
+
+def test_native_verified_cleanup_promotes_execution_only(tmp_path):
+    admission, request = execution_fixture(tmp_path)
+    record = _write_execution(admission, request, cleanup=True)
+    assert record.cleanup_status == "verified"
+    audit = _auditor(tmp_path.resolve(), admission, request, record)
+    result = audit.capture("execution")
+    assert result["status"] == "verified"
+    assert result["verified_digests"]["cleanup_sha256"] == record.cleanup_sha256
 
 
 def test_byte_identical_relocated_native_attempt_is_not_verified(tmp_path):

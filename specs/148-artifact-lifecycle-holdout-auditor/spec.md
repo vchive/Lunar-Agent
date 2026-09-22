@@ -3,6 +3,10 @@
 **Created**: 2026-09-22
 **Status**: Implemented as a read-only Python API; provider execution remains outside scope
 
+> **Superseded boundary (2026-09-22):** The native execution record described at this feature's
+> checkpoint did not yet carry independent cleanup evidence. Feature 149 adds the optional
+> cleanup-v1 receipt; the legacy limitation below remains true for retained three-file records.
+
 ## Problem
 
 Feature 147 can prove that an acceptance observation has a canonical manifest and an ordered
@@ -36,11 +40,11 @@ return eligibility projections for primary and joint closure. These projections 
 future postrun decision. They do not increment Feature 142/147 counters, do not authorize a
 provider request, and do not claim a real-model result when no registered attempt exists.
 
-The current native execution-record schema has no independent cleanup observation. Consequently,
-even otherwise successful retained v1 execution evidence produces `execution_cleanup_unknown`;
-the combined API currently returns both eligibility fields as `false`. Adding native cleanup
-evidence is a separate prerequisite for real acceptance, not a reason to infer successful cleanup
-from an exit code or a later receipt.
+At the Feature 148 checkpoint, the native execution-record schema had no independent cleanup
+observation. Consequently, even otherwise successful retained v1 execution evidence produced
+`execution_cleanup_unknown`; the combined API returned both eligibility fields as `false`. Feature
+149 adds the separate cleanup-v1 receipt for fresh records; legacy records still retain this
+limitation. Cleanup is never inferred from an exit code or a later receipt.
 
 Feature 139 is a closed historical slot. Its evidence and frozen preparation/primary/joint
 values remain immutable. This feature may compare a historical inventory by digest when a release

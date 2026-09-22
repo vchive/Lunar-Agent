@@ -13,9 +13,10 @@ no provider, evaluator, candidate or campaign and creates no root or report.
 The focused registration suite passed **16 tests** (canonical/digest and private-field rejection,
 material and frozen-identity bindings, seal tamper, and a temporary Git checkout covering clean,
 dirty, unpushed, root-reuse, product-drift and identity-reuse rejection). This is an offline
-admission-boundary check; it does not authorize or perform the real attempt. Launch-time material
-bytes, a separately committed registration, independent cleanup evidence and the actual automatic
-multi-file acceptance remain pending.
+admission-boundary check; it does not authorize or perform the real attempt. Feature 149 now supplies
+the provider-free independent cleanup-v1 receipt and native auditor wiring, including compatibility
+for legacy records whose cleanup remains unknown. Launch-time material bytes, a separately committed
+registration and the actual automatic multi-file acceptance remain pending.
 
 ## Phase C detached execution (2026-09-21)
 

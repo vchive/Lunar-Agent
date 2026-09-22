@@ -11,8 +11,8 @@
 - [x] T005 Add offline success, prefix, tamper, ordering, budget, and generation-mismatch tests.
 - [x] T006 Add a provider-free campaign-directory byte inventory and read-only audit with bounded
       files/bytes, no-follow file reads, and directory-entry race checks.
-- [ ] T007 Add independent artifact/lifecycle and holdout semantic auditors before any real
-      acceptance launch; specification is in [Feature 148](../148-artifact-lifecycle-holdout-auditor/spec.md).
+- [x] T007 Add independent artifact/lifecycle and holdout semantic auditors before any real
+      acceptance launch; completed by [Feature 148](../148-artifact-lifecycle-holdout-auditor/spec.md).
       This feature does not authorize or perform a provider attempt.
 - [x] T008 Reject one-use generation iterators, malformed containers, cyclic manifests and
       failed/unknown mismatches; verify directory limits, late mutations and descriptor cleanup.

@@ -8,6 +8,29 @@
 不为深度演化安排 WebAgent 对比。新的真实模型/框架效果测量仍须独立登记与固定条件。
 下文按 Feature 保留历史进展；旧章节中的“下一步”以最新章节为准。
 
+## 2026-09-22 Feature 149 独立 cleanup-v1 证据
+
+沿 Feature 142 SDD 完成独立 cleanup-v1 离线实现。新增
+`candidate_execution_cleanup` canonical parser/builder/read-only projection：cleanup receipt
+绑定 launch intent/result、native/process exit、observer/release identity 和独立 process-group
+absence probe；只有单一且匹配的 observer/release、`absent` probe、已知且一致的正常退出才会
+成为 `verified`。失败、未知、权限拒绝、超时和不完整回调均保持 failed/unknown，PID/PGID
+只存在于私有 receipt，不进入 `CandidateExecutionRecord.to_dict()` 的公开投影。
+
+native execution evidence 现在在 runner 返回后写 `cleanup.json`，并把 no-follow descriptor
+绑定进 `completed.json`；旧三文件 v1 仍可读取但 cleanup 保持 unknown。`acceptance_audit`
+只有 verified cleanup 才允许 execution boundary 通过；slot auditor 可检查可选 cleanup
+路径，inode/device 替换、复制目录和 descriptor 篡改均 fail closed。runner 的原有 process
+result 语义保持不变，仅增加可选 exit observation callback。
+
+Feature 149 parser/native/audit/slot 相关的九个文件选择集 **291 passed**（精确命令见
+`specs/149-independent-cleanup-evidence/validation.md`）。完整三阶段回归也已通过：当前
+产品 **7238 passed、1 skipped**，固定归档 **2294 passed**，冻结注册 **24 passed**，整体
+exit 0；Ruff、compileall、diff check 和旧名称扫描通过。没有 provider、campaign、WebAgent、
+evaluator 或历史生成源码执行。当前工作树已完成实现但尚未提交/推送，下一步是提交、推送并
+核对新 CI。真实自动多文件验收仍须先完成独立 registration seal/preflight 后再由用户明确授权，
+不能由本次离线 cleanup 证据代替。
+
 ## 2026-09-22 Feature 142 provider-free registration preflight
 
 在 Feature 148 之后继续现有 142 SDD，新增 `acceptance_registration`：canonical registration

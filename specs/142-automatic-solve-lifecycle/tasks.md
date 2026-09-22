@@ -97,3 +97,10 @@ foreground/background equivalence remained outside acceptance; Phase C below clo
       pushed clean `HEAD`, product checkpoint ancestry and bytes, and an absent campaign root.
 - [x] T031 Add provider-free parser, seal, Git fixture, tamper, dirty, unpushed, drift, root-reuse
       and identity-reuse tests; document the boundary without claiming launch or real acceptance.
+
+## Independent cleanup evidence prerequisite
+
+- [x] T032 Complete Feature 149's cleanup-v1 native receipt, runner observer/probe wiring, and
+      read-only acceptance/slot auditor integration. Keep old three-file records compatible but
+      cleanup-unknown, and do not authorize a provider until its focused and related regressions
+      pass.

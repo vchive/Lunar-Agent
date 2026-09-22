@@ -6,12 +6,14 @@ execution, and cannot repair an interrupted write.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import secrets
 import stat
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
@@ -21,6 +23,11 @@ from ._candidate_workspace_io import DirectoryChain, identity
 from .automatic_solve_lifecycle import SolveExecutionBudgetExceeded, SolveExecutionCancelled
 from .candidate_bundle import CandidateBundleError, verify_candidate_source_bundle
 from .candidate_execution import CandidateExecutionError, admit_candidate_execution
+from .candidate_execution_cleanup import (
+    CandidateExecutionCleanupError,
+    build_candidate_execution_cleanup,
+    parse_candidate_execution_cleanup,
+)
 from .candidate_execution_runner import CandidateExecutionRunnerError, run_candidate_execution
 from .candidate_workspace_plan import (
     CandidateWorkspaceError,
@@ -31,8 +38,10 @@ from .candidate_workspace_plan import (
 MAX_EXECUTION_RECORD_BYTES = 16 * 1024
 _INTENT = "launch-intent.json"
 _RESULT = "result.json"
+_CLEANUP = "cleanup.json"
 _COMPLETE = "completed.json"
-_NAMES = {_INTENT, _RESULT, _COMPLETE}
+_CORE_NAMES = {_INTENT, _RESULT, _COMPLETE}
+_NAMES = _CORE_NAMES | {_CLEANUP}
 _TEMP_NAMES = {"." + name + ".tmp" for name in _NAMES}
 _PROTOCOL = "lunar-candidate-execution-"
 _ERRORS = {
@@ -310,6 +319,60 @@ def _result(value, plan, admission) -> dict:
     return _decode(_encode(item))
 
 
+def _probe_process_group(identity_pair: tuple[int, int] | None) -> str:
+    """Probe one observed private process group without signaling it."""
+    if identity_pair is None:
+        return "unknown"
+    _pid, pgid = identity_pair
+    if type(pgid) is not int or pgid <= 1 or pgid == os.getpgrp():
+        return "unknown"
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return "absent"
+    except PermissionError:
+        return "unknown"
+    except OSError as exc:
+        return "absent" if exc.errno == errno.ESRCH else "unknown"
+    return "present"
+
+
+def _cleanup_payload(
+    returned, observed: list[tuple[int, int | None]], released: list[tuple[int, int | None]],
+    exits: list[int | None], observed_ms: int, *, callbacks_succeeded: bool = True,
+) -> dict:
+    """Construct an observation from supervisor callbacks and a post-return group probe."""
+    observer = observed[0] if len(observed) == 1 and observed[0][1] is not None else None
+    release = released[0] if len(released) == 1 and released[0][1] is not None else None
+    observer_identity = (
+        {"pid": observer[0], "pgid": observer[1]} if observer is not None else None
+    )
+    release_identity = (
+        {"pid": release[0], "pgid": release[1]} if release is not None else None
+    )
+    probe = _probe_process_group((observer[0], observer[1]) if observer is not None else None)
+    release_state = (
+        "observed" if release is not None else ("not_observed" if observed else "unknown")
+    )
+    native_exit = returned.execution.exit_code
+    process_exit = exits[0] if len(exits) == 1 else None
+    verified = (
+        observer_identity is not None and release_identity == observer_identity
+        and probe == "absent" and len(exits) == 1
+        and native_exit is not None and process_exit == native_exit
+        and callbacks_succeeded
+    )
+    cleanup = "verified" if verified else ("failed" if probe == "present" else "unknown")
+    return {
+        "protocol": "lunar-candidate-execution-cleanup-v1", "schema_version": "1",
+        "launch_intent_sha256": "0" * 64, "result_sha256": "0" * 64,
+        "native_exit_code": native_exit, "process_exit_code": process_exit,
+        "observer_identity": observer_identity, "release_identity": release_identity,
+        "group_probe": probe, "ownership_release": release_state,
+        "cleanup": cleanup, "observed_ms": max(0, min(86_400_000, observed_ms)),
+    }
+
+
 @dataclass(frozen=True)
 class CandidateExecutionRecord:
     """Detached, path-free observation; it grants no launch or evaluation authority."""
@@ -320,16 +383,33 @@ class CandidateExecutionRecord:
     completion_sha256: str | None = None
     runner_result_sha256: str | None = None
     _result_json: bytes | None = None
+    cleanup_sha256: str | None = None
+    _cleanup_json: bytes | None = None
 
     def to_dict(self) -> dict:
         result = {"status": self.status}
-        for key in ("launch_intent_sha256", "result_sha256", "completion_sha256", "runner_result_sha256"):
+        for key in (
+            "launch_intent_sha256", "result_sha256", "completion_sha256", "runner_result_sha256",
+            "cleanup_sha256",
+        ):
             value = getattr(self, key)
             if value is not None:
                 result[key] = value
         if self._result_json is not None:
             result["runner_result"] = json.loads(self._result_json)
+        if self._cleanup_json is not None:
+            cleanup = json.loads(self._cleanup_json)
+            # Process IDs are private supervisor evidence.  Keep only the bounded status in
+            # this detached projection; the retained receipt remains available to the inspector.
+            result["cleanup"] = cleanup["cleanup"]
         return result
+
+    @property
+    def cleanup_status(self) -> str:
+        """Return the retained cleanup claim, or unknown for legacy v1 records."""
+        if self._cleanup_json is None:
+            return "unknown"
+        return json.loads(self._cleanup_json)["cleanup"]
 
 
 def _names(chain: DirectoryChain) -> set[str]:
@@ -367,7 +447,7 @@ def _inspect(chain: DirectoryChain, plan, admission, binding) -> CandidateExecut
     if len({(node["device"], node["inode"]) for node in nodes}) != 3:
         _fail("identity_mismatch")
     intent_sha = _sha(intent_bytes)
-    if names & _TEMP_NAMES or not _NAMES <= names:
+    if names & _TEMP_NAMES or not _CORE_NAMES <= names:
         if _COMPLETE in names and _RESULT not in names:
             _fail("record_changed")
         chain.check()
@@ -381,25 +461,54 @@ def _inspect(chain: DirectoryChain, plan, admission, binding) -> CandidateExecut
     if (result["protocol"] != _PROTOCOL + "result-v1" or result["schema_version"] != "1"
             or result["launch_intent_sha256"] != intent_sha or result["runner_result_sha256"] != result_sha):
         _fail("identity_mismatch")
+    cleanup_bytes = cleanup_descriptor = None
+    cleanup = None
+    if _CLEANUP in names:
+        cleanup_bytes, cleanup_descriptor = _read(chain, _CLEANUP)
+        try:
+            cleanup = parse_candidate_execution_cleanup(
+                _decode(cleanup_bytes),
+                expected_launch_intent_sha256=intent_sha,
+                expected_result_sha256=_sha(result_bytes),
+            )
+        except CandidateExecutionCleanupError:
+            _fail("identity_mismatch")
+        # The companion receipt must describe the same native outcome. A timed-out process may
+        # have a later OS return code after the runner has deliberately kept its public exit
+        # unknown; retain that distinction while rejecting forged normal exits.
+        execution = metadata["execution"]
+        if cleanup["native_exit_code"] != execution["exit_code"]:
+            _fail("identity_mismatch")
+        if execution["status"] != "timed_out" and cleanup["process_exit_code"] != execution["exit_code"]:
+            _fail("identity_mismatch")
     complete_bytes, complete_descriptor = _read(chain, _COMPLETE)
     complete = _decode(complete_bytes)
     expected = {
         "protocol": _PROTOCOL + "completion-v1", "schema_version": "1",
         "launch_intent": intent_descriptor, "result": result_descriptor,
     }
+    if cleanup_descriptor is not None:
+        expected["cleanup"] = cleanup_descriptor
     if _encode(expected) != complete_bytes or complete != expected:
         _fail("identity_mismatch")
-    # Re-read all three names after comparison; same-byte replacement changes identity too.
-    for name, content, descriptor in (
+    # Re-read every retained record after comparison; same-byte replacement changes identity too.
+    retained = [
         (_INTENT, intent_bytes, intent_descriptor), (_RESULT, result_bytes, result_descriptor),
         (_COMPLETE, complete_bytes, complete_descriptor),
-    ):
+    ]
+    if cleanup_bytes is not None and cleanup_descriptor is not None:
+        retained.insert(2, (_CLEANUP, cleanup_bytes, cleanup_descriptor))
+    for name, content, descriptor in retained:
         if _read(chain, name) != (content, descriptor):
             _fail("record_changed")
     if _names(chain) != names:
         _fail("record_changed")
     return CandidateExecutionRecord(
-        "recorded", intent_sha, _sha(result_bytes), _sha(complete_bytes), result_sha, _encode(metadata),
+        status="recorded", launch_intent_sha256=intent_sha, result_sha256=_sha(result_bytes),
+        completion_sha256=_sha(complete_bytes), runner_result_sha256=result_sha,
+        _result_json=_encode(metadata), cleanup_sha256=(
+            cleanup["receipt_sha256"] if cleanup is not None else None
+        ), _cleanup_json=(cleanup_bytes if cleanup_bytes is not None else None),
     )
 
 
@@ -498,13 +607,42 @@ def run_candidate_execution_recorded(
                 or _read(attempt_chain, _INTENT) != (intent_bytes, intent_descriptor)):
             _fail("record_changed")
         # The runner performs its own launch-time source/input and executable preflight.
+        observed_processes: list[tuple[int, int | None]] = []
+        released_processes: list[tuple[int, int | None]] = []
+        observed_exits: list[int | None] = []
+        callbacks_succeeded = True
+
+        def observe_process(pid: int, pgid: int | None) -> None:
+            nonlocal callbacks_succeeded
+            observed_processes.append((pid, pgid))
+            if process_observer is not None:
+                try:
+                    process_observer(pid, pgid)
+                except Exception:  # noqa: BLE001 - caller telemetry cannot alter execution
+                    callbacks_succeeded = False
+
+        def release_process(pid: int, pgid: int | None) -> None:
+            nonlocal callbacks_succeeded
+            if process_released is not None:
+                try:
+                    process_released(pid, pgid)
+                except Exception:  # noqa: BLE001 - caller telemetry cannot alter execution
+                    callbacks_succeeded = False
+                    return
+            released_processes.append((pid, pgid))
+
+        def observe_exit(exit_code: int | None) -> None:
+            observed_exits.append(exit_code)
+
+        cleanup_started = time.monotonic()
         try:
             returned = run_candidate_execution(
                 admitted, plan=parsed, workspace_path=workspace, input_path=inputs, **pins,
                 timeout_seconds=timeout_seconds,
                 remaining_timeout=remaining_timeout,
-                process_observer=process_observer,
-                process_released=process_released,
+                process_observer=observe_process,
+                process_released=release_process,
+                process_exit_observed=observe_exit,
             )
         except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
             raise
@@ -517,14 +655,30 @@ def run_candidate_execution_recorded(
         metadata = _result(returned.to_dict(), parsed, admitted)
         if remaining_timeout is not None:
             remaining_timeout("candidate_execution")
-        _, result_descriptor = _write(attempt_chain, _RESULT, {
+        result_bytes, result_descriptor = _write(attempt_chain, _RESULT, {
             "protocol": _PROTOCOL + "result-v1", "schema_version": "1",
             "launch_intent_sha256": _sha(intent_bytes), "runner_result": metadata,
             "runner_result_sha256": _sha(_encode(metadata)),
         })
+        cleanup = _cleanup_payload(
+            returned, observed_processes, released_processes, observed_exits,
+            round((time.monotonic() - cleanup_started) * 1000),
+            callbacks_succeeded=callbacks_succeeded,
+        )
+        cleanup["launch_intent_sha256"] = _sha(intent_bytes)
+        cleanup["result_sha256"] = _sha(result_bytes)
+        _, cleanup_descriptor = _write(
+            attempt_chain, _CLEANUP,
+            build_candidate_execution_cleanup(
+                cleanup,
+                expected_launch_intent_sha256=_sha(intent_bytes),
+                expected_result_sha256=_sha(result_bytes),
+            ),
+        )
         _write(attempt_chain, _COMPLETE, {
             "protocol": _PROTOCOL + "completion-v1", "schema_version": "1",
             "launch_intent": intent_descriptor, "result": result_descriptor,
+            "cleanup": cleanup_descriptor,
         })
         record = _inspect(attempt_chain, parsed, admitted, binding)
         if record.status != "recorded":

@@ -1,5 +1,9 @@
 # Development quickstart
 
+> **Boundary note (2026-09-22):** Feature 149 adds optional cleanup-v1 evidence to fresh native
+> execution records. The legacy three-file examples in this guide remain cleanup-unknown; use
+> the Feature 149 quickstart for the fresh receipt contract.
+
 Feature 148 provides the Python API `audit_acceptance_artifacts` for inspecting retained evidence.
 It does not provide a launch or continuation command. Run the following checks from the repository
 root using the existing development environment:
@@ -165,10 +169,11 @@ preserves the first non-verified boundary; later successful evidence cannot repa
 `holdout_counts` contains `passed`, `failed`, `unknown` and `missing` counts.
 
 `primary_eligible` requires every primary boundary to be verified. `joint_eligible` also requires
-all eight holdouts to pass. The current native execution-record schema has no independent cleanup
-observation. Even a recorded, succeeded execution with exit zero therefore yields
-`execution_cleanup_unknown`, keeps `primary_eligible=false`, and consequently keeps
-`joint_eligible=false`. A separately verified scoring snapshot does not fill this gap.
+all eight holdouts to pass. At the Feature 148 checkpoint, the native execution-record schema had
+no independent cleanup observation. A recorded, succeeded execution with exit zero therefore
+yielded `execution_cleanup_unknown`, kept `primary_eligible=false`, and consequently kept
+`joint_eligible=false`. Feature 149 adds cleanup-v1 for fresh records; a separately verified
+scoring snapshot still does not fill a missing cleanup gap.
 
 The report always sets `provider_called_during_audit`, `executed_during_audit`,
 `mutated_during_audit` and `real_acceptance_claimed` to `false`. Its compatibility fields

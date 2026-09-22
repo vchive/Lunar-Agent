@@ -12,9 +12,9 @@ material being read without execution. Initial focused observer/generation/inven
 `src tests tools`, compileall and diff checks pass. This is provider-free local validation.
 
 The artifact/lifecycle semantic and holdout auditors are implemented separately in Feature 148.
-Independent cleanup evidence, launch preflight and real provider acceptance remain open work under
-the Feature 142 real-acceptance plan. Structure closure and byte inventory do not promote
-preparation, primary or joint success.
+Feature 149 now supplies independent cleanup-v1 evidence, while launch preflight and real provider
+acceptance remain open work under the Feature 142 real-acceptance plan. Structure closure and byte
+inventory do not promote preparation, primary or joint success.
 
 Independent review then found a consumed-iterator source-binding bypass, conflation of unknown and
 failed generation outcomes, raw malformed-input exceptions, and incomplete inventory mutation/fd

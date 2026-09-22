@@ -2,8 +2,9 @@
 
 This is an observation API, not a launcher or preregistration. Native records are
 inspected at their original paths; only SQLite is copied to a private snapshot.
-The current execution-record schema has no independent cleanup observation, so
-even otherwise complete retained v1 evidence cannot establish primary eligibility.
+Legacy execution records have no independent cleanup observation and therefore cannot establish
+primary eligibility. New records may carry the separate cleanup-v1 receipt; this auditor accepts
+that boundary only after its descriptor, identities, probe, and exit bindings verify.
 """
 from __future__ import annotations
 
@@ -194,10 +195,16 @@ class _NativeAudit:
         runner = record.to_dict()["runner_result"]
         _require(runner["status"] == "succeeded" and runner["execution"]["status"] == "succeeded"
                  and runner["execution"]["exit_code"] == 0, "execution_failed")
-        # Retain verified native pins for independent scoring checks, but never infer cleanup
-        # from the absence of an error. The v1 native parser has no cleanup field.
+        # Retain verified native pins for independent scoring checks. Cleanup is a separate
+        # supervisor receipt; a missing legacy receipt remains unknown and cannot be inferred
+        # from the process exit code.
         self.plan, self.admission, self.record = plan, admission, record
-        raise _BoundaryProblem("unverifiable", "execution_cleanup_unknown")
+        if record.cleanup_status == "failed":
+            raise _BoundaryProblem("failed", "execution_cleanup_failed")
+        if record.cleanup_status != "verified":
+            raise _BoundaryProblem("unverifiable", "execution_cleanup_unknown")
+        return {"completion_sha256": record.completion_sha256,
+                "cleanup_sha256": record.cleanup_sha256}
 
     def slot_identity(self):
         _require(self.child is not None, "child_missing", status="unverifiable")

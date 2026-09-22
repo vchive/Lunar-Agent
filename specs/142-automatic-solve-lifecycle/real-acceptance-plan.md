@@ -34,11 +34,12 @@ The inventory verifies bytes in a quiescent directory, not lifecycle semantics.
 read-only semantic/lifecycle and holdout auditor. Its bounded request/report schemas, private
 SQLite snapshot, rowid-ordered event reader, first-terminal-wins lifecycle checks, native artifact
 adapter, and holdout receipt checks have local regression coverage. The auditor never registers,
-launches, resumes, executes source/evaluators, or changes acceptance counters. An independent
-cleanup observation is still absent from the retained v1 execution record, so an otherwise
-complete native chain remains unverifiable for primary eligibility. Launch preflight/registration
-sealing and actual real-model acceptance remain pending. These helpers do not authorize a provider
-request.
+launches, resumes, executes source/evaluators, or changes acceptance counters. Feature 149 now
+supplies the provider-free cleanup-v1 receipt publication and runner/auditor wiring. Fresh records
+with a verified cleanup receipt can pass the execution boundary; retained legacy three-file records
+remain `execution_cleanup_unknown`, so an old chain stays unverifiable for primary eligibility.
+Launch preflight/registration sealing and actual real-model acceptance remain pending. These
+helpers do not authorize a provider request.
 
 Feature 144 supplies the next candidate-response product checkpoint: invocation-local bundle
 instructions, unchanged strict parsing, and canonical failed receipts with optional `phase` and
@@ -51,8 +52,8 @@ the new acceptance implementation still needs the following work:
 2. Bind the current lifecycle-enabled parent orchestration task, its execution identity, reciprocal
    child link and final delivery receipt. Do not reuse the historical interpretation where an
    intake-only parent could already be succeeded while the child was still running.
-3. Add and retain an independent native/process cleanup observation, then verify canonical
-   generation receipts with the current parser/Store contract. Preserve bounded
+3. Retain the independent native/process cleanup receipt produced by Feature 149 for the fresh
+   attempt, then verify canonical generation receipts with the current parser/Store contract. Preserve bounded
    failure phase/cause when present, and absence when unknown; neither field nor any later artifact
    can establish parser completion. Cover this observer with offline success, failure and tamper
    fixtures before preregistration.

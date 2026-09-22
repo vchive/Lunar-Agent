@@ -115,6 +115,7 @@ def _bounded_process_bytes(
     command: list[str], *, cwd: str, environment: dict[str, str], timeout: float, output_limit: int,
     capture_limit: int, process_observer: Callable[[int, int | None], None] | None = None,
     process_released: Callable[[int, int | None], None] | None = None,
+    process_exit_observed: Callable[[int | None], None] | None = None,
 ) -> tuple[bytes, bytes, Literal["succeeded", "failed", "timed_out"], int | None, str | None]:
     """Run a process while keeping each captured stream bounded in memory.
 
@@ -245,6 +246,11 @@ def _bounded_process_bytes(
 
     if process is not None and exit_code is None and reason != "timeout":
         exit_code = process.returncode
+    if process_exit_observed is not None:
+        try:
+            process_exit_observed(process.returncode if process is not None else None)
+        except Exception:  # noqa: BLE001, S110 - telemetry cannot alter execution
+            pass
     stdout = bytes(output["stdout"])
     stderr = bytes(output["stderr"])
     if not owned_group_exited:
@@ -264,12 +270,14 @@ def _bounded_process(
     command: list[str], *, cwd: str, environment: dict[str, str], timeout: float, output_limit: int,
     process_observer: Callable[[int, int | None], None] | None = None,
     process_released: Callable[[int, int | None], None] | None = None,
+    process_exit_observed: Callable[[int | None], None] | None = None,
 ) -> tuple[str, str, Literal["succeeded", "failed", "timed_out"], int | None, str | None]:
     """Keep the candidate runner's historical bounded, replacement-decoded text projection."""
     raw_stdout, raw_stderr, status, exit_code, error = _bounded_process_bytes(
         command, cwd=cwd, environment=environment, timeout=timeout, output_limit=output_limit,
         capture_limit=min(output_limit, MAX_RESULT_OUTPUT_BYTES),
         process_observer=process_observer, process_released=process_released,
+        process_exit_observed=process_exit_observed,
     )
     stdout, stdout_overflow = _bounded(raw_stdout, output_limit)
     stderr, stderr_overflow = _bounded(raw_stderr, output_limit)
@@ -399,6 +407,7 @@ class CandidateExecutionRunner:
         remaining_timeout: Callable[[str], float] | None = None,
         process_observer: Callable[[int, int | None], None] | None = None,
         process_released: Callable[[int, int | None], None] | None = None,
+        process_exit_observed: Callable[[int | None], None] | None = None,
     ) -> CandidateExecutionRun:
         if remaining_timeout is not None and not callable(remaining_timeout):
             raise CandidateExecutionRunnerError("invalid")
@@ -526,6 +535,7 @@ class CandidateExecutionRunner:
                     [*command, parsed_plan.entrypoint], cwd=str(workspace), environment=environment,
                     timeout=effective_timeout, output_limit=output_limit,
                     process_observer=process_observer, process_released=process_released,
+                    process_exit_observed=process_exit_observed,
                 )
             except (SolveExecutionBudgetExceeded, SolveExecutionCancelled):
                 raise
@@ -553,6 +563,7 @@ def run_candidate_execution(
     remaining_timeout: Callable[[str], float] | None = None,
     process_observer: Callable[[int, int | None], None] | None = None,
     process_released: Callable[[int, int | None], None] | None = None,
+    process_exit_observed: Callable[[int | None], None] | None = None,
 ) -> CandidateExecutionRun:
     return CandidateExecutionRunner().run(
         admission, plan=plan, workspace_path=workspace_path, input_path=input_path,
@@ -562,6 +573,7 @@ def run_candidate_execution(
         timeout_seconds=timeout_seconds,
         remaining_timeout=remaining_timeout,
         process_observer=process_observer, process_released=process_released,
+        process_exit_observed=process_exit_observed,
     )
 
 

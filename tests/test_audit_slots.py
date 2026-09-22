@@ -33,6 +33,16 @@ def test_one_complete_slot_is_verified(tmp_path):
     assert _audit(child, paths) == {"status": "verified", "reason": None}
 
 
+def test_optional_cleanup_receipt_is_checked_without_becoming_a_second_slot(tmp_path):
+    child, paths = _fixture(tmp_path)
+    cleanup = child / paths["execution_path"] / "cleanup.json"
+    cleanup.write_bytes(b"cleanup")
+    paths["cleanup_path"] = paths["execution_path"] + "/cleanup.json"
+    assert _audit(child, paths) == {"status": "verified", "reason": None}
+    paths["cleanup_path"] = paths["execution_path"] + "/wrong.json"
+    assert _audit(child, paths) == {"status": "failed", "reason": "slot_request_invalid"}
+
+
 def test_missing_slot_or_required_artifact_is_unverifiable(tmp_path):
     child, paths = _fixture(tmp_path)
     paths["plan_path"] = paths["plan_path"].replace("plan.json", "missing.json")

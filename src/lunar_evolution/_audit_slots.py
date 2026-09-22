@@ -23,7 +23,7 @@ def _fail(reason, status="failed"):
     raise _SlotProblem(status, reason) from None
 
 
-def _paths(plan, admission, execution, evaluation):
+def _paths(plan, admission, execution, evaluation, cleanup):
     # Shape matching rejects absolute, dot, traversal and alternate separators.
     if any(type(value) is not str or len(value) > 512
            for value in (plan, admission, execution, evaluation)):
@@ -34,6 +34,8 @@ def _paths(plan, admission, execution, evaluation):
     run_name = match[1]
     prefix = "evolution/bundle-attempts/" + run_name
     if admission != prefix + "/admission.json" or execution != prefix + "/attempt":
+        _fail("slot_request_invalid")
+    if cleanup is not None and cleanup != prefix + "/attempt/cleanup.json":
         _fail("slot_request_invalid")
     if not evaluation.startswith(prefix + "/evaluations/"):
         _fail("slot_request_invalid")
@@ -86,8 +88,10 @@ def _regular(chain, name):
         os.close(descriptor)
 
 
-def _inspect(child_workspace, plan_path, admission_path, execution_path, evaluation_path):
-    run_name, evaluation_name = _paths(plan_path, admission_path, execution_path, evaluation_path)
+def _inspect(child_workspace, plan_path, admission_path, execution_path, evaluation_path, cleanup_path):
+    run_name, evaluation_name = _paths(
+        plan_path, admission_path, execution_path, evaluation_path, cleanup_path,
+    )
     child = absolute_path(child_workspace)
     held = []
 
@@ -105,7 +109,9 @@ def _inspect(child_workspace, plan_path, admission_path, execution_path, evaluat
         if identity(os.fstat(run.fd)) != run_identity:
             _fail("slot_changed", "unverifiable")
         files = {name: _regular(run, name) for name in ("plan.json", "admission.json")}
-        hold(run_path / "attempt")
+        attempt = hold(run_path / "attempt")
+        if cleanup_path is not None:
+            _regular(attempt, "cleanup.json")
         evaluations = hold(run_path / "evaluations")
         evaluation_identity = _one_directory(evaluations, evaluation_name, _EVALUATION)
         evaluation = hold(run_path / "evaluations" / evaluation_name)
@@ -133,6 +139,7 @@ def _inspect(child_workspace, plan_path, admission_path, execution_path, evaluat
 
 def audit_execution_slots(
     child_workspace, *, plan_path, admission_path, execution_path, evaluation_path,
+    cleanup_path=None,
 ):
     """Report one run directory and one evaluation directory, never executing files.
 
@@ -142,7 +149,7 @@ def audit_execution_slots(
     a uniqueness check; the native inspectors still validate each record's bytes.
     """
     try:
-        _inspect(child_workspace, plan_path, admission_path, execution_path, evaluation_path)
+        _inspect(child_workspace, plan_path, admission_path, execution_path, evaluation_path, cleanup_path)
     except _SlotProblem as exc:
         return {"status": exc.status, "reason": exc.reason}
     except FileNotFoundError:

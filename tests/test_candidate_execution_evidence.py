@@ -198,3 +198,17 @@ def test_recorded_candidate_preserves_process_ownership_callbacks(tmp_path):
     assert events[0][1] > 0
     assert events[1] == ("released", events[0][1], events[0][2])
     assert inspect(admission, request) == record
+
+
+@pytest.mark.parametrize("callback", ["observer", "release"])
+def test_callback_failure_cannot_promote_cleanup_to_verified(tmp_path, callback):
+    admission, request = fixture(tmp_path)
+
+    def fail(*_args):
+        raise RuntimeError("telemetry failed")
+
+    kwargs = {"process_observer": fail} if callback == "observer" else {"process_released": fail}
+    record = run_candidate_execution_recorded(admission, **request, **kwargs)
+
+    assert record.cleanup_status == "unknown"
+    assert inspect(admission, request).cleanup_status == "unknown"

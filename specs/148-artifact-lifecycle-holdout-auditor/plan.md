@@ -1,5 +1,10 @@
 # Implementation Plan: artifact/lifecycle and holdout receipt auditor
 
+> **Boundary note (2026-09-22):** Feature 149 now supplies the independent cleanup-v1 receipt
+> and native wiring referenced as a prerequisite below. This plan records the Feature 148
+> checkpoint; fresh execution records use the Feature 149 contract and legacy records remain
+> cleanup-unknown.
+
 ## Design
 
 Implement the auditor as a read-only adapter over the existing acceptance observer and native
@@ -68,9 +73,9 @@ validation.
 
 See [quickstart.md](quickstart.md) for the implemented provider-free focused tests, the Python audit
 API, exact request fields, original-location requirements and report interpretation. The current
-native execution-record schema lacks independent cleanup evidence, so a successful execution
-record still leaves primary and joint eligibility false. No launch command or provider call is
-part of this feature.
+At the Feature 148 checkpoint, the native execution-record schema lacked independent cleanup
+evidence, so a successful execution record left primary and joint eligibility false. Feature 149
+supplies cleanup-v1 for fresh records; no launch command or provider call is part of this feature.
 
 ## Complexity tracking
 

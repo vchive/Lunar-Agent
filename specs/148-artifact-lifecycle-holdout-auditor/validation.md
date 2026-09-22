@@ -68,17 +68,20 @@ The current tracked and nonignored untracked file/path scan found no retired pro
 
 ## Evidence and limits
 
-The current native execution record has no independent cleanup observation. A retained execution that
-otherwise reports success is classified `unverifiable` with `execution_cleanup_unknown`;
-`primary_eligible` and `joint_eligible` remain false. A copied native execution/evaluation directory
-also remains unverifiable. Missing or failed evidence cannot be repaired by later receipts or
-successful holdouts. Request/token ceilings are digest-bound declarations, while actual usage
-accounting and launch enforcement belong to the separate measurement implementation.
+At the Feature 148 checkpoint, the native execution record had no independent cleanup observation.
+That checkpoint therefore classified an otherwise successful retained execution as `unverifiable`
+with `execution_cleanup_unknown`; a copied native execution/evaluation directory also remained
+unverifiable. Feature 149 now adds the optional cleanup-v1 receipt and wires it into native
+execution and acceptance auditing: a fresh record with a verified receipt can pass the execution
+boundary, while a legacy three-file record without `cleanup.json` remains `execution_cleanup_unknown`.
+Missing, failed, or relocated evidence still cannot be repaired by later receipts or successful
+holdouts. Request/token ceilings are digest-bound declarations, while actual usage accounting and
+launch enforcement belong to the separate measurement implementation.
 
 The combined report always emits `provider_called_during_audit=false`, `executed_during_audit=false`,
 `mutated_during_audit=false` and `real_acceptance_claimed=false`. Its three compatibility counters
 remain `0/1`; they do not rewrite historical results. Feature 139 remains preparation `1/1`,
 primary/joint `0/1`; Feature 131/134/139 retained evidence is untouched. No provider, real campaign
-or WebAgent was run, and no historical generated source was executed. Independent cleanup evidence,
-launch preflight/registration sealing and the actual registered automatic multi-file end-to-end
-acceptance are still required.
+or WebAgent was run, and no historical generated source was executed. A separately committed launch
+preflight/registration seal and the actual registered automatic multi-file end-to-end acceptance are
+still required; Feature 149's provider-free cleanup implementation does not authorize either step.

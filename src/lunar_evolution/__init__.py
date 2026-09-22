@@ -145,6 +145,12 @@ from .candidate_execution import (
     parse_candidate_execution_admission,
     validate_candidate_execution_admission,
 )
+from .candidate_execution_cleanup import (
+    CandidateExecutionCleanupError,
+    audit_candidate_execution_cleanup,
+    build_candidate_execution_cleanup,
+    parse_candidate_execution_cleanup,
+)
 from .candidate_execution_evidence import (
     CandidateExecutionEvidenceError,
     CandidateExecutionRecord,
@@ -453,6 +459,7 @@ __all__ = [
     "CandidateExecution",
     "CandidateExecutionAdmission",
     "CandidateExecutionBudget",
+    "CandidateExecutionCleanupError",
     "CandidateExecutionError",
     "CandidateExecutionEvidenceError",
     "CandidateExecutionInput",
@@ -589,6 +596,7 @@ __all__ = [
     "admit_seed_manifest",
     "audit_acceptance_artifacts",
     "audit_campaign_directory",
+    "audit_candidate_execution_cleanup",
     "audit_holdout_receipts",
     "benchmark_case_content_digest",
     "bind_benchmark_comparison_result_evidence",
@@ -598,6 +606,7 @@ __all__ = [
     "build_algorithm_plan",
     "build_algorithm_role_plan",
     "build_candidate_execution_admission",
+    "build_candidate_execution_cleanup",
     "build_candidate_manifest",
     "build_candidate_workspace_plan",
     "build_effect_kit",
@@ -641,6 +650,7 @@ __all__ = [
     "parse_candidate_evaluation_report",
     "parse_candidate_evaluation_spec",
     "parse_candidate_execution_admission",
+    "parse_candidate_execution_cleanup",
     "parse_candidate_source_bundle",
     "parse_candidate_workspace_plan",
     "parse_holdout_declaration",
