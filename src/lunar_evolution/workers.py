@@ -391,6 +391,9 @@ class WorkerService:
                 setter = getattr(adapter, name, None)
                 if callable(setter):
                     setter(callback)
+            set_worker_context = getattr(adapter, "set_worker_context", None)
+            if callable(set_worker_context):
+                set_worker_context(self, worker.owner_id, worker.id)
             request = AgentRequest(
                 run_id=f"worker-run-{worker.id}", task_id=attempt_id, role=worker.role,
                 prompt=prompt, required_capabilities=tuple(required_capabilities), workspace=root, timeout=timeout,
@@ -448,6 +451,12 @@ class WorkerService:
                             setter(None)
                         except Exception:  # noqa: BLE001, S110 - cleanup must reach every owned handle
                             pass
+                set_worker_context = getattr(adapter, "set_worker_context", None)
+                if callable(set_worker_context):
+                    try:
+                        set_worker_context(None)
+                    except Exception:  # noqa: BLE001, S110 - clear opt-in tools before reuse
+                        pass
                 with self._condition:
                     self._active.pop(attempt_id, None)
                     self._futures.pop(attempt_id, None)

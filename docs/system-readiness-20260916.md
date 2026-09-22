@@ -93,12 +93,13 @@ Feature 144 延续候选生成链路，给多文件请求增加本次调用专�
 最终产品 `c6947fd` 的 Linux/Python 3.11、3.12、3.13 完整 CI 也已通过。
 这些改动不增加真实模型样本，139 的 preparation 1/1、primary/joint 0/1 不变。
 
-当前 CLI `delegate` 已走 durable worker lifecycle；普通任务的 `run_agent()`、142 前台自动多文件仍不依赖该 WorkerService；
-这些 worker 修复不改变 142 Phase A/B 的验收。142 Phase C 已接通独立后台协调进程；真实前台验收准备与 143 consumer
+当前 CLI `delegate` 已走 durable worker lifecycle；AgentLoop 在 WorkerService attempt 内已有 opt-in
+worker 工具 façade，普通任务的 `run_agent()`、142 前台自动多文件仍不依赖该 WorkerService；这些 worker 修复不改变
+142 Phase A/B 的验收。142 Phase C 已接通独立后台协调进程；真实前台验收准备与 143 consumer
 验收分轨完成本轮本地与 Linux CI 验证，
 但在新真实验收登记时必须固定产品，不能运行途中换代码。143 T009 不阻塞 142。
 
-本轮包含 worker 产品修复、永久回归与 CI 诊断；没有 provider 请求或新增真实效果结果。
+本轮包含 worker 产品修复、AgentLoop façade、永久回归与 CI 诊断；没有 provider 请求或新增真实效果结果。
 历史 139 的未勾选项是冻结的离线检查点；其唯一槽已经结束，不是待重跑任务。104/133 后续
 均已实现，不能仍按最初“只写规格”状态算欠账。旧 002 已被 003 替代，094 的漏勾项已有实现
 验收。冻结记录不为清理待办而重写。

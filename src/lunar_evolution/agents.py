@@ -476,6 +476,14 @@ class RuntimeAgentAdapter:
         if callable(setter):
             setter(released)
 
+    def set_worker_context(
+        self, service=None, owner_id: str | None = None, parent_worker_id: str | None = None,
+    ) -> None:
+        """Forward the opt-in WorkerService tool context into the wrapped runtime."""
+        setter = getattr(self.runtime, "set_worker_context", None)
+        if callable(setter):
+            setter(service, owner_id, parent_worker_id)
+
     def _check_continuation(self) -> None:
         if self._continuation_guard is not None:
             self._continuation_guard()

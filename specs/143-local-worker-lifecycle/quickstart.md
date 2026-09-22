@@ -50,12 +50,19 @@ Do not delete owner lock files to force recovery. A retained process registratio
 attempt until cleanup is verified.
 
 This is the typed local API. The foreground CLI `lunar-evolution delegate` now uses the durable
-worker binding and result-delivery path described in the Feature 143 specification. AgentLoop
-worker tools, recursive workers, and automatic solve integration remain outside this bounded
-consumer; automatic multi-file background execution is Feature 142 Phase C.
+worker binding and result-delivery path described in the Feature 143 specification. The opt-in
+AgentLoop worker façade is available only inside a WorkerService attempt; recursive depth,
+automatic solve integration, and automatic multi-file background execution remain separate.
 
 A second `delegate --run-id` observation reuses an active binding. If another process is delivering
 the result, `wait_timeout` still bounds the observation. After a delivery owner exits, an explicit
 later observation can recover its reservation once it is stale (1–30 seconds, based on the original
 active timeout), using the stored envelope without running the worker again. Missing/unsafe lock
 evidence keeps the outcome unresolved. Cancellation cleans the exact abandoned staging batch.
+
+An AgentLoop receives worker tools only when a running WorkerService attempt injects its context.
+The model can then call `spawn_worker`, `wait_worker`, `cancel_worker`, and `read_worker_result`.
+The child is owned by the current worker, Store depth and owner checks remain authoritative, and
+wait timeouts are non-terminal. Results return bounded text and metadata; child artifacts stay in
+the child workspace until a later materialization feature. Ordinary AgentLoop runs and automatic
+multi-file solve do not expose these tools.

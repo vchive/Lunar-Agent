@@ -1,8 +1,8 @@
 # Feature Specification: Local multi-agent worker lifecycle
 
 **Created**: 2026-09-20
-**Status**: T009 is implemented; 2026-09-22 crash-window and observation-timeout hardening
-is undergoing final regression under the same bounded scope
+**Status**: T009 and the opt-in AgentLoop worker-tool façade are implemented; the façade remains
+provider-free, worker-scoped, and separate from automatic solve.
 **Input**: WebAgent reference-engine-v2.5 multiagent review and Lunar capability comparison
 
 ## Problem
@@ -92,7 +92,8 @@ response bodies, or filesystem paths in worker status.
 - **FR-013**: Worker events include fixed type, worker identity, phase/outcome, and bounded reason
   codes. They exclude prompts, secrets, provider text, and unbounded tracebacks.
 - **FR-014**: Existing `run_agent()`, ordinary `resume`, population evolution, and detached
-  ordinary solves retain their current behavior until explicitly migrated to this API.
+  ordinary solves retain their current behavior until explicitly migrated to this API. The
+  AgentLoop façade is opt-in only for a running WorkerService attempt.
 - **FR-015**: No OpenCode plugin, remote reference-engine client, SSE protocol, GPU sandbox, or multi-tenant
   service is introduced by this feature.
 
@@ -108,6 +109,13 @@ response bodies, or filesystem paths in worker status.
   attempt. Cancellation and recovery use verified attempt/process ownership, try cleanup for
   every owned process, and retain evidence of incomplete cleanup. Adapter callbacks alone do
   not establish that local processes have exited.
+- **FR-019**: A worker-scoped AgentLoop may expose bounded `spawn_worker`, `wait_worker`,
+  `cancel_worker`, and `read_worker_result` tools only while its WorkerService context is active.
+  Owner and depth checks remain authoritative; ordinary AgentLoop instances expose no worker
+  schemas.
+- **FR-020**: Worker-tool waits are bounded and poll the parent continuation guard. Child text and
+  metadata are returned through bounded JSON; child private artifacts are not copied into the
+  parent workspace by this slice.
 
 ## Acceptance criteria
 
@@ -172,8 +180,8 @@ See [quickstart.md](quickstart.md) for the explicit local API and recovery limit
 
 The first consumer is deliberately one foreground CLI path: `lunar-evolution delegate`. It is
 opt-in and single-task. CLI `--wait-timeout` uses a durable child host, and existing `--detach`
-launches that same consumer. Ordinary `run_agent`, AgentLoop, automatic multi-file solve,
-recursive worker creation, and model-facing worker tools retain their separate execution paths.
+launches that same consumer. Ordinary `run_agent` and automatic multi-file solve retain their
+separate execution paths. The opt-in AgentLoop façade below does not change the CLI default.
 
 Before a worker starts, the controller claims one ready task and durably binds the worker to the
 parent run, task, and task attempt in one binding record. A crash before the binding is committed
@@ -207,3 +215,17 @@ starts a new attempt automatically.
 T009 acceptance is provider-free. It requires successful and failed local command consumers,
 correct registry construction, durable pre-start binding, complete result/artifact handoff,
 parent cancellation and timeout isolation, late-result rejection, and owner-scoped recovery.
+
+## T028 bounded AgentLoop worker-tool façade
+
+When a WorkerService attempt wraps an AgentLoop runtime, it may inject the service, external owner,
+and current worker identity into the runtime's local tool registry. The model then sees only
+`spawn_worker`, `wait_worker`, `cancel_worker`, and `read_worker_result`. `spawn_worker` always
+sets the current worker as the child parent; Store owner/depth validation rejects unrelated owners
+and over-depth children. `wait_worker` treats a timeout as a running observation and checks the
+parent continuation guard between short polls, so cancellation cannot be hidden behind a long wait.
+
+The result contract is bounded JSON containing worker identity, phase/outcome, error code, result
+metadata, and bounded text. Child artifact paths remain private to the worker workspace; this slice
+does not materialize them into the parent workspace. No CLI, automatic solve, candidate generation,
+recursive worker depth, database schema, or real campaign is changed.

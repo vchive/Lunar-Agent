@@ -215,6 +215,10 @@ class AgentLoopRuntime:
             setter(released)
         self.tools.set_process_released(released)
 
+    def set_worker_context(self, service=None, owner_id: str | None = None, parent_worker_id: str | None = None) -> None:
+        """Expose opt-in child-worker tools for one durable WorkerService attempt."""
+        self.tools.set_worker_context(service, owner_id, parent_worker_id)
+
     def process_info(self) -> tuple[int | None, int | None]:
         return self.model.process_info()
 
@@ -222,6 +226,7 @@ class AgentLoopRuntime:
         if guard is not None and not callable(guard):
             raise TypeError("continuation guard must be callable or None")
         self._continuation_guard = guard
+        self.tools.set_continuation_guard(guard)
 
     def _check_continuation(self) -> None:
         if self._continuation_guard is not None:

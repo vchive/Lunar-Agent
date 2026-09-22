@@ -56,7 +56,7 @@ worker 仍不在该 bounded consumer 范围内，本地验收也不等于真实�
 | 失败分类、unknown、checkpoint/resume | **部分覆盖**。候选失败、timeout、unknown、run failure 和 preparation failure 有固定记录。 | 与 reference-engine-v2 的 retry queue/正式 iteration 语义不同；不能宣称恢复语义完全相同。 |
 | 全链路 wall-clock、父子取消、后台自动多文件 | **已覆盖（本地活动执行）**。Feature 142 统一一次活动执行的共享墙钟、父编排、父子取消与进程清理；Phase C 已接通后台入口，前后台一致性等本机夹具通过，完整回归已通过。 | 不累计人工等待和多次显式续跑的时间；本地清理不证明远端 provider 已停止计算，也不是远程实验控制面。 |
 | WebAgent 持久 approval gate | **部分覆盖**。Lunar 有 policy、event ledger、recovery 和 cancel，但没有完整的 `pending/approved/failed/timed_out/abandoned/not_confirmed` 状态机、同会话阻断和 bypass 防护。 | 应吸收状态机和未知终态原则，不必复制 OpenCode hook。 |
-| WebAgent WorkerRegistry | **部分覆盖**。Feature 143 已有持久 Worker/WorkerAttempt、`dispatch/send/list/wait/resume/cancel`、owner/depth 校验和结果投递 API；已补独立执行、活性锁、精确进程清理、排队取消和重复观察者交付修复，T009 已接入单任务前台 `delegate`。 | 不能宣称完整产品集成等价或真实效果持平；AgentLoop、自动 solve、递归 worker 和远程 WorkerRegistry 语义仍在范围外。 |
+| WebAgent WorkerRegistry | **部分覆盖**。Feature 143 已有持久 Worker/WorkerAttempt、`dispatch/send/list/wait/resume/cancel`、owner/depth 校验和结果投递 API；已补独立执行、活性锁、精确进程清理、排队取消和重复观察者交付修复，T009 已接入单任务前台 `delegate`，并在 WorkerService attempt 内提供 opt-in AgentLoop `spawn/wait/cancel/read-result` façade。 | 不能宣称完整产品集成等价或真实效果持平；自动 solve、递归深度、子产物 materialization 和远程 WorkerRegistry 语义仍在范围外。 |
 | WebAgent `evolve_*` / 外部实验服务客户端 / 外部服务 CLI | **未覆盖，且当前不迁移**。Lunar 默认使用本地 population 和本地 Store。 | 对方是远程实验控制面；Lunar 只保留 transport-neutral 的协议边界。 |
 | 远程 GPU、sandbox、upload/download、project relay | **未覆盖**。Lunar 当前是本地受控子进程和本地 workspace。 | 属于 WebAgent/reference-engine-v2 服务部署能力，当前产品没有这个运行前提。 |
 | Provider HTTP trace、SSE stall replay、OpenCode plugin compatibility | **未覆盖等价实现**。Lunar 有 transcript、usage 和事件诊断，但没有 provider fetch hook 或 OpenCode 1.3.10 插件兼容层。 | 只能吸收脱敏、可审计和 unknown 不自动重试的原则。 |

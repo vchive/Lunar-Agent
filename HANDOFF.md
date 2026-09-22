@@ -23,8 +23,26 @@
 Python 3.11、3.12、3.13 全部通过。
 
 系统仍未全部完成：Feature 139 真实完整交付仍为 preparation 1/1、primary/joint 0/1；
-AgentLoop worker 工具、自动 solve 接入 WorkerService、递归 worker、外部 producer 的完整
-调度和真实框架验收仍未完成。本轮没有 provider/campaign/WebAgent 执行。
+自动 solve 接入 WorkerService、递归 worker、外部 producer 的完整调度和真实框架验收仍未
+完成。本轮没有 provider/campaign/WebAgent 执行。
+
+## 2026-09-22 AgentLoop worker 工具 façade
+
+沿 Feature 143 增加一个 opt-in、worker-scoped 的 AgentLoop 工具桥：WorkerService 执行
+RuntimeAgentAdapter 时注入准确的 owner/parent worker 上下文，模型只在该上下文中看到
+`spawn_worker`、`wait_worker`、`cancel_worker`、`read_worker_result`。子 worker 继续由
+Store 的 owner/depth 校验和 WorkerService 取消树管理；wait 是有界、非终态观察，并在轮询间
+检查父 attempt 的 continuation guard。结果只返回有界文本/metadata，子 worker 私有产物不
+直接进入父 workspace。
+
+新增 `tests/test_agent_worker_tools.py` 3 项 provider-free 回归：普通 AgentLoop 不暴露
+worker schema、owner/parent/depth 和结果读取、取消打断 wait，以及 RuntimeAgentAdapter 内的
+实际 spawn→wait 闭环。普通 `run_agent`、自动 solve、候选生成和 CLI 默认路径未接入；真实
+provider、campaign、WebAgent 和 139 primary/joint 结果均未改变。
+
+本工作树完整回归收集 6726 项，结果为 **6725 passed、1 skipped**；Ruff、compileall、diff
+检查和旧名称扫描均通过。该回归仍是 provider-free 本地验证，尚未宣称真实模型或框架端到端
+成功。
 
 ## 2026-09-21 自动多文件后台执行（Feature 142 Phase C，发布验收完成）
 

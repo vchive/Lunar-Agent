@@ -73,3 +73,14 @@ the CLI integration.
 - [x] T027 Complete the three regression phases, update verification records, push, and inspect Linux CI.
       Current 6722 passed/1 skipped, archived 2294 passed, frozen123 24 passed; `0adb637` Linux CI
       passed on Python 3.11, 3.12, and 3.13.
+
+## Opt-in AgentLoop worker-tool façade
+
+- [x] T028 Inject the active WorkerService owner/parent context into AgentLoop runtimes without
+      changing ordinary runtime or automatic-solve construction.
+- [x] T029 Expose bounded spawn/wait/cancel/read-result tools only in that context; preserve Store
+      owner/depth checks, continuation cancellation, text-only result delivery, and private child
+      artifact boundaries.
+- [x] T030 Add provider-free AgentLoop/WorkerService integration regressions and document that this
+      façade does not enable automatic solve, candidate generation, recursive depth, or real-model
+      end-to-end success.

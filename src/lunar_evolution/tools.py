@@ -70,12 +70,55 @@ class LocalToolRegistry:
         )
         self._process_observer: Callable[[int, int | None], None] | None = None
         self._process_released: Callable[[int, int | None], None] | None = None
+        # Worker tools are opt-in.  A normal AgentLoop never receives a WorkerService or
+        # exposes these schemas; WorkerService installs the context only for an executing
+        # worker attempt and clears it before releasing the attempt.
+        self._worker_service = None
+        self._worker_owner_id: str | None = None
+        self._worker_parent_id: str | None = None
+        self._continuation_guard: Callable[[], None] | None = None
 
     def set_process_observer(self, observer: Callable[[int, int | None], None] | None) -> None:
         self._process_observer = observer
 
     def set_process_released(self, released: Callable[[int, int | None], None] | None) -> None:
         self._process_released = released
+
+    def set_continuation_guard(self, guard: Callable[[], None] | None) -> None:
+        """Install the parent-attempt guard used by bounded worker waits."""
+        if guard is not None and not callable(guard):
+            raise TypeError("continuation guard must be callable or None")
+        self._continuation_guard = guard
+
+    def set_worker_context(
+        self, service=None, owner_id: str | None = None, parent_worker_id: str | None = None,
+    ) -> None:
+        """Enable worker tools for one running worker attempt.
+
+        The service is deliberately duck-typed here to keep the confined local-tool layer
+        independent from the scheduler module and its Store import graph.
+        """
+        if service is None:
+            if owner_id is not None or parent_worker_id is not None:
+                raise ValueError("worker identity requires a WorkerService")
+            self._worker_service = None
+            self._worker_owner_id = None
+            self._worker_parent_id = None
+            return
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            raise ValueError("worker owner identity must be non-empty")
+        if parent_worker_id is not None and (
+            not isinstance(parent_worker_id, str) or not parent_worker_id.strip()
+        ):
+            raise ValueError("parent worker identity must be non-empty")
+        required_methods = ("dispatch", "wait", "cancel", "read_result_envelope")
+        if any(not callable(getattr(service, name, None)) for name in required_methods):
+            raise TypeError("worker service does not implement the local worker tool contract")
+        if getattr(service, "store", None) is None:
+            raise TypeError("worker service does not implement the local worker tool contract")
+        self._worker_service = service
+        self._worker_owner_id = owner_id
+        self._worker_parent_id = parent_worker_id
 
     @contextmanager
     def execution_deadline(self, deadline: float) -> Iterator[None]:
@@ -250,6 +293,47 @@ class LocalToolRegistry:
                     ["command"],
                 )
             )
+        if self._worker_service is not None:
+            schemas.extend(
+                (
+                    self._schema(
+                        "spawn_worker",
+                        "Start one bounded child worker owned by this worker attempt.",
+                        {
+                            "prompt": {"type": "string", "description": "Non-empty child task prompt."},
+                            "role": {"type": "string", "description": "Child role; defaults to worker."},
+                            "required_capabilities": {
+                                "type": "array", "items": {"type": "string"},
+                                "description": "Optional capability names.",
+                            },
+                            "preferred_adapter": {"type": "string"},
+                            "timeout": {"type": "number", "minimum": 0.001},
+                        },
+                        ["prompt"],
+                    ),
+                    self._schema(
+                        "wait_worker",
+                        "Wait for a child worker for a bounded time and return its state.",
+                        {
+                            "worker_id": {"type": "string"},
+                            "timeout": {"type": "number", "minimum": 0},
+                        },
+                        ["worker_id"],
+                    ),
+                    self._schema(
+                        "cancel_worker",
+                        "Cancel one owned child worker and its descendants.",
+                        {"worker_id": {"type": "string"}},
+                        ["worker_id"],
+                    ),
+                    self._schema(
+                        "read_worker_result",
+                        "Read a settled child worker result envelope with bounded text.",
+                        {"worker_id": {"type": "string"}},
+                        ["worker_id"],
+                    ),
+                )
+            )
         return tuple(schemas)
 
     @staticmethod
@@ -284,9 +368,132 @@ class LocalToolRegistry:
                 return self._remember_memory(arguments)
             if name == "run_command":
                 return self._run_command(arguments, workspace)
+            if name == "spawn_worker":
+                return self._spawn_worker(arguments)
+            if name == "wait_worker":
+                return self._wait_worker(arguments)
+            if name == "cancel_worker":
+                return self._cancel_worker(arguments)
+            if name == "read_worker_result":
+                return self._read_worker_result(arguments)
             raise ToolError(f"unknown tool: {name}")
-        except (OSError, sqlite3.Error, ToolError, TypeError, ValueError) as exc:
+        except (OSError, sqlite3.Error, ToolError, TypeError, ValueError, RuntimeError) as exc:
             return ToolResult(output=f"tool_error: {type(exc).__name__}: {exc}", success=False)
+
+    def _require_worker_context(self):
+        if self._worker_service is None or self._worker_owner_id is None:
+            raise ToolError("worker tools are unavailable in this AgentLoop")
+        return self._worker_service, self._worker_owner_id
+
+    def _worker_id(self, arguments: dict[str, object]) -> str:
+        worker_id = arguments.get("worker_id")
+        if not isinstance(worker_id, str) or not worker_id.strip():
+            raise ToolError("worker_id must be a non-empty string")
+        service, owner_id = self._require_worker_context()
+        if self._worker_parent_id is None:
+            raise ToolError("worker parent context is missing")
+        current = service.store.get_worker(worker_id)
+        visited: set[str] = set()
+        while current is not None and current.id not in visited:
+            if current.owner_id != owner_id:
+                raise ToolError("worker is owned by another caller")
+            if current.parent_worker_id == self._worker_parent_id:
+                return worker_id
+            visited.add(current.id)
+            if current.parent_worker_id is None or len(visited) >= 32:
+                break
+            current = service.store.get_worker(current.parent_worker_id)
+        raise ToolError("worker is outside the current worker subtree")
+
+    @staticmethod
+    def _worker_payload(worker) -> dict[str, object]:
+        return {
+            "worker_id": worker.id,
+            "parent_worker_id": worker.parent_worker_id,
+            "role": worker.role,
+            "agent_type": worker.agent_type,
+            "depth": worker.depth,
+            "phase": worker.phase.value,
+            "outcome": worker.outcome.value if worker.outcome is not None else None,
+            "stop_reason": worker.stop_reason.value if worker.stop_reason is not None else None,
+            "result_ref": worker.result_ref,
+        }
+
+    def _spawn_worker(self, arguments: dict[str, object]) -> ToolResult:
+        service, owner_id = self._require_worker_context()
+        prompt = arguments.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip() or "\x00" in prompt:
+            raise ToolError("prompt must be non-empty and NUL-free")
+        if len(prompt.encode("utf-8")) > 64 * 1024:
+            raise ToolError("prompt exceeds 65536 bytes")
+        role = arguments.get("role", "worker")
+        if not isinstance(role, str) or not role.strip():
+            raise ToolError("role must be a non-empty string")
+        capabilities = arguments.get("required_capabilities", ())
+        if not isinstance(capabilities, (list, tuple)) or any(
+            not isinstance(item, str) or not item.strip() for item in capabilities
+        ) or len(capabilities) > 16:
+            raise ToolError("required_capabilities must contain at most 16 strings")
+        preferred = arguments.get("preferred_adapter")
+        if preferred is not None and (not isinstance(preferred, str) or not preferred.strip()):
+            raise ToolError("preferred_adapter must be a non-empty string")
+        timeout = arguments.get("timeout")
+        if timeout is not None and (
+            isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout) or timeout <= 0 or timeout > 24 * 60 * 60
+        ):
+            raise ToolError("timeout must be between 0 and 86400 seconds")
+        worker = service.dispatch(
+            owner_id,
+            role=role,
+            prompt=prompt,
+            parent_worker_id=self._worker_parent_id,
+            required_capabilities=tuple(capabilities),
+            preferred_adapter=preferred,
+            timeout=timeout,
+        )
+        return ToolResult(json.dumps(self._worker_payload(worker), sort_keys=True))
+
+    def _wait_worker(self, arguments: dict[str, object]) -> ToolResult:
+        service, owner_id = self._require_worker_context()
+        worker_id = self._worker_id(arguments)
+        timeout = arguments.get("timeout", 30.0)
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
+            raise ToolError("timeout must be a non-negative finite number")
+        timeout = min(float(timeout), 300.0)
+        deadline = time.monotonic() + timeout
+        while True:
+            if self._continuation_guard is not None:
+                self._continuation_guard()
+            remaining = deadline - time.monotonic()
+            worker = service.wait(owner_id, worker_id, timeout=min(0.1, max(0.0, remaining)))
+            if worker.phase.value == "idle" or remaining <= 0:
+                return ToolResult(json.dumps(self._worker_payload(worker), sort_keys=True))
+
+    def _cancel_worker(self, arguments: dict[str, object]) -> ToolResult:
+        service, owner_id = self._require_worker_context()
+        worker = service.cancel(owner_id, self._worker_id(arguments))
+        return ToolResult(json.dumps(self._worker_payload(worker), sort_keys=True))
+
+    def _read_worker_result(self, arguments: dict[str, object]) -> ToolResult:
+        service, owner_id = self._require_worker_context()
+        result = service.read_result_envelope(owner_id, self._worker_id(arguments))
+        text = result.text
+        raw = text.encode("utf-8")
+        truncated = len(raw) > self.max_output_bytes
+        if truncated:
+            text = raw[: self.max_output_bytes].decode("utf-8", errors="ignore")
+        payload = {
+            "adapter_name": result.adapter_name,
+            "role": result.role,
+            "status": result.status,
+            "text": text,
+            "truncated": truncated,
+            "artifacts": list(result.artifacts),
+            "metadata": dict(result.metadata),
+            "error": result.error,
+        }
+        return ToolResult(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
     def _safe_path(self, workspace: Path, value: object) -> Path:
         if not isinstance(value, str) or not value.strip():
