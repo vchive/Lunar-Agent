@@ -133,6 +133,23 @@ def _confined(root: Path, relative: str, *, code: str = "producer_bundle_publica
     return current
 
 
+def _ensure_directory(root: Path, relative: str) -> Path:
+    """Create a private, no-follow directory chain below ``root`` for nested source files."""
+    _safe_relative(relative)
+    current = root
+    for part in Path(relative).parts:
+        current = current / part
+        if _present(current):
+            _directory(current)
+            continue
+        try:
+            current.mkdir(mode=0o700)
+        except OSError as exc:
+            raise ProducerBundlePublicationStagingError("producer_bundle_publication_stage_write_failed") from exc
+        _fsync_dir(current.parent)
+    return current
+
+
 def _workspace(value: str | Path) -> Path:
     try:
         path = Path(value).expanduser().absolute()
@@ -280,6 +297,8 @@ class ProducerBundlePublicationArtifact:
     execution_receipt_sha256: str | None = None
     evaluation_receipt_sha256: str | None = None
     publication_receipt_sha256: str | None = None
+    execution_receipt: Mapping[str, object] | None = None
+    evaluation_receipt: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate_id, str) or not self.candidate_id:
@@ -288,6 +307,10 @@ class ProducerBundlePublicationArtifact:
             _fail("producer_bundle_publication_source_invalid")
         if not isinstance(self.record, Mapping) or not isinstance(self.receipt, Mapping):
             _fail("producer_bundle_publication_sidecar_invalid")
+        for value, code in ((self.execution_receipt, "producer_bundle_publication_execution_receipt_invalid"),
+                            (self.evaluation_receipt, "producer_bundle_publication_evaluation_receipt_invalid")):
+            if value is not None and not isinstance(value, Mapping):
+                _fail(code)
         for value, code in ((self.execution_receipt_sha256, "producer_bundle_publication_execution_receipt_invalid"),
                             (self.evaluation_receipt_sha256, "producer_bundle_publication_evaluation_receipt_invalid"),
                             (self.publication_receipt_sha256, "producer_bundle_publication_publication_receipt_invalid")):
@@ -295,7 +318,7 @@ class ProducerBundlePublicationArtifact:
                 _fail(code)
         for name, content in self.source_files.items():
             _safe_relative(name, "producer_bundle_publication_source_path_invalid")
-            if name in {"record.json", "receipt.json"}:
+            if name in {"record.json", "receipt.json", "execution-receipt.json", "evaluation-receipt.json"}:
                 _fail("producer_bundle_publication_source_path_invalid")
             if isinstance(content, str):
                 encoded = content.encode("utf-8")
@@ -305,6 +328,18 @@ class ProducerBundlePublicationArtifact:
                 _fail("producer_bundle_publication_source_invalid")
             if len(encoded) > _MAX_SOURCE_BYTES:
                 _fail("producer_bundle_publication_source_too_large")
+
+        # The receipt hashes are canonical JSON identities.  Keep this check here so a caller
+        # cannot attach a digest for a different evidence object while staging the same bytes.
+        for value, digest, code in ((self.execution_receipt, self.execution_receipt_sha256,
+                                     "producer_bundle_publication_execution_receipt_invalid"),
+                                    (self.evaluation_receipt, self.evaluation_receipt_sha256,
+                                     "producer_bundle_publication_evaluation_receipt_invalid")):
+            if value is not None:
+                declared = value.get("receipt_sha256")
+                expected = declared if isinstance(declared, str) else _sha(_canonical(dict(value)))
+                if digest != expected:
+                    _fail(code)
 
     def source_bytes(self) -> dict[str, bytes]:
         return {name: value.encode("utf-8") if isinstance(value, str) else value for name, value in self.source_files.items()}
@@ -449,20 +484,44 @@ def _artifact_entry(batch: Path, artifact: ProducerBundlePublicationArtifact) ->
         _fail("producer_bundle_publication_staging_conflict")
     candidate_root.mkdir(mode=0o700)
     for relative, content in sorted(artifact.source_bytes().items()):
+        parent = Path(relative).parent.as_posix()
+        if parent != ".":
+            _ensure_directory(candidate_root, parent)
         target = _confined(candidate_root, relative,
                            code="producer_bundle_publication_source_path_invalid")
         _write_new(target, content, maximum=_MAX_SOURCE_BYTES)
         paths.append(_file_descriptor(target, relative, content))
     record_bytes = _pretty(dict(artifact.record), MAX_ARCHIVE_LINE_BYTES)
     receipt_bytes = _pretty(dict(artifact.receipt), MAX_ARCHIVE_LINE_BYTES)
-    _write_new(candidate_root / "record.json", record_bytes,
+    sidecar_relative = ""
+    raw_code_path = artifact.record.get("code_path")
+    prefix = f"evolution/candidates/{artifact.candidate_id}/"
+    if isinstance(raw_code_path, str) and raw_code_path.startswith(prefix):
+        source_relative = raw_code_path.removeprefix(prefix)
+        if source_relative in artifact.source_files:
+            sidecar_relative = Path(source_relative).parent.as_posix()
+            if sidecar_relative == ".":
+                sidecar_relative = ""
+    sidecar_root = candidate_root if not sidecar_relative else _ensure_directory(candidate_root, sidecar_relative)
+    record_path = sidecar_root / "record.json"
+    receipt_path = sidecar_root / "receipt.json"
+    _write_new(record_path, record_bytes,
                maximum=MAX_ARCHIVE_LINE_BYTES)
-    _write_new(candidate_root / "receipt.json", receipt_bytes,
+    _write_new(receipt_path, receipt_bytes,
                maximum=MAX_ARCHIVE_LINE_BYTES)
     paths.extend((
-        _file_descriptor(candidate_root / "record.json", "record.json", record_bytes),
-        _file_descriptor(candidate_root / "receipt.json", "receipt.json", receipt_bytes),
+        _file_descriptor(record_path, str(record_path.relative_to(candidate_root)), record_bytes),
+        _file_descriptor(receipt_path, str(receipt_path.relative_to(candidate_root)), receipt_bytes),
     ))
+    evidence_root = sidecar_root
+    for name, value in (("execution-receipt.json", artifact.execution_receipt),
+                        ("evaluation-receipt.json", artifact.evaluation_receipt)):
+        if value is None:
+            continue
+        content = _pretty(dict(value), MAX_ARCHIVE_LINE_BYTES)
+        target = evidence_root / name
+        _write_new(target, content, maximum=MAX_ARCHIVE_LINE_BYTES)
+        paths.append(_file_descriptor(target, str(target.relative_to(candidate_root)), content))
     return {"candidate_id": artifact.candidate_id, "paths": paths,
             "record_sha256": _sha(record_bytes), "receipt_sha256": _sha(receipt_bytes)}
 

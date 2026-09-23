@@ -1,0 +1,5 @@
+- [x] T155-01 Define canonical execution/evaluation receipt DTOs.
+- [x] T155-02 Project native pipeline evidence into Feature 153 artifacts.
+- [x] T155-03 Preserve nested candidate sidecars during staged publication/recovery.
+- [x] T155-04 Add focused provider-free regression and static validation.
+- [ ] T155-05 Wire external launcher output to this adapter in a later feature.

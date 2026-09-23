@@ -277,8 +277,21 @@ def _verify_manifest_files(root: Path, batch: Path, manifest_files: dict[str, ob
                 _fail("producer_bundle_recovery_manifest_files_invalid")
         except OSError as exc:
             raise ProducerBundleRecoveryError("producer_bundle_recovery_manifest_files_invalid") from exc
-        record = _read(candidate_root / "record.json", 64 * 1024)
-        receipt = _read(candidate_root / "receipt.json", 64 * 1024)
+        # Native multi-file candidates retain record/receipt beside their entrypoint (for
+        # example ``solve/record.json``).  Legacy producer fixtures keep them at the candidate
+        # root.  Resolve from the staged manifest paths without guessing outside that tree.
+        descriptors = item["paths"]  # type: ignore[index]
+        declared_paths = [descriptor["path"] for descriptor in descriptors if isinstance(descriptor, dict)]
+        record_relative = "record.json" if "record.json" in declared_paths else next(
+            (path for path in declared_paths if isinstance(path, str) and path.endswith("/record.json")), None,
+        )
+        receipt_relative = "receipt.json" if "receipt.json" in declared_paths else next(
+            (path for path in declared_paths if isinstance(path, str) and path.endswith("/receipt.json")), None,
+        )
+        if not isinstance(record_relative, str) or not isinstance(receipt_relative, str):
+            _fail("producer_bundle_recovery_manifest_files_invalid")
+        record = _read(candidate_root / record_relative, 64 * 1024)
+        receipt = _read(candidate_root / receipt_relative, 64 * 1024)
         if (hashlib.sha256(record).hexdigest() != item["record_sha256"]
                 or hashlib.sha256(receipt).hexdigest() != item["receipt_sha256"]):  # type: ignore[index]
             _fail("producer_bundle_recovery_evidence_mismatch")

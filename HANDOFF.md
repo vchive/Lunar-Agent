@@ -1,5 +1,29 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-24 Feature 154/155 producer launch boundary and evidence handoff
+
+继续沿现有 SDD 完成两条 provider-free slice，并已通过项目 `.venv` 的完整回归。
+Feature 154 新增声明式 `ProducerLaunchIntent`、一次性 exact-match
+`ProducerLaunchAttestation` 和只读 `preflight_producer_launch`：启动意图绑定预留
+`journal_id`、run/parent-task/task、完整 `CandidateIntegrityAuthority`、producer 身份、
+可执行文件字节及 device/inode/mtime/ctime、argv、系统派生输出路径，以及独立的
+request/max-request/output/wall-clock 预算。preflight 要求调用方显式提供 authority 与三元
+身份，返回 `preflight_passed` 观察结果；它不启动进程、不写 Store/文件、不消费 plan/journal，
+也不把观察结果当执行或发布授权。一次性 attestation 只为后续真实 PID/PGID 登记保留，必须
+精确匹配 parent/child/task、intent、执行文件字节和 inode/时间指纹。
+
+Feature 155 新增 `ProducerBundleExecutionReceipt`、`ProducerBundleEvaluationReceipt` 和
+只读 `build_producer_bundle_publication_artifact`。它重新检查已经保留的 native plan、admission、
+execution、cleanup、evaluation 和 source bytes，将成功且 cleanup verified 的多文件候选投影为
+Feature 153 可发布 artifact；execution/evaluation receipt 作为 canonical sidecar 写入 staged
+candidate，nested entrypoint 的 native `record.json`/`receipt.json` 与 source tree 保持相邻，旧
+root layout 继续兼容。unknown/timeout/cleanup-unknown 不可投影，也不会触发重跑。
+
+新增 focused launcher/receipt/nested staging/recovery 测试；Ruff、compileall、diff check 和
+项目 `.venv` 全仓 **通过**。本轮未启动 external producer、provider、scheduler、WebAgent 或真实
+campaign；Feature 154 的 T154-07（真实 process ownership/cleanup/recovery）和 Feature 155
+T155-05（外部 launcher 输出接线）仍是后续功能。
+
 ## 2026-09-23 Feature 153 producer bundle publication transaction SDD
 
 在 Feature 152 的 authority-bound admission plan 之上新增

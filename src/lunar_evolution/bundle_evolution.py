@@ -313,6 +313,21 @@ class MultiFileCandidatePipeline:
     def set_continuation_guard(self, guard) -> None:
         self._continuation_guard = guard
 
+    def build_publication_artifact(self, archive, candidate):
+        """Project one persisted candidate into the Feature 153 publication artifact.
+
+        This is a read-only hand-off: the native execution/evaluation records are inspected and
+        wrapped into portable receipts, while the publication transaction remains responsible for
+        staging and committing bytes.  No candidate is executed or evaluated by this method.
+        """
+        from .producer_bundle_receipts import build_producer_bundle_publication_artifact
+
+        return build_producer_bundle_publication_artifact(archive, candidate)
+
+    # Keep the shorter spelling convenient for callers that treat the pipeline as the owner of
+    # per-candidate evidence.
+    publication_artifact = build_publication_artifact
+
     def _effective_timeout(self, stage: str) -> float:
         if self._continuation_guard is not None:
             self._continuation_guard()
