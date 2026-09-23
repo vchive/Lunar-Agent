@@ -1,5 +1,25 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-23 Feature 151 verified producer bundle → native population draft
+
+沿 Feature 150 的显式 bundle bridge 继续现有 SDD，新增
+`ProducerBundleDraft`、`ProducerBundlePopulationError` 和
+`prepare_producer_bundle_drafts`。该 provider-free、只读适配器重新通过 canonical candidate
+bundle verifier 校验 regular-file bytes、size/SHA、inode/device 和读取期间变化，再将每个已
+校验 bundle 解码为原生多文件 `CandidateDraft`；entrypoint 保持为 `draft.filename`，完整的
+`source_files` 映射保留，producer fingerprint/ID、bundle digest 和 envelope digest 只作为
+provenance metadata，不进入本地 score 或 candidate identity。单次调用拒绝重复 bundle ID、
+跨 bundle 路径复用、篡改源文件、非法根目录和符号链接根；不复制、stage、执行、评测或写入
+producer workspace。
+
+新增 `specs/151-producer-bundle-population/` 和
+`tests/test_producer_bundle_population.py`，公开 API 已从 `lunar_evolution` 导出。Feature
+151 只完成 projection slice；自动 external admission transaction、archive publication、
+delivery、launcher/scheduler 和真实 producer campaign 仍未完成，也没有改动旧单文件
+`SeedManifest` 协议或自动 solve 默认入口。Feature 151 focused **12 passed**（含 Feature
+150 handoff），Ruff、compileall、diff check 通过；本轮没有调用 provider、producer、WebAgent
+或真实 campaign。下一步是另行设计显式 bundle admission 到 archive/交付的契约。
+
 ## 2026-09-23 Feature 150 显式 producer 多文件分组桥
 
 沿现有 109/142 SDD 完成 provider-free 的多文件 producer bridge。新增

@@ -1082,8 +1082,11 @@ entrypoint, and already-declared `candidate_source` paths; the bridge reuses the
 bundle verifier and returns only a read-only verified bundle plus producer provenance. It never
 guesses grouping from directories, lineage, ordering, or producer scores. This is a preparation
 boundary only: it does not launch OpenEvolve/Shinka, import a population, evaluate a candidate, or
-claim a real producer campaign result. Complete external producer population and delivery remain a
-separately specified follow-up.
+claim a real producer campaign result. Feature [151](specs/151-producer-bundle-population/) now
+projects those verified groups into native multi-file `CandidateDraft` values, preserving the
+entrypoint, source files, and provenance-only metadata without writing or evaluating anything.
+Automatic external admission, archive publication, delivery, and producer launchers remain future
+work under a separately specified contract.
 
 For a native Shinka result directory, `lunar_evolution.export_shinka_result(...)` is a read-only, offline
 exporter. It opens `programs.sqlite` (with an explicit legacy `evolution_db.sqlite` fallback) in
@@ -1474,8 +1477,9 @@ completed **0/2** tasks: both failed at contract intake, before evaluator or can
 See the [113 report](docs/history-archive.md). Current-version reliability
 still needs successful real-model validation; local fixtures do not establish effectiveness or
 relative WebAgent performance. Active-process cancellation orchestration and the full OpenEvolve/
-Shinka multi-file seed admission path remain future work; Feature 150 currently supplies only the
-explicit provider-free grouping and source-verification bridge.
+Shinka external-bundle admission, archive publication, and delivery path remain future work;
+Feature 150 supplies grouping/source verification and Feature 151 supplies the provider-free native
+`CandidateDraft` projection. No launcher or real producer campaign is implied.
 
 Feature 114 fixes the confirmed intake integration problem: contract compilation uses a stateless
 protocol call when supported and receives explicit JSON field/type guidance. Ordinary solving

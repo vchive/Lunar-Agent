@@ -309,6 +309,11 @@ from .producer_bundle_handoff import (
     VerifiedProducerBundleResult,
     prepare_producer_bundle_manifest,
 )
+from .producer_bundle_population import (
+    ProducerBundleDraft,
+    ProducerBundlePopulationError,
+    prepare_producer_bundle_drafts,
+)
 from .producer_handoff import (
     ProducerHandoffError,
     ProducerMaterial,
@@ -537,7 +542,9 @@ __all__ = [
     "PopulationConfig",
     "PopulationState",
     "PopulationStrategy",
+    "ProducerBundleDraft",
     "ProducerBundleHandoffError",
+    "ProducerBundlePopulationError",
     "ProducerBundleResult",
     "ProducerHandoffError",
     "ProducerMaterial",
@@ -674,6 +681,7 @@ __all__ = [
     "parse_registration_seal",
     "parse_seed_manifest",
     "preflight_acceptance_registration",
+    "prepare_producer_bundle_drafts",
     "prepare_producer_bundle_manifest",
     "prepare_producer_seed_manifest",
     "producer_bundle_dependency_sha256",
