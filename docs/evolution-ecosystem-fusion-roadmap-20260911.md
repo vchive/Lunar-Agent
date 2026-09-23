@@ -2,6 +2,19 @@
 
 当前整体现状与版本完成标准见 [2026-09-16 系统评估](system-readiness-20260916.md)。
 
+## 当前路线状态（2026-09-23）
+
+146 的递归 worker 生命周期、147 的离线验收证据观察器、148 的 artifact/lifecycle 与 holdout
+审计、149 的独立 cleanup-v1 receipt，以及 142 的 registration preflight 均已实现并推送。
+provider-free native quickstart 已完成一次端到端复核并交付最高分候选；这验证管线可运行，但不
+增加真实模型样本。Feature 139 的唯一真实槽已完成且结果为 preparation `1/1`、primary/joint
+`0/1`，因此当前 P0 是新身份/新槽下的成功交付验收，旧槽不能重跑。
+
+后续按优先级分为：将 opt-in AgentLoop worker façade/递归 WorkerService 接入 automatic solve
+默认入口；把 OpenEvolve/Shinka 的多文件 SeedManifest 与 launcher 接到同一 admission、执行、
+评分和交付链；再为跨文件依赖、复杂输入和远端运行建立独立规格与 provider-free fixture。真实
+producer 或模型效果必须新登记后单独执行，不安排 WebAgent 重跑或深度演化对比。
+
 截至 2026-09-21，产品 `65d9ae2` 已完成 [Feature 142](../specs/142-automatic-solve-lifecycle/spec.md)
 Phase A 前台共享活动墙钟、父编排与恢复，以及 Phase B 父子取消、实际进程登记和清理。
 Phase B 定向回归 146 项通过；最终双阶段回归为当前 `8636 passed, 1 skipped, 24 deselected`、
@@ -11,9 +24,9 @@ Phase C 自动后台执行现已实现：新 solve、两种 resume 和 answer �
 HTTP 夹具已通过前后台交付、取消、异常恢复及并发争用；当前完整三阶段回归已通过，
 产品 `ff1edcb` 与测试修复 `ad89b50` 已推送，后者的 Linux/Python 3.11–3.13 完整 CI 全部通过，
 精确结果见 [142 validation](../specs/142-automatic-solve-lifecycle/validation.md)。上述 Phase B 历史计数
-不代替本次验证。新的 50 分钟真实模型验收只有
-[计划](../specs/142-automatic-solve-lifecycle/real-acceptance-plan.md)，尚无新登记或运行；
-Feature 139 的 preparation `1/1`、primary/joint `0/1` 保持不变。
+不代替本次验证。新的成功样本仍需按
+[计划](../specs/142-automatic-solve-lifecycle/real-acceptance-plan.md) 新登记；Feature 139 的旧槽
+已完成且 preparation `1/1`、primary/joint `0/1`，不可再次启动。
 
 [Feature 143](../specs/143-local-worker-lifecycle/spec.md) 已修复审计发现的共享取消、误判中断
 和排队取消缺陷，补上独立 adapter/runtime、精确 attempt 进程登记清理、owner 活性锁与消息
@@ -49,7 +62,9 @@ run 墙钟传播和取消竞态，以及公开 transport status 和 persisted/ef
 核验仍保持通过；真实槽不重开、不修复、不追加请求。
 Feature 139 的固定测量预算不替代通用产品能力；随后 Feature 142 Phase A/B 已补齐前台
 活动执行预算、父编排、运行中本地取消和清理。Phase C 已接通自动后台执行并通过本机夹具，
-提交及 Linux CI 已收尾；外部 producer 多文件接线、AgentLoop/递归 worker 扩展及真实效果验收仍在后续范围。
+提交及 Linux CI 已收尾；外部 producer 多文件接线、AgentLoop/递归 worker 扩展及新的真实成功
+效果验收仍在后续范围。旧 Feature 139 唯一真实槽已经完成并以 `0/1` 收口，不应按本段早期
+“尚无新登记或运行”的历史表述再次启动。
 
 本文记录 Lunar Evolution 与公开 evolution/program-search 项目的融合边界和优先级。公开项目
 信息核对于 2026-09-11；没有执行外部框架、远端服务或新的 WebAgent 对比；Feature 139 的

@@ -1,5 +1,16 @@
 # Validation
 
+## Historical status correction
+
+The offline checkpoint below predates the 50-minute registration. On 2026-09-20 the revised
+manifest was committed and pushed, the read-only launch checks admitted exactly one fresh
+`attempt-001`, and the retained evidence was summarized and independently audited once. The
+authoritative outcome is preparation `1/1`, primary/joint `0/1`: both candidate attempts ended
+before parser-complete delivery (`worker_failed` and `malformed_candidate`). The registration and
+measurement implementation were later moved into the historical archive during the project
+identity migration, so this document remains evidence of the frozen run and must not be used to
+start, resume, repair, or append to that slot.
+
 ## Authorized 50-minute preregistration revision (2026-09-20)
 
 The user authorized the single real acceptance attempt and requested 50 minutes instead of

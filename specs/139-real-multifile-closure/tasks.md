@@ -4,10 +4,14 @@ Current preregistration gaps are tracked in [preregistration-audit.md](preregist
 The offline fixture suites, B001–B011 corrections, registration, observer, worker, supervision,
 and retained-evidence analysis have completed independent offline acceptance on 2026-09-20.
 T006a–T006c include actual worker/summary entrypoints and native Store/workspace evidence.
-T007 final split regression passed; T008–T011 real registration/run/report remain separate gates.
-This list records the offline implementation checkpoint, before a concrete registration exists.
-Later T008 status is established by `measurement/manifest.json` and read-only launch checks;
-verification evidence remains under ignored local paths without rewriting frozen SDD files.
+T007 final split regression passed. The original task list was intentionally frozen before
+registration; its unchecked T008r3/T008–T011 boxes are retained as that pre-run checkpoint and
+must not be interpreted as permission to rerun the old slot. The authoritative follow-up record
+is [HANDOFF.md](../../HANDOFF.md): the new `-50min` registration was pushed, the sole real
+`attempt-001` was launched and summarized once, and the postrun result is preparation `1/1`,
+primary/joint `0/1` with no completed candidate. The old measurement implementation and its
+private artifacts were later moved into `docs/history-archive.json` during the identity migration;
+no current command may recreate or append to that historical slot.
 
 ## Pre-admission 50-minute revision (2026-09-20)
 

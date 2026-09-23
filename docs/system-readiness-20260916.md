@@ -1,11 +1,14 @@
 # Lunar Evolution 当前能力、剩余工作与终态验收
 
-2026-09-22 增量：146 递归 worker 的取消、恢复和父状态准入已通过本地及 Linux 三版本 CI。
-147 的离线六阶段结构观察器与保留目录字节审计、148 的 artifact/lifecycle 与 8 项 holdout
-语义审计，以及 149 的独立 cleanup-v1 receipt 均已实现并通过 provider-free 回归；它们不把
-结构完整或摘要一致计为真实成功。142 的 registration manifest/seal 与只读 preflight 也已
-实现并推送。真实完整交付验收仍是发布重点，需新登记材料、唯一真实 attempt 和 postrun
-审计；详见
+2026-09-23 增量：142 的 provider-free native 多文件 quickstart、Phase C subprocess 生命周期
+和 CLI/integration 复核均通过；四个候选得分 1/2/6/7，选择并交付 7 分候选，`solve --resume`
+没有重复调用。146 递归 worker 的取消、恢复和父状态准入已通过本地及 Linux 三版本 CI；147
+的离线六阶段结构观察器与保留目录字节审计、148 的 artifact/lifecycle 与 8 项 holdout 语义
+审计，以及 149 的独立 cleanup-v1 receipt 均已实现并通过 provider-free 回归。它们不把结构
+完整或摘要一致计为真实成功。Feature 139 唯一真实槽已完成但结果为 preparation `1/1`、
+primary/joint `0/1`，所以当前发布重点是取得新的成功样本，而不是重跑旧槽。142 的 registration
+manifest/seal 与只读 preflight 已实现并推送；新成功样本仍需新登记材料、唯一真实 attempt 和
+postrun 审计；详见
 [147 validation](../specs/147-acceptance-evidence-observer/validation.md) 和
 [148 tasks](../specs/148-artifact-lifecycle-holdout-auditor/tasks.md)。
 
@@ -58,7 +61,7 @@ WorkerService，仍不属于该 `bounded slice`。不能把未接入的可选框
 
 | 优先级/范围 | 尚未完成 | 完成条件 |
 | --- | --- | --- |
-| P0：前台自动多文件验收 | 147/148/149 离线观察、语义审计、cleanup-v1 和 142 registration preflight 已实现；仍无新鲜 launch-time material、真实登记、执行证据或结果 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
+| P0：前台自动多文件验收 | 离线观察、语义审计、cleanup-v1、registration preflight 和旧槽真实失败样本均已保留；当前没有成功交付样本 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：真实候选完成率 | 144 已补明确响应协议、消除通用总结指令冲突并保留细分失败诊断；真实成功率仍未确认 | 在新的固定条件验收中检验；保留严格解析和失败分母，不把离线 fixture 通过当作真实可靠性提升 |
 | P1：更广泛并发多 Agent 的发布 | 143 T009 单任务前台 `delegate` consumer 已接线并通过交付并发审计；AgentLoop façade 与递归 WorkerService 已有 opt-in 实现，自动 solve 尚未接入，也没有真实模型效果验收 | 若纳入发布范围，再把 AgentLoop façade 与递归 worker 接入目标用户入口（包括自动 solve），并分别验证用户操作、结果回流、取消和恢复 |
 | 后续能力 | OpenEvolve/Shinka 多文件接入、Shinka 启动调度及真实框架验收 | 外部候选走同一执行/评分/交付链，在新独立登记中验证；不重跑 WebAgent |

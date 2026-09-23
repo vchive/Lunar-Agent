@@ -27,9 +27,7 @@ Feature 149 parser/native/audit/slot 相关的九个文件选择集 **291 passed
 `specs/149-independent-cleanup-evidence/validation.md`）。完整三阶段回归也已通过：当前
 产品 **7238 passed、1 skipped**，固定归档 **2294 passed**，冻结注册 **24 passed**，整体
 exit 0；Ruff、compileall、diff check 和旧名称扫描通过。没有 provider、campaign、WebAgent、
-evaluator 或历史生成源码执行。当前工作树已完成实现但尚未提交/推送，下一步是提交、推送并
-核对新 CI。真实自动多文件验收仍须先完成独立 registration seal/preflight 后再由用户明确授权，
-不能由本次离线 cleanup 证据代替。Feature 149 已提交为 `806b97f` 并推送；GitHub Actions
+evaluator 或历史生成源码执行。Feature 149 实现已提交并推送；GitHub Actions
 [Run 230](https://github.com/vchive/Lunar-Evolution/actions/runs/35749740921) 已在 Python 3.11、
 3.12、3.13 全部通过，T007 已完成。
 
@@ -37,6 +35,26 @@ evaluator 或历史生成源码执行。当前工作树已完成实现但尚未�
 `test_preparation_ceiling_does_not_leak_between_threads` 的线程时序断言；Python 3.11/3.13
 通过，且在固定历史 checkout 的 Python 3.12 上连续重跑该测试 10/10 通过。Run 230 已验证
 Feature 149 产品提交三版本全绿；该历史归档抖动不改变产品或冻结证据。
+
+## 2026-09-23 provider-free 端到端复核与当前发布边界
+
+沿现有 142 SDD 完成一次不调用 provider 的可运行链路复核。`specs/112-automatic-bundle-evaluator/quickstart.py`
+成功退出，四个双文件候选得分为 **1、2、6、7**，选择并交付 7 分候选；随后 `deliver` 与
+`solve --resume` 均成功，恢复没有重复调用 compiler/evaluator/auditor 或候选生成器。
+`tests/test_automatic_detach_phase_c.py` **10 passed**，覆盖真实 subprocess coordinator、准备、
+生成、执行、独立评分、选择、交付、待答、继续、取消和清理；`tests/test_agent_bundle_cli.py`
+与 `tests/test_agent_bundle_integration.py` 合计 **38 passed**，覆盖多文件 CLI、候选生成、独立
+评测和交付边界。
+
+这证明当前 Lunar Evolution 的 provider-free native 多文件管线和后台生命周期可运行，但不新增
+真实模型样本，也不等同于 Feature 139 的六阶段 registration/holdout/cleanup 公共审计。Feature
+139 的唯一真实 `attempt-001` 已在 2026-09-20 完成，结果为 preparation `1/1`、primary/joint
+`0/1`，两个候选分别是 `worker_failed` 与 `malformed_candidate`；旧槽不可重跑。
+
+当前真正的发布缺口只有三类：若要得到成功交付样本，需要新身份、新 manifest/seal、新 campaign
+root 和新的真实 provider 槽；AgentLoop worker façade/递归 WorkerService 尚未接入 automatic solve
+默认入口；OpenEvolve/Shinka 等外部 producer 的多文件 SeedManifest/launcher 接线及复杂跨文件、
+远端运行仍属于后续能力。真实槽、provider、WebAgent 和历史生成源码本轮均未启动。
 
 ## 2026-09-22 Feature 142 provider-free registration preflight
 
