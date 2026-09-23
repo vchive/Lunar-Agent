@@ -64,7 +64,7 @@ WorkerService，仍不属于该 `bounded slice`。不能把未接入的可选框
 | P0：前台自动多文件验收 | 离线观察、语义审计、cleanup-v1、registration preflight 和旧槽真实失败样本均已保留；当前没有成功交付样本 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：真实候选完成率 | 144 已补明确响应协议、消除通用总结指令冲突并保留细分失败诊断；真实成功率仍未确认 | 在新的固定条件验收中检验；保留严格解析和失败分母，不把离线 fixture 通过当作真实可靠性提升 |
 | P1：更广泛并发多 Agent 的发布 | 143 T009 单任务前台 `delegate` consumer 已接线并通过交付并发审计；AgentLoop façade 与递归 WorkerService 已有 opt-in 实现，自动 solve 尚未接入，也没有真实模型效果验收 | 若纳入发布范围，再把 AgentLoop façade 与递归 worker 接入目标用户入口（包括自动 solve），并分别验证用户操作、结果回流、取消和恢复 |
-| 后续能力 | OpenEvolve/Shinka 的自动外部 bundle admission、archive/交付接线、启动调度及真实框架验收 | Feature 150 已提供显式、provider-free 的 bundle grouping 和源文件校验，Feature 151 已将已校验 bundle 投影为 native `CandidateDraft`，Feature 152 已提供绑定本地 authority 的只读 admission plan；执行、archive publication、delivery 和 launcher 仍须按独立事务契约接入并在新独立登记中验证；不重跑 WebAgent |
+| 后续能力 | OpenEvolve/Shinka 的自动外部 bundle admission、archive/交付接线、启动调度及真实框架验收 | Feature 150 已提供显式、provider-free 的 bundle grouping 和源文件校验，Feature 151 已将已校验 bundle 投影为 native `CandidateDraft`，Feature 152 已提供绑定本地 authority 的只读 admission plan，Feature 153 已写明批次 journal 与 staged publication 的 SDD；执行、archive publication、delivery 和 launcher 仍须按该事务契约接入并在新独立登记中验证；不重跑 WebAgent |
 | 后续扩展 | 更复杂输入、跨文件依赖、通用仓库/workflow 与远端运行 | 明确支持范围和代表性验收，不从一个双文件样例外推 |
 
 公共 GitHub Actions 元数据确认 [run 35522272395](https://github.com/vchive/Lunar-Evolution/actions/runs/35522272395)
@@ -340,7 +340,7 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 顺序 | 工作 | 验收条件 |
 | --- | --- | --- |
 | 1 | 多文件 exact evaluator 与输出契约：已完成本地实现与验证 | evaluator 实现与契约固定，成功 execution record 关联评测时输出快照；坏输出直接无效，失败进程拒绝；评测不重跑候选 |
-| 2 | 多文件进入演化与最终交付：原生本地闭环已完成，外部 producer 的自动接线待补 | Candidate/receipt/archive/lineage 已表达 bundle；command generator 和 controller 已接通；helper 模块任务完成生成、评分、下一代选择与可复核交付；Feature 150 已能把显式 producer 多文件组投影为已校验 bundle，Feature 151 已能投影为 native `CandidateDraft`，Feature 152 已能绑定 admission plan，但自动执行、archive publication、delivery 和 launcher 尚未接入 |
+| 2 | 多文件进入演化与最终交付：原生本地闭环已完成，外部 producer 的自动接线待补 | Candidate/receipt/archive/lineage 已表达 bundle；command generator 和 controller 已接通；helper 模块任务完成生成、评分、下一代选择与可复核交付；Feature 150 已能把显式 producer 多文件组投影为已校验 bundle，Feature 151 已能投影为 native `CandidateDraft`，Feature 152 已能绑定 admission plan，Feature 153 已定义 publication transaction，但自动执行、archive publication、delivery 和 launcher 尚未接入 |
 | 3 | 统一用户入口与恢复：自动准备、preparation 预算、共享活动墙钟、父编排与交付、terminal resume 和实际进程取消/清理已实现 | parent 输入/profile 绑定与 publication journal 已接通；支持范围内无需手写 profile/harness；自动后台和更大输入格式/探针容量继续待补 |
 | 4 | 当前版本真实验收 | 按本次发布声明的支持路径，使用明确模型、输入、预算和 evaluator 验证；保留失败分母，报告有效解率、分数、耗时和已知用量。外部 producer 仅在该能力纳入发布时单独验收 |
 
