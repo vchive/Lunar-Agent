@@ -12,6 +12,14 @@ configuration 和 island mapping，避免只绑定 archive 行而无法恢复 `P
 SDD，代码、真实 producer、provider、campaign 和 launcher 均未启动；下一步按该规格实现
 journal 与 publication transaction。
 
+随后完成 T153-01：新增 `ProducerBundlePublicationCandidate`、
+`ProducerBundlePublicationJournal` 及 canonical parser/builder。journal 绑定 run/task、完整
+archive/state prefix、authority、budget、population/island mapping、候选 receipt 与状态转移；
+`journal_sha256` 计算时排除自身字段，严格拒绝未知字段、重复 JSON key、非法 digest/状态、
+重复候选和越界 island。该 slice focused **6 passed**，Ruff/compile 通过；仍未写 archive、
+执行候选、调用 provider 或接入 automatic solve。下一步是 zero-write preflight 与 staged
+publication。
+
 ## 2026-09-23 Feature 152 显式 producer bundle admission descriptor
 
 沿 Feature 150/151 的现有 SDD 新增 `ProducerBundleAdmissionItem`、

@@ -321,6 +321,13 @@ from .producer_bundle_population import (
     ProducerBundlePopulationError,
     prepare_producer_bundle_drafts,
 )
+from .producer_bundle_publication import (
+    ProducerBundlePublicationCandidate,
+    ProducerBundlePublicationError,
+    ProducerBundlePublicationJournal,
+    build_producer_bundle_publication_journal,
+    parse_producer_bundle_publication_journal,
+)
 from .producer_handoff import (
     ProducerHandoffError,
     ProducerMaterial,
@@ -555,6 +562,9 @@ __all__ = [
     "ProducerBundleDraft",
     "ProducerBundleHandoffError",
     "ProducerBundlePopulationError",
+    "ProducerBundlePublicationCandidate",
+    "ProducerBundlePublicationError",
+    "ProducerBundlePublicationJournal",
     "ProducerBundleResult",
     "ProducerHandoffError",
     "ProducerMaterial",
@@ -646,6 +656,7 @@ __all__ = [
     "build_holdout_receipt",
     "build_private_input_profile",
     "build_producer_bundle_admission_plan",
+    "build_producer_bundle_publication_journal",
     "build_registration_seal",
     "build_remote_producer_envelope",
     "build_round_feedback",
@@ -689,6 +700,7 @@ __all__ = [
     "parse_holdout_declaration",
     "parse_holdout_receipt",
     "parse_producer_bundle_admission_plan",
+    "parse_producer_bundle_publication_journal",
     "parse_producer_envelope",
     "parse_registration_seal",
     "parse_seed_manifest",
