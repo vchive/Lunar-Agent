@@ -1,6 +1,6 @@
 # Feature 153: producer bundle publication transaction
 
-**Status**: SDD specification; implementation not started
+**Status**: Provider-free journal and read-only preflight slice; staged publication pending
 
 ## Problem
 

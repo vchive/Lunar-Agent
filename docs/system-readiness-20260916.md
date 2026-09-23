@@ -64,7 +64,7 @@ WorkerService，仍不属于该 `bounded slice`。不能把未接入的可选框
 | P0：前台自动多文件验收 | 离线观察、语义审计、cleanup-v1、registration preflight 和旧槽真实失败样本均已保留；当前没有成功交付样本 | 新身份、新目录和固定产品/模型/预算下，生成、执行、独立评分、选择、父交付全部有绑定证据；单独报告准备、primary/joint 和留出结果 |
 | P0：真实候选完成率 | 144 已补明确响应协议、消除通用总结指令冲突并保留细分失败诊断；真实成功率仍未确认 | 在新的固定条件验收中检验；保留严格解析和失败分母，不把离线 fixture 通过当作真实可靠性提升 |
 | P1：更广泛并发多 Agent 的发布 | 143 T009 单任务前台 `delegate` consumer 已接线并通过交付并发审计；AgentLoop façade 与递归 WorkerService 已有 opt-in 实现，自动 solve 尚未接入，也没有真实模型效果验收 | 若纳入发布范围，再把 AgentLoop façade 与递归 worker 接入目标用户入口（包括自动 solve），并分别验证用户操作、结果回流、取消和恢复 |
-| 后续能力 | OpenEvolve/Shinka 的自动外部 bundle admission、archive/交付接线、启动调度及真实框架验收 | Feature 150 已提供显式、provider-free 的 bundle grouping 和源文件校验，Feature 151 已将已校验 bundle 投影为 native `CandidateDraft`，Feature 152 已提供绑定本地 authority 的只读 admission plan，Feature 153 已写明批次 journal 与 staged publication 的 SDD；执行、archive publication、delivery 和 launcher 仍须按该事务契约接入并在新独立登记中验证；不重跑 WebAgent |
+| 后续能力 | OpenEvolve/Shinka 的自动外部 bundle admission、archive/交付接线、启动调度及真实框架验收 | Feature 150 已提供显式、provider-free 的 bundle grouping 和源文件校验，Feature 151 已将已校验 bundle 投影为 native `CandidateDraft`，Feature 152 已提供绑定本地 authority 的只读 admission plan，Feature 153 T153-01/T153-02 已提供 canonical batch journal 与 zero-write preflight 并写明 staged publication 的 SDD；执行、archive publication、delivery 和 launcher 仍须按该事务契约接入并在新独立登记中验证；不重跑 WebAgent |
 | 后续扩展 | 更复杂输入、跨文件依赖、通用仓库/workflow 与远端运行 | 明确支持范围和代表性验收，不从一个双文件样例外推 |
 
 公共 GitHub Actions 元数据确认 [run 35522272395](https://github.com/vchive/Lunar-Evolution/actions/runs/35522272395)
@@ -326,8 +326,8 @@ Feature 114 修复后的全仓结果为 **5517 passed, 1 skipped**，详见
 | 自动 evaluator/profile | 自动 compiler/auditor、输出探针、独立 preparation 请求/墙钟预算与冻结恢复已接通；源码文件数另做确定性检查；其他 source/execution 提前报不支持 | 128及134真实准备通过，各自8/8留出；134完整交付仍为0/1 |
 | 自动 solve 前台生命周期 | 一次活动执行的共享 deadline、durable parent orchestration、统一入口、排他继续、只读状态和实际进程取消/清理已实现 | Feature 142 Phase A/B 定向与最终双阶段离线回归通过；自动 detach 和新的真实完整交付尚未验收 |
 | 显式 worker API | 有独立 worker/attempt、owner 活性、六项操作、进程清理和结果引用；前台单任务 `delegate` 已迁入；WorkerService 内有 opt-in AgentLoop worker-tool façade 与递归生命周期 | `9213f01` 检查点为当前 6703 passed / 1 skipped、历史 2294 passed、注册 24 passed；重复观察者交付回归已通过；自动 solve 尚未接入这些 worker API，真实多 Agent 效果仍未验收 |
-| OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现；Feature 150 提供 provider-free 多文件分组/校验，Feature 151 提供 native `CandidateDraft` 投影，Feature 152 提供 authority-bound admission plan | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证，也未接入自动 external admission、archive/交付或 launcher |
-| ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现；Feature 150 提供 provider-free 多文件分组/校验，Feature 151 提供 native `CandidateDraft` 投影，Feature 152 提供 authority-bound admission plan | 本地 fixture；尚无 Shinka launcher/调度、自动 external admission 或完整 archive/交付实现 |
+| OpenEvolve | 显式 subprocess adapter、Lunar 本地重评及结果接入已有实现；Feature 150 提供 provider-free 多文件分组/校验，Feature 151 提供 native `CandidateDraft` 投影，Feature 152 提供 authority-bound admission plan，Feature 153 T153-01/T153-02 提供 canonical publication journal 与 preflight | 本地 fixture；尚无真实 OpenEvolve 搜索效果验证，也未接入自动 external admission、archive/交付或 launcher |
+| ShinkaEvolve | SQLite 结果导出和 CLI population warm-start 已实现；Feature 150 提供 provider-free 多文件分组/校验，Feature 151 提供 native `CandidateDraft` 投影，Feature 152 提供 authority-bound admission plan，Feature 153 T153-01/T153-02 提供 canonical publication journal 与 preflight | 本地 fixture；尚无 Shinka launcher/调度、自动 external admission 或完整 archive/交付实现 |
 | 固定条件比较 | task、comparison plan、result、evidence binding 已实现 | 协议测试；尚无这些新协议下的真实框架对照 |
 | 远端演化 | lifecycle 协议和 completed material bridge 已实现 | 无内置真实 transport/client；默认本地路线不依赖它 |
 
@@ -413,8 +413,9 @@ answer 启动失败恢复与并发争抢也已通过定向验收，当前完整�
    完成但没有 completed candidate 或交付。生命周期继续既有 142 SDD；候选完成可靠性的
    后续产品工作应独立明确规格，提高严格最终响应协议的可完成性并保留 typed worker failure；
    失败分母保持为1，不重开旧槽。
-4. 在 Feature 150/151/152 的显式 bundle、native `CandidateDraft` 与 authority-bound plan
-   结果之上，单独定义外部 bundle admission transaction、archive publication、delivery 和
+4. 在 Feature 150/151/152/153 T153-01/T153-02 的显式 bundle、native `CandidateDraft`、
+   authority-bound plan、journal 与 zero-write preflight 结果之上，单独定义外部 bundle
+   admission transaction、archive publication、delivery 和
    launcher 边界，使 OpenEvolve/Shinka 输出进入同一完整源码路径，再用独立登记的小规模
    任务验证当前模型和真实 producer 效果。该准备能力本身不产生效果或 parity 结论。
 

@@ -17,9 +17,10 @@ from typing import NoReturn
 
 from . import _benchmark_files as _files
 from .candidate_evaluation_spec import strict_json
+from .producer_bundle_handoff import ProducerBundleHandoffError
+from .producer_bundle_handoff import _identifier as _producer_identifier
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SCHEMA_VERSION = "1"
 _PROTOCOL = "lunar-producer-bundle-publication-v1"
 MAX_PRODUCER_BUNDLE_PUBLICATION_BYTES = 256 * 1024
@@ -70,9 +71,10 @@ def _digest(value: object, code: str = "producer_bundle_publication_digest_inval
 
 
 def _identifier(value: object, code: str = "producer_bundle_publication_identifier_invalid") -> str:
-    if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
+    try:
+        return _producer_identifier(value, code)
+    except ProducerBundleHandoffError:
         _fail(code)
-    return value
 
 
 def _optional_identifier(value: object, code: str) -> str | None:
@@ -130,18 +132,29 @@ class ProducerBundlePublicationCandidate:
         _bounded_int(self.generation, "producer_bundle_publication_generation_invalid", maximum=1_000_000)
         _bounded_int(self.iteration, "producer_bundle_publication_iteration_invalid", maximum=1_000_000)
         _bounded_int(self.island_id, "producer_bundle_publication_island_invalid", maximum=4096)
+        _digest(self.preparation_receipt_sha256, "producer_bundle_publication_preparation_receipt_invalid")
         for value, code in (
-            (self.preparation_receipt_sha256, "producer_bundle_publication_preparation_receipt_invalid"),
             (self.execution_receipt_sha256, "producer_bundle_publication_execution_receipt_invalid"),
             (self.evaluation_receipt_sha256, "producer_bundle_publication_evaluation_receipt_invalid"),
             (self.publication_receipt_sha256, "producer_bundle_publication_publication_receipt_invalid"),
         ):
             if value is not None:
                 _digest(value, code)
-        if self.status not in _CANDIDATE_STATUSES:
+        if not isinstance(self.status, str) or self.status not in _CANDIDATE_STATUSES:
             _fail("producer_bundle_publication_candidate_status_invalid")
         if self.parent_id == self.candidate_id:
             _fail("producer_bundle_publication_parent_cycle")
+        if (
+            (self.evaluation_receipt_sha256 is not None and self.execution_receipt_sha256 is None)
+            or (self.publication_receipt_sha256 is not None
+                and (self.evaluation_receipt_sha256 is None or self.status != "admitted"))
+            or (self.status == "admitted" and self.evaluation_receipt_sha256 is None)
+            or (self.status == "planned" and any(value is not None for value in (
+                self.execution_receipt_sha256, self.evaluation_receipt_sha256,
+                self.publication_receipt_sha256,
+            )))
+        ):
+            _fail("producer_bundle_publication_receipt_sequence_invalid")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -215,8 +228,10 @@ class ProducerBundlePublicationJournal:
         ):
             _digest(value, f"producer_bundle_publication_{name}_invalid")
         _identifier(self.evaluator_kind, "producer_bundle_publication_evaluator_kind_invalid")
-        _identifier(self.strategy, "producer_bundle_publication_strategy_invalid")
-        if not 1 <= self.num_islands <= 4096:
+        if self.strategy != "population":
+            _fail("producer_bundle_publication_strategy_invalid")
+        _bounded_int(self.num_islands, "producer_bundle_publication_num_islands_invalid", maximum=4096)
+        if self.num_islands == 0:
             _fail("producer_bundle_publication_num_islands_invalid")
         if (
             not isinstance(self.candidates, tuple)
@@ -224,6 +239,14 @@ class ProducerBundlePublicationJournal:
             or any(not isinstance(item, ProducerBundlePublicationCandidate) for item in self.candidates)
         ):
             _fail("producer_bundle_publication_candidates_invalid")
+        try:
+            normalized = tuple(ProducerBundlePublicationCandidate.from_dict(item.to_dict())
+                               for item in self.candidates)
+        except ProducerBundlePublicationError:
+            raise
+        except Exception as exc:
+            raise ProducerBundlePublicationError("producer_bundle_publication_candidates_invalid") from exc
+        object.__setattr__(self, "candidates", normalized)
         candidate_ids = [item.candidate_id for item in self.candidates]
         bundle_ids = [item.bundle_id for item in self.candidates]
         if len(candidate_ids) != len(set(candidate_ids)):
@@ -232,9 +255,9 @@ class ProducerBundlePublicationJournal:
             _fail("producer_bundle_publication_bundle_duplicate")
         if any(item.island_id >= self.num_islands for item in self.candidates):
             _fail("producer_bundle_publication_island_invalid")
-        if self.state not in _STATES:
+        if not isinstance(self.state, str) or self.state not in _STATES:
             _fail("producer_bundle_publication_state_invalid")
-        if self.publication_phase not in _PHASES:
+        if not isinstance(self.publication_phase, str) or self.publication_phase not in _PHASES:
             _fail("producer_bundle_publication_phase_invalid")
         if _STATE_PHASES[self.state] != self.publication_phase:
             _fail("producer_bundle_publication_state_phase_invalid")
@@ -246,6 +269,34 @@ class ProducerBundlePublicationJournal:
         ):
             if value is not None:
                 _digest(value, f"producer_bundle_publication_{name}_invalid")
+        receipts = [value for item in self.candidates for value in (
+            item.preparation_receipt_sha256, item.execution_receipt_sha256,
+            item.evaluation_receipt_sha256, item.publication_receipt_sha256,
+        ) if value is not None]
+        if len(receipts) != len(set(receipts)):
+            _fail("producer_bundle_publication_receipt_reused")
+        statuses = {item.status for item in self.candidates}
+        if self.state == "prepared" and statuses != {"planned"}:
+            _fail("producer_bundle_publication_state_candidates_invalid")
+        if self.state in {"publishing", "published"} and (
+            not statuses <= {"admitted", "rejected"} or "admitted" not in statuses
+        ):
+            _fail("producer_bundle_publication_state_candidates_invalid")
+        if self.state not in {"unknown", "failed"} and "unknown" in statuses:
+            _fail("producer_bundle_publication_state_candidates_invalid")
+        terminal = (self.terminal_marker_sha256, self.archive_after_sha256, self.state_after_sha256)
+        if self.state == "published":
+            if any(value is None for value in terminal) or any(
+                item.status == "admitted" and item.publication_receipt_sha256 is None
+                for item in self.candidates
+            ):
+                _fail("producer_bundle_publication_terminal_evidence_invalid")
+        elif self.state != "unknown" and any(value is not None for value in terminal):
+            _fail("producer_bundle_publication_terminal_evidence_invalid")
+        if self.state in {"prepared", "executing", "failed"} and any(
+            item.publication_receipt_sha256 is not None for item in self.candidates
+        ):
+            _fail("producer_bundle_publication_terminal_evidence_invalid")
         expected = hashlib.sha256(_canonical(self._payload_dict())).hexdigest()
         if self.journal_sha256 is None:
             object.__setattr__(self, "journal_sha256", expected)
@@ -302,7 +353,8 @@ class ProducerBundlePublicationJournal:
     @classmethod
     def from_dict(cls, value: object) -> ProducerBundlePublicationJournal:
         raw = _object(value, _JOURNAL_FIELDS, "producer_bundle_publication_schema_invalid")
-        if not isinstance(raw["candidates"], list):
+        _digest(raw["journal_sha256"], "producer_bundle_publication_journal_sha256_invalid")
+        if not isinstance(raw["candidates"], list) or not 1 <= len(raw["candidates"]) <= MAX_PUBLICATION_CANDIDATES:
             _fail("producer_bundle_publication_candidates_invalid")
         return cls(
             **{**raw, "candidates": tuple(ProducerBundlePublicationCandidate.from_dict(item)
@@ -322,7 +374,6 @@ def build_producer_bundle_publication_journal(**kwargs: object) -> ProducerBundl
         normalized.append(value)
     values = dict(kwargs)
     values["candidates"] = tuple(normalized)
-    values.pop("journal_sha256", None)
     try:
         return ProducerBundlePublicationJournal(**values)  # type: ignore[arg-type]
     except TypeError as exc:
@@ -337,9 +388,14 @@ def parse_producer_bundle_publication_journal(
         if isinstance(source, Mapping):
             raw = strict_json(_canonical(dict(source)), MAX_PRODUCER_BUNDLE_PUBLICATION_BYTES)
         else:
-            content = _files.read_regular_file(
-                _files.absolute_path(source), MAX_PRODUCER_BUNDLE_PUBLICATION_BYTES,
-            )
+            try:
+                content = _files.read_regular_file(
+                    _files.absolute_path(source), MAX_PRODUCER_BUNDLE_PUBLICATION_BYTES,
+                )
+            except _files.BenchmarkFileError as exc:
+                if exc.reason == "too_large":
+                    _fail("producer_bundle_publication_too_large")
+                raise
             raw = strict_json(content, MAX_PRODUCER_BUNDLE_PUBLICATION_BYTES)
         return ProducerBundlePublicationJournal.from_dict(raw)
     except ProducerBundlePublicationError:

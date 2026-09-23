@@ -26,7 +26,7 @@ def _candidate(index: int = 0, *, status: str = "planned") -> ProducerBundlePubl
         generation=0,
         iteration=0,
         island_id=index,
-        preparation_receipt_sha256=_digest("b"),
+        preparation_receipt_sha256=_digest("b" if index == 0 else "7"),
         status=status,
     )
 

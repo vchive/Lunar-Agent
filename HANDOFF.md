@@ -20,6 +20,14 @@ archive/state prefix、authority、budget、population/island mapping、候选 r
 执行候选、调用 provider 或接入 automatic solve。下一步是 zero-write preflight 与 staged
 publication。
 
+T153-02 随后完成：新增 `ProducerBundlePreflightReceipt`、
+`preflight_producer_bundle_publication` 和 deterministic candidate ID。preflight 通过系统派生
+的 `evolution/producer-batches/<journal_id>` 路径做 no-follow 检查，只读验证 plan digest、
+authority/budget、journal candidate 映射、archive/state prefix、native candidate integrity
+和 candidate ID 冲突，拒绝旧 `seed_handoff` 混合记录；失败不创建或修改文件。Feature 153
+journal/admission/population/preflight focused **27 passed**，Ruff、compile、diff check 通过；
+staged publication、execution/evaluation transaction、resume/recovery 和 delivery 仍未接线。
+
 ## 2026-09-23 Feature 152 显式 producer bundle admission descriptor
 
 沿 Feature 150/151 的现有 SDD 新增 `ProducerBundleAdmissionItem`、

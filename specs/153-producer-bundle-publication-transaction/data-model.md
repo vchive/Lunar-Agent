@@ -39,3 +39,9 @@ the canonical payload with `journal_sha256` omitted. Its prefix digest covers ca
 archive bytes in append order, `state.json`, strategy configuration, active mapping, and any
 seed-commit marker. The journal is an authority and recovery record. It contains no producer-
 reported score and does not replace the native execution, evaluation, or archive record schemas.
+
+The legal phase projection is strict: `prepared/preflight` contains only planned items;
+`executing/staged` may contain planned, rejected, or admitted items; `publishing/staged` contains
+only rejected/admitted items and at least one admitted item; `published/committed` requires an
+admitted item, publication receipts, terminal marker, and after digests. `failed/recovery_required`
+records a known failure, while `unknown/recovery_required` is terminal and cannot be resumed.

@@ -1481,9 +1481,9 @@ Shinka external-bundle admission, archive publication, and delivery path remain 
 Feature 150 supplies grouping/source verification and Feature 151 supplies the provider-free native
 `CandidateDraft` projection. Feature 152 adds a provider-free, read-only admission plan that binds
 the draft batch to contract/evaluator/runner authority and yields a canonical resume digest. It
-does not publish or execute candidates; Feature 153 now specifies the separate batch journal and
-staged publication transaction needed before that step. No launcher or real producer campaign is
-implied.
+does not publish or execute candidates; Feature 153 now provides the canonical journal DTO/parser
+and a provider-free zero-write preflight, while specifying the separate staged publication
+transaction needed before that step. No launcher or real producer campaign is implied.
 
 Feature 114 fixes the confirmed intake integration problem: contract compilation uses a stateless
 protocol call when supported and receives explicit JSON field/type guidance. Ordinary solving
