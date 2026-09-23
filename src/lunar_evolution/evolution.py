@@ -69,6 +69,12 @@ _RESERVED_CANDIDATE_SOURCE_BASENAMES = frozenset(
 )
 _SEED_STAGE_NAME = ".evolution-seed-stage-v1"
 _SEED_BACKUP_NAME = ".evolution-seed-backup-v1"
+# Producer-bundle publication uses a separate transaction protocol.  Presence of this marker
+# means that a batch may have crossed a filesystem commit boundary without a durable terminal
+# result; ordinary archive readers and writers must fail closed until the transaction is resumed
+# or explicitly adjudicated.
+_PRODUCER_PUBLICATION_MARKER_NAME = "producer-publication.json"
+_PRODUCER_PUBLICATION_RECOVERY_ERROR = "producer_bundle_publication_recovery_required"
 # Process creation and interpreter startup can consume a few tens of milliseconds even for an
 # empty candidate. A floor prevents a sub-scheduling-quantum budget from timing out before the
 # candidate gets a chance to execute; longer budgets retain the requested value exactly.
@@ -2706,6 +2712,8 @@ class CandidateArchive:
         self.seed_commit_path = self.root / "seed-commit.json"
         self.seed_stage_path = self.workspace / _SEED_STAGE_NAME
         self.seed_backup_path = self.workspace / _SEED_BACKUP_NAME
+        self._producer_publication_inspection = False
+        self._guard_producer_publication_recovery()
         if read_only:
             self._inspect_read_only_layout()
         self._preflight_seed_recovery_strategy(requested_strategy)
@@ -2735,8 +2743,27 @@ class CandidateArchive:
             raise EvolutionError("evolution_archive_directory_invalid") from exc
 
     def _require_writable(self) -> None:
+        self._guard_producer_publication_recovery()
         if self.read_only:
             raise EvolutionError("evolution_archive_read_only")
+
+    def _guard_producer_publication_recovery(self) -> None:
+        """Reject an archive whose producer publication has an unresolved commit marker.
+
+        The transaction implementation may create a private read-only inspection view while it
+        holds the workspace publication lock.  That view sets the private inspection flag before
+        invoking archive validators; no public constructor argument can bypass this guard.
+        """
+
+        if getattr(self, "_producer_publication_inspection", False):
+            return
+        marker = getattr(self, "root", Path(".")) / _PRODUCER_PUBLICATION_MARKER_NAME
+        try:
+            present = marker.exists() or marker.is_symlink()
+        except OSError as exc:
+            raise EvolutionError(_PRODUCER_PUBLICATION_RECOVERY_ERROR) from exc
+        if present:
+            raise EvolutionError(_PRODUCER_PUBLICATION_RECOVERY_ERROR)
 
     @staticmethod
     def _path_present(path: Path) -> bool:
@@ -3374,6 +3401,8 @@ class CandidateArchive:
     def _guard_active_write(self, strategy: object = _MISSING_STRATEGY) -> str | None:
         """Reject retired, malformed, or cross-strategy workspaces before mutation."""
 
+        self._guard_producer_publication_recovery()
+
         if strategy is not _MISSING_STRATEGY:
             if strategy == "loop":
                 raise EvolutionError(LOOP_STRATEGY_RETIRED_MESSAGE)
@@ -3444,6 +3473,7 @@ class CandidateArchive:
             raise EvolutionError("verified_seed_state_invalid")
 
     def records(self) -> list[Candidate]:
+        self._guard_producer_publication_recovery()
         if not self.archive_path.exists():
             if self.archive_path.is_symlink():
                 raise EvolutionError("evolution archive is invalid or exceeds the bounded size")
@@ -3510,6 +3540,7 @@ class CandidateArchive:
         return records
 
     def offspring_outcomes(self) -> tuple[OffspringOutcome, ...]:
+        self._guard_producer_publication_recovery()
         path = self.offspring_outcomes_path
         if not path.exists():
             if path.is_symlink():
@@ -3645,6 +3676,7 @@ class CandidateArchive:
                     pass
 
     def next_id(self) -> str:
+        self._guard_producer_publication_recovery()
         numbers = []
         for candidate in self.records():
             match = re.fullmatch(r"candidate-(\d+)", candidate.candidate_id)
@@ -3653,6 +3685,7 @@ class CandidateArchive:
         return f"candidate-{(max(numbers, default=0) + 1):04d}"
 
     def candidate_source_path(self, candidate_id: str, filename: str) -> Path:
+        self._guard_producer_publication_recovery()
         _safe_id(candidate_id, "candidate_id")
         relative = _safe_relative_path(filename, "candidate filename")
         if Path(relative).name in _RESERVED_CANDIDATE_SOURCE_BASENAMES:
@@ -3873,6 +3906,7 @@ class CandidateArchive:
         candidate_id: str,
         source_path: str | Path | None = None,
     ) -> CandidateReceipt:
+        self._guard_producer_publication_recovery()
         if source_path is None:
             # Preserve the original root-sidecar lookup for callers that do not have an archive
             # record yet.  Once a candidate is published, derive the sidecar location from its
@@ -3918,6 +3952,7 @@ class CandidateArchive:
         ``require_all=False`` is useful for read-only inspection of a mixed historical archive.
         """
 
+        self._guard_producer_publication_recovery()
         if records is None:
             validated_records = tuple(self.records())
         else:
@@ -4898,6 +4933,7 @@ class CandidateArchive:
         return max(valid, key=lambda candidate: candidate.evaluation.combined_score)
 
     def write_state(self, payload: dict[str, Any]) -> None:
+        self._guard_producer_publication_recovery()
         self._require_writable()
         strategy = payload.get("strategy", _MISSING_STRATEGY)
         selected_strategy = self._guard_active_write(strategy)
@@ -4963,6 +4999,7 @@ class CandidateArchive:
         )
 
     def read_state(self) -> dict[str, Any]:
+        self._guard_producer_publication_recovery()
         if not self.state_path.exists():
             if self.state_path.is_symlink():
                 raise EvolutionError("evolution state is invalid or exceeds the bounded size")

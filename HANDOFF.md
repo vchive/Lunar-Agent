@@ -3795,3 +3795,11 @@ Feature 140 定向测试、Feature 139 离线套件、Ruff、compileall 和 diff
 历史 product commit 与当前工作树不同（`ValueError: product_changed`）；历史证据没有被修改，
 需要从固定 checkout 单独复验。当前没有 provider/evaluator 调用、生成源码执行或 Feature 139
 真实登记。完成推送后才能重新评估 Feature 139 的 registration gate。
+
+## 2026-09-23 Feature 153 T153-03/T153-04/T153-05 完成
+
+在 T153-01/T153-02 的 provider-free journal 与 preflight 之上完成 staged publication transaction、exact-match resume 和故障边界回归。新增 `producer_bundle_staging.py`：按系统派生的 `evolution/producer-batches/<journal_id>/` 写入候选 source tree、`record.json`、`receipt.json`、archive/state staged snapshot、manifest 与 durable marker；持有 workspace publication lock，在首个目标移动前把 marker 原子切换为 `unknown`，提交成功后写入 terminal/final journal 并删除 marker。source/record/receipt 的 manifest descriptor 包含 SHA、size，并在可用时绑定 device/inode/mtime/ctime；提交和恢复均复核 no-follow 字节与身份。
+
+混合批次保留已知 `rejected` 项，只按 journal 计划顺序一次发布 `admitted` 子集；全 rejected 不修改 archive/state。未知写入、commit 边界、marker、源字节、receipt、archive/state 或身份变化均 fail-closed。新增 `producer_bundle_recovery.py` 的只读 exact-match resume：复核 plan/authority/preflight/journal/manifest、staged/final candidate tree、terminal after-digest，拒绝 prepared journal、unknown marker/state、重复发布和篡改证据，不重新调用 producer/evaluator。`CandidateArchive` 在 unresolved producer marker 存在时统一拒绝普通读取/写入。
+
+新增 staging、recovery、marker guard focused tests；Feature 153 组合回归 40 项通过，当前全仓回归通过（`pytest -q --disable-warnings`，exit 0），Ruff、compileall、diff check 和旧名称扫描通过。T153-06 launcher/scheduler、external producer/provider campaign 仍按规格延期；本轮没有启动真实 producer、provider 或 WebAgent。
