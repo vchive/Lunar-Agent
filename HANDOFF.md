@@ -1,5 +1,24 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-23 Feature 152 显式 producer bundle admission descriptor
+
+沿 Feature 150/151 的现有 SDD 新增 `ProducerBundleAdmissionItem`、
+`ProducerBundleAdmissionPlan`、`build_producer_bundle_admission_plan` 和
+`parse_producer_bundle_admission_plan`。该 provider-free、只读边界接收 Feature 151 的
+`ProducerBundleDraft`，重新校验 native bundle digest 和规范 provenance metadata，并绑定
+contract、evaluator kind/fingerprint、runner、dependency、environment authority。计划保留
+bundle 输入顺序，规范化材料路径，拒绝重复 bundle ID/路径、非法路径、digest 不一致、额外
+metadata、未知字段和重复 JSON key；`digest()` 对嵌套 DTO 重新解析，避免浅冻结对象被篡改后
+继续产生相同身份。producer score 不进入计划，也不改变 candidate identity。
+
+新增 `specs/152-producer-bundle-admission-descriptor/` 和
+`tests/test_producer_bundle_admission.py`，API 已从 `lunar_evolution` 导出。Feature 152 只
+完成 admission intent/authority binding；它不执行 candidate、不写 archive、不发布交付、不
+接入 automatic solve、旧单文件 `SeedManifest` 或 launcher。后续仍需单独实现 per-candidate
+execution/archive publication、批次 journal/resume recovery 与真实 external producer 验收。
+Feature 152 focused **23 passed**；Ruff、compileall、diff check 继续作为提交门槛。本轮没有
+调用 provider、producer、WebAgent 或真实 campaign。
+
 ## 2026-09-23 Feature 151 verified producer bundle → native population draft
 
 沿 Feature 150 的显式 bundle bridge 继续现有 SDD，新增

@@ -300,6 +300,13 @@ from .openevolve_handoff import (
     declared_protocol_environment_sha256,
     source_only_dependency_sha256,
 )
+from .producer_bundle_admission import (
+    ProducerBundleAdmissionError,
+    ProducerBundleAdmissionItem,
+    ProducerBundleAdmissionPlan,
+    build_producer_bundle_admission_plan,
+    parse_producer_bundle_admission_plan,
+)
 from .producer_bundle_handoff import (
     BundleGroup,
     ProducerBundleHandoffError,
@@ -542,6 +549,9 @@ __all__ = [
     "PopulationConfig",
     "PopulationState",
     "PopulationStrategy",
+    "ProducerBundleAdmissionError",
+    "ProducerBundleAdmissionItem",
+    "ProducerBundleAdmissionPlan",
     "ProducerBundleDraft",
     "ProducerBundleHandoffError",
     "ProducerBundlePopulationError",
@@ -635,6 +645,7 @@ __all__ = [
     "build_holdout_declaration",
     "build_holdout_receipt",
     "build_private_input_profile",
+    "build_producer_bundle_admission_plan",
     "build_registration_seal",
     "build_remote_producer_envelope",
     "build_round_feedback",
@@ -677,6 +688,7 @@ __all__ = [
     "parse_candidate_workspace_plan",
     "parse_holdout_declaration",
     "parse_holdout_receipt",
+    "parse_producer_bundle_admission_plan",
     "parse_producer_envelope",
     "parse_registration_seal",
     "parse_seed_manifest",
