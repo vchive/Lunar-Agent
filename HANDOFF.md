@@ -26,7 +26,8 @@ T153-02 随后完成：新增 `ProducerBundlePreflightReceipt`、
 authority/budget、journal candidate 映射、archive/state prefix、native candidate integrity
 和 candidate ID 冲突，拒绝旧 `seed_handoff` 混合记录；失败不创建或修改文件。Feature 153
 journal/admission/population/preflight focused **27 passed**，Ruff、compile、diff check 通过；
-staged publication、execution/evaluation transaction、resume/recovery 和 delivery 仍未接线。
+最新全仓回归为 **7277 passed、1 skipped**；staged publication、execution/evaluation
+transaction、resume/recovery 和 delivery 仍未接线。
 
 ## 2026-09-23 Feature 152 显式 producer bundle admission descriptor
 
