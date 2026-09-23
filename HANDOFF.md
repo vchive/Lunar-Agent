@@ -5,10 +5,12 @@
 在 Feature 152 的 authority-bound admission plan 之上新增
 `specs/153-producer-bundle-publication-transaction/` 规格，明确 producer bundle 进入 archive
 前需要独立的批次 journal、按计划顺序的 candidate receipt、全批次 staged publication 和
-fail-closed resume。现有 `CandidateArchive.commit_initial_seeds` 绑定旧的 `SeedManifest`/
-seed receipt 证据，不能直接接收 producer bundle draft，因此 Feature 153 暂不改旧入口或
-automatic solve。该轮只完成 SDD，代码、真实 producer、provider、campaign 和 launcher 均未
-启动；下一步按该规格实现 journal 与 publication transaction。
+fail-closed resume。规格同时绑定完整 archive/state prefix、run/task identity、population
+configuration 和 island mapping，避免只绑定 archive 行而无法恢复 `PopulationStrategy`。
+现有 `CandidateArchive.commit_initial_seeds` 绑定旧的 `SeedManifest`/seed receipt 证据，不能
+直接接收 producer bundle draft，因此 Feature 153 暂不改旧入口或 automatic solve。该轮只完成
+SDD，代码、真实 producer、provider、campaign 和 launcher 均未启动；下一步按该规格实现
+journal 与 publication transaction。
 
 ## 2026-09-23 Feature 152 显式 producer bundle admission descriptor
 

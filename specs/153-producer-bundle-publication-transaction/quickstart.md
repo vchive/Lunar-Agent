@@ -13,3 +13,7 @@ Feature 151 ProducerBundleDrafts
 
 Resume must supply the original journal and plan. A changed bundle, authority pin, archive prefix,
 receipt, or source byte must fail closed before a write.
+
+The journal digest excludes its own `journal_sha256` field. A crash at any staging or commit point
+must return `recovery_required`/`unknown` with the evidence retained; it must not infer success or
+silently rerun a producer or evaluator.
