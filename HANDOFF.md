@@ -1,5 +1,24 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-23 Feature 150 显式 producer 多文件分组桥
+
+沿现有 109/142 SDD 完成 provider-free 的多文件 producer bridge。新增
+`BundleGroup`、`VerifiedProducerBundle` 和 `prepare_producer_bundle_manifest`：调用方必须
+显式给出 bundle ID、entrypoint 与已在 `lunar-producer-result-v1` envelope 中声明的
+`candidate_source` 路径；不从目录、lineage、顺序或 producer score 猜测分组。桥接只读校验
+contract/producer identity、路径/组边界、regular UTF-8 bytes、size/SHA、inode/device 与读
+期间变化，并返回既有 `CandidateSourceBundle` 的 canonical digest。未分组辅助 material 会
+忽略，被分组的非 `candidate_source` 会固定拒绝；不复制、stage、执行、评测、写 campaign 或
+改变既有单文件 producer API/协议 bytes。
+
+新增 `specs/150-producer-bundle-bridge/` 的 spec/plan/data-model/tasks/quickstart/validation，
+README、system-readiness 和本记录同步说明：Feature 150 只完成 grouping/source-verification
+preparation，OpenEvolve/Shinka 的完整 multi-file SeedManifest admission、population、delivery
+和 launcher 仍未完成。focused bridge **7 passed**，producer 回归 **67 passed**，candidate
+bundle 回归 **180 passed**，Ruff、compileall、diff check、公共导出和旧名称扫描通过。没有
+调用 provider、producer、evaluator、campaign、WebAgent 或真实效果测量。下一步是单独 SDD 的
+多文件 producer admission/完整 population 接线；不重开 Feature 139 旧槽。
+
 ## 当前协作约定更新（2026-09-16）
 
 用户已明确允许“该 push 就 push，不用存太多”。后续完成且通过验证的工作应正常 commit

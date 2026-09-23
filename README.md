@@ -1076,6 +1076,15 @@ batch to one verified-seed manifest. Lunar Evolution assigns islands and identit
 has passed the local exact evaluator. Producer metrics such as `combined_score`, `correct`, or
 feedback are reduced to `{present, score_present, payload_sha256}` and cannot become Lunar Evolution scores.
 
+Feature [150](specs/150-producer-bundle-bridge/) adds an explicit, provider-free grouping bridge for
+producer outputs that contain several files per candidate. `BundleGroup` names the bundle ID,
+entrypoint, and already-declared `candidate_source` paths; the bridge reuses the canonical source
+bundle verifier and returns only a read-only verified bundle plus producer provenance. It never
+guesses grouping from directories, lineage, ordering, or producer scores. This is a preparation
+boundary only: it does not launch OpenEvolve/Shinka, import a population, evaluate a candidate, or
+claim a real producer campaign result. Complete external producer population and delivery remain a
+separately specified follow-up.
+
 For a native Shinka result directory, `lunar_evolution.export_shinka_result(...)` is a read-only, offline
 exporter. It opens `programs.sqlite` (with an explicit legacy `evolution_db.sqlite` fallback) in
 immutable read-only mode when the database is quiescent (live `-wal`/`-shm`/rollback-journal
@@ -1464,8 +1473,9 @@ Normal solving remains the default. The first preregistered GLM-5.2 acceptance o
 completed **0/2** tasks: both failed at contract intake, before evaluator or candidate generation.
 See the [113 report](docs/history-archive.md). Current-version reliability
 still needs successful real-model validation; local fixtures do not establish effectiveness or
-relative WebAgent performance. Active-process cancellation orchestration and OpenEvolve/Shinka
-multi-file seed imports remain future work.
+relative WebAgent performance. Active-process cancellation orchestration and the full OpenEvolve/
+Shinka multi-file seed admission path remain future work; Feature 150 currently supplies only the
+explicit provider-free grouping and source-verification bridge.
 
 Feature 114 fixes the confirmed intake integration problem: contract compilation uses a stateless
 protocol call when supported and receives explicit JSON field/type guidance. Ordinary solving
