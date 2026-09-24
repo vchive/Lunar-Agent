@@ -39,6 +39,10 @@ prompt, credential, provider response, or score. A successful evidence record re
 bootstrap descriptor, durable Feature 156 registration before release, exactly one release token,
 exactly one target start after release, and a retained target process-group identity.
 
+`terminal` is an optional close frame after `target_started`; transport EOF after a valid
+`target_started` frame is also a successful handshake close. EOF before target start is a terminal
+failure. A terminal close never substitutes for the required target-start evidence.
+
 `pre_gate_target_work_observed=false` is not a free-form claim from the target. It is established
 only by the trusted bootstrap state machine plus the controlled fixture's pre/post markers. The
 evidence is invalid if bootstrap identity or exact-byte execution is unresolved.

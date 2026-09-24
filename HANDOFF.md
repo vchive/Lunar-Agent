@@ -3869,3 +3869,21 @@ Feature 157 提交为 `9f79e4a`，已推送到当前分支。它提供严格绑�
 parent/task、intent 和两项预算的有界请求事件 DTO，支持 complete/partial 覆盖与固定摘要；
 评估结果明确是 `cooperative_declaration`，不能冒充宿主强制的 request timeout。Feature 156
 仍需 controller-owned evidence pipe 或受控 producer SDK 后才能接入该证据。
+
+## 2026-09-24 Feature 158 trusted producer bootstrap contract
+
+新增 `producer_bootstrap.py` 与 provider-free 专项回归。`TrustedBootstrapDescriptor`、
+`TrustedBootstrapLaunch`、`BootstrapHandshakeFrame` 和 `TrustedBootstrapEvidence` 使用固定
+协议版本、严格 canonical JSON、大小上限、身份字段校验和自摘要；握手帧绑定 launch/intent
+摘要，拒绝重复键、字段漂移、摘要篡改及非 target-started 帧携带进程身份。
+
+`TrustedBootstrapSession` 实现 ready → release → target-started → terminal 的确定性状态机，
+独立记录 ready 观测，拒绝错误 token、重复 release、提前 target、重复 target、target 身份
+漂移、提前 EOF、终止帧乱序和终止后的迟到帧。target 启动后的 terminal 帧保留 passed 证据；
+未完成的 ready/release 仍为 unknown，协议失败为 failed 并保留固定 failure code。
+
+Feature 158 专项 16 项、Feature 156/157 组合 55 项通过，Ruff、compileall 和 diff 检查通过。
+当前只完成 DTO、解析器和确定性会话模型；尚未启动真正的 Lunar-owned bootstrap 进程，没有
+实现 allowlist/跨平台 exact-byte runtime、registration fsync 后 gate release、hostile direct
+producer 负例或 Feature 156 生命周期接入。因此 T158-02 至 T158-06 继续待办，不接入默认
+调度，也不把 cooperative fixture 当作可信 bootstrap 证明。
