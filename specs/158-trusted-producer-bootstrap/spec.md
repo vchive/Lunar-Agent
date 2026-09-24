@@ -2,7 +2,7 @@
 
 **Created**: 2026-09-24
 
-**Status**: SDD only; no implementation or scheduler integration
+**Status**: Provider-free trusted-bootstrap fixture implemented; Feature 156 integration and scheduler integration remain deferred
 
 ## Problem
 
@@ -29,9 +29,10 @@ trusted bootstrap reached its gate
   -> bootstrap started the target producer
 ```
 
-The feature does not launch a producer, implement the bootstrap, enforce provider request limits,
-publish output, or add a scheduler entry point. It only defines the contract and the controlled
-fixture required before such an implementation can claim gate-before-producer-work.
+The checked-in fixture launches only a pinned local target and is not a producer scheduler entry
+point. The feature does not enforce provider request limits, publish output, or integrate the
+runtime into Feature 156's production launcher. It provides the controlled evidence required
+before a later implementation can claim gate-before-producer-work.
 
 ## Scope and boundaries
 

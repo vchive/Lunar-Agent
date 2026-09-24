@@ -45,4 +45,6 @@ failure. A terminal close never substitutes for the required target-start eviden
 
 `pre_gate_target_work_observed=false` is not a free-form claim from the target. It is established
 only by the trusted bootstrap state machine plus the controlled fixture's pre/post markers. The
-evidence is invalid if bootstrap identity or exact-byte execution is unresolved.
+evidence is invalid if bootstrap identity or exact-byte execution is unresolved. The checked-in
+fixture uses a same-source descriptor recheck and explicitly reports `fixture-only`; it does not
+claim that a pathname recheck closes Feature 156's non-Darwin replacement window.

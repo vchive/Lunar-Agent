@@ -80,6 +80,8 @@ def test_trusted_bootstrap_happy_path_produces_passed_evidence():
     session.accept_frame(_ready(launch))
     session.release("nonce-001")
     session.accept_frame(_started(launch))
+    assert session.evidence().status == "unknown"
+    session.record_eof()
     evidence = session.evidence()
     assert evidence.status == "passed"
     assert evidence.release_observed is True
@@ -247,6 +249,7 @@ def test_eof_after_target_start_is_successful_handshake_close():
     session.accept_frame(_ready(launch))
     session.release("nonce-001")
     session.accept_frame(_started(launch))
+    assert session.evidence().status == "unknown"
     session.record_eof()
     assert session.evidence().status == "passed"
 

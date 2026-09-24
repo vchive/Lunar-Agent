@@ -16,3 +16,15 @@
 6. Keep Feature 154 preflight, Feature 156 lifecycle, Feature 157 request evidence, output
    publication, automatic solve, and scheduler entry points unchanged until a later integration
    feature implements this contract.
+
+## Implemented fixture slice
+
+The provider-free runtime in `src/lunar_evolution/trusted_bootstrap_runtime.py` now exercises the
+descriptor allowlist, ready/block/release/target-start handshake, durable registration ordering,
+target identity recheck, process-group retention, bounded cleanup, fixed deadline, duplicate/early
+gate rejection, and hostile direct-producer rejection. It intentionally remains `fixture-only` and
+is not exported through the package scheduler path. The remaining integration task must supply
+platform-bound exact-byte execution and Feature 156 registration/recovery ownership before any
+external producer can use this boundary. The one-time target PGID observation cannot prove that a
+target or its descendants never leave the registered group after start; production admission must
+resolve that escape boundary before claiming complete cleanup or trusted pre-gate containment.

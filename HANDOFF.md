@@ -3887,3 +3887,27 @@ Feature 158 专项 16 项、Feature 156/157 组合 55 项通过，Ruff、compile
 实现 allowlist/跨平台 exact-byte runtime、registration fsync 后 gate release、hostile direct
 producer 负例或 Feature 156 生命周期接入。因此 T158-02 至 T158-06 继续待办，不接入默认
 调度，也不把 cooperative fixture 当作可信 bootstrap 证明。
+
+## 2026-09-24 Feature 158 provider-free trusted bootstrap fixture
+
+新增 `trusted_bootstrap_runtime.py` 与专项回归。受控 Lunar-owned bootstrap 现在先校验
+fixture-only descriptor，再发出 `bootstrap_ready` 并阻塞在私有 gate；父进程在注册回执完成
+文件和目录 fsync 后才写入一次 gate token。bootstrap 重新检查 target 字节摘要，启动一次
+同一 process group 的 target，并发出 `target_started`/`terminal`。结果保留 registration、
+launch/intent 绑定、target group identity、target exit code 和固定状态；deadline、target
+替换、目标启动失败、重复 gate、提前 EOF、非法 timeout 以及 hostile direct-producer 均
+fail-closed。父进程异常清理使用已登记的私有进程组，不写 producer 文本或可变诊断摘要。
+
+本轮 Feature 158 专项为 **35 passed**（runtime 19、state machine 16），Ruff、compileall 和 diff check 通过。运行时保持
+`fixture-only`，没有通过包级默认导出或 scheduler 入口接入，避免 `python -m` 重复导入告警。
+运行时成功路径会对已登记的私有进程组执行一次 owner-checked cleanup；deadline 或清理
+不确定时保留 unknown 证据并再次尝试清理。T158-04 仍未完成：尚未把 runtime 接入 Feature 156 正式 registration/cleanup/recovery，
+一次性 target PGID 观测也不能证明 target 或后代此后从未脱离进程组；
+也没有非 Darwin descriptor-bound exact-byte 执行；因此不能接受外部 producer、真实 provider、
+WebAgent 或 campaign 验收。
+
+本轮组合回归 `tests/test_producer_bootstrap.py`、`tests/test_trusted_bootstrap_runtime.py`、
+`tests/test_producer_process.py`、`tests/test_producer_request_evidence.py` 和
+`tests/test_process_ownership.py` 共 **94 passed**。全仓 pytest 在当前未安装项目 CLI 的
+解释器环境中有 4 个既有 installed-CLI/effect-adapter 收集后失败，原因是找不到
+`Path(sys.executable).parent / "lunar-evolution"`；未涉及本轮代码。

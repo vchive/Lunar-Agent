@@ -463,7 +463,7 @@ class TrustedBootstrapSession:
 
     def evidence(self) -> TrustedBootstrapEvidence:
         passed = (
-            self.state in {"target_started", "terminal"} and self.release_count == 1
+            self.state == "terminal" and self.release_count == 1
             and self.target_start_count == 1 and not self.pre_gate_target_work_observed
             and self.target_group_identity is not None and self.failure_code is None
         )
