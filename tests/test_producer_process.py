@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,9 +26,21 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
     producer_root = tmp_path / "producer-root"
     producer_root.mkdir()
     script = producer_root / "producer.py"
+    descendant_setup = ""
+    if mode in {"descendant-pipes", "descendant-redirect", "descendant-stubborn"}:
+        child_code = "import time; time.sleep(60)"
+        if mode == "descendant-stubborn":
+            child_code = (
+                "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "open('../ready', 'w').close(); time.sleep(60)"
+            )
+        kwargs = ", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL" if mode == "descendant-redirect" else ""
+        descendant_setup = f"subprocess.Popen([sys.executable, '-c', {child_code!r}]{kwargs})\n"
+        if mode == "descendant-stubborn":
+            descendant_setup += "while not pathlib.Path('../ready').exists(): import time; time.sleep(0.01)\n"
     script.write_text(
         "#!/usr/bin/env python3\n"
-        "import json, os, pathlib, sys\n"
+        "import json, os, pathlib, subprocess, sys\n"
         "fd = int(os.environ['LUNAR_PRODUCER_GATE_FD'])\n"
         "if os.read(fd, 1) != b'1': sys.exit(4)\n"
         + ("registration = json.loads(pathlib.Path('../process-registration.json').read_text())\n"
@@ -34,7 +48,8 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
            if mode == "gate-order" else "")
         + ("print('x' * 10000)\n" if mode == "overflow" else "")
         + ("sys.exit(3)\n" if mode == "failed" else "")
-        + (f"pathlib.Path('../output/producer-result.json').write_text(json.dumps({{'schema_version':'1','producer_id':'fixture','producer_fingerprint':'{DIGEST}','producer_run_id':'run-1','status':'completed','contract_sha256':'{DIGEST}','budget':{{'requests':{3 if mode == 'over-requests' else 1}}},'materials':[]}}))\n" if mode in {"success", "gate-order", "over-requests"} else "")
+        + (f"pathlib.Path('../output/producer-result.json').write_text(json.dumps({{'schema_version':'1','producer_id':'fixture','producer_fingerprint':'{DIGEST}','producer_run_id':'run-1','status':'completed','contract_sha256':'{DIGEST}','budget':{{'requests':{3 if mode == 'over-requests' else 1}}},'materials':[]}}))\n" if mode in {"success", "gate-order", "over-requests", "descendant-pipes", "descendant-redirect", "descendant-stubborn"} else "")
+        + descendant_setup
         + ("pathlib.Path('../output/actual.json').write_text('external')\n"
            "pathlib.Path('../output/producer-result.json').symlink_to('actual.json')\n"
            if mode == "symlink-envelope" else "")
@@ -49,7 +64,7 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
         dependency_sha256=DIGEST, environment_sha256=DIGEST, producer_id="fixture", producer_fingerprint=DIGEST,
         executable_relative="producer.py", argv=("producer.py",), working_directory="work", output_directory="output",
         request_timeout_seconds=1, max_requests=2, output_max_bytes=1024 if mode == "overflow" else 65536,
-        wall_timeout_seconds=1,
+        wall_timeout_seconds=3 if mode in {"descendant-pipes", "descendant-redirect", "descendant-stubborn"} else 1,
     )
     return producer_root, intent, build_producer_launch_attestation(intent, "nonce-001")
 
@@ -231,6 +246,31 @@ def test_output_limit_is_bounded(tmp_path: Path):
     assert receipt.status == "failed"
     assert receipt.failure_code == "producer_process_output_limit_exceeded"
     assert receipt.stdout_evidence.bytes_observed > intent.output_max_bytes
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+@pytest.mark.parametrize("mode", ["descendant-pipes", "descendant-redirect", "descendant-stubborn"])
+def test_leader_exit_cleans_remaining_descendant_group(tmp_path: Path, mode: str):
+    producer_root, intent, attestation = _fixture(tmp_path, mode=mode)
+    started = time.monotonic()
+    receipt = None
+    try:
+        receipt = run_producer_process(
+            tmp_path, intent=intent, attestation=attestation, producer_root=producer_root,
+        )
+        assert time.monotonic() - started < intent.wall_timeout_seconds
+        assert receipt.status == "completed"
+        assert receipt.cleanup_status in {"cleaned", "already_exited"}
+        if mode == "descendant-stubborn":
+            assert receipt.cleanup_status == "cleaned"
+        with pytest.raises(ProcessLookupError):
+            os.killpg(receipt.pgid, 0)
+    finally:
+        if receipt is not None:
+            try:
+                os.killpg(receipt.pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_capture_timeout_does_not_read_open_pipe_after_deadline():

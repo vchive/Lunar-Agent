@@ -101,11 +101,10 @@ def _check_owner(
     try:
         os_owned = os.getpgid(registration.pid) == registration.pgid
     except ProcessLookupError:
-        # After our verified SIGTERM the leader may already have been reaped while its
-        # descendants keep the process group alive. POSIX reserves that group ID until the
-        # group is empty. Only extend our earlier authority for an actual group leader and
-        # while the durable registration can still be checked; a missing PID never grants
-        # initial signal authority, and a reused PID in another group still fails above.
+        # The leader may have been reaped while descendants keep its group alive. POSIX
+        # reserves that group ID until the group is empty. Callers may extend their earlier
+        # ownership observation only for an actual private group leader with a live owner
+        # predicate; a reused PID in another group still fails the OS check above.
         os_owned = (
             allow_exited_leader
             and registration.pid == registration.pgid
@@ -144,8 +143,14 @@ def cleanup_registered_process(
     grace_seconds: float = DEFAULT_CLEANUP_GRACE_SECONDS,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
+    allow_exited_leader_initial: bool = False,
 ) -> ProcessCleanupResult:
-    """Terminate one registered group without signalling a reused/unowned identity."""
+    """Terminate one registered group without signalling a reused/unowned identity.
+
+    A caller that observed and reaped its own private group leader may extend its
+    registration authority to the retained group. An unrelated or reused leader PID
+    still fails the OS identity check.
+    """
     if (
         isinstance(grace_seconds, bool)
         or not isinstance(grace_seconds, (int, float))
@@ -159,7 +164,9 @@ def cleanup_registered_process(
         return _result(registration, ProcessCleanupStatus.PROBE_FAILED, error=type(exc).__name__)
     if not alive:
         return _result(registration, ProcessCleanupStatus.ALREADY_EXITED)
-    owned, failure = _check_owner(registration)
+    owned, failure = _check_owner(
+        registration, allow_exited_leader=allow_exited_leader_initial,
+    )
     if not owned:
         return _result(registration, failure or ProcessCleanupStatus.OWNERSHIP_LOST, alive_after=True)
 

@@ -10,3 +10,4 @@
 - [x] T156-08 Add read-only controller-interruption recovery that inspects exact registrations and never relaunches or consumes another attestation.
 - [ ] T156-09 Add provider-free fixture tests for success, replay, gate, timeout, capture, tampering, cleanup, receipt durability, and recovery.
 - [ ] T156-10 Run focused tests, Ruff, compileall, diff checks, and the existing offline regression; keep integration entry points unchanged.
+- [ ] T156-11 Close the executable replacement window with a platform-supported byte-bound execution contract and a deterministic replacement regression before external admission.

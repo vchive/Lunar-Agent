@@ -20,7 +20,8 @@ The focused matrix must include: successful gated completion; nonce replay; tupl
 identity drift; shell/credential rejection; child exits before gate; registration write failure;
 full stdout/stderr pipes; deterministic output overflow; wall timeout; PID/PGID ownership loss;
 SIGTERM/SIGKILL uncertainty; controller interruption; symlinked/replaced/truncated envelope;
-unstable receipt writes; and recovery with no automatic relaunch.
+unstable receipt writes; recovery with no automatic relaunch; and a replacement exactly between
+the final executable check and process creation that cannot execute un-attested bytes.
 
 ## Implementation checkpoint (2026-09-24)
 
@@ -31,8 +32,8 @@ a held no-follow directory descriptor, and atomically publishes a chained termin
 Recovery verifies the claim, registration, and terminal receipt without relaunching. The focused
 provider-free matrix covers gate order, cross-batch nonce replay, executable drift, nonzero exit,
 request and output limits, timeout, envelope/directory replacement, registration/terminal write
-failures, duplicate JSON keys, and recovery tampering. The focused matrix has **26 passing tests**.
-The final offline repository regression has **7329 passed, 1 skipped**; Ruff, compileall, and
+failures, duplicate JSON keys, and recovery tampering. The focused matrix has **29 passing tests**.
+The final offline repository regression has **7335 passed, 1 skipped**; Ruff, compileall, and
 `git diff --check` pass.
 
 This is not yet the full acceptance matrix. Request-level timeout is a declaration to the producer
@@ -42,6 +43,14 @@ can do work before reading the gate, so gate participation needs an explicit tru
 contract before this runner is connected to an external campaign. Fault injection for capture
 errors and signal uncertainty remains to be added. The executable is still re-opened by pathname
 between its final identity check and `Popen`, so a concurrent replacement can run bytes that were
-not attested. A leader that exits while a descendant retains the process group can also leave
-cleanup unverified. Those are release blockers for external producer admission, along with the
+not attested. That is a release blocker for external producer admission, along with the
 cooperative gate and request-level evidence. The default scheduler does not call this runner.
+
+The descendant cleanup gap is now addressed for descendants that remain in the registered
+process group. The runner cleans that group when the leader exits and retains the first cleanup
+evidence; fixture tests cover inherited pipes, redirected pipes, and a descendant that ignores
+SIGTERM. A descendant that leaves the registered group remains outside this ownership contract.
+
+The macOS local probe confirmed that a shebang fixture cannot be launched through `/dev/fd` even
+when the verified descriptor is inherited by the child. `fexecve` and `execveat` are unavailable
+through the local Python/libc interface, so a pathname recheck must not be presented as a fix.

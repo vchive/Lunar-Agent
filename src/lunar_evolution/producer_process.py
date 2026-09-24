@@ -417,6 +417,7 @@ def _capture(
     limit: int,
     deadline: float,
     monotonic: Callable[[], float],
+    on_exited_leader: Callable[[], bool] | None = None,
 ) -> tuple[ProducerStreamEvidence, ProducerStreamEvidence, bool, bool]:
     selector = selectors.DefaultSelector()
     states: dict[str, dict[str, object]] = {
@@ -429,8 +430,16 @@ def _capture(
             selector.register(stream, selectors.EVENT_READ, name)
     overflow = False
     timed_out = False
+    exited_leader_handled = False
     try:
-        while selector.get_map() or process.poll() is None:
+        while True:
+            leader_exited = process.poll() is not None
+            if not selector.get_map() and leader_exited:
+                break
+            if leader_exited and selector.get_map() and not exited_leader_handled and on_exited_leader is not None:
+                exited_leader_handled = True
+                if not on_exited_leader():
+                    break
             remaining = deadline - monotonic()
             if remaining <= 0:
                 timed_out = True
@@ -537,9 +546,15 @@ def _read_envelope(
     return evidence, requests
 
 
-def _cleanup(registration: RegisteredProcess, *, deadline: float, monotonic: Callable[[], float]) -> ProcessCleanupResult:
+def _cleanup(
+    registration: RegisteredProcess, process: subprocess.Popen[bytes], *,
+    deadline: float, monotonic: Callable[[], float],
+) -> ProcessCleanupResult:
     remaining = max(0.01, min(0.25, deadline - monotonic()))
-    return cleanup_registered_process(registration, grace_seconds=remaining, monotonic=monotonic)
+    return cleanup_registered_process(
+        registration, grace_seconds=remaining, monotonic=monotonic,
+        allow_exited_leader_initial=process.returncode is not None,
+    )
 
 
 def run_producer_process(
@@ -640,7 +655,7 @@ def run_producer_process(
         if pgid != process.pid:
             raise ProducerProcessError("producer_process_registration_mismatch")
         registration = RegisteredProcess(
-            process.pid, pgid, owner_check=lambda: process.poll() is None,
+            process.pid, pgid, owner_check=lambda: process.pid == pgid,
             label=intent.launch_id,
         )
         registration_payload = {
@@ -658,20 +673,37 @@ def run_producer_process(
         gate_released = True
         os.close(gate_write)
         gate_write = -1
+        exited_leader_cleanup: ProcessCleanupResult | None = None
+
+        def cleanup_exited_leader() -> bool:
+            nonlocal exited_leader_cleanup
+            exited_leader_cleanup = _cleanup(registration, process, deadline=deadline, monotonic=monotonic)
+            return exited_leader_cleanup.status in {
+                ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED,
+            }
+
         stdout, stderr, overflow, timed_out = _capture(
             process, limit=intent.output_max_bytes, deadline=deadline, monotonic=monotonic,
+            on_exited_leader=cleanup_exited_leader,
         )
+        if exited_leader_cleanup is not None and exited_leader_cleanup.status not in {
+            ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED,
+        }:
+            return _persist_receipt(
+                batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+                gate_released, stdout, stderr, None, exited_leader_cleanup, "unknown", "producer_process_cleanup_unknown",
+                process.returncode,
+            )
         if timed_out or overflow:
-            if registration is not None:
-                cleanup_result = _cleanup(registration, deadline=deadline, monotonic=monotonic)
-            else:
-                cleanup_result = ProcessCleanupResult(intent.launch_id, process.pid, pgid, ProcessCleanupStatus.OWNER_CHECK_FAILED)
+            cleanup_result = exited_leader_cleanup or _cleanup(
+                registration, process, deadline=deadline, monotonic=monotonic,
+            )
             try:
                 process.wait(timeout=max(0.01, deadline - monotonic()))
             except subprocess.TimeoutExpired:
                 pass
             if cleanup_result.status not in {ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED} and process.poll() is not None:
-                cleanup_result = _cleanup(registration, deadline=deadline, monotonic=monotonic)
+                cleanup_result = _cleanup(registration, process, deadline=deadline, monotonic=monotonic)
             verified = cleanup_result.status in {ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED}
             status = "unknown" if timed_out or not verified else "failed"
             failure = (
@@ -685,12 +717,14 @@ def run_producer_process(
         try:
             exit_code = process.wait(timeout=max(0.01, deadline - monotonic()))
         except subprocess.TimeoutExpired:
-            cleanup_result = _cleanup(registration, deadline=deadline, monotonic=monotonic)
+            cleanup_result = _cleanup(registration, process, deadline=deadline, monotonic=monotonic)
             return _persist_receipt(
                 batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
                 gate_released, stdout, stderr, None, cleanup_result, "unknown", "producer_process_wall_timeout",
             )
-        cleanup_result = _cleanup(registration, deadline=deadline, monotonic=monotonic)
+        cleanup_result = exited_leader_cleanup or _cleanup(
+            registration, process, deadline=deadline, monotonic=monotonic,
+        )
         if cleanup_result.status not in {ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED}:
             return _persist_receipt(
                 batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
@@ -721,11 +755,11 @@ def run_producer_process(
         )
     except ProducerProcessError:
         if process is not None and registration is not None:
-            _cleanup(registration, deadline=deadline, monotonic=monotonic)
+            _cleanup(registration, process, deadline=deadline, monotonic=monotonic)
         raise
     except (OSError, subprocess.SubprocessError) as exc:
         if process is not None and registration is not None:
-            _cleanup(registration, deadline=deadline, monotonic=monotonic)
+            _cleanup(registration, process, deadline=deadline, monotonic=monotonic)
         raise ProducerProcessError("producer_process_launch_unknown") from exc
     finally:
         for fd in (gate_read, gate_write):

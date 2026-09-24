@@ -103,6 +103,15 @@ and owner predicate, then atomically writes and fsyncs the launch receipt. Only 
 `process_registered` receipt permits gate release. A child that exits before release is `failed`
 unless the parent cannot determine the reason, which is `unknown`.
 
+The executable bytes actually run must be bound to the attested bytes. Checking the source path
+immediately before `Popen(executable=path)` is insufficient: a concurrent rename can replace the
+path between the check and the kernel's open. On macOS, executing a shebang script through a held
+`/dev/fd` descriptor fails, and Python exposes no `fexecve`/`execveat` fallback there. A future
+implementation must define and test a platform-supported descriptor-bound execution mechanism,
+or a controlled producer runtime that executes the verified source bytes from a held descriptor
+and separately pins its trusted runtime. Until then, pathname execution is local prototype
+behavior and cannot satisfy the executable-identity acceptance criterion or external admission.
+
 The durable receipt is written with a bounded temporary file, `fsync`, and no-follow atomic rename;
 the destination and every existing ancestor must be a regular directory without symlinks. The
 receipt is never overwritten by a different launch, and each state transition binds the previous
@@ -177,3 +186,5 @@ the only result exposed to downstream publication code.
 7. Provider-free local fixtures cover success, replay, shell rejection, gate failure, timeout,
    output overflow, symlink/race tampering, cleanup uncertainty, controller interruption, and
    recovery. No real provider, external producer campaign, evaluator, or WebAgent is run.
+8. A deterministic replacement between the final source check and process creation cannot run
+   un-attested bytes while producing a successful execution receipt.

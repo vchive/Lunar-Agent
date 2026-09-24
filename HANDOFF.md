@@ -3843,3 +3843,20 @@ Feature 140 定向测试、Feature 139 离线套件、Ruff、compileall 和 diff
 混合批次保留已知 `rejected` 项，只按 journal 计划顺序一次发布 `admitted` 子集；全 rejected 不修改 archive/state。未知写入、commit 边界、marker、源字节、receipt、archive/state 或身份变化均 fail-closed。新增 `producer_bundle_recovery.py` 的只读 exact-match resume：复核 plan/authority/preflight/journal/manifest、staged/final candidate tree、terminal after-digest，拒绝 prepared journal、unknown marker/state、重复发布和篡改证据，不重新调用 producer/evaluator。`CandidateArchive` 在 unresolved producer marker 存在时统一拒绝普通读取/写入。
 
 新增 staging、recovery、marker guard focused tests；Feature 153 组合回归 40 项通过，当前全仓回归通过（`pytest -q --disable-warnings`，exit 0），Ruff、compileall、diff check 和旧名称扫描通过。T153-06 launcher/scheduler、external producer/provider campaign 仍按规格延期；本轮没有启动真实 producer、provider 或 WebAgent。
+
+## 2026-09-24 Feature 156 本地进程生命周期继续推进
+
+在 `codex/feature-156-producer-lifecycle` 分支，已实现 provider-free 本地 producer 的一次性
+attestation 消耗、进程登记后放行、受限输出采集、结果文件证据和终态回执。此次补上主进程
+退出但后代仍留在登记进程组中的清理：runner 在等待管道期间及时清理该组，保留首次
+SIGTERM/SIGKILL 清理证据；缺失 owner、复用 PID、非组长等情况仍拒绝发信号。真实后代
+fixture 覆盖继承管道、重定向管道和忽略 SIGTERM。
+
+专项 `tests/test_producer_process.py` 29 项通过；进程所有权相关组合 67 项通过；全仓离线
+回归 7335 passed、1 skipped。Ruff、compileall、`git diff --check` 通过。没有运行真实
+provider、evaluator、外部 producer campaign 或 WebAgent；默认调度未接入该 runner。
+
+Feature 156 仍未达到外部接入验收：macOS 上对脚本按已验证 FD 的 `/dev/fd` 执行不可行，
+当前按路径 `Popen` 在最后核验与内核打开之间存在可执行文件替换窗口；请求级超时尚无
+可信逐请求证据，任意 producer 是否遵守 gate 也不能由父进程证明。SDD 已加入执行字节
+绑定的明确验收项。上述问题解决前，不把 Feature 156 标为完成或合入默认调度。

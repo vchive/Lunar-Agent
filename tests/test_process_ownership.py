@@ -108,6 +108,24 @@ def test_missing_leader_never_grants_initial_signal_authority(monkeypatch):
     assert result.status is ProcessCleanupStatus.OWNERSHIP_LOST
 
 
+@pytest.mark.parametrize("authority", ["reused_pid", "missing_callback", "nonleader"])
+def test_exited_leader_initial_cleanup_rejects_unowned_group(monkeypatch, authority):
+    pid, pgid = (321, 654) if authority == "nonleader" else (321, 321)
+    registration = RegisteredProcess(
+        pid, pgid, owner_check=None if authority == "missing_callback" else lambda: True,
+    )
+    monkeypatch.setattr(
+        "lunar_evolution.process_ownership.os.getpgid",
+        lambda _pid: pgid + 1 if authority == "reused_pid" else (_ for _ in ()).throw(ProcessLookupError()),
+    )
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda *_args: pytest.fail("must not signal"))
+
+    result = cleanup_registered_process(registration, allow_exited_leader_initial=True)
+
+    assert result.status is ProcessCleanupStatus.OWNERSHIP_LOST
+
+
 @pytest.mark.parametrize("authority", ["replaced", "missing_callback", "reused_pid", "nonleader"])
 def test_exited_leader_escalation_requires_unchanged_authority(monkeypatch, authority):
     pid, pgid = (321, 654) if authority == "nonleader" else (321, 321)
