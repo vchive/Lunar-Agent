@@ -41,11 +41,12 @@ This is not yet the full acceptance matrix. Request-level timeout is a declarati
 and cannot be enforced inside an arbitrary executable by the parent process; the protocol needs
 an acknowledged request-level receipt or a controlled producer SDK. A non-cooperating executable
 can do work before reading the gate, so gate participation needs an explicit trusted producer
-contract before this runner is connected to an external campaign. Fault injection for capture
-errors and signal uncertainty remains to be added. The executable is still re-opened by pathname
-between its final identity check and `Popen`, so a concurrent replacement can run bytes that were
-not attested. That is a release blocker for external producer admission, along with the
-cooperative gate and request-level evidence. The default scheduler does not call this runner.
+contract before this runner is connected to an external campaign. Darwin uses a private immutable
+snapshot of the verified executable bytes. On non-Darwin platforms the executable is still
+re-opened by pathname between its final identity check and `Popen`, so a concurrent replacement
+can run bytes that were not attested. That platform gap remains a release blocker for external
+producer admission, along with the cooperative gate and request-level evidence. The default
+scheduler does not call this runner.
 
 The descendant cleanup gap is now addressed for descendants that remain in the registered
 process group. The runner cleans that group when the leader exits and retains the first cleanup
@@ -68,10 +69,10 @@ fixture passes that same deadline through both normal and exceptional cleanup pa
 
 The focused process-ownership, producer-process, and trusted-bootstrap-runtime suites pass.
 New fixtures cover capture-read failure, SIGTERM failure, SIGKILL failure, cleanup uncertainty
-projection, owner-loss without a direct fallback kill, and a two-phase cleanup that cannot
-exceed the absolute deadline. These fixtures improve T156-13 coverage but do not close the
-complete lifecycle matrix.
+projection, owner-loss without a direct fallback kill, child exit after registration but before
+gate release, broken gate delivery, and a two-phase cleanup that cannot exceed the absolute
+deadline. T156-13 is complete; T156-09's broader lifecycle matrix remains open.
 
-T156-05, T156-06, T156-09, T156-11, T156-11b, T156-12, T156-13, and T156-14 remain open:
+T156-05, T156-06, T156-09, T156-11, T156-11b, T156-12, and T156-14 remain open:
 request-level timeout is still cooperative, non-Darwin execution is pathname-bound, trusted
 bootstrap is fixture-only, and controller-owned request evidence is not yet connected.

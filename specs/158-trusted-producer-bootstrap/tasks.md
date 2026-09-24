@@ -11,3 +11,7 @@
 The runtime fixture now propagates one absolute monotonic deadline through normal and exceptional
 cleanup and bounds the final leader reap. This is supporting evidence for T158-04; it does not
 bind the fixture to Feature 156 registration, recovery, or a production scheduler entry point.
+The child now defers target path validation until after gate release; a fixture with an absent
+target still emits `bootstrap_ready` and only reports `target_start_failed` after release.
+Post-release target identity failures, including a hard-linked target, also emit the fixed
+`target_start_failed` frame rather than falling through to an unclassified early EOF.

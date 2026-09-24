@@ -14,5 +14,5 @@
 - [x] T156-11a On Darwin, stage the verified bytes into a private immutable snapshot, bind its digest into registration/terminal receipts, and cover replacement-after-check and snapshot-lock failure.
 - [ ] T156-11b Define a descriptor-bound execution mechanism for non-Darwin platforms; pathname-unbound execution remains prototype-only.
 - [ ] T156-12 Define and attest a Lunar-owned producer bootstrap protocol; reject arbitrary direct executables that cannot prove no work occurred before registration-gate release.
-- [ ] T156-13 Add capture/read and signal/cleanup fault-injection fixtures, including child exit before gate and broken gate delivery; preserve terminal unknown/recovery evidence.
+- [x] T156-13 Add capture/read and signal/cleanup fault-injection fixtures, including child exit before gate and broken gate delivery; preserve terminal unknown/recovery evidence.
 - [ ] T156-14 Integrate Feature 157 only after controller-owned request evidence is host-observed and recovery-safe; producer-declared files remain diagnostics.

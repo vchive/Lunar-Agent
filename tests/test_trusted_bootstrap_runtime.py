@@ -78,11 +78,13 @@ def _launch(target: Path, *, bootstrap=None) -> TrustedBootstrapLaunch:
     )
 
 
-def _start_child_fixture(tmp_path: Path, target: Path):
+def _start_child_fixture(
+    tmp_path: Path, target: Path, *, launch: TrustedBootstrapLaunch | None = None,
+):
     import lunar_evolution.trusted_bootstrap_runtime as runtime
 
     descriptor = build_trusted_bootstrap_descriptor()
-    launch = _launch(target)
+    launch = launch or _launch(target)
     launch_read, launch_write = os.pipe()
     gate_read, gate_write = os.pipe()
     frame_read, frame_write = os.pipe()
@@ -120,6 +122,52 @@ def _start_child_fixture(tmp_path: Path, target: Path):
     ready = json.loads(frame_stream.readline().decode("utf-8"))
     assert ready["kind"] == "bootstrap_ready"
     return process, gate_write, frame_stream
+
+
+def test_child_does_not_inspect_target_before_gate_release(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    target.unlink()
+    process, gate_write, frames = _start_child_fixture(tmp_path, target, launch=launch)
+    try:
+        assert process.poll() is None
+        os.write(gate_write, b"1")
+        os.close(gate_write)
+        gate_write = -1
+        failure = json.loads(frames.readline().decode("utf-8"))
+        assert failure["kind"] == "target_start_failed"
+        assert process.wait(timeout=3) == 25
+    finally:
+        frames.close()
+        if gate_write >= 0:
+            os.close(gate_write)
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+    assert not (tmp_path / "target-marker").exists()
+
+
+def test_post_release_target_identity_failure_emits_start_failure(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    process, gate_write, frames = _start_child_fixture(tmp_path, target, launch=launch)
+    hardlink = tmp_path / "target-hardlink.py"
+    try:
+        os.link(target, hardlink)
+        os.write(gate_write, b"1")
+        os.close(gate_write)
+        gate_write = -1
+        failure = json.loads(frames.readline().decode("utf-8"))
+        assert failure["kind"] == "target_start_failed"
+        assert process.wait(timeout=3) == 25
+    finally:
+        frames.close()
+        if gate_write >= 0:
+            os.close(gate_write)
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+    assert not (tmp_path / "target-marker").exists()
 
 
 def test_runtime_durably_registers_before_release_and_starts_target_after_gate(tmp_path: Path):

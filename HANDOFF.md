@@ -3931,3 +3931,21 @@ owner 丢失时不得直接 kill。定向回归共 78 passed；Ruff、compileall
 fixture-only，尚未接入 Feature 156 正式 registration/cleanup/recovery 或默认 scheduler。
 没有运行 provider、WebAgent、外部 producer 或真实 campaign。当前工作区在提交前包含上述
 deadline 实现、测试和文档更新。
+
+## 2026-09-24 Feature 156/158 gate fault follow-up
+
+trusted bootstrap 子进程现在把 target 路径与文件检查推迟到 gate 放行后。新增 fixture
+验证放行前移除 target 时仍先收到 `bootstrap_ready`，放行后才报告
+`target_start_failed`。Feature 156 新增登记后、放行前子进程退出和 gate 写入失败两项
+故障回归；两者都没有成功输出或终态回执，恢复时返回 `recovery_required`。
+
+T156-13 的 capture、signal、cleanup、pre-gate exit 和 broken-gate 故障矩阵已完成。
+T156-09 的完整生命周期矩阵、T156-12 的正式 trusted-bootstrap 接入、T158-04 的
+registration/cleanup/recovery 身份绑定等仍未完成。Darwin 使用私有 immutable snapshot
+绑定执行字节；非 Darwin 仍有按路径执行的替换窗口。请求级预算还缺宿主观测的可信证据，
+因此当前实现仍是 provider-free fixture，不接入默认 scheduler 或外部 campaign。
+
+独立复核还发现放行后的 target 身份检查可能因非法文件直接退出；现已改为发出固定
+`target_start_failed` 帧，并用多硬链接 target 回归覆盖。Feature 156/157/158 及进程所有权
+五套组合测试通过；Ruff、compileall、`git diff --check` 通过。没有运行真实 provider、
+WebAgent 或 campaign，也没有重新跑全仓回归。

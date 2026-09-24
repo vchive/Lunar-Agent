@@ -44,7 +44,10 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
     script.write_text(
         "#!/usr/bin/env python3\n"
         "import json, os, pathlib, subprocess, sys\n"
-        "fd = int(os.environ['LUNAR_PRODUCER_GATE_FD'])\n"
+        + ("import time\n"
+           "while not pathlib.Path('../exit-before-gate').exists(): time.sleep(0.01)\n"
+           "sys.exit(7)\n" if mode == "exit-before-gate" else "")
+        + "fd = int(os.environ['LUNAR_PRODUCER_GATE_FD'])\n"
         "if os.read(fd, 1) != b'1': sys.exit(4)\n"
         + ("registration = json.loads(pathlib.Path('../process-registration.json').read_text())\n"
            "if registration['pid'] != os.getpid() or registration['pgid'] != os.getpgrp(): sys.exit(5)\n"
@@ -67,7 +70,7 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
         dependency_sha256=DIGEST, environment_sha256=DIGEST, producer_id="fixture", producer_fingerprint=DIGEST,
         executable_relative="producer.py", argv=("producer.py",), working_directory="work", output_directory="output",
         request_timeout_seconds=1, max_requests=2, output_max_bytes=1024 if mode == "overflow" else 65536,
-        wall_timeout_seconds=3 if mode in {"descendant-pipes", "descendant-redirect", "descendant-stubborn"} else 1,
+        wall_timeout_seconds=3 if mode in {"descendant-pipes", "descendant-redirect", "descendant-stubborn", "exit-before-gate"} else 1,
     )
     return producer_root, intent, build_producer_launch_attestation(intent, "nonce-001")
 
@@ -223,6 +226,70 @@ def test_registration_write_failure_never_releases_work_gate(tmp_path: Path, mon
     recovered = recover_producer_process(tmp_path, journal_id=intent.journal_id)
     assert recovered["status"] == "recovery_required"
     assert recovered["reason"] == "producer_process_registration_missing"
+
+
+def test_child_exit_before_gate_requires_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    producer_root, intent, attestation = _fixture(tmp_path, mode="exit-before-gate")
+    original_write = producer_process._atomic_json
+    spawned = []
+
+    def tracked_popen(*args, **kwargs):
+        process = producer_process.subprocess.Popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def exit_after_registration(path, value, **kwargs):
+        original_write(path, value, **kwargs)
+        if path.name == "process-registration.json":
+            (path.parent / "exit-before-gate").touch()
+            assert spawned[0].wait(timeout=2) == 7
+
+    monkeypatch.setattr(producer_process, "_atomic_json", exit_after_registration)
+    with pytest.raises(ProducerProcessError) as exc:
+        run_producer_process(
+            tmp_path, intent=intent, attestation=attestation, producer_root=producer_root,
+            popen_factory=tracked_popen,
+        )
+    assert exc.value.code == "producer_process_launch_unknown"
+    batch = tmp_path / "evolution/producer-batches/journal-001"
+    assert (batch / "process-registration.json").is_file()
+    assert not (batch / "execution-receipt.json").exists()
+    assert not (batch / "output/producer-result.json").exists()
+    recovered = recover_producer_process(tmp_path, journal_id=intent.journal_id)
+    assert recovered["status"] == "recovery_required"
+    assert recovered["reason"] == "producer_process_terminal_receipt_missing"
+
+
+def test_broken_gate_delivery_requires_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    producer_root, intent, attestation = _fixture(tmp_path)
+    original_write = producer_process.os.write
+    spawned = []
+
+    def tracked_popen(*args, **kwargs):
+        process = producer_process.subprocess.Popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def fail_gate_write(fd, data):
+        if data == b"1":
+            raise BrokenPipeError("gate delivery failed")
+        return original_write(fd, data)
+
+    monkeypatch.setattr(producer_process.os, "write", fail_gate_write)
+    with pytest.raises(ProducerProcessError) as exc:
+        run_producer_process(
+            tmp_path, intent=intent, attestation=attestation, producer_root=producer_root,
+            popen_factory=tracked_popen,
+        )
+    assert exc.value.code == "producer_process_launch_unknown"
+    assert spawned[0].wait(timeout=1) != 0
+    batch = tmp_path / "evolution/producer-batches/journal-001"
+    assert (batch / "process-registration.json").is_file()
+    assert not (batch / "execution-receipt.json").exists()
+    assert not (batch / "output/producer-result.json").exists()
+    recovered = recover_producer_process(tmp_path, journal_id=intent.journal_id)
+    assert recovered["status"] == "recovery_required"
+    assert recovered["reason"] == "producer_process_terminal_receipt_missing"
 
 
 def test_terminal_receipt_write_failure_requires_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

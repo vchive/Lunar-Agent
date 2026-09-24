@@ -295,8 +295,6 @@ def _bootstrap_child(launch_fd: int, gate_fd: int, frame_fd: int) -> int:
         }
         if any(observed[key] != expected[key] for key in expected):
             return 23
-        target, argv, cwd = _target_command(control)
-
         def emit(sequence: int, kind: str, **kwargs: object) -> None:
             frame = BootstrapHandshakeFrame(
                 sequence=sequence,
@@ -311,7 +309,12 @@ def _bootstrap_child(launch_fd: int, gate_fd: int, frame_fd: int) -> int:
         token = os.read(gate_fd, 2)
         if token != b"1":
             return 24
-        target_identity = _identity(target)
+        try:
+            target, argv, cwd = _target_command(control)
+            target_identity = _identity(target)
+        except TrustedBootstrapRuntimeError:
+            emit(2, "target_start_failed")
+            return 25
         if target_identity["sha256"] != launch.target_executable_identity:
             emit(2, "target_start_failed")
             return 25
