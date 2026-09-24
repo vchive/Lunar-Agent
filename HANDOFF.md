@@ -1,5 +1,21 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-24 Feature 156 producer 本地进程生命周期（开发中）
+
+沿 Feature 154/155 的 SDD 新增 provider-free 本地 runner：一次性 nonce 在 workspace 范围内
+原子消费，合作式 producer 在持久化 PID/PGID 登记前被工作门阻塞；执行使用固定的非敏感环境、
+独立进程组和有界 stdout/stderr，终态写入带 digest 的执行回执。只读恢复核验登记与终态，不
+自动重启。结果文件和恢复记录现在通过持有的 no-follow 目录描述符读取；墙钟截止时间从准备
+开始计算，并覆盖结果文件读取。专项 **24 passed**，含跨批次 nonce、请求超额、工作门顺序、
+写入失败、目录替换、重复 JSON 键和回执缺失。专项最终 **26 passed**；最终源码全仓离线
+回归 **7329 passed、1 skipped**。Ruff、compileall 与 diff check 通过。
+
+Feature 156 **未完成，也未接入默认调度**。可执行文件在最后一次核验与 `Popen` 按路径重开
+之间仍可被替换；任意外部 producer 不一定遵守工作门；请求级超时尚无可信逐请求证据；主
+进程先退出而后代仍活着时清理可能保持 unknown。后续需要解决这些边界及 capture/signal
+故障注入后，才能连接外部 producer 和接受真实 campaign 验收。本轮没有调用 provider、
+WebAgent、evaluator 或真实 campaign。
+
 ## 2026-09-24 Feature 154/155 producer launch boundary and evidence handoff
 
 继续沿现有 SDD 完成两条 provider-free slice，并已通过项目 `.venv` 的完整回归。
