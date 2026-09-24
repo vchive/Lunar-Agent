@@ -105,6 +105,10 @@ PGID.
 The bootstrap does not consume a second attestation. It receives the already consumed, exact
 launch record and cannot widen budgets. Timeout, handshake uncertainty, target start uncertainty,
 or cleanup uncertainty retain Feature 156's terminal unknown semantics and never trigger a retry.
+The fixture's timeout is one absolute monotonic deadline measured from the attempt start. Both
+owner-checked cleanup grace phases are clipped to that deadline; after expiry, a leader reap is
+bounded and any remaining liveness is recorded as `unknown`/`recovery_required` rather than
+extending the attempt with an unbounded wait.
 
 ## Proof limits
 
