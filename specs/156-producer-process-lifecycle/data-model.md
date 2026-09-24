@@ -14,6 +14,9 @@ ProducerProcessRegistration
   schema_version / protocol
   launch_id / journal_id / run_id / parent_task_id / task_id
   intent_sha256 / attestation_sha256 / executable_identity
+  execution_binding                         # darwin-immutable-snapshot | pathname_unbound
+  execution_snapshot_relative_path?
+  execution_snapshot_sha256 / execution_snapshot_size
   pid / pgid / session_id / owner_lock_sha256
   gate_protocol / registered_at_unix_ns
   registration_sha256
@@ -36,6 +39,8 @@ ProducerExecutionReceipt
   launch_id / journal_id / run_id / parent_task_id / task_id
   intent_sha256 / attestation_sha256 / consumption_sha256
   registration_sha256 / executable_identity
+  execution_binding / execution_snapshot_relative_path?
+  execution_snapshot_sha256 / execution_snapshot_size
   pid / pgid / gate_released
   request_timeout_seconds / max_requests / output_max_bytes / wall_timeout_seconds
   request_count / exit_code?

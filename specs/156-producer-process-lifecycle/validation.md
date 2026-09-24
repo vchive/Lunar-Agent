@@ -16,8 +16,9 @@ provider, evaluator, WebAgent, or campaign is started.
 | Recovery | Recovery inspects and may clean only the exact registered group. It cannot consume another nonce, widen budgets, alter intent, reinterpret output, or relaunch. |
 | Regression | Focused lifecycle tests, Ruff, compileall, diff checks, and the full project offline suite pass. Existing automatic solve and scheduler defaults remain unchanged. |
 
-The focused matrix must include: successful gated completion; nonce replay; tuple and executable
-identity drift; shell/credential rejection; child exits before gate; registration write failure;
+The focused matrix must include: successful gated completion; a hostile pre-gate side-effect
+fixture; child exit before gate/broken gate delivery; nonce replay; tuple and executable
+identity drift; shell/credential rejection; registration write failure;
 full stdout/stderr pipes; deterministic output overflow; wall timeout; PID/PGID ownership loss;
 SIGTERM/SIGKILL uncertainty; controller interruption; symlinked/replaced/truncated envelope;
 unstable receipt writes; recovery with no automatic relaunch; and a replacement exactly between
@@ -32,8 +33,8 @@ a held no-follow directory descriptor, and atomically publishes a chained termin
 Recovery verifies the claim, registration, and terminal receipt without relaunching. The focused
 provider-free matrix covers gate order, cross-batch nonce replay, executable drift, nonzero exit,
 request and output limits, timeout, envelope/directory replacement, registration/terminal write
-failures, duplicate JSON keys, and recovery tampering. The focused matrix has **29 passing tests**.
-The final offline repository regression has **7335 passed, 1 skipped**; Ruff, compileall, and
+failures, duplicate JSON keys, and recovery tampering. The focused matrix has **31 passing tests**.
+The final offline repository regression has **7345 passed, 1 skipped**; Ruff, compileall, and
 `git diff --check` pass.
 
 This is not yet the full acceptance matrix. Request-level timeout is a declaration to the producer
@@ -53,4 +54,7 @@ SIGTERM. A descendant that leaves the registered group remains outside this owne
 
 The macOS local probe confirmed that a shebang fixture cannot be launched through `/dev/fd` even
 when the verified descriptor is inherited by the child. `fexecve` and `execveat` are unavailable
-through the local Python/libc interface, so a pathname recheck must not be presented as a fix.
+through the local Python/libc interface. Darwin now uses a private immutable executable snapshot;
+the replacement-after-final-check fixture verifies that the snapshot bytes run and that a failed
+immutable lock rejects before spawn. Non-Darwin remains `pathname_unbound` until a
+descriptor-bound mechanism is specified and tested, so it is not external-admission ready.

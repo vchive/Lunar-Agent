@@ -15,6 +15,7 @@ import secrets
 import selectors
 import stat
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
@@ -40,6 +41,8 @@ GATE_ENV = "LUNAR_PRODUCER_GATE_FD"
 _PROTOCOL = PRODUCER_PROCESS_PROTOCOL
 _MAX_RECEIPT_BYTES = 256 * 1024
 _MAX_CAPTURE_CHUNK = 64 * 1024
+_UF_IMMUTABLE = 0x00000002
+_SNAPSHOT_RELATIVE_PATH = ".producer-snapshots/executable"
 
 
 class ProducerProcessError(ValueError):
@@ -228,6 +231,170 @@ def _identity_digest(identity: Mapping[str, object]) -> str:
     return _sha(dict(identity))
 
 
+@dataclass(frozen=True, slots=True)
+class ProducerExecutableSnapshot:
+    """The exact byte binding used for one producer spawn.
+
+    Darwin uses a private immutable copy because its kernel has no supported
+    ``fexecve``/``execveat`` interface.  Other platforms retain the historical
+    pathname prototype explicitly; that binding is never suitable for external
+    admission.
+    """
+
+    relative_path: str | None
+    sha256: str
+    size: int
+    binding: str
+
+    @property
+    def path(self) -> Path | None:
+        return None
+
+
+def _snapshot_executable(
+    executable: Path,
+    batch: Path,
+    expected_identity: Mapping[str, object],
+    *,
+    deadline: float,
+    monotonic: Callable[[], float],
+) -> ProducerExecutableSnapshot:
+    """Bind executable bytes before ``Popen`` on Darwin.
+
+    A descriptor is opened without following the final symlink, copied while
+    its identity is held, then published under a private batch directory.  The
+    published file is made user-immutable before it is passed to ``Popen``.
+    This is deliberately Darwin-specific: pathname execution remains an
+    explicit prototype on CI/Linux until a descriptor-native contract exists.
+    """
+
+    if sys.platform != "darwin":
+        return ProducerExecutableSnapshot(
+            relative_path=None,
+            sha256=str(expected_identity["sha256"]),
+            size=int(expected_identity["size"]),
+            binding="pathname_unbound",
+        )
+    if not hasattr(os, "chflags"):
+        _fail("producer_process_execution_binding_unsupported")
+    if monotonic() >= deadline:
+        _fail("producer_process_wall_timeout")
+    snapshot_dir = batch / ".producer-snapshots"
+    _safe_dir(snapshot_dir, create=True)
+    snapshot = batch / _SNAPSHOT_RELATIVE_PATH
+    temp_name = ".executable-" + secrets.token_hex(12)
+    temp_path = snapshot_dir / temp_name
+    source_fd = -1
+    target_fd = -1
+    published = False
+    try:
+        source_fd = os.open(executable, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        source_info = os.fstat(source_fd)
+        source_tuple = {
+            "size": source_info.st_size,
+            "device": source_info.st_dev,
+            "inode": source_info.st_ino,
+            "mtime_ns": source_info.st_mtime_ns,
+            "ctime_ns": source_info.st_ctime_ns,
+        }
+        expected_tuple = {key: expected_identity[key] for key in source_tuple}
+        if not stat.S_ISREG(source_info.st_mode) or source_info.st_nlink != 1 or source_tuple != expected_tuple:
+            _fail("producer_process_executable_changed")
+        target_fd = os.open(
+            temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            stat.S_IMODE(source_info.st_mode),
+        )
+        digest_state = hashlib.sha256()
+        total = 0
+        while True:
+            if monotonic() >= deadline:
+                _fail("producer_process_wall_timeout")
+            chunk = os.read(source_fd, _MAX_CAPTURE_CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_OUTPUT_BYTES:
+                _fail("producer_process_executable_invalid")
+            digest_state.update(chunk)
+            written = 0
+            while written < len(chunk):
+                count = os.write(target_fd, chunk[written:])
+                if count <= 0:
+                    raise OSError("short write")
+                written += count
+        source_after = os.fstat(source_fd)
+        if (
+            source_after.st_dev, source_after.st_ino, source_after.st_size,
+            source_after.st_mtime_ns, source_after.st_ctime_ns,
+        ) != (
+            source_info.st_dev, source_info.st_ino, source_info.st_size,
+            source_info.st_mtime_ns, source_info.st_ctime_ns,
+        ) or total != source_info.st_size or digest_state.hexdigest() != str(expected_identity["sha256"]):
+            _fail("producer_process_executable_changed")
+        os.fsync(target_fd)
+        os.close(target_fd)
+        target_fd = -1
+        # Publish the copy under its final private name before setting the
+        # immutable flag; an immutable inode cannot be renamed on Darwin.
+        os.replace(temp_path, snapshot)
+        published = True
+        with _held_directory(snapshot_dir) as directory_fd:
+            os.fsync(directory_fd)
+        staged = _file_identity(snapshot)
+        if staged["sha256"] != expected_identity["sha256"] or staged["size"] != expected_identity["size"]:
+            _fail("producer_process_execution_binding_unknown")
+        try:
+            os.chflags(snapshot, _UF_IMMUTABLE)
+        except OSError as exc:
+            raise ProducerProcessError("producer_process_execution_binding_unknown") from exc
+        try:
+            flags = os.stat(snapshot, follow_symlinks=False).st_flags
+        except OSError as exc:
+            raise ProducerProcessError("producer_process_execution_binding_unknown") from exc
+        if not flags & _UF_IMMUTABLE:
+            _fail("producer_process_execution_binding_unknown")
+        locked = _file_identity(snapshot)
+        if locked["sha256"] != expected_identity["sha256"] or locked["size"] != expected_identity["size"]:
+            _fail("producer_process_execution_binding_unknown")
+        with _held_directory(snapshot_dir) as directory_fd:
+            os.fsync(directory_fd)
+        return ProducerExecutableSnapshot(
+            relative_path=_SNAPSHOT_RELATIVE_PATH,
+            sha256=str(locked["sha256"]),
+            size=int(locked["size"]),
+            binding="darwin-immutable-snapshot",
+        )
+    except ProducerProcessError:
+        raise
+    except OSError as exc:
+        raise ProducerProcessError("producer_process_execution_binding_unknown") from exc
+    finally:
+        for fd in (source_fd, target_fd):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        if not published:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
+def _remove_executable_snapshot(snapshot: ProducerExecutableSnapshot | None, batch: Path | None) -> None:
+    if snapshot is None or snapshot.binding != "darwin-immutable-snapshot" or batch is None:
+        return
+    path = batch / (snapshot.relative_path or "")
+    try:
+        os.chflags(path, 0)
+        path.unlink()
+    except OSError:
+        # The immutable file is retained as recovery evidence if cleanup is
+        # uncertain; execution bytes remain bound by the receipt digest.
+        return
+
+
 def _atomic_json(path: Path, value: Mapping[str, object], *, exclusive: bool = False) -> None:
     data = _canonical(value)
 
@@ -343,6 +510,10 @@ class ProducerExecutionReceipt:
     envelope_evidence: ProducerEnvelopeEvidence | None
     cleanup_status: str
     cleanup_sha256: str | None
+    execution_binding: str
+    execution_snapshot_relative_path: str | None
+    execution_snapshot_sha256: str
+    execution_snapshot_size: int
     status: str
     failure_code: str | None = None
     previous_receipt_sha256: str | None = None
@@ -353,6 +524,21 @@ class ProducerExecutionReceipt:
     def __post_init__(self) -> None:
         if self.schema_version != "1" or self.protocol != _PROTOCOL:
             _fail("producer_process_receipt_schema_invalid")
+        if self.execution_binding not in {"pathname_unbound", "darwin-immutable-snapshot"}:
+            _fail("producer_process_receipt_execution_binding_invalid")
+        if (
+            not isinstance(self.execution_snapshot_sha256, str)
+            or len(self.execution_snapshot_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in self.execution_snapshot_sha256)
+            or isinstance(self.execution_snapshot_size, bool)
+            or not isinstance(self.execution_snapshot_size, int)
+            or self.execution_snapshot_size < 0
+        ):
+            _fail("producer_process_receipt_execution_snapshot_invalid")
+        if self.execution_binding == "darwin-immutable-snapshot" and not self.execution_snapshot_relative_path:
+            _fail("producer_process_receipt_execution_snapshot_invalid")
+        if self.execution_binding == "pathname_unbound" and self.execution_snapshot_relative_path is not None:
+            _fail("producer_process_receipt_execution_snapshot_invalid")
         if self.status not in {"completed", "failed", "cancelled", "unknown", "recovery_required"}:
             _fail("producer_process_receipt_status_invalid")
         expected = self.digest()
@@ -389,6 +575,10 @@ class ProducerExecutionReceipt:
             "envelope_evidence": None if self.envelope_evidence is None else self.envelope_evidence.to_dict(),
             "cleanup_status": self.cleanup_status,
             "cleanup_sha256": self.cleanup_sha256,
+            "execution_binding": self.execution_binding,
+            "execution_snapshot_relative_path": self.execution_snapshot_relative_path,
+            "execution_snapshot_sha256": self.execution_snapshot_sha256,
+            "execution_snapshot_size": self.execution_snapshot_size,
             "status": self.status,
             "failure_code": self.failure_code,
             "previous_receipt_sha256": self.previous_receipt_sha256,
@@ -606,6 +796,8 @@ def run_producer_process(
     output = _relative_path(batch, intent.output_directory)
     _safe_dir(working, create=True)
     _safe_dir(output, create=True)
+    snapshot: ProducerExecutableSnapshot | None = None
+    snapshot_path = executable
 
     attestation_digest = attestation.attestation_sha256 or attestation.digest()
     intent_digest = intent.intent_sha256 or intent.digest()
@@ -626,6 +818,18 @@ def run_producer_process(
     _atomic_json(claim_path, claim_payload, exclusive=True)
     consumption_digest = str(claim_payload["consumption_sha256"])
 
+    # Consume the attestation before the final byte-bound preparation. If snapshot creation
+    # fails after the one-time claim, recovery sees the claim and can close the attempt without
+    # allowing a second launch.
+    snapshot = _snapshot_executable(
+        executable,
+        batch,
+        expected_identity,
+        deadline=deadline,
+        monotonic=monotonic,
+    )
+    snapshot_path = executable if snapshot.relative_path is None else batch / snapshot.relative_path
+
     gate_read, gate_write = os.pipe()
     gate_released = False
     process: subprocess.Popen[bytes] | None = None
@@ -642,7 +846,7 @@ def run_producer_process(
         if _file_identity(executable) != expected_identity:
             _fail("producer_process_executable_changed")
         process = popen_factory(
-            list(intent.argv), executable=str(executable), shell=False, start_new_session=True,
+            list(intent.argv), executable=str(snapshot_path), shell=False, start_new_session=True,
             close_fds=True, pass_fds=(gate_read,), cwd=str(working), env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -663,7 +867,12 @@ def run_producer_process(
             "journal_id": intent.journal_id, "run_id": intent.run_id, "parent_task_id": intent.parent_task_id,
             "task_id": intent.task_id, "intent_sha256": intent_digest,
             "attestation_sha256": attestation_digest, "consumption_sha256": consumption_digest,
-            "executable_identity": _identity_digest(identity), "pid": process.pid, "pgid": pgid,
+            "executable_identity": _identity_digest(identity),
+            "execution_binding": snapshot.binding,
+            "execution_snapshot_relative_path": snapshot.relative_path,
+            "execution_snapshot_sha256": snapshot.sha256,
+            "execution_snapshot_size": snapshot.size,
+            "pid": process.pid, "pgid": pgid,
             "gate_protocol": "fd-read-one-byte", "registered_at_unix_ns": time.time_ns(),
         }
         registration_payload["registration_sha256"] = _digest_without(registration_payload, "registration_sha256")
@@ -690,7 +899,7 @@ def run_producer_process(
             ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED,
         }:
             return _persist_receipt(
-                batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+                batch, intent, attestation, consumption_digest, registration_digest, identity, snapshot, process.pid, pgid,
                 gate_released, stdout, stderr, None, exited_leader_cleanup, "unknown", "producer_process_cleanup_unknown",
                 process.returncode,
             )
@@ -711,7 +920,7 @@ def run_producer_process(
                 "producer_process_wall_timeout" if timed_out else "producer_process_output_limit_exceeded"
             )
             return _persist_receipt(
-                batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+                batch, intent, attestation, consumption_digest, registration_digest, identity, snapshot, process.pid, pgid,
                 gate_released, stdout, stderr, None, cleanup_result, status, failure,
             )
         try:
@@ -719,7 +928,7 @@ def run_producer_process(
         except subprocess.TimeoutExpired:
             cleanup_result = _cleanup(registration, process, deadline=deadline, monotonic=monotonic)
             return _persist_receipt(
-                batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+                batch, intent, attestation, consumption_digest, registration_digest, identity, snapshot, process.pid, pgid,
                 gate_released, stdout, stderr, None, cleanup_result, "unknown", "producer_process_wall_timeout",
             )
         cleanup_result = exited_leader_cleanup or _cleanup(
@@ -727,12 +936,12 @@ def run_producer_process(
         )
         if cleanup_result.status not in {ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED}:
             return _persist_receipt(
-                batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+                batch, intent, attestation, consumption_digest, registration_digest, identity, snapshot, process.pid, pgid,
                 gate_released, stdout, stderr, None, cleanup_result, "unknown", "producer_process_cleanup_unknown", exit_code,
             )
         if exit_code != 0:
             return _persist_receipt(
-                batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+                batch, intent, attestation, consumption_digest, registration_digest, identity, snapshot, process.pid, pgid,
                 gate_released, stdout, stderr, None, cleanup_result, "failed", "producer_process_exit_failed", exit_code,
             )
         try:
@@ -742,7 +951,7 @@ def run_producer_process(
             )
         except ProducerProcessError as exc:
             return _persist_receipt(
-                batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+                batch, intent, attestation, consumption_digest, registration_digest, identity, snapshot, process.pid, pgid,
                 gate_released, stdout, stderr, None, cleanup_result,
                 "unknown" if exc.code.endswith("_unknown") or exc.code == "producer_process_wall_timeout" else "failed",
                 exc.code, exit_code,
@@ -750,7 +959,7 @@ def run_producer_process(
         status = "completed" if request_count <= intent.max_requests else "failed"
         failure = None if status == "completed" else "producer_process_request_limit_exceeded"
         return _persist_receipt(
-            batch, intent, attestation, consumption_digest, registration_digest, identity, process.pid, pgid,
+            batch, intent, attestation, consumption_digest, registration_digest, identity, snapshot, process.pid, pgid,
             gate_released, stdout, stderr, envelope, cleanup_result, status, failure, exit_code, request_count,
         )
     except ProducerProcessError:
@@ -772,11 +981,24 @@ def run_producer_process(
             for stream in (process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()
+        # Keep an immutable snapshot when no terminal receipt was durably published. A
+        # post-spawn exception must leave recovery evidence and must not remove the bytes a
+        # still-running child may be executing.
+        if snapshot is not None and (batch / "execution-receipt.json").is_file():
+            try:
+                terminal = _read_durable_json(
+                    batch / "execution-receipt.json", code="producer_process_receipt_cleanup_unknown",
+                )
+            except ProducerProcessError:
+                terminal = {}
+            if terminal.get("status") in {"completed", "failed", "cancelled"}:
+                _remove_executable_snapshot(snapshot, batch)
 
 
 def _persist_receipt(
     batch: Path, intent: ProducerLaunchIntent, attestation: ProducerLaunchAttestation,
-    consumption_digest: str, registration_digest: str, identity: Mapping[str, object], pid: int, pgid: int,
+    consumption_digest: str, registration_digest: str, identity: Mapping[str, object],
+    snapshot: ProducerExecutableSnapshot, pid: int, pgid: int,
     gate_released: bool, stdout: ProducerStreamEvidence, stderr: ProducerStreamEvidence,
     envelope: ProducerEnvelopeEvidence | None, cleanup: ProcessCleanupResult, status: str,
     failure: str | None, exit_code: int | None = None, request_count: int | None = None,
@@ -793,6 +1015,10 @@ def _persist_receipt(
         output_max_bytes=intent.output_max_bytes, wall_timeout_seconds=intent.wall_timeout_seconds,
         request_count=request_count, exit_code=exit_code, stdout_evidence=stdout, stderr_evidence=stderr,
         envelope_evidence=envelope, cleanup_status=cleanup_status, cleanup_sha256=cleanup_digest,
+        execution_binding=snapshot.binding,
+        execution_snapshot_relative_path=snapshot.relative_path,
+        execution_snapshot_sha256=snapshot.sha256,
+        execution_snapshot_size=snapshot.size,
         status=status, failure_code=failure, previous_receipt_sha256=registration_digest,
     )
     _atomic_json(batch / "execution-receipt.json", receipt.to_dict(), exclusive=True)
@@ -910,7 +1136,8 @@ def recover_producer_process(
         or any(raw.get(key) != registration.get(key) for key in (
             "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
             "intent_sha256", "attestation_sha256", "consumption_sha256", "registration_sha256",
-            "executable_identity", "pid", "pgid",
+            "executable_identity", "execution_binding", "execution_snapshot_relative_path",
+            "execution_snapshot_sha256", "execution_snapshot_size", "pid", "pgid",
         ))
         or raw.get("previous_receipt_sha256") != registration.get("registration_sha256")
     ):

@@ -3852,11 +3852,20 @@ attestation 消耗、进程登记后放行、受限输出采集、结果文件�
 SIGTERM/SIGKILL 清理证据；缺失 owner、复用 PID、非组长等情况仍拒绝发信号。真实后代
 fixture 覆盖继承管道、重定向管道和忽略 SIGTERM。
 
-专项 `tests/test_producer_process.py` 29 项通过；进程所有权相关组合 67 项通过；全仓离线
-回归 7335 passed、1 skipped。Ruff、compileall、`git diff --check` 通过。没有运行真实
+专项 `tests/test_producer_process.py` 31 项通过；进程所有权相关核心组合 51 项通过；
+Feature 157 请求证据 8 项通过；全仓离线回归 7345 passed、1 skipped。Ruff、compileall、
+`git diff --check` 通过。没有运行真实
 provider、evaluator、外部 producer campaign 或 WebAgent；默认调度未接入该 runner。
 
 Feature 156 仍未达到外部接入验收：macOS 上对脚本按已验证 FD 的 `/dev/fd` 执行不可行，
-当前按路径 `Popen` 在最后核验与内核打开之间存在可执行文件替换窗口；请求级超时尚无
+当前 Darwin 已改为私有 `UF_IMMUTABLE` 字节快照并绑定快照摘要；非 Darwin 仍按路径
+`Popen`，存在最后核验与内核打开之间的替换窗口。请求级超时尚无
 可信逐请求证据，任意 producer 是否遵守 gate 也不能由父进程证明。SDD 已加入执行字节
-绑定的明确验收项。上述问题解决前，不把 Feature 156 标为完成或合入默认调度。
+绑定、trusted bootstrap 和 hostile pre-gate 负例的明确验收项。Feature 157 已定义
+cooperative request evidence DTO，但仍未接入 Feature 156；文件声明不能冒充 host-observed
+enforcement。上述问题解决前，不把 Feature 156 标为完成或合入默认调度。
+
+Feature 157 提交为 `9f79e4a`，已推送到当前分支。它提供严格绑定 launch/journal/run/
+parent/task、intent 和两项预算的有界请求事件 DTO，支持 complete/partial 覆盖与固定摘要；
+评估结果明确是 `cooperative_declaration`，不能冒充宿主强制的 request timeout。Feature 156
+仍需 controller-owned evidence pipe 或受控 producer SDK 后才能接入该证据。

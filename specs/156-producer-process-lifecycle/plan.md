@@ -6,7 +6,9 @@
    persist the claim before attempting `Popen` and make replay fail closed.
 3. Add a gate-aware no-shell launcher using `Popen(shell=False, start_new_session=True,
    close_fds=True)`, then verify executable identity and exact PID/PGID ownership before writing
-   and fsyncing the registration receipt.
+   and fsyncing the registration receipt. On Darwin, copy the final verified bytes into a private
+   immutable snapshot and bind that snapshot digest to registration and terminal receipts; keep
+   pathname execution explicitly prototype-only on platforms without a descriptor-bound path.
 4. Release the gate only after registration is durable. Drain stdout/stderr concurrently under
    fixed byte ceilings and record only bounded counts, truncation flags, and digests.
 5. Enforce one monotonic wall-clock deadline across waits, capture, owner-checked cleanup, and

@@ -96,21 +96,32 @@ constructs a shell command or interpolates untrusted text. Standard input is clo
 path and `argv[0]` must remain the exact pinned values from the intent; any drift aborts before
 spawn.
 
-The child receives a private, fixed gate descriptor through the launch protocol. It must block
-before producer work until the parent releases that descriptor. Immediately after `Popen`, the
-parent verifies `pid`, `pgid == pid` (or the exact recorded session group), executable identity,
-and owner predicate, then atomically writes and fsyncs the launch receipt. Only a durable
-`process_registered` receipt permits gate release. A child that exits before release is `failed`
-unless the parent cannot determine the reason, which is `unknown`.
+The child receives a private, fixed gate descriptor through the launch protocol. The direct
+launcher supports only a cooperating fixture contract: the target must block before producer work
+until the parent releases that descriptor. Immediately after `Popen`, the parent verifies `pid`,
+`pgid == pid` (or the exact recorded session group), executable identity, and owner predicate,
+then atomically writes and fsyncs the launch receipt. Only a durable `process_registered` receipt
+permits gate release. A child that exits before release is `failed` unless the parent cannot
+determine the reason, which is `unknown`.
+
+This observation does not prove that an arbitrary executable waited. A producer can write files,
+fork, leave the process group, or use the network before reading the gate. External admission
+therefore requires a Lunar-owned, attested bootstrap whose first action is the gate wait; the
+bootstrap may start the pinned producer only after the parent registration is durable. Until that
+protocol and its identity digest are part of the intent and receipt, arbitrary direct targets are
+out of scope and the runner remains provider-free prototype behavior.
 
 The executable bytes actually run must be bound to the attested bytes. Checking the source path
 immediately before `Popen(executable=path)` is insufficient: a concurrent rename can replace the
 path between the check and the kernel's open. On macOS, executing a shebang script through a held
 `/dev/fd` descriptor fails, and Python exposes no `fexecve`/`execveat` fallback there. A future
-implementation must define and test a platform-supported descriptor-bound execution mechanism,
-or a controlled producer runtime that executes the verified source bytes from a held descriptor
-and separately pins its trusted runtime. Until then, pathname execution is local prototype
-behavior and cannot satisfy the executable-identity acceptance criterion or external admission.
+implementation must define and test a platform-supported descriptor-bound execution mechanism on
+each remaining platform, or a controlled producer runtime that executes the verified source bytes
+from a held descriptor and separately pins its trusted runtime. The Darwin implementation stages
+the verified bytes into a private `UF_IMMUTABLE` snapshot and binds its digest and binding mode in
+the registration and terminal receipts; replacement after the final source check therefore uses
+the snapshot bytes. On non-Darwin platforms the current `pathname_unbound` mode remains local
+prototype behavior and cannot satisfy external executable admission.
 
 The durable receipt is written with a bounded temporary file, `fsync`, and no-follow atomic rename;
 the destination and every existing ancestor must be a regular directory without symlinks. The
@@ -188,3 +199,5 @@ the only result exposed to downstream publication code.
    recovery. No real provider, external producer campaign, evaluator, or WebAgent is run.
 8. A deterministic replacement between the final source check and process creation cannot run
    un-attested bytes while producing a successful execution receipt.
+9. A hostile direct target that performs a side effect before reading the gate cannot produce a
+   completed receipt; external admission uses only an attested Lunar-owned bootstrap.

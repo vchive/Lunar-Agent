@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -246,6 +248,68 @@ def test_output_limit_is_bounded(tmp_path: Path):
     assert receipt.status == "failed"
     assert receipt.failure_code == "producer_process_output_limit_exceeded"
     assert receipt.stdout_evidence.bytes_observed > intent.output_max_bytes
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin immutable execution snapshots")
+def test_darwin_snapshot_survives_source_replacement_after_final_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    producer_root, intent, attestation = _fixture(tmp_path)
+    executable = producer_root / "producer.py"
+    original = executable.read_bytes()
+    observed = {}
+
+    def replacing_popen(*args, **kwargs):
+        snapshot = Path(kwargs["executable"])
+        flags = os.stat(snapshot, follow_symlinks=False).st_flags
+        assert flags & producer_process._UF_IMMUTABLE
+        assert snapshot.name == "executable"
+        replacement = producer_root / "replacement.py"
+        replacement.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib\n"
+            "pathlib.Path('../output/producer-result.json').write_text('{}')\n",
+            encoding="utf-8",
+        )
+        replacement.chmod(0o755)
+        replacement.replace(executable)
+        observed["snapshot"] = snapshot
+        return producer_process.subprocess.Popen(*args, **kwargs)
+
+    receipt = run_producer_process(
+        tmp_path,
+        intent=intent,
+        attestation=attestation,
+        producer_root=producer_root,
+        popen_factory=replacing_popen,
+    )
+    assert receipt.status == "completed"
+    assert receipt.execution_binding == "darwin-immutable-snapshot"
+    assert receipt.execution_snapshot_sha256 == hashlib.sha256(original).hexdigest()
+    assert not observed["snapshot"].exists()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin immutable execution snapshots")
+def test_darwin_snapshot_lock_failure_rejects_before_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    producer_root, intent, attestation = _fixture(tmp_path)
+
+    def fail_chflags(*args, **kwargs):
+        raise OSError("immutable flags unavailable")
+
+    monkeypatch.setattr(producer_process.os, "chflags", fail_chflags)
+
+    def forbidden_spawn(*args, **kwargs):
+        pytest.fail("snapshot lock failure must reject before spawn")
+
+    with pytest.raises(ProducerProcessError) as exc:
+        run_producer_process(
+            tmp_path,
+            intent=intent,
+            attestation=attestation,
+            producer_root=producer_root,
+            popen_factory=forbidden_spawn,
+        )
+    assert exc.value.code == "producer_process_execution_binding_unknown"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
