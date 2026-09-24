@@ -3911,3 +3911,23 @@ WebAgent 或 campaign 验收。
 `tests/test_process_ownership.py` 共 **94 passed**。全仓 pytest 在当前未安装项目 CLI 的
 解释器环境中有 4 个既有 installed-CLI/effect-adapter 收集后失败，原因是找不到
 `Path(sys.executable).parent / "lunar-evolution"`；未涉及本轮代码。
+
+## 2026-09-24 Feature 156/158 deadline-bound cleanup follow-up
+
+本轮继续沿现有 SDD 收紧生命周期预算边界。`cleanup_registered_process()` 新增可选的绝对
+monotonic `deadline`，TERM 与 KILL 两阶段共享同一个截止时间；截止后不会继续等待，仍存活
+的进程组保留 `cleanup_unverified`/`unknown` 语义。trusted bootstrap fixture 的正常路径和
+异常收尾都传入同一 deadline，最终 leader `wait()` 也保持有界。
+
+审查同时修正了两个安全边界：producer process 的 cleanup 现在把全局 deadline 传到底层，
+并在允许已退出 leader 时先调用 `poll()`；trusted bootstrap 异常收尾不再绕过 owner-checked
+cleanup 直接调用 `process.kill()`。新增回归覆盖绝对 deadline 传递、已退出 leader 观测以及
+owner 丢失时不得直接 kill。定向回归共 78 passed；Ruff、compileall 和 `git diff --check`
+已通过。Darwin immutable snapshot 测试仍可能产生 pytest 清理警告，这是测试快照的系统
+不可变属性，不影响通过结果。
+
+这轮没有扩大声明范围：T156-05/06/09/11/11b/12/13/14 与 T158-04 仍未完成。请求级超时
+仍是 producer 协议声明，非 Darwin 仍缺 descriptor-bound execution，trusted bootstrap 仍是
+fixture-only，尚未接入 Feature 156 正式 registration/cleanup/recovery 或默认 scheduler。
+没有运行 provider、WebAgent、外部 producer 或真实 campaign。当前工作区在提交前包含上述
+deadline 实现、测试和文档更新。

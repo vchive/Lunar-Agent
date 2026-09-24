@@ -743,7 +743,8 @@ def _cleanup(
     remaining = max(0.01, min(0.25, deadline - monotonic()))
     return cleanup_registered_process(
         registration, grace_seconds=remaining, monotonic=monotonic,
-        allow_exited_leader_initial=process.returncode is not None,
+        deadline=deadline,
+        allow_exited_leader_initial=process.poll() is not None,
     )
 
 

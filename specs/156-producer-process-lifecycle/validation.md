@@ -58,3 +58,20 @@ through the local Python/libc interface. Darwin now uses a private immutable exe
 the replacement-after-final-check fixture verifies that the snapshot bytes run and that a failed
 immutable lock rejects before spawn. Non-Darwin remains `pathname_unbound` until a
 descriptor-bound mechanism is specified and tested, so it is not external-admission ready.
+
+## Deadline and fault-injection follow-up (2026-09-24)
+
+The cleanup primitive now accepts one absolute monotonic deadline. SIGTERM grace, SIGKILL
+grace, and the final leader wait are all clipped to that deadline; a post-deadline live group
+is reported as `cleanup_unverified` rather than extending the attempt. The trusted bootstrap
+fixture passes that same deadline through both normal and exceptional cleanup paths.
+
+The focused process-ownership, producer-process, and trusted-bootstrap-runtime suites pass.
+New fixtures cover capture-read failure, SIGTERM failure, SIGKILL failure, cleanup uncertainty
+projection, owner-loss without a direct fallback kill, and a two-phase cleanup that cannot
+exceed the absolute deadline. These fixtures improve T156-13 coverage but do not close the
+complete lifecycle matrix.
+
+T156-05, T156-06, T156-09, T156-11, T156-11b, T156-12, T156-13, and T156-14 remain open:
+request-level timeout is still cooperative, non-Darwin execution is pathname-bound, trusted
+bootstrap is fixture-only, and controller-owned request evidence is not yet connected.

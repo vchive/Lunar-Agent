@@ -10,6 +10,7 @@ are still attempted.
 from __future__ import annotations
 
 import errno
+import math
 import os
 import signal
 import time
@@ -141,6 +142,7 @@ def cleanup_registered_process(
     registration: RegisteredProcess,
     *,
     grace_seconds: float = DEFAULT_CLEANUP_GRACE_SECONDS,
+    deadline: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
     allow_exited_leader_initial: bool = False,
@@ -155,6 +157,13 @@ def cleanup_registered_process(
         isinstance(grace_seconds, bool)
         or not isinstance(grace_seconds, (int, float))
         or not 0 < float(grace_seconds) <= MAX_CLEANUP_GRACE_SECONDS
+    ) or (
+        deadline is not None
+        and (
+            isinstance(deadline, bool)
+            or not isinstance(deadline, (int, float))
+            or not math.isfinite(float(deadline))
+        )
     ) or not _valid_registration(registration):
         return _result(registration, ProcessCleanupStatus.INVALID_REGISTRATION)
 
@@ -177,7 +186,9 @@ def cleanup_registered_process(
     except OSError as exc:
         return _result(registration, ProcessCleanupStatus.TERM_FAILED, alive_after=True, error=type(exc).__name__)
 
-    deadline = monotonic() + float(grace_seconds)
+    cleanup_deadline = monotonic() + float(grace_seconds)
+    if deadline is not None:
+        cleanup_deadline = min(cleanup_deadline, float(deadline))
     while True:
         try:
             alive = _group_alive(registration.pgid)
@@ -188,7 +199,7 @@ def cleanup_registered_process(
             )
         if not alive:
             return _result(registration, ProcessCleanupStatus.CLEANED, term_sent=True)
-        remaining = deadline - monotonic()
+        remaining = cleanup_deadline - monotonic()
         if remaining <= 0:
             break
         sleep(min(0.01, remaining))
@@ -210,6 +221,8 @@ def cleanup_registered_process(
         )
 
     kill_deadline = monotonic() + float(grace_seconds)
+    if deadline is not None:
+        kill_deadline = min(kill_deadline, float(deadline))
     while True:
         try:
             alive = _group_alive(registration.pgid)
@@ -234,9 +247,10 @@ def cleanup_registered_processes(
     registrations: Iterable[RegisteredProcess],
     *,
     grace_seconds: float = DEFAULT_CLEANUP_GRACE_SECONDS,
+    deadline: float | None = None,
     cleanup: Callable[..., ProcessCleanupResult] = cleanup_registered_process,
 ) -> tuple[ProcessCleanupResult, ...]:
-    """Clean all registrations, preserving fan-out after callback or OS failures."""
+    """Clean all registrations under one optional absolute deadline."""
     results: list[ProcessCleanupResult] = []
     completed: dict[tuple[int, int], ProcessCleanupResult] = {}
     for registration in registrations:
@@ -257,7 +271,10 @@ def cleanup_registered_processes(
             ))
             continue
         try:
-            result = cleanup(registration, grace_seconds=grace_seconds)
+            kwargs: dict[str, object] = {"grace_seconds": grace_seconds}
+            if deadline is not None:
+                kwargs["deadline"] = deadline
+            result = cleanup(registration, **kwargs)
         except Exception as exc:  # noqa: BLE001 - continue fan-out after one callback fails.
             result = _result(
                 registration, ProcessCleanupStatus.CALLBACK_FAILED, error=type(exc).__name__,

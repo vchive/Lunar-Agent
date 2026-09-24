@@ -19,6 +19,7 @@ from lunar_evolution import (
     producer_process,
     run_producer_process,
 )
+from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
 from lunar_evolution.producer_process import recover_producer_process
 
 DIGEST = "a" * 64
@@ -349,6 +350,75 @@ def test_capture_timeout_does_not_read_open_pipe_after_deadline():
         assert timed_out is True
     finally:
         os.close(write_fd)
+
+
+def test_capture_read_failure_is_unknown(monkeypatch: pytest.MonkeyPatch):
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"x")
+    try:
+        with os.fdopen(read_fd, "rb", buffering=0) as stdout:
+            process = SimpleNamespace(stdout=stdout, stderr=None, poll=lambda: None)
+            original_read = producer_process.os.read
+
+            def fail_read(fd: int, size: int) -> bytes:
+                if fd == read_fd:
+                    raise OSError("capture read unavailable")
+                return original_read(fd, size)
+
+            monkeypatch.setattr(producer_process.os, "read", fail_read)
+            with pytest.raises(ProducerProcessError) as exc:
+                producer_process._capture(
+                    process, limit=1024, deadline=time.monotonic() + 1.0,
+                    monotonic=time.monotonic,
+                )
+        assert exc.value.code == "producer_process_capture_unknown"
+    finally:
+        os.close(write_fd)
+
+
+def test_cleanup_signal_uncertainty_is_persisted_as_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    producer_root, intent, attestation = _fixture(tmp_path)
+
+    def uncertain_cleanup(registration, **kwargs):
+        return ProcessCleanupResult(
+            label=registration.label,
+            pid=registration.pid,
+            pgid=registration.pgid,
+            status=ProcessCleanupStatus.KILL_FAILED,
+            alive_after=True,
+        )
+
+    monkeypatch.setattr(producer_process, "cleanup_registered_process", uncertain_cleanup)
+    receipt = run_producer_process(
+        tmp_path, intent=intent, attestation=attestation, producer_root=producer_root,
+    )
+    assert receipt.status == "unknown"
+    assert receipt.failure_code == "producer_process_cleanup_unknown"
+
+
+def test_cleanup_passes_absolute_deadline_and_rechecks_exited_leader(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    registration = producer_process.RegisteredProcess(321, 654, owner_check=lambda: True)
+    observed: dict[str, object] = {}
+
+    def checked_cleanup(registration, **kwargs):
+        observed.update(kwargs)
+        return ProcessCleanupResult(
+            label=registration.label,
+            pid=registration.pid,
+            pgid=registration.pgid,
+            status=ProcessCleanupStatus.ALREADY_EXITED,
+        )
+
+    monkeypatch.setattr(producer_process, "cleanup_registered_process", checked_cleanup)
+    process = SimpleNamespace(returncode=None, poll=lambda: 7)
+    producer_process._cleanup(registration, process, deadline=10.0, monotonic=lambda: 9.0)
+
+    assert observed["deadline"] == 10.0
+    assert observed["allow_exited_leader_initial"] is True
 
 
 def test_preparation_time_counts_toward_wall_deadline(tmp_path: Path):

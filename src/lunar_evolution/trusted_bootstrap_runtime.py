@@ -503,7 +503,8 @@ def run_trusted_bootstrap_fixture(
         target_exit_code = process.wait(timeout=_remaining(deadline))
         cleanup_result = cleanup_registered_process(
             registration_process,
-            grace_seconds=min(0.25, _remaining(deadline)),
+            grace_seconds=min(0.25, max(0.001, _remaining(deadline))),
+            deadline=deadline,
             allow_exited_leader_initial=True,
         )
         if cleanup_result.status.value not in {"already_exited", "cleaned"}:
@@ -558,11 +559,9 @@ def run_trusted_bootstrap_fixture(
             cleanup_registered_process(
                 registration_process,
                 grace_seconds=0.25,
-                allow_exited_leader_initial=process.returncode is not None,
+                deadline=deadline,
+                allow_exited_leader_initial=process.poll() is not None,
             )
-            if process.poll() is None:
-                process.kill()
-                process.wait()
         if process is not None and process.stderr is not None:
             process.stderr.close()
         if registration_digest and not evidence_path.exists():

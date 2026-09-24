@@ -66,6 +66,59 @@ def test_term_then_kill_after_grace(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.term_sent and result.kill_sent
 
 
+def test_absolute_deadline_bounds_both_cleanup_phases(monkeypatch: pytest.MonkeyPatch) -> None:
+    registration = RegisteredProcess(321, 654, owner_check=lambda: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", lambda _pid: 654)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    clock = iter([0.0, 0.0, 1.0, 1.0, 1.0])
+    result = cleanup_registered_process(
+        registration,
+        grace_seconds=5.0,
+        deadline=1.0,
+        sleep=lambda _delay: None,
+        monotonic=lambda: next(clock),
+    )
+    assert result.status is ProcessCleanupStatus.CLEANUP_UNVERIFIED
+    assert sent == [(654, signal.SIGTERM), (654, signal.SIGKILL)]
+
+
+def test_term_signal_failure_is_uncertain_and_does_not_escalate(monkeypatch: pytest.MonkeyPatch) -> None:
+    registration = RegisteredProcess(321, 654, owner_check=lambda: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", lambda _pid: 654)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
+
+    def fail_term(_pgid: int, _signal: int) -> None:
+        raise OSError("signal unavailable")
+
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", fail_term)
+    result = cleanup_registered_process(registration)
+    assert result.status is ProcessCleanupStatus.TERM_FAILED
+    assert result.alive_after is True
+
+
+def test_kill_signal_failure_is_uncertain_after_term(monkeypatch: pytest.MonkeyPatch) -> None:
+    registration = RegisteredProcess(321, 654, owner_check=lambda: True)
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.getpgid", lambda _pid: 654)
+    monkeypatch.setattr("lunar_evolution.process_ownership._group_alive", lambda _pgid: True)
+    sent: list[int] = []
+
+    def fail_kill(_pgid: int, sig: int) -> None:
+        sent.append(sig)
+        if sig == signal.SIGKILL:
+            raise OSError("kill unavailable")
+
+    monkeypatch.setattr("lunar_evolution.process_ownership.os.killpg", fail_kill)
+    clock = iter([0.0, 1.0, 1.0])
+    result = cleanup_registered_process(
+        registration, grace_seconds=0.5, sleep=lambda _delay: None,
+        monotonic=lambda: next(clock),
+    )
+    assert result.status is ProcessCleanupStatus.KILL_FAILED
+    assert sent == [signal.SIGTERM, signal.SIGKILL]
+
+
 def test_fanout_continues_after_callback_failure() -> None:
     registrations = [RegisteredProcess(1, 2, label="first"), RegisteredProcess(3, 4, label="second")]
     calls: list[str] = []
@@ -199,6 +252,24 @@ def test_successful_same_group_cleanup_is_not_repeated():
     assert calls == ["first"]
     assert [result.label for result in results] == ["first", "second"]
     assert all(result.status is ProcessCleanupStatus.CLEANED and result.term_sent for result in results)
+
+
+def test_fanout_propagates_one_absolute_deadline():
+    registrations = [RegisteredProcess(321, 321, label="one")]
+    observed = {}
+
+    def cleanup(registration, *, grace_seconds, deadline):
+        observed.update(grace_seconds=grace_seconds, deadline=deadline)
+        return ProcessCleanupResult(
+            registration.label, registration.pid, registration.pgid,
+            ProcessCleanupStatus.CLEANED,
+        )
+
+    cleanup_registered_processes(
+        registrations, grace_seconds=0.5, deadline=12.0, cleanup=cleanup,
+    )
+
+    assert observed == {"grace_seconds": 0.5, "deadline": 12.0}
 
 
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")

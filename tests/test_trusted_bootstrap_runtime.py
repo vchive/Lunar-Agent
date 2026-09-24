@@ -261,6 +261,47 @@ def test_unverified_cleanup_preserves_unknown_and_retries(
     assert json.loads(evidence_path.read_text(encoding="utf-8"))["status"] == "unknown"
 
 
+def test_exception_cleanup_never_direct_kills_unverified_leader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import lunar_evolution.trusted_bootstrap_runtime as runtime
+
+    target = _target(tmp_path)
+    registration: dict[str, int] = {}
+
+    def uncertain_cleanup(record, **kwargs):
+        registration["pgid"] = record.pgid
+        return ProcessCleanupResult(
+            label=record.label,
+            pid=record.pid,
+            pgid=record.pgid,
+            status=ProcessCleanupStatus.OWNERSHIP_LOST,
+            alive_after=True,
+        )
+
+    monkeypatch.setattr(runtime, "cleanup_registered_process", uncertain_cleanup)
+    monkeypatch.setattr(
+        runtime.subprocess.Popen,
+        "kill",
+        lambda _process: pytest.fail("unverified cleanup must not bypass owner checks"),
+    )
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        run_trusted_bootstrap_fixture(
+            tmp_path,
+            launch=_launch(target),
+            descriptor=build_trusted_bootstrap_descriptor(),
+            target_executable=target,
+            timeout_seconds=0.05,
+            on_before_release=lambda _path: time.sleep(0.1),
+        )
+    assert exc.value.code == "trusted_bootstrap_deadline_exceeded"
+    assert registration["pgid"] > 1
+    try:
+        os.killpg(registration["pgid"], 9)
+    except ProcessLookupError:
+        pass
+
+
 @pytest.mark.parametrize(("gate_bytes", "expected_status"), [(b"11", 24), (b"", 24)])
 def test_child_rejects_duplicate_gate_token_and_early_gate_eof(
     tmp_path: Path, gate_bytes: bytes, expected_status: int,
