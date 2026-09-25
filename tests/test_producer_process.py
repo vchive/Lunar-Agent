@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 from contextlib import contextmanager
@@ -766,6 +767,96 @@ def test_missing_terminal_receipt_requires_recovery_without_relaunch(tmp_path: P
     assert recovered["reason"] == "producer_process_terminal_receipt_missing"
 
 
+def _registered_live_process(tmp_path: Path):
+    producer_root, intent, attestation = _fixture(tmp_path)
+    run_producer_process(tmp_path, intent=intent, attestation=attestation, producer_root=producer_root)
+    batch = tmp_path / "evolution/producer-batches/journal-001"
+    (batch / "execution-receipt.json").unlink()
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        start_new_session=True, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    registration_path = batch / "process-registration.json"
+    registration = json.loads(registration_path.read_text())
+    registration["pid"] = process.pid
+    registration["pgid"] = os.getpgid(process.pid)
+    registration["owner_identity"] = producer_process._process_owner_identity(process.pid)
+    assert registration["owner_identity"] is not None
+    registration["owner_identity_sha256"] = producer_process._sha(registration["owner_identity"])
+    registration["registration_sha256"] = producer_process._digest_without(
+        registration, "registration_sha256",
+    )
+    registration_path.write_bytes(producer_process._canonical(registration))
+    return batch, intent, process
+
+
+def test_explicit_recovery_cleans_only_registered_owner_and_writes_receipt(tmp_path: Path):
+    batch, intent, process = _registered_live_process(tmp_path)
+    try:
+        observed = recover_producer_process(tmp_path, journal_id=intent.journal_id)
+        assert observed["status"] == "recovery_required"
+        assert not (batch / "recovery-receipt.json").exists()
+        recovered = recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+        assert recovered["status"] == "recovery_required"
+        assert recovered["term_sent"] is True
+        assert recovered["cleanup_status"] in {"cleaned", "cleanup_unverified", "ownership_lost"}
+        assert recovered["recovery_sha256"] == producer_process._digest_without(recovered, "recovery_sha256")
+        assert recover_producer_process(tmp_path, journal_id=intent.journal_id) == recovered
+        with pytest.raises(ProducerProcessError) as exc:
+            recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+        assert exc.value.code == "producer_process_recovery_already_recorded"
+        assert not (batch / "execution-receipt.json").exists()
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
+def test_explicit_recovery_denies_changed_owner_without_signal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    batch, intent, process = _registered_live_process(tmp_path)
+    try:
+        monkeypatch.setattr(producer_process, "_process_owner_identity", lambda _pid: None)
+        recovered = recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+        assert recovered["cleanup_status"] == "ownership_lost"
+        assert recovered["term_sent"] is False
+        assert process.poll() is None
+        assert (batch / "recovery-receipt.json").is_file()
+    finally:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
+def test_explicit_recovery_rejects_busy_lifecycle_lock(tmp_path: Path):
+    batch, intent, process = _registered_live_process(tmp_path)
+    try:
+        with producer_process._recovery_lock(batch), pytest.raises(ProducerProcessError) as exc:
+            recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+        assert exc.value.code == "producer_process_recovery_busy"
+        assert process.poll() is None
+        assert not (batch / "recovery-receipt.json").exists()
+    finally:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
+def test_explicit_recovery_rejects_tampered_recovery_receipt(tmp_path: Path):
+    batch, intent, process = _registered_live_process(tmp_path)
+    try:
+        recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+        path = batch / "recovery-receipt.json"
+        receipt = json.loads(path.read_text())
+        receipt["status"] = "completed"
+        path.write_bytes(producer_process._canonical(receipt))
+        with pytest.raises(ProducerProcessError) as exc:
+            recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+        assert exc.value.code == "producer_process_recovery_receipt_invalid"
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
 def test_recovery_rejects_registration_owner_identity_mismatch(tmp_path: Path):
     producer_root, intent, attestation = _fixture(tmp_path)
     run_producer_process(tmp_path, intent=intent, attestation=attestation, producer_root=producer_root)
@@ -782,6 +873,149 @@ def test_recovery_rejects_registration_owner_identity_mismatch(tmp_path: Path):
     with pytest.raises(ProducerProcessError) as exc:
         recover_producer_process(tmp_path, journal_id=intent.journal_id)
     assert exc.value.code == "producer_process_recovery_registration_invalid"
+
+
+def _recovery_registration(tmp_path: Path, pid: int, pgid: int, owner: dict[str, object]) -> Path:
+    batch = tmp_path / "evolution/producer-batches/journal-001"
+    claim = {
+        "schema_version": "1", "protocol": producer_process.PRODUCER_PROCESS_PROTOCOL,
+        "consumption_id": "launch-001", "launch_id": "launch-001", "journal_id": "journal-001",
+        "run_id": "run-001", "parent_task_id": "parent-001", "task_id": "task-001",
+        "intent_sha256": DIGEST, "attestation_sha256": DIGEST,
+        "nonce": "nonce-001", "executable_identity": DIGEST,
+    }
+    claim["consumption_sha256"] = producer_process._digest_without(claim, "consumption_sha256")
+    registration = {
+        "schema_version": "1", "protocol": producer_process.PRODUCER_PROCESS_PROTOCOL,
+        **{key: claim[key] for key in (
+            "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+            "intent_sha256", "attestation_sha256", "consumption_sha256", "executable_identity",
+        )},
+        "pid": pid, "pgid": pgid, "owner_identity": owner,
+        "owner_identity_sha256": producer_process._sha(owner),
+        "recovery_lock_protocol": producer_process._RECOVERY_LOCK_PROTOCOL,
+    }
+    registration["registration_sha256"] = producer_process._digest_without(
+        registration, "registration_sha256",
+    )
+    producer_process._atomic_json(batch / "attestation-consumption.json", claim, exclusive=True)
+    nonce_key = hashlib.sha256(b"nonce-001").hexdigest()
+    producer_process._atomic_json(
+        tmp_path / "evolution/producer-nonces" / f"{nonce_key}.json", claim, exclusive=True,
+    )
+    producer_process._atomic_json(batch / "process-registration.json", registration, exclusive=True)
+    return batch
+
+
+@pytest.mark.skipif(sys.platform not in {"darwin", "linux"}, reason="requires OS process identity")
+def test_explicit_recovery_cleans_exact_live_owner_and_records_unknown(tmp_path: Path):
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        owner = producer_process._process_owner_identity(process.pid)
+        assert owner is not None
+        batch = _recovery_registration(tmp_path, process.pid, process.pid, owner)
+        receipt = recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+        assert receipt["status"] == "recovery_required"
+        assert receipt["execution_outcome"] == "unknown"
+        assert receipt["cleanup_status"] in {"cleaned", "cleanup_unverified", "ownership_lost"}
+        assert receipt["term_sent"] is True
+        assert receipt["registration_sha256"] == json.loads(
+            (batch / "process-registration.json").read_text()
+        )["registration_sha256"]
+        assert recover_producer_process(tmp_path, journal_id="journal-001") == receipt
+        with pytest.raises(ProducerProcessError) as exc:
+            recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+        assert exc.value.code == "producer_process_recovery_already_recorded"
+        process.wait(timeout=2)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+
+
+@pytest.mark.skipif(sys.platform not in {"darwin", "linux"}, reason="requires OS process identity")
+def test_explicit_recovery_owner_mismatch_never_signals(tmp_path: Path):
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        owner = producer_process._process_owner_identity(process.pid)
+        assert owner is not None
+        owner["kind"] = "different-start-identity"
+        _recovery_registration(tmp_path, process.pid, process.pid, owner)
+        receipt = recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+        assert receipt["cleanup_status"] == "ownership_lost"
+        assert receipt["term_sent"] is False
+        assert process.poll() is None
+    finally:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
+def test_explicit_recovery_absent_group_records_no_signal(tmp_path: Path):
+    pid = os.getpid() + 10_000_000
+    _recovery_registration(tmp_path, pid, pid, {"kind": "absent", "pid": pid})
+    receipt = recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+    assert receipt["cleanup_status"] == "already_exited"
+    assert receipt["term_sent"] is False
+
+
+def test_explicit_recovery_rejects_legacy_registration_without_lifecycle_lock(tmp_path: Path):
+    pid = os.getpid() + 10_000_000
+    batch = _recovery_registration(tmp_path, pid, pid, {"kind": "absent", "pid": pid})
+    path = batch / "process-registration.json"
+    registration = json.loads(path.read_text())
+    del registration["recovery_lock_protocol"]
+    registration["registration_sha256"] = producer_process._digest_without(
+        registration, "registration_sha256",
+    )
+    path.write_bytes(producer_process._canonical(registration))
+    assert recover_producer_process(tmp_path, journal_id="journal-001")["status"] == "recovery_required"
+    with pytest.raises(ProducerProcessError) as exc:
+        recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+    assert exc.value.code == "producer_process_recovery_registration_invalid"
+    assert not (batch / "recovery-receipt.json").exists()
+
+
+def test_explicit_recovery_receipt_write_failure_keeps_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pid = os.getpid() + 10_000_000
+    batch = _recovery_registration(tmp_path, pid, pid, {"kind": "absent", "pid": pid})
+    original_write = producer_process._atomic_json
+
+    def fail_recovery_receipt(path, value, **kwargs):
+        if path.name == "recovery-receipt.json":
+            raise ProducerProcessError("producer_process_receipt_write_unknown")
+        return original_write(path, value, **kwargs)
+
+    monkeypatch.setattr(producer_process, "_atomic_json", fail_recovery_receipt)
+    with pytest.raises(ProducerProcessError) as exc:
+        recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+    assert exc.value.code == "producer_process_recovery_receipt_write_unknown"
+    assert not (batch / "recovery-receipt.json").exists()
+    observed = recover_producer_process(tmp_path, journal_id="journal-001")
+    assert observed["status"] == "recovery_required"
+    assert observed["reason"] == "producer_process_terminal_receipt_missing"
+
+
+@pytest.mark.parametrize("field", ["pgid", "run_id", "recovery_lock_protocol"])
+def test_explicit_recovery_rejects_malformed_registration_tuple(tmp_path: Path, field: str):
+    pid = os.getpid() + 10_000_000
+    batch = _recovery_registration(tmp_path, pid, pid, {"kind": "absent", "pid": pid})
+    path = batch / "process-registration.json"
+    registration = json.loads(path.read_text())
+    registration[field] = 0 if field == "pgid" else "tampered"
+    registration["registration_sha256"] = producer_process._digest_without(
+        registration, "registration_sha256",
+    )
+    path.write_bytes(producer_process._canonical(registration))
+    with pytest.raises(ProducerProcessError) as exc:
+        recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+    assert exc.value.code == "producer_process_recovery_registration_invalid"
+    assert not (batch / "recovery-receipt.json").exists()
 
 
 def test_recovery_rejects_symlinked_receipt(tmp_path: Path):

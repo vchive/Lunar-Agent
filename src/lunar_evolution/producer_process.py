@@ -44,6 +44,7 @@ _MAX_RECEIPT_BYTES = 256 * 1024
 _MAX_CAPTURE_CHUNK = 64 * 1024
 _UF_IMMUTABLE = 0x00000002
 _SNAPSHOT_RELATIVE_PATH = ".producer-snapshots/executable"
+_RECOVERY_LOCK_PROTOCOL = "journal-flock-v1"
 
 
 class ProducerProcessError(ValueError):
@@ -532,6 +533,51 @@ def _atomic_json(path: Path, value: Mapping[str, object], *, exclusive: bool = F
                     pass
 
 
+@contextmanager
+def _recovery_lock(batch: Path):
+    """Serialize explicit recovery cleanup while allowing stale locks to recover."""
+    try:
+        import fcntl
+    except ImportError as exc:  # pragma: no cover - supported local targets are POSIX.
+        raise ProducerProcessError("producer_process_recovery_lock_unsupported") from exc
+    with _held_directory(batch) as directory_fd:
+        try:
+            fd = os.open(
+                ".recovery.lock",
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=directory_fd,
+            )
+            try:
+                opened = os.fstat(fd)
+                current = os.stat(".recovery.lock", dir_fd=directory_fd, follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+                ):
+                    _fail("producer_process_recovery_lock_unknown")
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except (BlockingIOError, OSError) as exc:
+                    if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in {11, 35}:
+                        raise ProducerProcessError("producer_process_recovery_busy") from exc
+                    raise ProducerProcessError("producer_process_recovery_lock_unknown") from exc
+                current = os.stat(".recovery.lock", dir_fd=directory_fd, follow_symlinks=False)
+                if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+                    _fail("producer_process_recovery_lock_unknown")
+                yield
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                os.close(fd)
+        except ProducerProcessError:
+            raise
+        except OSError as exc:
+            raise ProducerProcessError("producer_process_recovery_lock_unknown") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class ProducerStreamEvidence:
     stream: str
@@ -854,7 +900,7 @@ def _remaining_timeout(deadline: float, monotonic: Callable[[], float]) -> float
     return max(0.0, deadline - monotonic())
 
 
-def run_producer_process(
+def _run_producer_process(
     workspace: str | Path,
     *,
     intent: ProducerLaunchIntent,
@@ -1009,6 +1055,7 @@ def run_producer_process(
             "execution_snapshot_sha256": snapshot.sha256,
             "execution_snapshot_size": snapshot.size,
             "pid": process.pid, "pgid": pgid,
+            "recovery_lock_protocol": _RECOVERY_LOCK_PROTOCOL,
             "gate_protocol": "fd-read-one-byte", "registered_at_unix_ns": time.time_ns(),
         }
         registration_payload["registration_sha256"] = _digest_without(registration_payload, "registration_sha256")
@@ -1133,6 +1180,35 @@ def run_producer_process(
                 _remove_executable_snapshot(snapshot, batch)
 
 
+def run_producer_process(
+    workspace: str | Path,
+    *,
+    intent: ProducerLaunchIntent,
+    attestation: ProducerLaunchAttestation | object,
+    producer_root: str | Path,
+    expected_run_id: str | None = None,
+    expected_parent_task_id: str | None = None,
+    expected_task_id: str | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
+    popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+) -> ProducerExecutionReceipt:
+    """Hold the per-journal ownership lock through the entire process attempt."""
+    if not isinstance(intent, ProducerLaunchIntent):
+        _fail("producer_process_intent_invalid")
+    root = _safe_root(workspace)
+    if not isinstance(intent.journal_id, str) or not intent.journal_id or "/" in intent.journal_id or ".." in intent.journal_id:
+        _fail("producer_process_identity_mismatch")
+    batch = root / "evolution" / "producer-batches" / intent.journal_id
+    _safe_dir(batch, create=True)
+    with _recovery_lock(batch):
+        return _run_producer_process(
+            workspace, intent=intent, attestation=attestation, producer_root=producer_root,
+            expected_run_id=expected_run_id, expected_parent_task_id=expected_parent_task_id,
+            expected_task_id=expected_task_id, monotonic=monotonic,
+            popen_factory=popen_factory,
+        )
+
+
 def _persist_receipt(
     batch: Path, intent: ProducerLaunchIntent, attestation: ProducerLaunchAttestation,
     consumption_digest: str, registration_digest: str, identity: Mapping[str, object],
@@ -1244,7 +1320,7 @@ def _read_durable_json(path: Path, *, code: str) -> dict[str, object]:
     return raw
 
 
-def recover_producer_process(
+def _inspect_producer_process(
     workspace: str | Path, *, journal_id: str,
 ) -> dict[str, object]:
     """Inspect durable launch state without consuming another claim or restarting a producer."""
@@ -1257,7 +1333,9 @@ def recover_producer_process(
         os.lstat(path)
     except FileNotFoundError:
         claim = _read_durable_json(batch / "attestation-consumption.json", code="producer_process_recovery_claim_invalid")
-        if claim.get("protocol") != _PROTOCOL or claim.get("journal_id") != journal_id or claim.get("consumption_sha256") != _digest_without(claim, "consumption_sha256"):
+        if (claim.get("schema_version") != "1" or claim.get("protocol") != _PROTOCOL
+                or claim.get("journal_id") != journal_id
+                or claim.get("consumption_sha256") != _digest_without(claim, "consumption_sha256")):
             _fail("producer_process_recovery_claim_invalid")
         registration_path = batch / "process-registration.json"
         try:
@@ -1266,16 +1344,28 @@ def recover_producer_process(
             return {"status": "recovery_required", "reason": "producer_process_registration_missing", "journal_id": journal_id, "launch_id": claim["launch_id"]}
         registration = _read_durable_json(registration_path, code="producer_process_recovery_registration_invalid")
         owner_identity = registration.get("owner_identity")
+        pid = registration.get("pid")
+        pgid = registration.get("pgid")
         if (
-            registration.get("protocol") != _PROTOCOL
+            registration.get("schema_version") != "1"
+            or registration.get("protocol") != _PROTOCOL
             or registration.get("journal_id") != journal_id
             or registration.get("consumption_sha256") != claim["consumption_sha256"]
             or registration.get("registration_sha256") != _digest_without(registration, "registration_sha256")
+            or any(registration.get(key) != claim.get(key) for key in (
+                "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+                "intent_sha256", "attestation_sha256", "consumption_sha256", "executable_identity",
+            ))
+            or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1
+            or isinstance(pgid, bool) or not isinstance(pgid, int) or pgid != pid
             or not isinstance(owner_identity, dict)
-            or owner_identity.get("pid") != registration.get("pid")
+            or owner_identity.get("pid") != pid
             or registration.get("owner_identity_sha256") != _sha(owner_identity)
         ):
             _fail("producer_process_recovery_registration_invalid")
+        recovered = _read_recovery_receipt(batch, registration)
+        if recovered is not None:
+            return recovered
         return {"status": "recovery_required", "reason": "producer_process_terminal_receipt_missing", "journal_id": journal_id, "launch_id": claim["launch_id"], "registration_sha256": registration["registration_sha256"], "pid": registration["pid"], "pgid": registration["pgid"]}
     except OSError as exc:
         raise ProducerProcessError("producer_process_recovery_receipt_invalid") from exc
@@ -1286,7 +1376,15 @@ def recover_producer_process(
     registration = _read_durable_json(batch / "process-registration.json", code="producer_process_recovery_receipt_invalid")
     owner_identity = registration.get("owner_identity")
     if (
-        claim.get("consumption_sha256") != _digest_without(claim, "consumption_sha256")
+        claim.get("schema_version") != "1" or claim.get("protocol") != _PROTOCOL
+        or claim.get("journal_id") != journal_id
+        or claim.get("consumption_sha256") != _digest_without(claim, "consumption_sha256")
+        or registration.get("schema_version") != "1" or registration.get("protocol") != _PROTOCOL
+        or registration.get("journal_id") != journal_id
+        or any(registration.get(key) != claim.get(key) for key in (
+            "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+            "intent_sha256", "attestation_sha256", "consumption_sha256", "executable_identity",
+        ))
         or registration.get("registration_sha256") != _digest_without(registration, "registration_sha256")
         or not isinstance(owner_identity, dict)
         or owner_identity.get("pid") != registration.get("pid")
@@ -1308,6 +1406,132 @@ def recover_producer_process(
     if raw.get("status") in {"unknown", "recovery_required"}:
         _fail("producer_process_recovery_required")
     return raw
+
+
+def _read_recovery_receipt(batch: Path, registration: Mapping[str, object]) -> dict[str, object] | None:
+    path = batch / "recovery-receipt.json"
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ProducerProcessError("producer_process_recovery_receipt_invalid") from exc
+    receipt = _read_durable_json(path, code="producer_process_recovery_receipt_invalid")
+    if (
+        receipt.get("schema_version") != "1"
+        or receipt.get("protocol") != "lunar-producer-process-recovery-v1"
+        or receipt.get("status") != "recovery_required"
+        or receipt.get("execution_outcome") != "unknown"
+        or receipt.get("reason") != "producer_process_terminal_receipt_missing"
+        or receipt.get("recovery_sha256") != _digest_without(receipt, "recovery_sha256")
+        or any(receipt.get(key) != registration.get(key) for key in (
+            "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+            "intent_sha256", "attestation_sha256", "consumption_sha256",
+            "registration_sha256", "pid", "pgid", "owner_identity_sha256",
+        ))
+        or receipt.get("previous_receipt_sha256") != registration.get("registration_sha256")
+        or receipt.get("cleanup_status") not in {status.value for status in ProcessCleanupStatus}
+        or not isinstance(receipt.get("term_sent"), bool)
+        or not isinstance(receipt.get("kill_sent"), bool)
+        or not isinstance(receipt.get("alive_after"), bool)
+    ):
+        _fail("producer_process_recovery_receipt_invalid")
+    return receipt
+
+
+def _cleanup_recovered_process(batch: Path, registration: Mapping[str, object]) -> dict[str, object]:
+    pid = registration.get("pid")
+    pgid = registration.get("pgid")
+    owner_identity = registration.get("owner_identity")
+    if (
+        isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1
+        or isinstance(pgid, bool) or not isinstance(pgid, int) or pgid != pid
+        or not isinstance(owner_identity, dict)
+        or owner_identity.get("pid") != pid
+        or registration.get("owner_identity_sha256") != _sha(owner_identity)
+        or registration.get("recovery_lock_protocol") != _RECOVERY_LOCK_PROTOCOL
+    ):
+        _fail("producer_process_recovery_registration_invalid")
+    prior = _read_recovery_receipt(batch, registration)
+    if prior is not None:
+        _fail("producer_process_recovery_already_recorded")
+
+    registration_path = batch / "process-registration.json"
+
+    def owner_check() -> bool:
+        try:
+            current = _read_durable_json(
+                registration_path, code="producer_process_recovery_registration_invalid",
+            )
+            return current == registration and _process_owner_identity(pid) == owner_identity
+        except ProducerProcessError:
+            return False
+
+    # Recovery has no Popen handle. A vanished leader cannot authorize signals to a
+    # surviving group; only an OS-visible, exact start identity can grant that authority.
+    result = cleanup_registered_process(
+        RegisteredProcess(pid, pgid, owner_check=owner_check, label=str(registration["launch_id"])),
+        grace_seconds=0.25,
+    )
+    receipt: dict[str, object] = {
+        "schema_version": "1", "protocol": "lunar-producer-process-recovery-v1",
+        "status": "recovery_required", "execution_outcome": "unknown",
+        "reason": "producer_process_terminal_receipt_missing",
+        **{key: registration[key] for key in (
+            "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+            "intent_sha256", "attestation_sha256", "consumption_sha256",
+            "registration_sha256", "pid", "pgid", "owner_identity_sha256",
+        )},
+        "previous_receipt_sha256": registration["registration_sha256"],
+        "cleanup_status": result.status.value,
+        "term_sent": result.term_sent, "kill_sent": result.kill_sent,
+        "alive_after": result.alive_after,
+    }
+    receipt["recovery_sha256"] = _digest_without(receipt, "recovery_sha256")
+    try:
+        _atomic_json(batch / "recovery-receipt.json", receipt, exclusive=True)
+    except ProducerProcessError as exc:
+        raise ProducerProcessError("producer_process_recovery_receipt_write_unknown") from exc
+    return receipt
+
+
+def recover_producer_process(
+    workspace: str | Path, *, journal_id: str, cleanup: bool = False,
+) -> dict[str, object]:
+    """Inspect one attempt; explicit cleanup only addresses a missing terminal receipt."""
+    if not isinstance(cleanup, bool):
+        _fail("producer_process_recovery_cleanup_invalid")
+    if not cleanup:
+        return _inspect_producer_process(workspace, journal_id=journal_id)
+    root = _safe_root(workspace)
+    if not isinstance(journal_id, str) or not journal_id or "/" in journal_id or ".." in journal_id:
+        _fail("producer_process_recovery_identity_invalid")
+    batch = root / "evolution" / "producer-batches" / journal_id
+    with _recovery_lock(batch):
+        observation = _inspect_producer_process(workspace, journal_id=journal_id)
+        if observation.get("protocol") == "lunar-producer-process-recovery-v1":
+            _fail("producer_process_recovery_already_recorded")
+        if observation.get("reason") != "producer_process_terminal_receipt_missing":
+            return observation
+        registration = _read_durable_json(
+            batch / "process-registration.json", code="producer_process_recovery_registration_invalid",
+        )
+        if registration.get("registration_sha256") != observation.get("registration_sha256"):
+            _fail("producer_process_recovery_registration_invalid")
+        claim = _read_durable_json(
+            batch / "attestation-consumption.json", code="producer_process_recovery_claim_invalid",
+        )
+        nonce = claim.get("nonce")
+        if not isinstance(nonce, str) or not nonce:
+            _fail("producer_process_recovery_claim_invalid")
+        nonce_key = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+        nonce_claim = _read_durable_json(
+            root / "evolution" / "producer-nonces" / f"{nonce_key}.json",
+            code="producer_process_recovery_claim_invalid",
+        )
+        if nonce_claim != claim or claim.get("consumption_sha256") != registration.get("consumption_sha256"):
+            _fail("producer_process_recovery_claim_invalid")
+        return _cleanup_recovered_process(batch, registration)
 
 
 launch_producer_process = run_producer_process
