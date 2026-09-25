@@ -11,7 +11,10 @@ from pathlib import Path
 import pytest
 
 from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
-from lunar_evolution.producer_bootstrap import TrustedBootstrapLaunch
+from lunar_evolution.producer_bootstrap import (
+    TrustedBootstrapLaunch,
+    parse_trusted_bootstrap_registration,
+)
 from lunar_evolution.trusted_bootstrap_runtime import (
     TrustedBootstrapRuntimeError,
     build_trusted_bootstrap_descriptor,
@@ -196,6 +199,9 @@ def test_runtime_durably_registers_before_release_and_starts_target_after_gate(t
             assert (info.st_dev, info.st_ino) in synced_inodes
             payload = json.loads(path.read_text(encoding="utf-8"))
             assert payload["registration_sha256"]
+            parsed = parse_trusted_bootstrap_registration(payload, launch=launch)
+            assert parsed.pid == payload["pid"]
+            assert parsed.pgid == payload["pgid"]
 
         result = run_trusted_bootstrap_fixture(
             tmp_path,

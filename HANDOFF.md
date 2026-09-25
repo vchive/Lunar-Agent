@@ -3962,6 +3962,15 @@ API。该 DTO 只验证登记载荷形状与跨协议绑定，不读取登记文
 Feature 158/156/157/ownership 组合回归通过，Ruff、compileall 和 `git diff --check` 通过。
 没有运行真实 provider、WebAgent、外部 producer 或 campaign。
 
+## 2026-09-25 Feature 158 registration DTO fixture接线
+
+将 `TrustedBootstrapRegistration` 接入 trusted bootstrap fixture 的实际登记写入点：运行时
+现在通过 DTO 构造登记载荷，在 durable registration 发布前按完整 `TrustedBootstrapLaunch`
+做 exact binding 校验。登记顺序回归同时解析落盘载荷并确认 PID/PGID 与 launch 绑定一致。
+
+这完成了 T158-04 的 fixture-level registration binding 证据，但尚未接入 Feature 156 的
+生产 runner、恢复读取和正式 scheduler，因此仍不扩大外部 producer admission 范围。
+
 ## 2026-09-25 Feature 158 registration binding DTO
 
 沿现有 SDD 补上 T158-04 的窄身份边界，但没有声称完成 Feature 156 生命周期接入。`producer_bootstrap.py`

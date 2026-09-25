@@ -23,3 +23,6 @@ gate protocol from `TrustedBootstrapLaunch`, adds the registered bootstrap PID/P
 `registration_sha256` to the strict canonical payload.  Parsing can require an exact launch
 match, but the DTO does not read registration files, inspect processes, invoke a provider, or
 wire the fixture into Feature 156 cleanup/recovery.
+The fixture runtime now constructs and parses this DTO before durable registration publication,
+and the release-order test verifies the persisted payload binds back to the exact launch. This is
+fixture-level evidence only; Feature 156's production runner and recovery path remain separate.

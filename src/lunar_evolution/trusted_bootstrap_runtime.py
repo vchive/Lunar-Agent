@@ -30,7 +30,9 @@ from .producer_bootstrap import (
     TrustedBootstrapEvidence,
     TrustedBootstrapLaunch,
     TrustedBootstrapSession,
+    build_trusted_bootstrap_registration,
     parse_bootstrap_handshake_frame,
+    parse_trusted_bootstrap_registration,
 )
 
 _MAX_CONTROL_BYTES = 64 * 1024
@@ -460,23 +462,10 @@ def run_trusted_bootstrap_fixture(
         if frame is None:
             raise TrustedBootstrapRuntimeError("trusted_bootstrap_ready_missing")
         session.accept_frame(frame)
-        registration = {
-            "schema_version": "1",
-            "protocol": "lunar-trusted-producer-bootstrap-v1",
-            "launch_id": launch.launch_id,
-            "journal_id": launch.journal_id,
-            "run_id": launch.run_id,
-            "parent_task_id": launch.parent_task_id,
-            "task_id": launch.task_id,
-            "intent_sha256": launch.intent_sha256,
-            "attestation_sha256": launch.attestation_sha256,
-            "bootstrap_descriptor_sha256": launch.bootstrap_descriptor_sha256,
-            "target_executable_identity": launch.target_executable_identity,
-            "pid": process.pid,
-            "pgid": bootstrap_pgid,
-            "gate_protocol": launch.gate_protocol,
-        }
-        registration["registration_sha256"] = _digest_without(registration, "registration_sha256")
+        registration = build_trusted_bootstrap_registration(
+            launch, pid=process.pid, pgid=bootstrap_pgid,
+        ).to_dict()
+        parse_trusted_bootstrap_registration(registration, launch=launch)
         registration_digest = str(registration["registration_sha256"])
         session.registration_sha256 = registration_digest
         _durable_json(registration_path, registration)
