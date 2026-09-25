@@ -1,5 +1,20 @@
 # Feature 156 validation
 
+## Owner identity checkpoint (2026-09-25)
+
+The local runner now records an OS-observed process start identity in its durable registration
+before gate release, repeats it in the terminal receipt, and rejects a mismatched identity before
+in-process cleanup. If identity becomes unreadable, the live controller may retain cleanup authority
+only after reaping its child and confirming the leader PID is absent; a reused visible PID is denied.
+Darwin reads microsecond start time from `libproc`; Linux records the boot ID and `/proc` start tick.
+Recovery checks the registration-to-receipt binding but remains read-only:
+there is no post-crash owner-checked cleanup or terminal recovery receipt yet. T156-06 therefore
+remains open, as do trusted bootstrap integration and non-Darwin byte-bound execution.
+
+The owner-identity and Feature 156/157/158 focused suites pass **133 tests**. The final code also
+passes the full offline repository suite, Ruff, compileall, and diff checks. No provider, external
+producer, scheduler, or campaign was run.
+
 Validation is provider-free and uses short local fixture executables only. No external producer,
 provider, evaluator, WebAgent, or campaign is started.
 

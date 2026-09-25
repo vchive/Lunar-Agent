@@ -1,5 +1,19 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-25 Feature 156 owner identity 登记收窄
+
+沿现有 SDD 为 provider-free producer 登记增加 OS 观测的进程启动身份，并绑定到终态回执：
+Darwin 使用 `libproc` 的微秒级启动时间，Linux 使用 boot ID 与 `/proc` start tick。
+运行中清理先核对该身份；身份漂移会拒绝授权。登记完成后若墙钟已经到期，工作门保持关闭。
+身份不可读时，只有原子进程已回收且该 PID 已不存在，才允许继续清理残留进程组；
+同 PID/PGID 已被复用也会拒绝。恢复检查验证身份字段与回执链，仍只读，不执行崩溃后的
+进程组清理。本轮 Feature 156/157/158 专项 **133 passed**，最终代码的全仓离线回归、
+Ruff、compileall 与 diff check 通过。
+
+T156-06 仍未完成：恢复时缺少可授权的 post-crash cleanup 和终态 recovery receipt。非 Darwin
+执行字节绑定、trusted bootstrap 正式接入、host-observed request evidence 及完整 T156 矩阵
+仍待后续。未调用 provider、外部 producer、WebAgent、scheduler 或真实 campaign。
+
 ## 2026-09-25 Feature 156 capture evidence and deadline tightening
 
 继续现有 Feature 156 SDD，修复两个 provider-free 生命周期证据边界：当单次 stdout/stderr

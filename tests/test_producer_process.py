@@ -86,7 +86,55 @@ def test_attested_process_is_registered_before_gate_and_emits_receipt(tmp_path: 
     registration = json.loads((batch / "process-registration.json").read_text())
     assert registration["registration_sha256"] == receipt.registration_sha256
     assert (registration["pid"], registration["pgid"]) == (receipt.pid, receipt.pgid)
+    assert registration["owner_identity"] == receipt.owner_identity
+    assert registration["owner_identity_sha256"] == producer_process._sha(receipt.owner_identity)
+    assert receipt.owner_identity["pid"] == receipt.pid
     assert (batch / "execution-receipt.json").is_file()
+
+
+def test_owner_identity_change_denies_cleanup_authority(monkeypatch: pytest.MonkeyPatch):
+    owner_identity = {"kind": "test-starttime", "pid": 321, "start": 1}
+    process = SimpleNamespace(poll=lambda: 0)
+    monkeypatch.setattr(
+        producer_process, "_process_owner_identity",
+        lambda _pid: {"kind": "test-starttime", "pid": 321, "start": 2},
+    )
+    assert producer_process._current_process_owned(321, owner_identity, process) is False
+
+
+@pytest.mark.skipif(sys.platform not in {"darwin", "linux"}, reason="requires OS process identity")
+def test_os_process_owner_identity_has_subsecond_or_boot_scoped_start():
+    observed = producer_process._process_owner_identity(os.getpid())
+    assert observed is not None
+    assert observed["pid"] == os.getpid()
+    if sys.platform == "darwin":
+        assert observed["kind"] == "darwin-libproc-starttime-v1"
+        assert observed["start_sec"] > 0
+        assert 0 <= observed["start_usec"] < 1_000_000
+    else:
+        assert observed["kind"] == "linux-proc-starttime-v1"
+        assert observed["boot_id"]
+        assert observed["starttime_ticks"] > 0
+
+
+def test_missing_identity_requires_live_controller_child_observation(monkeypatch: pytest.MonkeyPatch):
+    owner_identity = {"kind": "test-starttime", "pid": 321, "start": 1}
+    monkeypatch.setattr(producer_process, "_process_owner_identity", lambda _pid: None)
+    assert producer_process._current_process_owned(
+        321, owner_identity, SimpleNamespace(poll=lambda: None),
+    ) is False
+    monkeypatch.setattr(producer_process.os, "getpgid", lambda _pid: 321)
+    assert producer_process._current_process_owned(
+        321, owner_identity, SimpleNamespace(poll=lambda: 0),
+    ) is False
+
+    def missing_pid(_pid: int) -> int:
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(producer_process.os, "getpgid", missing_pid)
+    assert producer_process._current_process_owned(
+        321, owner_identity, SimpleNamespace(poll=lambda: 0),
+    ) is True
 
 
 def test_registration_is_durable_before_gate_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -646,6 +694,24 @@ def test_missing_terminal_receipt_requires_recovery_without_relaunch(tmp_path: P
     recovered = recover_producer_process(tmp_path, journal_id=intent.journal_id)
     assert recovered["status"] == "recovery_required"
     assert recovered["reason"] == "producer_process_terminal_receipt_missing"
+
+
+def test_recovery_rejects_registration_owner_identity_mismatch(tmp_path: Path):
+    producer_root, intent, attestation = _fixture(tmp_path)
+    run_producer_process(tmp_path, intent=intent, attestation=attestation, producer_root=producer_root)
+    batch = tmp_path / "evolution/producer-batches/journal-001"
+    (batch / "execution-receipt.json").unlink()
+    path = batch / "process-registration.json"
+    registration = json.loads(path.read_text())
+    registration["owner_identity"]["pid"] += 1
+    registration["owner_identity_sha256"] = producer_process._sha(registration["owner_identity"])
+    registration["registration_sha256"] = producer_process._digest_without(
+        registration, "registration_sha256",
+    )
+    path.write_bytes(producer_process._canonical(registration))
+    with pytest.raises(ProducerProcessError) as exc:
+        recover_producer_process(tmp_path, journal_id=intent.journal_id)
+    assert exc.value.code == "producer_process_recovery_registration_invalid"
 
 
 def test_recovery_rejects_symlinked_receipt(tmp_path: Path):

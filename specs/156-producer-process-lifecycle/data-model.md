@@ -17,7 +17,8 @@ ProducerProcessRegistration
   execution_binding                         # darwin-immutable-snapshot | pathname_unbound
   execution_snapshot_relative_path?
   execution_snapshot_sha256 / execution_snapshot_size
-  pid / pgid / session_id / owner_lock_sha256
+  pid / pgid / owner_identity / owner_identity_sha256
+  session_id / owner_lock_sha256
   gate_protocol / registered_at_unix_ns
   registration_sha256
 
@@ -41,7 +42,7 @@ ProducerExecutionReceipt
   registration_sha256 / executable_identity
   execution_binding / execution_snapshot_relative_path?
   execution_snapshot_sha256 / execution_snapshot_size
-  pid / pgid / gate_released
+  pid / pgid / owner_identity / gate_released
   request_timeout_seconds / max_requests / output_max_bytes / wall_timeout_seconds
   request_count / exit_code?
   stdout_evidence / stderr_evidence
@@ -64,3 +65,9 @@ overwrite an earlier attempt.
 `session_id` and `owner_lock_sha256` identify the local registration; they do not grant authority
 to signal another process. Producer output, stdout, and stderr are represented by bounded sizes
 and digests, not arbitrary text.
+
+`owner_identity` is an OS-observed PID start identity, captured before gate release and copied
+unchanged into the terminal receipt. Darwin uses `libproc` start seconds and microseconds; Linux
+uses the boot ID and `/proc` start tick. An unavailable or changed identity cannot authorize
+signalling a live process. The live controller may still clean descendants after it has reaped
+the exact child; recovery cannot borrow that in-memory observation.

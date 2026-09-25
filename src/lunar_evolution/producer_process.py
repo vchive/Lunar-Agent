@@ -71,6 +71,7 @@ class ProducerProcessRegistration:
     launch_id: str
     pid: int
     pgid: int
+    owner_identity: Mapping[str, object]
     intent_sha256: str
     attestation_sha256: str
     registration_sha256: str
@@ -94,6 +95,91 @@ def _canonical(value: object) -> bytes:
 
 def _sha(value: object) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def _process_owner_identity(pid: int) -> dict[str, object] | None:
+    """Return an OS-observed identity that changes when a PID is reused.
+
+    The identity is deliberately small and contains no command line or producer data.  Linux
+    exposes a boot-scoped process start tick in ``/proc``.  Darwin exposes microsecond start
+    time through libproc.  Unsupported platforms return ``None`` so recovery remains
+    fail-closed instead of treating a PID/PGID pair as ownership evidence.
+    """
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+        return None
+    try:
+        if sys.platform.startswith("linux"):
+            boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+            fields = Path(f"/proc/{pid}/stat").read_text(encoding="ascii").strip()
+            marker = fields.rfind(")")
+            if marker < 0:
+                return None
+            values = fields[marker + 2 :].split()
+            # The suffix starts at field 3 (state); field 22 is index 19 here.
+            starttime = values[19]
+            if not boot_id or not starttime.isdigit():
+                return None
+            return {
+                "kind": "linux-proc-starttime-v1",
+                "pid": pid,
+                "boot_id": boot_id,
+                "starttime_ticks": int(starttime),
+            }
+        if sys.platform == "darwin":
+            import ctypes
+
+            class ProcBsdInfo(ctypes.Structure):
+                _fields_ = [
+                    ("flags", ctypes.c_uint32), ("status", ctypes.c_uint32),
+                    ("xstatus", ctypes.c_uint32), ("pid", ctypes.c_uint32),
+                    ("ppid", ctypes.c_uint32), ("uid", ctypes.c_uint32),
+                    ("gid", ctypes.c_uint32), ("ruid", ctypes.c_uint32),
+                    ("rgid", ctypes.c_uint32), ("svuid", ctypes.c_uint32),
+                    ("svgid", ctypes.c_uint32), ("reserved", ctypes.c_uint32),
+                    ("comm", ctypes.c_char * 16), ("name", ctypes.c_char * 32),
+                    ("nfiles", ctypes.c_uint32), ("pgid", ctypes.c_uint32),
+                    ("pjobc", ctypes.c_uint32), ("tdev", ctypes.c_uint32),
+                    ("tpgid", ctypes.c_uint32), ("nice", ctypes.c_int32),
+                    ("start_sec", ctypes.c_uint64), ("start_usec", ctypes.c_uint64),
+                ]
+
+            libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            libproc.proc_pidinfo.argtypes = [
+                ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int,
+            ]
+            libproc.proc_pidinfo.restype = ctypes.c_int
+            info = ProcBsdInfo()
+            size = ctypes.sizeof(info)
+            observed = libproc.proc_pidinfo(pid, 3, 0, ctypes.byref(info), size)
+            if observed != size or info.pid != pid or info.start_sec == 0 or info.start_usec >= 1_000_000:
+                return None
+            return {
+                "kind": "darwin-libproc-starttime-v1", "pid": pid,
+                "start_sec": info.start_sec, "start_usec": info.start_usec,
+            }
+    except (OSError, UnicodeError, ValueError, IndexError, AttributeError):
+        return None
+    return None
+
+
+def _current_process_owned(
+    pid: int, owner_identity: Mapping[str, object], process: subprocess.Popen[bytes],
+) -> bool:
+    current = _process_owner_identity(pid)
+    if current is not None:
+        return current == owner_identity
+    # Only this live controller can extend its observation after reaping the exact child.
+    # A visible PID with unreadable identity may already belong to a different group.
+    # Recovery has no Popen handle and cannot use this fallback.
+    if process.poll() is None:
+        return False
+    try:
+        os.getpgid(pid)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
 
 
 def _digest_without(value: Mapping[str, object], field: str) -> str:
@@ -498,6 +584,7 @@ class ProducerExecutionReceipt:
     executable_identity: str
     pid: int
     pgid: int
+    owner_identity: Mapping[str, object]
     gate_released: bool
     request_timeout_seconds: int
     max_requests: int
@@ -541,6 +628,8 @@ class ProducerExecutionReceipt:
             _fail("producer_process_receipt_execution_snapshot_invalid")
         if self.status not in {"completed", "failed", "cancelled", "unknown", "recovery_required"}:
             _fail("producer_process_receipt_status_invalid")
+        if not isinstance(self.owner_identity, Mapping) or self.owner_identity.get("pid") != self.pid:
+            _fail("producer_process_receipt_owner_identity_invalid")
         expected = self.digest()
         if self.receipt_sha256 is None:
             object.__setattr__(self, "receipt_sha256", expected)
@@ -582,6 +671,7 @@ class ProducerExecutionReceipt:
             "status": self.status,
             "failure_code": self.failure_code,
             "previous_receipt_sha256": self.previous_receipt_sha256,
+            "owner_identity": self.owner_identity,
         }
         if include_receipt_sha256:
             value["receipt_sha256"] = self.receipt_sha256
@@ -867,8 +957,13 @@ def run_producer_process(
             raise ProducerProcessError("producer_process_registration_unknown") from exc
         if pgid != process.pid:
             raise ProducerProcessError("producer_process_registration_mismatch")
+        owner_identity = _process_owner_identity(process.pid)
+        if owner_identity is None:
+            raise ProducerProcessError("producer_process_owner_identity_unknown")
+
         registration = RegisteredProcess(
-            process.pid, pgid, owner_check=lambda: process.pid == pgid,
+            process.pid, pgid,
+            owner_check=lambda: _current_process_owned(process.pid, owner_identity, process),
             label=intent.launch_id,
         )
         registration_payload = {
@@ -877,6 +972,8 @@ def run_producer_process(
             "task_id": intent.task_id, "intent_sha256": intent_digest,
             "attestation_sha256": attestation_digest, "consumption_sha256": consumption_digest,
             "executable_identity": _identity_digest(identity),
+            "owner_identity": owner_identity,
+            "owner_identity_sha256": _sha(owner_identity),
             "execution_binding": snapshot.binding,
             "execution_snapshot_relative_path": snapshot.relative_path,
             "execution_snapshot_sha256": snapshot.sha256,
@@ -887,6 +984,8 @@ def run_producer_process(
         registration_payload["registration_sha256"] = _digest_without(registration_payload, "registration_sha256")
         _atomic_json(batch / "process-registration.json", registration_payload, exclusive=True)
         registration_digest = str(registration_payload["registration_sha256"])
+        if monotonic() >= deadline:
+            _fail("producer_process_wall_timeout")
         os.write(gate_write, b"1")
         gate_released = True
         os.close(gate_write)
@@ -1012,6 +1111,17 @@ def _persist_receipt(
     envelope: ProducerEnvelopeEvidence | None, cleanup: ProcessCleanupResult, status: str,
     failure: str | None, exit_code: int | None = None, request_count: int | None = None,
 ) -> ProducerExecutionReceipt:
+    persisted_registration = _read_durable_json(
+        batch / "process-registration.json", code="producer_process_receipt_registration_unknown",
+    )
+    owner_identity = persisted_registration.get("owner_identity")
+    if (
+        not isinstance(owner_identity, dict)
+        or owner_identity.get("pid") != pid
+        or persisted_registration.get("owner_identity_sha256") != _sha(owner_identity)
+        or persisted_registration.get("registration_sha256") != registration_digest
+    ):
+        _fail("producer_process_receipt_registration_unknown")
     cleanup_status = cleanup.status.value
     cleanup_digest = _sha({"status": cleanup_status, "pid": pid, "pgid": pgid, "term_sent": cleanup.term_sent, "kill_sent": cleanup.kill_sent, "alive_after": cleanup.alive_after})
     receipt = ProducerExecutionReceipt(
@@ -1020,6 +1130,7 @@ def _persist_receipt(
         intent_sha256=intent.intent_sha256 or intent.digest(), attestation_sha256=attestation.attestation_sha256 or attestation.digest(),
         consumption_sha256=consumption_digest, registration_sha256=registration_digest,
         executable_identity=_identity_digest(identity), pid=pid, pgid=pgid, gate_released=gate_released,
+        owner_identity=owner_identity,
         request_timeout_seconds=intent.request_timeout_seconds, max_requests=intent.max_requests,
         output_max_bytes=intent.output_max_bytes, wall_timeout_seconds=intent.wall_timeout_seconds,
         request_count=request_count, exit_code=exit_code, stdout_evidence=stdout, stderr_evidence=stderr,
@@ -1124,7 +1235,16 @@ def recover_producer_process(
         except FileNotFoundError:
             return {"status": "recovery_required", "reason": "producer_process_registration_missing", "journal_id": journal_id, "launch_id": claim["launch_id"]}
         registration = _read_durable_json(registration_path, code="producer_process_recovery_registration_invalid")
-        if registration.get("protocol") != _PROTOCOL or registration.get("journal_id") != journal_id or registration.get("consumption_sha256") != claim["consumption_sha256"] or registration.get("registration_sha256") != _digest_without(registration, "registration_sha256"):
+        owner_identity = registration.get("owner_identity")
+        if (
+            registration.get("protocol") != _PROTOCOL
+            or registration.get("journal_id") != journal_id
+            or registration.get("consumption_sha256") != claim["consumption_sha256"]
+            or registration.get("registration_sha256") != _digest_without(registration, "registration_sha256")
+            or not isinstance(owner_identity, dict)
+            or owner_identity.get("pid") != registration.get("pid")
+            or registration.get("owner_identity_sha256") != _sha(owner_identity)
+        ):
             _fail("producer_process_recovery_registration_invalid")
         return {"status": "recovery_required", "reason": "producer_process_terminal_receipt_missing", "journal_id": journal_id, "launch_id": claim["launch_id"], "registration_sha256": registration["registration_sha256"], "pid": registration["pid"], "pgid": registration["pgid"]}
     except OSError as exc:
@@ -1134,9 +1254,13 @@ def recover_producer_process(
         _fail("producer_process_recovery_receipt_invalid")
     claim = _read_durable_json(batch / "attestation-consumption.json", code="producer_process_recovery_receipt_invalid")
     registration = _read_durable_json(batch / "process-registration.json", code="producer_process_recovery_receipt_invalid")
+    owner_identity = registration.get("owner_identity")
     if (
         claim.get("consumption_sha256") != _digest_without(claim, "consumption_sha256")
         or registration.get("registration_sha256") != _digest_without(registration, "registration_sha256")
+        or not isinstance(owner_identity, dict)
+        or owner_identity.get("pid") != registration.get("pid")
+        or registration.get("owner_identity_sha256") != _sha(owner_identity)
         or raw.get("status") not in {"completed", "failed", "cancelled", "unknown", "recovery_required"}
         or any(raw.get(key) != claim.get(key) for key in (
             "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
@@ -1146,7 +1270,7 @@ def recover_producer_process(
             "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
             "intent_sha256", "attestation_sha256", "consumption_sha256", "registration_sha256",
             "executable_identity", "execution_binding", "execution_snapshot_relative_path",
-            "execution_snapshot_sha256", "execution_snapshot_size", "pid", "pgid",
+            "execution_snapshot_sha256", "execution_snapshot_size", "pid", "pgid", "owner_identity",
         ))
         or raw.get("previous_receipt_sha256") != registration.get("registration_sha256")
     ):
