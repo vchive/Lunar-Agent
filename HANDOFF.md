@@ -3985,4 +3985,4 @@ descriptor、target identity 和 gate protocol 做严格字段绑定，并记录
 校验/数据模型，不读文件、不检查进程、不调用 provider，也未改 scheduler 或现有 producer
 runner 行为。T158-04 的正式 registration/cleanup/recovery 接线、T156-09 完整矩阵、非 Darwin
 descriptor-bound execution 和宿主请求级证据仍未完成；没有运行真实 provider、WebAgent 或
-campaign。本轮改动尚未提交或推送。
+campaign。本轮改动已随 `cda59a9` 和 `df95820` 提交并推送。
