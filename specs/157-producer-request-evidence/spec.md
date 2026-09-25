@@ -2,7 +2,7 @@
 
 **Created**: 2026-09-24
 
-**Status**: provider-free DTO and parser implemented; lifecycle integration deferred
+**Status**: declaration DTO and fixture-level host ledger/journal implemented; lifecycle integration deferred
 
 ## Problem
 
@@ -49,8 +49,13 @@ Reading a file written by an arbitrary child after it exits is still a declarati
 upgrade the receipt to `request_timeout_enforced`. The existing wall-clock deadline and output
 capture remain the only host-enforced limits until that contract exists.
 
+The provider-free `HostRequestLedger` and `HostRequestJournal` provide bounded controller-side
+admission, monotonic timing, fsynced append-only records, and read-only crash recovery for
+brokered requests. Their snapshot explicitly says `brokered_requests_only`; they do not
+perform outbound I/O, cancel a hung request, or prevent producer egress outside the broker.
+See `transport-design.md` for the production transport and isolation requirements.
+
 ## Non-goals
 
 This feature does not call a provider, inspect prompts or responses, enforce remote token/cost
 limits, change `run_producer_process`, or connect the payload to scheduler defaults.
-

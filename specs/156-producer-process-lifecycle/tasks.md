@@ -12,7 +12,7 @@
 - [x] T156-10 Run focused tests, Ruff, compileall, diff checks, and the existing offline regression; keep integration entry points unchanged.
 - [ ] T156-11 Close the executable replacement window with a platform-supported byte-bound execution contract and a deterministic replacement regression before external admission.
 - [x] T156-11a On Darwin, stage the verified bytes into a private immutable snapshot, bind its digest into registration/terminal receipts, and cover replacement-after-check and snapshot-lock failure.
-- [ ] T156-11b Define a descriptor-bound execution mechanism for non-Darwin platforms; pathname-unbound execution remains prototype-only.
+- [x] T156-11b On Linux, execute a sealed memfd through an inherited descriptor and verify source replacement after the final check; other non-Darwin platforms remain prototype-only.
 - [ ] T156-12 Define and attest a Lunar-owned producer bootstrap protocol; reject arbitrary direct executables that cannot prove no work occurred before registration-gate release.
 - [x] T156-13 Add capture/read and signal/cleanup fault-injection fixtures, including child exit before gate and broken gate delivery; preserve terminal unknown/recovery evidence.
 - [ ] T156-14 Integrate Feature 157 only after controller-owned request evidence is host-observed and recovery-safe; producer-declared files remain diagnostics.

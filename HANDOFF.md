@@ -1,5 +1,24 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-25 Linux 执行字节绑定与宿主请求日志
+
+沿 Feature 156/157 SDD，Linux producer runner 现在把已核验的可执行字节复制到 sealed
+memfd，并在 `Popen` 完成前持有、继承该描述符；登记和终态回执记录
+`linux-sealed-memfd` 及字节摘要。真实 Linux 上的 runner 专项 **46 passed、2 skipped**，
+覆盖最终校验后替换源路径仍运行已封印字节，以及平台能力缺失时启动前拒绝。
+Darwin 继续使用 immutable snapshot，其他平台仍为 prototype，Feature 156 整体
+T156-11 不因 Linux 子项完成而关闭。
+
+Feature 157 新增 controller-owned 请求计数/单调计时账本，以及逐条 fsync、哈希串联的
+有界请求日志和只读恢复；崩溃时未结束的请求保持不确定。它只证明经过该入口的请求，
+尚无实际 outbound broker、I/O 超时取消、producer 出口隔离或 Feature 156 正式接线，
+因此 T157-05/06 与 T156-14 保持开放。两项实现均未调用 provider、外部 producer、
+WebAgent、scheduler 或真实 campaign。
+
+当前主要未完成项：Feature 156 的崩溃后授权清理与终态恢复回执、trusted bootstrap
+正式接入和完整生命周期矩阵；Feature 157 的实际受控 transport；外部 producer 到
+population/archive/delivery 的自动接线；以及新的真实模型完整交付验收。
+
 ## 2026-09-25 Feature 156 owner identity 登记收窄
 
 沿现有 SDD 为 provider-free producer 登记增加 OS 观测的进程启动身份，并绑定到终态回执：

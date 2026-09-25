@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from lunar_evolution import (
     producer_process,
     run_producer_process,
 )
+from lunar_evolution.linux_executable_binding import LinuxExecutableBindingError
 from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
 from lunar_evolution.producer_process import recover_producer_process
 
@@ -450,6 +452,74 @@ def test_darwin_snapshot_lock_failure_rejects_before_spawn(tmp_path: Path, monke
             popen_factory=forbidden_spawn,
         )
     assert exc.value.code == "producer_process_execution_binding_unknown"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="requires Linux sealed memfd execution")
+def test_linux_sealed_executable_survives_source_replacement_after_final_check(tmp_path: Path):
+    import fcntl
+
+    producer_root, intent, attestation = _fixture(tmp_path)
+    executable = producer_root / "producer.py"
+    original_digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+    observed: dict[str, int] = {}
+
+    def replacing_popen(*args, **kwargs):
+        bound_path = kwargs["executable"]
+        assert bound_path.startswith("/proc/self/fd/")
+        bound_fd = int(bound_path.rsplit("/", 1)[1])
+        assert bound_fd in kwargs["pass_fds"]
+        required_seals = (
+            fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+        )
+        assert fcntl.fcntl(bound_fd, fcntl.F_GET_SEALS) & required_seals == required_seals
+        observed["fd"] = bound_fd
+
+        replacement = producer_root / "replacement.py"
+        replacement.write_text("#!/usr/bin/env python3\nraise SystemExit(9)\n", encoding="utf-8")
+        replacement.chmod(0o755)
+        replacement.replace(executable)
+        return producer_process.subprocess.Popen(*args, **kwargs)
+
+    receipt = run_producer_process(
+        tmp_path, intent=intent, attestation=attestation, producer_root=producer_root,
+        popen_factory=replacing_popen,
+    )
+    assert receipt.status == "completed"
+    assert receipt.execution_binding == "linux-sealed-memfd"
+    assert receipt.execution_snapshot_sha256 == original_digest
+    assert receipt.execution_snapshot_relative_path is None
+    registration = json.loads(
+        (tmp_path / "evolution/producer-batches/journal-001/process-registration.json").read_text()
+    )
+    assert registration["execution_binding"] == "linux-sealed-memfd"
+    assert registration["execution_snapshot_sha256"] == original_digest
+    with pytest.raises(OSError):
+        os.fstat(observed["fd"])
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="requires Linux runner path")
+def test_linux_binding_unavailable_rejects_before_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    producer_root, intent, attestation = _fixture(tmp_path)
+
+    @contextmanager
+    def unavailable(*args, **kwargs):
+        raise LinuxExecutableBindingError("linux_execution_binding_unsupported")
+        yield
+
+    monkeypatch.setattr(producer_process, "sealed_linux_executable", unavailable)
+
+    def forbidden_spawn(*args, **kwargs):
+        pytest.fail("an unsupported execution binding must reject before spawn")
+
+    with pytest.raises(ProducerProcessError) as exc:
+        run_producer_process(
+            tmp_path, intent=intent, attestation=attestation, producer_root=producer_root,
+            popen_factory=forbidden_spawn,
+        )
+    assert exc.value.code == "producer_process_execution_binding_unsupported"
+    batch = tmp_path / "evolution/producer-batches/journal-001"
+    assert (batch / "attestation-consumption.json").is_file()
+    assert not (batch / "process-registration.json").exists()
 
 
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")

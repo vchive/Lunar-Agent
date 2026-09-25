@@ -9,7 +9,7 @@ only after reaping its child and confirming the leader PID is absent; a reused v
 Darwin reads microsecond start time from `libproc`; Linux records the boot ID and `/proc` start tick.
 Recovery checks the registration-to-receipt binding but remains read-only:
 there is no post-crash owner-checked cleanup or terminal recovery receipt yet. T156-06 therefore
-remains open, as do trusted bootstrap integration and non-Darwin byte-bound execution.
+remains open, as do trusted bootstrap integration and byte-bound execution on other platforms.
 
 The owner-identity and Feature 156/157/158 focused suites pass **133 tests**. The final code also
 passes the full offline repository suite, Ruff, compileall, and diff checks. No provider, external
@@ -52,16 +52,12 @@ failures, duplicate JSON keys, and recovery tampering. The focused matrix has **
 The final offline repository regression has **7345 passed, 1 skipped**; Ruff, compileall, and
 `git diff --check` pass.
 
-This is not yet the full acceptance matrix. Request-level timeout is a declaration to the producer
-and cannot be enforced inside an arbitrary executable by the parent process; the protocol needs
-an acknowledged request-level receipt or a controlled producer SDK. A non-cooperating executable
-can do work before reading the gate, so gate participation needs an explicit trusted producer
-contract before this runner is connected to an external campaign. Darwin uses a private immutable
-snapshot of the verified executable bytes. On non-Darwin platforms the executable is still
-re-opened by pathname between its final identity check and `Popen`, so a concurrent replacement
-can run bytes that were not attested. That platform gap remains a release blocker for external
-producer admission, along with the cooperative gate and request-level evidence. The default
-scheduler does not call this runner.
+This was not yet the full acceptance matrix. Request-level timeout was a declaration to the
+producer and could not be enforced inside an arbitrary executable by the parent process. A
+non-cooperating executable could do work before reading the gate. At this checkpoint Darwin
+used a private immutable snapshot, while Linux and other non-Darwin platforms still re-opened
+the executable by pathname between the final identity check and `Popen`. The default scheduler
+did not call this runner.
 
 The descendant cleanup gap is now addressed for descendants that remain in the registered
 process group. The runner cleans that group when the leader exits and retains the first cleanup
@@ -72,8 +68,21 @@ The macOS local probe confirmed that a shebang fixture cannot be launched throug
 when the verified descriptor is inherited by the child. `fexecve` and `execveat` are unavailable
 through the local Python/libc interface. Darwin now uses a private immutable executable snapshot;
 the replacement-after-final-check fixture verifies that the snapshot bytes run and that a failed
-immutable lock rejects before spawn. Non-Darwin remains `pathname_unbound` until a
-descriptor-bound mechanism is specified and tested, so it is not external-admission ready.
+immutable lock rejects before spawn. Linux uses a sealed memfd inherited across `Popen` and
+executed through `/proc/self/fd`; other platforms retain the `pathname_unbound` prototype.
+
+## Linux byte-bound launch follow-up (2026-09-25)
+
+The Linux runner now holds a sealed memfd through `Popen` and passes it in `pass_fds` along with
+the registration gate. The actual Linux fixture replaces the source path inside the `Popen`
+callback, after the runner's final identity check. The original shebang script still completes,
+the registration and terminal receipt bind its digest as `linux-sealed-memfd`, and the parent
+descriptor is closed after process creation. An unavailable Linux binding rejects before spawn
+after the one-time attestation has been consumed. The focused Linux producer-process and binding
+suites passed with **46 passed, 2 skipped**; Ruff, compileall, and diff checks passed locally.
+The Darwin focused suite passes with the Linux-only tests skipped. This closes the Linux pathname
+replacement window, but external admission remains blocked by the trusted pre-gate bootstrap and
+host-observed request enforcement; other platforms remain pathname-bound prototypes.
 
 ## Deadline and fault-injection follow-up (2026-09-24)
 
@@ -93,6 +102,6 @@ projection, owner-loss without a direct fallback kill, child exit after registra
 gate release, broken gate delivery, and a two-phase cleanup that cannot exceed the absolute
 deadline. T156-13 is complete; T156-09's broader lifecycle matrix remains open.
 
-T156-05, T156-06, T156-09, T156-11, T156-11b, T156-12, and T156-14 remain open:
-request-level timeout is still cooperative, non-Darwin execution is pathname-bound, trusted
-bootstrap is fixture-only, and controller-owned request evidence is not yet connected.
+At this checkpoint T156-05, T156-06, T156-09, T156-11, T156-11b, T156-12, and T156-14 remained
+open. T156-11b is now complete for Linux as recorded above. The trusted bootstrap is still
+fixture-only, and controller-owned request evidence is not yet connected to the runner.

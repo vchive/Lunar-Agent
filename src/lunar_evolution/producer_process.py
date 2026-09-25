@@ -18,10 +18,11 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
+from .linux_executable_binding import LinuxExecutableBindingError, sealed_linux_executable
 from .process_ownership import (
     ProcessCleanupResult,
     ProcessCleanupStatus,
@@ -322,9 +323,9 @@ class ProducerExecutableSnapshot:
     """The exact byte binding used for one producer spawn.
 
     Darwin uses a private immutable copy because its kernel has no supported
-    ``fexecve``/``execveat`` interface.  Other platforms retain the historical
-    pathname prototype explicitly; that binding is never suitable for external
-    admission.
+    ``fexecve``/``execveat`` interface. Linux binds the same attested bytes to a
+    sealed memfd held through process creation. Other platforms retain the
+    pathname prototype explicitly.
     """
 
     relative_path: str | None
@@ -350,10 +351,17 @@ def _snapshot_executable(
     A descriptor is opened without following the final symlink, copied while
     its identity is held, then published under a private batch directory.  The
     published file is made user-immutable before it is passed to ``Popen``.
-    This is deliberately Darwin-specific: pathname execution remains an
-    explicit prototype on CI/Linux until a descriptor-native contract exists.
+    Linux's descriptor-bound copy is held in ``run_producer_process`` through
+    process creation. This function publishes only its expected receipt metadata.
     """
 
+    if sys.platform.startswith("linux"):
+        return ProducerExecutableSnapshot(
+            relative_path=None,
+            sha256=str(expected_identity["sha256"]),
+            size=int(expected_identity["size"]),
+            binding="linux-sealed-memfd",
+        )
     if sys.platform != "darwin":
         return ProducerExecutableSnapshot(
             relative_path=None,
@@ -611,7 +619,7 @@ class ProducerExecutionReceipt:
     def __post_init__(self) -> None:
         if self.schema_version != "1" or self.protocol != _PROTOCOL:
             _fail("producer_process_receipt_schema_invalid")
-        if self.execution_binding not in {"pathname_unbound", "darwin-immutable-snapshot"}:
+        if self.execution_binding not in {"pathname_unbound", "darwin-immutable-snapshot", "linux-sealed-memfd"}:
             _fail("producer_process_receipt_execution_binding_invalid")
         if (
             not isinstance(self.execution_snapshot_sha256, str)
@@ -624,7 +632,7 @@ class ProducerExecutionReceipt:
             _fail("producer_process_receipt_execution_snapshot_invalid")
         if self.execution_binding == "darwin-immutable-snapshot" and not self.execution_snapshot_relative_path:
             _fail("producer_process_receipt_execution_snapshot_invalid")
-        if self.execution_binding == "pathname_unbound" and self.execution_snapshot_relative_path is not None:
+        if self.execution_binding in {"pathname_unbound", "linux-sealed-memfd"} and self.execution_snapshot_relative_path is not None:
             _fail("producer_process_receipt_execution_snapshot_invalid")
         if self.status not in {"completed", "failed", "cancelled", "unknown", "recovery_required"}:
             _fail("producer_process_receipt_status_invalid")
@@ -942,13 +950,35 @@ def run_producer_process(
             verify_producer_launch_attestation(intent, attestation)
         except ProducerLaunchError as exc:
             raise ProducerProcessError("producer_process_attestation_mismatch") from exc
-        if _file_identity(executable) != expected_identity:
-            _fail("producer_process_executable_changed")
-        process = popen_factory(
-            list(intent.argv), executable=str(snapshot_path), shell=False, start_new_session=True,
-            close_fds=True, pass_fds=(gate_read,), cwd=str(working), env=env,
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        linux_context = (
+            sealed_linux_executable(executable, expected_identity, deadline=deadline, monotonic=monotonic)
+            if sys.platform.startswith("linux") else nullcontext(None)
         )
+        try:
+            with linux_context as linux_binding:
+                if _file_identity(executable) != expected_identity:
+                    _fail("producer_process_executable_changed")
+                if linux_binding is not None and (
+                    linux_binding.sha256 != snapshot.sha256 or linux_binding.size != snapshot.size
+                ):
+                    _fail("producer_process_execution_binding_unknown")
+                process = popen_factory(
+                    list(intent.argv),
+                    executable=linux_binding.executable if linux_binding is not None else str(snapshot_path),
+                    shell=False, start_new_session=True,
+                    close_fds=True,
+                    pass_fds=(gate_read, linux_binding.pass_fd) if linux_binding is not None else (gate_read,),
+                    cwd=str(working), env=env,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+        except LinuxExecutableBindingError as exc:
+            code = {
+                "linux_execution_binding_unsupported": "producer_process_execution_binding_unsupported",
+                "linux_execution_wall_timeout": "producer_process_wall_timeout",
+                "linux_execution_source_invalid": "producer_process_executable_invalid",
+                "linux_execution_source_changed": "producer_process_executable_changed",
+            }.get(exc.code, "producer_process_execution_binding_unknown")
+            raise ProducerProcessError(code) from exc
         os.close(gate_read)
         gate_read = -1
         try:

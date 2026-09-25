@@ -1,5 +1,13 @@
 # Lunar Evolution 当前能力、剩余工作与终态验收
 
+2026-09-25 更新：provider-free 原生多文件端到端链路仍可运行，Linux 外部 producer
+启动链新增 sealed memfd 执行字节绑定并通过真实 Linux 替换攻击回归。宿主请求账本现可
+逐条持久化并只读恢复，但尚无实际受控网络代理、超时取消和出口隔离；trusted bootstrap
+仍是 fixture，崩溃后进程组清理也未完成。因此外部 producer 不能进入默认调度或宣称
+生产可用。真实模型完整交付仍无新成功样本，Feature 139 历史结果不变。当前开发状态
+以 [Feature 156 任务](../specs/156-producer-process-lifecycle/tasks.md) 和
+[Feature 157 任务](../specs/157-producer-request-evidence/tasks.md) 为准。
+
 2026-09-23 增量：142 的 provider-free native 多文件 quickstart、Phase C subprocess 生命周期
 和 CLI/integration 复核均通过；四个候选得分 1/2/6/7，选择并交付 7 分候选，`solve --resume`
 没有重复调用。146 递归 worker 的取消、恢复和父状态准入已通过本地及 Linux 三版本 CI；147

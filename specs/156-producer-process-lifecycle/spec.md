@@ -114,14 +114,16 @@ out of scope and the runner remains provider-free prototype behavior.
 The executable bytes actually run must be bound to the attested bytes. Checking the source path
 immediately before `Popen(executable=path)` is insufficient: a concurrent rename can replace the
 path between the check and the kernel's open. On macOS, executing a shebang script through a held
-`/dev/fd` descriptor fails, and Python exposes no `fexecve`/`execveat` fallback there. A future
-implementation must define and test a platform-supported descriptor-bound execution mechanism on
-each remaining platform, or a controlled producer runtime that executes the verified source bytes
-from a held descriptor and separately pins its trusted runtime. The Darwin implementation stages
-the verified bytes into a private `UF_IMMUTABLE` snapshot and binds its digest and binding mode in
-the registration and terminal receipts; replacement after the final source check therefore uses
-the snapshot bytes. On non-Darwin platforms the current `pathname_unbound` mode remains local
-prototype behavior and cannot satisfy external executable admission.
+`/dev/fd` descriptor fails, and Python exposes no `fexecve`/`execveat` fallback there. The Darwin
+implementation stages verified bytes into a private `UF_IMMUTABLE` snapshot and binds its digest
+and binding mode in the registration and terminal receipts. On Linux, the runner copies the
+attested source into a sealed executable memfd, keeps its descriptor open through `Popen`, and
+passes that descriptor to the child so a shebang interpreter reopens the sealed script through
+`/proc/self/fd`. The registration and terminal receipts bind the sealed digest and binding mode;
+replacement after the final source check therefore cannot change the executed bytes. If Linux
+memfd sealing or `/proc/self/fd` is unavailable, launch fails before process creation. Other
+platforms still use `pathname_unbound` prototype behavior and cannot satisfy external executable
+admission.
 
 The durable receipt is written with a bounded temporary file, `fsync`, and no-follow atomic rename;
 the destination and every existing ancestor must be a regular directory without symlinks. The

@@ -14,7 +14,7 @@ ProducerProcessRegistration
   schema_version / protocol
   launch_id / journal_id / run_id / parent_task_id / task_id
   intent_sha256 / attestation_sha256 / executable_identity
-  execution_binding                         # darwin-immutable-snapshot | pathname_unbound
+  execution_binding                         # darwin-immutable-snapshot | linux-sealed-memfd | pathname_unbound
   execution_snapshot_relative_path?
   execution_snapshot_sha256 / execution_snapshot_size
   pid / pgid / owner_identity / owner_identity_sha256

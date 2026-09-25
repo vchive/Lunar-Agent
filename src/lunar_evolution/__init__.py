@@ -284,6 +284,11 @@ from .holdout_audit import (
 from .holdout_audit import (
     SCHEMA_VERSION as HOLDOUT_AUDIT_SCHEMA_VERSION,
 )
+from .linux_executable_binding import (
+    LinuxExecutableBindingError,
+    LinuxSealedExecutable,
+    sealed_linux_executable,
+)
 from .model_profile import UsageLedger, UsageSnapshot
 from .models import (
     Worker,
@@ -431,6 +436,17 @@ from .producer_request_evidence import (
     assess_producer_request_evidence,
     parse_producer_request_evidence,
     validate_producer_request_evidence,
+)
+from .producer_request_transport import (
+    HostRequestEvent,
+    HostRequestJournal,
+    HostRequestJournalIdentity,
+    HostRequestLedger,
+    HostRequestRecovery,
+    HostRequestSnapshot,
+    ProducerRequestTransportError,
+    RequestAdmission,
+    read_host_request_journal,
 )
 from .profiles import EvaluatorProfile, ModelProfile, ProfileRegistry, SolverProfile
 from .remote_evolution import (
@@ -650,6 +666,14 @@ __all__ = [
     "FrozenEvaluatorBundle",
     "GenerationRequest",
     "HoldoutAuditError",
+    "HostRequestEvent",
+    "HostRequestJournal",
+    "HostRequestJournalIdentity",
+    "HostRequestLedger",
+    "HostRequestRecovery",
+    "HostRequestSnapshot",
+    "LinuxExecutableBindingError",
+    "LinuxSealedExecutable",
     "LoopStrategy",
     "ModelIdentity",
     "ModelProfile",
@@ -700,6 +724,7 @@ __all__ = [
     "ProducerRequestEvidence",
     "ProducerRequestEvidenceAssessment",
     "ProducerRequestEvidenceError",
+    "ProducerRequestTransportError",
     "ProducerResultEnvelope",
     "ProducerStreamEvidence",
     "ProfileRegistry",
@@ -715,6 +740,7 @@ __all__ = [
     "RemoteStatusRequest",
     "RemoteSubmitRequest",
     "RemoteSyncRequest",
+    "RequestAdmission",
     "RuntimeAgentAdapter",
     "RuntimeContractCompiler",
     "SeedAdmissionError",
@@ -875,6 +901,7 @@ __all__ = [
     "publish_producer_bundle_publication",
     "read_bundle_delivery_materials",
     "read_candidate_source_files",
+    "read_host_request_journal",
     "reconcile_remote_state",
     "recover_producer_process",
     "remote_cancel",
@@ -891,6 +918,7 @@ __all__ = [
     "run_harness_adapter",
     "run_producer_process",
     "run_subject_adapter",
+    "sealed_linux_executable",
     "source_only_dependency_sha256",
     "stage_candidate_execution_inputs",
     "stage_candidate_inputs",
