@@ -1,5 +1,19 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 156 崩溃后清理与锁身份
+
+外部 producer 的显式恢复现在可在登记链、一次性 nonce claim、OS 进程启动身份和原生命周期锁
+全部匹配时，尝试清理仍存活的进程组。默认恢复继续只读；清理另写 create-only、fsync 的
+recovery receipt，执行结果始终为 unknown，不据此发布或重启。活跃控制器持锁时恢复拒绝；
+锁文件设备号/inode 已绑定进登记 digest，路径被替换后不能借新锁清理旧进程，每次信号前
+也复核锁路径。旧登记缺少锁身份时不能授权清理。
+
+专项进程生命周期回归、Ruff、compileall 与 diff check 已通过；完整三阶段离线回归
+为当前 7453 passed / 6 skipped、历史归档 2294 passed、固定注册 24 passed，均无失败。
+trusted bootstrap 正式接线、Feature 157 实际请求 broker/超时取消/出口隔离、外部 producer
+到 population/archive/delivery 的自动接线、新真实模型完整交付验收仍未完成；不能宣称生产可用。
+本轮未启动 provider、外部 producer、WebAgent 或真实 campaign。
+
 ## 2026-09-25 Linux 执行字节绑定与宿主请求日志
 
 沿 Feature 156/157 SDD，Linux producer runner 现在把已核验的可执行字节复制到 sealed

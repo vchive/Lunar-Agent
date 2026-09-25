@@ -565,7 +565,7 @@ def _recovery_lock(batch: Path):
                 current = os.stat(".recovery.lock", dir_fd=directory_fd, follow_symlinks=False)
                 if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
                     _fail("producer_process_recovery_lock_unknown")
-                yield
+                yield (opened.st_dev, opened.st_ino)
             finally:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_UN)
@@ -576,6 +576,17 @@ def _recovery_lock(batch: Path):
             raise
         except OSError as exc:
             raise ProducerProcessError("producer_process_recovery_lock_unknown") from exc
+
+
+def _current_recovery_lock_identity(batch: Path) -> tuple[int, int] | None:
+    try:
+        with _held_directory(batch) as directory_fd:
+            current = os.stat(".recovery.lock", dir_fd=directory_fd, follow_symlinks=False)
+            if not stat.S_ISREG(current.st_mode) or current.st_nlink != 1:
+                return None
+            return current.st_dev, current.st_ino
+    except (OSError, ProducerProcessError):
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -911,6 +922,7 @@ def _run_producer_process(
     expected_task_id: str | None = None,
     monotonic: Callable[[], float] = time.monotonic,
     popen_factory: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    recovery_lock_identity: tuple[int, int],
 ) -> ProducerExecutionReceipt:
     """Run one exact producer attempt and return a durable terminal receipt."""
     if not isinstance(intent, ProducerLaunchIntent):
@@ -1056,6 +1068,8 @@ def _run_producer_process(
             "execution_snapshot_size": snapshot.size,
             "pid": process.pid, "pgid": pgid,
             "recovery_lock_protocol": _RECOVERY_LOCK_PROTOCOL,
+            "recovery_lock_device": recovery_lock_identity[0],
+            "recovery_lock_inode": recovery_lock_identity[1],
             "gate_protocol": "fd-read-one-byte", "registered_at_unix_ns": time.time_ns(),
         }
         registration_payload["registration_sha256"] = _digest_without(registration_payload, "registration_sha256")
@@ -1200,12 +1214,12 @@ def run_producer_process(
         _fail("producer_process_identity_mismatch")
     batch = root / "evolution" / "producer-batches" / intent.journal_id
     _safe_dir(batch, create=True)
-    with _recovery_lock(batch):
+    with _recovery_lock(batch) as lock_identity:
         return _run_producer_process(
             workspace, intent=intent, attestation=attestation, producer_root=producer_root,
             expected_run_id=expected_run_id, expected_parent_task_id=expected_parent_task_id,
             expected_task_id=expected_task_id, monotonic=monotonic,
-            popen_factory=popen_factory,
+            popen_factory=popen_factory, recovery_lock_identity=lock_identity,
         )
 
 
@@ -1439,7 +1453,9 @@ def _read_recovery_receipt(batch: Path, registration: Mapping[str, object]) -> d
     return receipt
 
 
-def _cleanup_recovered_process(batch: Path, registration: Mapping[str, object]) -> dict[str, object]:
+def _cleanup_recovered_process(
+    batch: Path, registration: Mapping[str, object], lock_identity: tuple[int, int],
+) -> dict[str, object]:
     pid = registration.get("pid")
     pgid = registration.get("pgid")
     owner_identity = registration.get("owner_identity")
@@ -1450,6 +1466,8 @@ def _cleanup_recovered_process(batch: Path, registration: Mapping[str, object]) 
         or owner_identity.get("pid") != pid
         or registration.get("owner_identity_sha256") != _sha(owner_identity)
         or registration.get("recovery_lock_protocol") != _RECOVERY_LOCK_PROTOCOL
+        or registration.get("recovery_lock_device") != lock_identity[0]
+        or registration.get("recovery_lock_inode") != lock_identity[1]
     ):
         _fail("producer_process_recovery_registration_invalid")
     prior = _read_recovery_receipt(batch, registration)
@@ -1463,7 +1481,11 @@ def _cleanup_recovered_process(batch: Path, registration: Mapping[str, object]) 
             current = _read_durable_json(
                 registration_path, code="producer_process_recovery_registration_invalid",
             )
-            return current == registration and _process_owner_identity(pid) == owner_identity
+            return (
+                current == registration
+                and _current_recovery_lock_identity(batch) == lock_identity
+                and _process_owner_identity(pid) == owner_identity
+            )
         except ProducerProcessError:
             return False
 
@@ -1507,7 +1529,7 @@ def recover_producer_process(
     if not isinstance(journal_id, str) or not journal_id or "/" in journal_id or ".." in journal_id:
         _fail("producer_process_recovery_identity_invalid")
     batch = root / "evolution" / "producer-batches" / journal_id
-    with _recovery_lock(batch):
+    with _recovery_lock(batch) as lock_identity:
         observation = _inspect_producer_process(workspace, journal_id=journal_id)
         if observation.get("protocol") == "lunar-producer-process-recovery-v1":
             _fail("producer_process_recovery_already_recorded")
@@ -1531,7 +1553,7 @@ def recover_producer_process(
         )
         if nonce_claim != claim or claim.get("consumption_sha256") != registration.get("consumption_sha256"):
             _fail("producer_process_recovery_claim_invalid")
-        return _cleanup_recovered_process(batch, registration)
+        return _cleanup_recovered_process(batch, registration, lock_identity)
 
 
 launch_producer_process = run_producer_process

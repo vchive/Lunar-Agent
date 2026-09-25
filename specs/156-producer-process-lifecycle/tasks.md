@@ -5,7 +5,7 @@
 - [x] T156-03 Implement the gate-aware no-shell `Popen` path with a new session, closed descriptors, derived cwd, and exact PID/PGID owner registration for cooperating local producers.
 - [x] T156-04 Persist a launch registration receipt with bounded fsync/atomic publication before releasing the producer work gate.
 - [ ] T156-05 Add one monotonic wall-clock deadline, independent request/output limits, concurrent bounded stdout/stderr capture, and deterministic overflow handling.
-- [ ] T156-06 Integrate owner-checked process-group cleanup and fail-closed timeout, liveness, signal, and cleanup uncertainty states.
+- [ ] T156-06 Integrate owner-checked process-group cleanup and fail-closed timeout, liveness, signal, and cleanup uncertainty states. Explicit post-crash cleanup now acquires the registered device/inode lifecycle lock, rechecks durable registration, lock path, and OS start identity before signals, and persists a separate recovery receipt. A missing execution receipt remains an unknown outcome even after verified cleanup; full lifecycle acceptance is still open.
 - [x] T156-07 Add no-follow, bounded, double-identity output-envelope evidence and bind stable bytes to the execution receipt.
 - [x] T156-08 Add read-only controller-interruption recovery that inspects exact registrations and never relaunches or consumes another attestation.
 - [ ] T156-09 Add provider-free fixture tests for success, replay, gate, timeout, capture, tampering, cleanup, receipt durability, and recovery.

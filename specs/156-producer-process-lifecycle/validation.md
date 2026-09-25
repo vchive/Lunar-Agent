@@ -1,5 +1,33 @@
 # Feature 156 validation
 
+## Post-crash cleanup acceptance (2026-09-26)
+
+Explicit recovery cleanup is a separate operation from read-only inspection. The runner and
+recovery must share a nonblocking, no-follow lifecycle lock so a live controller is never
+mistaken for a crashed one. Recovery must validate the full claim-to-registration identity
+tuple and the exact PID/PGID types before any signal. Each owner check must reread the durable
+registration, match the lock file's registered device/inode, and match the current OS process
+start identity. The lock device/inode is included in the registration digest, and legacy
+registrations without it cannot authorize cleanup. Lock replacement while the old controller
+still owns its flock, or immediately before a recovery signal, must fail closed. If the leader is gone while its
+group remains, recovery has no continuous child observation and must not signal that group.
+
+The cleanup result belongs in a create-only, fsynced recovery receipt chained to the
+registration. It proves only the cleanup observation: missing stream/envelope evidence cannot
+be promoted to successful execution, publication, or a fresh launch. Tests must cover live
+controller contention, exact owner cleanup, reused PID/group, absent leader/group, signal and
+probe uncertainty, registration tampering, duplicate recovery, and receipt write failure.
+
+The focused producer-process, process-ownership, and trusted-bootstrap-runtime suites pass.
+The complete provider-free three-stage regression passes: current **7453 passed, 6 skipped**;
+archived **2294 passed**; frozen registration **24 passed**. Ruff, compileall, and diff checks
+pass. No provider, external producer, scheduler, WebAgent, or real campaign was run. The fixture's
+ordinary wall-clock budget is five seconds so file replacement assertions remain deterministic
+under the full suite; the dedicated timeout fixture retains a one-second budget.
+
+This increment does not close T156-06 by itself. Trusted bootstrap integration, host-observed
+request enforcement, complete lifecycle fixtures, and external producer admission remain open.
+
 ## Owner identity checkpoint (2026-09-25)
 
 The local runner now records an OS-observed process start identity in its durable registration

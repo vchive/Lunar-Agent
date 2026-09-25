@@ -73,7 +73,7 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
         dependency_sha256=DIGEST, environment_sha256=DIGEST, producer_id="fixture", producer_fingerprint=DIGEST,
         executable_relative="producer.py", argv=("producer.py",), working_directory="work", output_directory="output",
         request_timeout_seconds=1, max_requests=2, output_max_bytes=1024 if mode == "overflow" else 65536,
-        wall_timeout_seconds=3 if mode in {"descendant-pipes", "descendant-redirect", "descendant-stubborn", "exit-before-gate"} else 1,
+        wall_timeout_seconds=1 if mode == "timeout" else 5,
     )
     return producer_root, intent, build_producer_launch_attestation(intent, "nonce-001")
 
@@ -92,6 +92,10 @@ def test_attested_process_is_registered_before_gate_and_emits_receipt(tmp_path: 
     assert registration["owner_identity"] == receipt.owner_identity
     assert registration["owner_identity_sha256"] == producer_process._sha(receipt.owner_identity)
     assert receipt.owner_identity["pid"] == receipt.pid
+    lock_stat = (batch / ".recovery.lock").stat()
+    assert (registration["recovery_lock_device"], registration["recovery_lock_inode"]) == (
+        lock_stat.st_dev, lock_stat.st_ino,
+    )
     assert (batch / "execution-receipt.json").is_file()
 
 
@@ -639,7 +643,7 @@ def test_cleanup_passes_absolute_deadline_and_rechecks_exited_leader(
 
 def test_preparation_time_counts_toward_wall_deadline(tmp_path: Path):
     producer_root, intent, attestation = _fixture(tmp_path)
-    times = iter((0.0, 2.0))
+    times = iter((0.0, 6.0))
 
     def forbidden_spawn(*args, **kwargs):
         pytest.fail("expired launch must not spawn")
@@ -840,6 +844,43 @@ def test_explicit_recovery_rejects_busy_lifecycle_lock(tmp_path: Path):
         process.wait(timeout=2)
 
 
+def test_explicit_recovery_rejects_replaced_lock_while_controller_holds_old_inode(tmp_path: Path):
+    batch, intent, process = _registered_live_process(tmp_path)
+    try:
+        with producer_process._recovery_lock(batch):
+            (batch / ".recovery.lock").rename(batch / ".recovery.lock.old")
+            with pytest.raises(ProducerProcessError) as exc:
+                recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+            assert exc.value.code == "producer_process_recovery_registration_invalid"
+            assert process.poll() is None
+            assert not (batch / "recovery-receipt.json").exists()
+    finally:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
+def test_explicit_recovery_loses_authority_if_lock_changes_before_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    batch, intent, process = _registered_live_process(tmp_path)
+    original_cleanup = producer_process.cleanup_registered_process
+
+    def replace_lock_before_cleanup(*args, **kwargs):
+        (batch / ".recovery.lock").rename(batch / ".recovery.lock.old")
+        (batch / ".recovery.lock").touch()
+        return original_cleanup(*args, **kwargs)
+
+    monkeypatch.setattr(producer_process, "cleanup_registered_process", replace_lock_before_cleanup)
+    try:
+        recovered = recover_producer_process(tmp_path, journal_id=intent.journal_id, cleanup=True)
+        assert recovered["cleanup_status"] == "ownership_lost"
+        assert recovered["term_sent"] is False
+        assert process.poll() is None
+    finally:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
 def test_explicit_recovery_rejects_tampered_recovery_receipt(tmp_path: Path):
     batch, intent, process = _registered_live_process(tmp_path)
     try:
@@ -877,6 +918,9 @@ def test_recovery_rejects_registration_owner_identity_mismatch(tmp_path: Path):
 
 def _recovery_registration(tmp_path: Path, pid: int, pgid: int, owner: dict[str, object]) -> Path:
     batch = tmp_path / "evolution/producer-batches/journal-001"
+    batch.mkdir(parents=True)
+    with producer_process._recovery_lock(batch) as lock_identity:
+        pass
     claim = {
         "schema_version": "1", "protocol": producer_process.PRODUCER_PROCESS_PROTOCOL,
         "consumption_id": "launch-001", "launch_id": "launch-001", "journal_id": "journal-001",
@@ -894,6 +938,7 @@ def _recovery_registration(tmp_path: Path, pid: int, pgid: int, owner: dict[str,
         "pid": pid, "pgid": pgid, "owner_identity": owner,
         "owner_identity_sha256": producer_process._sha(owner),
         "recovery_lock_protocol": producer_process._RECOVERY_LOCK_PROTOCOL,
+        "recovery_lock_device": lock_identity[0], "recovery_lock_inode": lock_identity[1],
     }
     registration["registration_sha256"] = producer_process._digest_without(
         registration, "registration_sha256",
@@ -975,6 +1020,25 @@ def test_explicit_recovery_rejects_legacy_registration_without_lifecycle_lock(tm
     )
     path.write_bytes(producer_process._canonical(registration))
     assert recover_producer_process(tmp_path, journal_id="journal-001")["status"] == "recovery_required"
+    with pytest.raises(ProducerProcessError) as exc:
+        recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
+    assert exc.value.code == "producer_process_recovery_registration_invalid"
+    assert not (batch / "recovery-receipt.json").exists()
+
+
+@pytest.mark.parametrize("field", ["recovery_lock_device", "recovery_lock_inode"])
+def test_explicit_recovery_rejects_legacy_registration_without_lock_identity(
+    tmp_path: Path, field: str,
+):
+    pid = os.getpid() + 10_000_000
+    batch = _recovery_registration(tmp_path, pid, pid, {"kind": "absent", "pid": pid})
+    path = batch / "process-registration.json"
+    registration = json.loads(path.read_text())
+    del registration[field]
+    registration["registration_sha256"] = producer_process._digest_without(
+        registration, "registration_sha256",
+    )
+    path.write_bytes(producer_process._canonical(registration))
     with pytest.raises(ProducerProcessError) as exc:
         recover_producer_process(tmp_path, journal_id="journal-001", cleanup=True)
     assert exc.value.code == "producer_process_recovery_registration_invalid"

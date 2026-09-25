@@ -1,5 +1,12 @@
 # Lunar Evolution 当前能力、剩余工作与终态验收
 
+2026-09-26 更新：Feature 156 已有显式、授权的崩溃后 producer 进程组清理，默认恢复仍只读。
+恢复回执只证明清理观测，执行结果保持 unknown；活跃控制器竞争、锁文件替换、登记或 OS
+进程身份不匹配均不能获得清理授权。锁设备号/inode 已绑定到登记 digest 并在发信号前复核。
+这尚未完成 Feature 156 整体生命周期验收。trusted bootstrap 正式接线、Feature 157
+真实受控请求出口、外部 producer 自动接入 population/archive/delivery，以及新真实模型
+完整交付成功样本仍缺失。因此当前仍不能宣布生产可用。
+
 2026-09-25 更新：provider-free 原生多文件端到端链路仍可运行，Linux 外部 producer
 启动链新增 sealed memfd 执行字节绑定并通过真实 Linux 替换攻击回归。宿主请求账本现可
 逐条持久化并只读恢复，但尚无实际受控网络代理、超时取消和出口隔离；trusted bootstrap
