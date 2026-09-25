@@ -13,6 +13,14 @@ TrustedBootstrapLaunch
   gate_protocol / gate_nonce
   launch_sha256
 
+TrustedBootstrapRegistration
+  schema_version / protocol
+  launch_id / journal_id / run_id / parent_task_id / task_id
+  intent_sha256 / attestation_sha256
+  bootstrap_descriptor_sha256 / target_executable_identity
+  pid / pgid / gate_protocol
+  registration_sha256
+
 BootstrapHandshakeFrame
   sequence / kind
   launch_sha256 / intent_sha256
@@ -48,3 +56,10 @@ only by the trusted bootstrap state machine plus the controlled fixture's pre/po
 evidence is invalid if bootstrap identity or exact-byte execution is unresolved. The checked-in
 fixture uses a same-source descriptor recheck and explicitly reports `fixture-only`; it does not
 claim that a pathname recheck closes Feature 156's non-Darwin replacement window.
+
+`TrustedBootstrapRegistration` is a provider-free DTO for the durable process-registration
+boundary. Its canonical digest covers every listed field except `registration_sha256`; parser
+input must contain exactly those fields. When checked against a `TrustedBootstrapLaunch`, every
+launch-owned identity must match byte-for-byte, while `pid` and `pgid` are bounded positive
+process identities. This validates the registration payload shape and cross-binding only; it does
+not itself prove that the PID/PGID exists or perform cleanup/recovery.

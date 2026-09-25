@@ -15,3 +15,11 @@ The child now defers target path validation until after gate release; a fixture 
 target still emits `bootstrap_ready` and only reports `target_start_failed` after release.
 Post-release target identity failures, including a hard-linked target, also emit the fixed
 `target_start_failed` frame rather than falling through to an unclassified early EOF.
+
+T158-04 remains open at the lifecycle-integration level.  The provider-free
+`TrustedBootstrapRegistration` DTO now covers the narrow identity boundary: it carries the
+launch/journal/run/parent/task, intent, attestation, bootstrap descriptor, target identity, and
+gate protocol from `TrustedBootstrapLaunch`, adds the registered bootstrap PID/PGID, and binds
+`registration_sha256` to the strict canonical payload.  Parsing can require an exact launch
+match, but the DTO does not read registration files, inspect processes, invoke a provider, or
+wire the fixture into Feature 156 cleanup/recovery.

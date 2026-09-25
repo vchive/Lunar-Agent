@@ -309,8 +309,12 @@ from .producer_bootstrap import (
     TrustedBootstrapDescriptor,
     TrustedBootstrapEvidence,
     TrustedBootstrapLaunch,
+    TrustedBootstrapRegistration,
     TrustedBootstrapSession,
+    build_trusted_bootstrap_registration,
     parse_bootstrap_handshake_frame,
+    parse_trusted_bootstrap_registration,
+    verify_trusted_bootstrap_registration,
 )
 from .producer_bundle_admission import (
     ProducerBundleAdmissionError,
@@ -734,6 +738,7 @@ __all__ = [
     "TrustedBootstrapDescriptor",
     "TrustedBootstrapEvidence",
     "TrustedBootstrapLaunch",
+    "TrustedBootstrapRegistration",
     "TrustedBootstrapSession",
     "UsageLedger",
     "UsageSnapshot",
@@ -799,6 +804,7 @@ __all__ = [
     "build_remote_producer_envelope",
     "build_round_feedback",
     "build_strategy",
+    "build_trusted_bootstrap_registration",
     "candidate_file_table_sha256",
     "candidate_output_contract_sha256",
     "canonical_profile_json",
@@ -855,6 +861,7 @@ __all__ = [
     "parse_producer_request_evidence",
     "parse_registration_seal",
     "parse_seed_manifest",
+    "parse_trusted_bootstrap_registration",
     "preflight_acceptance_registration",
     "preflight_producer_bundle_publication",
     "preflight_producer_launch",
@@ -893,4 +900,5 @@ __all__ = [
     "validate_producer_request_evidence",
     "verify_candidate_source_bundle",
     "verify_producer_launch_attestation",
+    "verify_trusted_bootstrap_registration",
 ]

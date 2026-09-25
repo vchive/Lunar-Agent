@@ -211,6 +211,154 @@ class TrustedBootstrapLaunch:
         return _digest_without(self.to_dict(), "launch_sha256")
 
 
+_REGISTRATION_FIELDS = frozenset({
+    "schema_version", "protocol", "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+    "intent_sha256", "attestation_sha256", "bootstrap_descriptor_sha256", "target_executable_identity",
+    "pid", "pgid", "gate_protocol", "registration_sha256",
+})
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedBootstrapRegistration:
+    """Canonical Feature 156-style process registration for one bootstrap launch.
+
+    This DTO is intentionally provider-free.  It binds the process identity recorded before
+    gate release to every identity carried by :class:`TrustedBootstrapLaunch`; it does not
+    inspect a process, read a registration file, or authorize a scheduler launch.
+    """
+
+    launch_id: str
+    journal_id: str
+    run_id: str
+    parent_task_id: str
+    task_id: str
+    intent_sha256: str
+    attestation_sha256: str
+    bootstrap_descriptor_sha256: str
+    target_executable_identity: str
+    pid: int
+    pgid: int
+    gate_protocol: str
+    registration_sha256: str | None = None
+    schema_version: str = TRUSTED_BOOTSTRAP_SCHEMA_VERSION
+    protocol: str = TRUSTED_BOOTSTRAP_PROTOCOL
+
+    def __post_init__(self) -> None:
+        if self.schema_version != TRUSTED_BOOTSTRAP_SCHEMA_VERSION or self.protocol != TRUSTED_BOOTSTRAP_PROTOCOL:
+            _fail("producer_bootstrap_registration_schema_invalid")
+        for value in (self.launch_id, self.journal_id, self.run_id, self.parent_task_id, self.task_id):
+            _id(value, "producer_bootstrap_registration_identity_invalid")
+        for value in (
+            self.intent_sha256,
+            self.attestation_sha256,
+            self.bootstrap_descriptor_sha256,
+            self.target_executable_identity,
+        ):
+            _sha(value, "producer_bootstrap_registration_digest_invalid")
+        _int(self.pid, minimum=2, maximum=2**63 - 1, code="producer_bootstrap_registration_process_identity_invalid")
+        _int(self.pgid, minimum=2, maximum=2**63 - 1, code="producer_bootstrap_registration_process_identity_invalid")
+        if self.gate_protocol != "fd-read-one-byte-v1":
+            _fail("producer_bootstrap_registration_gate_protocol_invalid")
+        if self.registration_sha256 is not None:
+            _sha(self.registration_sha256, "producer_bootstrap_registration_digest_invalid")
+            if self.registration_sha256 != self.digest():
+                _fail("producer_bootstrap_registration_digest_mismatch")
+        else:
+            object.__setattr__(self, "registration_sha256", self.digest())
+
+    @classmethod
+    def from_launch(cls, launch: TrustedBootstrapLaunch, *, pid: int, pgid: int) -> TrustedBootstrapRegistration:
+        """Build the exact registration payload for ``launch`` and one process identity."""
+        if not isinstance(launch, TrustedBootstrapLaunch):
+            _fail("producer_bootstrap_registration_launch_invalid")
+        return cls(
+            launch_id=launch.launch_id,
+            journal_id=launch.journal_id,
+            run_id=launch.run_id,
+            parent_task_id=launch.parent_task_id,
+            task_id=launch.task_id,
+            intent_sha256=launch.intent_sha256,
+            attestation_sha256=launch.attestation_sha256,
+            bootstrap_descriptor_sha256=launch.bootstrap_descriptor_sha256,
+            target_executable_identity=launch.target_executable_identity,
+            pid=pid,
+            pgid=pgid,
+            gate_protocol=launch.gate_protocol,
+        )
+
+    def to_dict(self, *, include_digest: bool = True) -> dict[str, object]:
+        value: dict[str, object] = {
+            "schema_version": self.schema_version,
+            "protocol": self.protocol,
+            "launch_id": self.launch_id,
+            "journal_id": self.journal_id,
+            "run_id": self.run_id,
+            "parent_task_id": self.parent_task_id,
+            "task_id": self.task_id,
+            "intent_sha256": self.intent_sha256,
+            "attestation_sha256": self.attestation_sha256,
+            "bootstrap_descriptor_sha256": self.bootstrap_descriptor_sha256,
+            "target_executable_identity": self.target_executable_identity,
+            "pid": self.pid,
+            "pgid": self.pgid,
+            "gate_protocol": self.gate_protocol,
+        }
+        if include_digest:
+            value["registration_sha256"] = self.registration_sha256
+        return value
+
+    def digest(self) -> str:
+        return _digest_without(self.to_dict(), "registration_sha256")
+
+    def bind_to(self, launch: TrustedBootstrapLaunch) -> TrustedBootstrapRegistration:
+        """Require every launch-owned field to match exactly."""
+        if not isinstance(launch, TrustedBootstrapLaunch):
+            _fail("producer_bootstrap_registration_launch_invalid")
+        for field in (
+            "launch_id", "journal_id", "run_id", "parent_task_id", "task_id", "intent_sha256",
+            "attestation_sha256", "bootstrap_descriptor_sha256", "target_executable_identity", "gate_protocol",
+        ):
+            if getattr(self, field) != getattr(launch, field):
+                _fail("producer_bootstrap_registration_binding_mismatch")
+        return self
+
+
+def build_trusted_bootstrap_registration(
+    launch: TrustedBootstrapLaunch, *, pid: int, pgid: int,
+) -> TrustedBootstrapRegistration:
+    """Build one digest-bound registration DTO without process or filesystem I/O."""
+    return TrustedBootstrapRegistration.from_launch(launch, pid=pid, pgid=pgid)
+
+
+def parse_trusted_bootstrap_registration(
+    value: object, *, launch: TrustedBootstrapLaunch | None = None,
+) -> TrustedBootstrapRegistration:
+    """Parse and optionally bind one canonical registration payload."""
+    encoded: bytes | None = None
+    if isinstance(value, (str, bytes, bytearray)):
+        encoded = bytes(value, "utf-8") if isinstance(value, str) else bytes(value)
+        value = _strict_json(encoded)
+    raw = _object(value, _REGISTRATION_FIELDS, "producer_bootstrap_registration_schema_invalid")
+    if encoded is not None and _canonical(raw) != encoded:
+        _fail("producer_bootstrap_registration_noncanonical")
+    try:
+        registration = TrustedBootstrapRegistration(**raw)
+    except ProducerBootstrapError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ProducerBootstrapError("producer_bootstrap_registration_schema_invalid") from exc
+    if launch is not None:
+        registration.bind_to(launch)
+    return registration
+
+
+def verify_trusted_bootstrap_registration(
+    launch: TrustedBootstrapLaunch, value: object,
+) -> TrustedBootstrapRegistration:
+    """Validate a registration payload against its exact trusted launch identity."""
+    return parse_trusted_bootstrap_registration(value, launch=launch)
+
+
 _FRAME_FIELDS = frozenset({
     "schema_version", "protocol", "sequence", "kind", "launch_sha256", "intent_sha256",
     "target_executable_identity", "observed_pid", "observed_pgid", "frame_sha256",
@@ -490,6 +638,10 @@ __all__ = [
     "TrustedBootstrapDescriptor",
     "TrustedBootstrapEvidence",
     "TrustedBootstrapLaunch",
+    "TrustedBootstrapRegistration",
     "TrustedBootstrapSession",
+    "build_trusted_bootstrap_registration",
     "parse_bootstrap_handshake_frame",
+    "parse_trusted_bootstrap_registration",
+    "verify_trusted_bootstrap_registration",
 ]

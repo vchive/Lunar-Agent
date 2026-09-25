@@ -9,8 +9,12 @@ from lunar_evolution.producer_bootstrap import (
     ProducerBootstrapError,
     TrustedBootstrapDescriptor,
     TrustedBootstrapLaunch,
+    TrustedBootstrapRegistration,
     TrustedBootstrapSession,
+    build_trusted_bootstrap_registration,
     parse_bootstrap_handshake_frame,
+    parse_trusted_bootstrap_registration,
+    verify_trusted_bootstrap_registration,
 )
 
 DIGEST = "a" * 64
@@ -72,6 +76,62 @@ def test_descriptor_and_launch_have_stable_self_digests():
     launch = _launch()
     assert descriptor.descriptor_sha256 == descriptor.digest()
     assert launch.launch_sha256 == launch.digest()
+
+
+def test_registration_binds_launch_and_process_identity_with_stable_digest():
+    launch = _launch()
+    registration = build_trusted_bootstrap_registration(launch, pid=1234, pgid=1234)
+    assert isinstance(registration, TrustedBootstrapRegistration)
+    assert registration.registration_sha256 == registration.digest()
+    assert verify_trusted_bootstrap_registration(launch, registration.to_dict()) == registration
+
+    encoded = json.dumps(registration.to_dict(), sort_keys=True, separators=(",", ":"))
+    assert parse_trusted_bootstrap_registration(encoded, launch=launch) == registration
+
+
+@pytest.mark.parametrize(
+    ("field", "code"),
+    [
+        ("launch_id", "producer_bootstrap_registration_binding_mismatch"),
+        ("intent_sha256", "producer_bootstrap_registration_binding_mismatch"),
+        ("bootstrap_descriptor_sha256", "producer_bootstrap_registration_binding_mismatch"),
+        ("target_executable_identity", "producer_bootstrap_registration_binding_mismatch"),
+    ],
+)
+def test_registration_rejects_launch_identity_drift(field: str, code: str):
+    launch = _launch()
+    value = build_trusted_bootstrap_registration(launch, pid=1234, pgid=1234).to_dict()
+    value[field] = "d" * 64 if field.endswith("sha256") or field == "target_executable_identity" else "other-launch"
+    value["registration_sha256"] = None
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_registration(launch, value)
+    assert exc.value.code == code
+
+
+def test_registration_rejects_noncanonical_or_digest_tampering():
+    launch = _launch()
+    registration = build_trusted_bootstrap_registration(launch, pid=1234, pgid=1234)
+    encoded = json.dumps(registration.to_dict(), indent=2)
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_registration(encoded)
+    assert exc.value.code == "producer_bootstrap_registration_noncanonical"
+
+    forged = registration.to_dict()
+    forged["pid"] = 4321
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_registration(forged)
+    assert exc.value.code == "producer_bootstrap_registration_digest_mismatch"
+
+
+@pytest.mark.parametrize("field", ["pid", "pgid"])
+def test_registration_rejects_invalid_process_identity(field: str):
+    launch = _launch()
+    value = build_trusted_bootstrap_registration(launch, pid=1234, pgid=1234).to_dict()
+    value[field] = True
+    value["registration_sha256"] = None
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_registration(value)
+    assert exc.value.code == "producer_bootstrap_registration_process_identity_invalid"
 
 
 def test_trusted_bootstrap_happy_path_produces_passed_evidence():

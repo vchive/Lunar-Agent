@@ -3949,3 +3949,31 @@ registration/cleanup/recovery 身份绑定等仍未完成。Darwin 使用私有 
 `target_start_failed` 帧，并用多硬链接 target 回归覆盖。Feature 156/157/158 及进程所有权
 五套组合测试通过；Ruff、compileall、`git diff --check` 通过。没有运行真实 provider、
 WebAgent 或 campaign，也没有重新跑全仓回归。
+
+## 2026-09-25 Feature 158 registration binding DTO
+
+继续 T158-04 的窄范围推进：新增 `TrustedBootstrapRegistration`，将 launch/journal/run/
+parent/task、intent、attestation、bootstrap descriptor、target executable identity、
+bootstrap PID/PGID 和 gate protocol 绑定到严格 canonical digest。解析器支持 exact-schema、
+非 canonical JSON、摘要篡改、进程身份边界和 launch identity drift 拒绝；同时导出到包级
+API。该 DTO 只验证登记载荷形状与跨协议绑定，不读取登记文件、不检查 PID/PGID 存在、不执行
+清理或恢复，因此 T158-04 的正式 Feature 156 生命周期接入仍未完成。
+
+Feature 158/156/157/ownership 组合回归通过，Ruff、compileall 和 `git diff --check` 通过。
+没有运行真实 provider、WebAgent、外部 producer 或 campaign。
+
+## 2026-09-25 Feature 158 registration binding DTO
+
+沿现有 SDD 补上 T158-04 的窄身份边界，但没有声称完成 Feature 156 生命周期接入。`producer_bootstrap.py`
+新增 provider-free `TrustedBootstrapRegistration` DTO、构造器和解析/验证函数。DTO 对
+`TrustedBootstrapLaunch` 的 launch/journal/run/parent/task、intent、attestation、bootstrap
+descriptor、target identity 和 gate protocol 做严格字段绑定，并记录 bootstrap PID/PGID；
+`registration_sha256` 覆盖全部非摘要字段，canonical JSON 要求固定字段集合、拒绝重复键、
+摘要篡改、非 canonical 文本、无效 PID/PGID 和 launch 字段漂移。
+
+新增 Feature 158 focused registration 回归，覆盖正常 round-trip、launch 身份漂移、PID/PGID
+边界、canonical/digest 篡改；`tests/test_producer_bootstrap.py` 共 24 项通过。该 DTO 是纯
+校验/数据模型，不读文件、不检查进程、不调用 provider，也未改 scheduler 或现有 producer
+runner 行为。T158-04 的正式 registration/cleanup/recovery 接线、T156-09 完整矩阵、非 Darwin
+descriptor-bound execution 和宿主请求级证据仍未完成；没有运行真实 provider、WebAgent 或
+campaign。本轮改动尚未提交或推送。
