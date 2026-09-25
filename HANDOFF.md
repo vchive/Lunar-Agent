@@ -3986,3 +3986,19 @@ descriptor、target identity 和 gate protocol 做严格字段绑定，并记录
 runner 行为。T158-04 的正式 registration/cleanup/recovery 接线、T156-09 完整矩阵、非 Darwin
 descriptor-bound execution 和宿主请求级证据仍未完成；没有运行真实 provider、WebAgent 或
 campaign。本轮改动已随 `cda59a9` 和 `df95820` 提交并推送。
+
+## 2026-09-25 Feature 158 fixture evidence recovery
+
+继续 T158-04 的 fixture 级收窄：登记与 bootstrap evidence 都已能以严格 canonical JSON
+解析，并检查自身摘要。fixture 新增纯读取恢复 API，从 workspace 到 journal 持有逐级 no-follow
+目录句柄，在同一 journal 句柄下完成 bounded、稳定 inode 读取并复核目录身份后，
+强制 registration 绑定到输入 launch，并要求 evidence 的 launch 与 registration 摘要精确匹配。
+通过或失败的终态 evidence 返回 `evidence_available`；缺失登记、缺失终态 evidence 或 unknown
+evidence 返回 `recovery_required`。该路径不 spawn/relaunch、不检查或 signal PID/PGID，也不清理
+进程。回归覆盖成功/失败终态、缺少登记或 evidence、unknown、文件和上级目录 symlink 替换、缺失摘要和
+已重新摘要的绑定篡改。Feature 156/157/158 与进程所有权组合回归通过，Ruff、compileall
+与 `git diff --check` 通过。
+
+T158-04 仍保持开放。Feature 156 production runner 的 post-crash owner check、受权 cleanup 和
+正式 recovery integration 尚未完成，fixture 的 `RegisteredProcess.owner_check` 不能授权故障后的
+信号操作；没有扩大 scheduler、外部 producer、WebAgent 或真实 campaign 的接入范围。

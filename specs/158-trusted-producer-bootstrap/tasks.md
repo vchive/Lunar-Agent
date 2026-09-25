@@ -26,3 +26,12 @@ wire the fixture into Feature 156 cleanup/recovery.
 The fixture runtime now constructs and parses this DTO before durable registration publication,
 and the release-order test verifies the persisted payload binds back to the exact launch. This is
 fixture-level evidence only; Feature 156's production runner and recovery path remain separate.
+
+The fixture now also has a read-only recovery observation: it holds the entire workspace-to-journal
+directory chain with no-follow descriptors and reads both durable artifacts through one held
+journal directory, rejecting symlinked or replaced ancestors and files. It requires canonical self-authenticating
+payloads; and requires the evidence launch and registration digests to match the exact supplied
+launch. It reports only `evidence_available` for passed/failed terminal evidence, or
+`recovery_required` for missing or unknown evidence. It never relaunches, signals, cleans up, or
+inspects a process. T158-04 remains open because the Feature 156 production runner still owns
+post-interruption process authority, cleanup, and recovery integration.

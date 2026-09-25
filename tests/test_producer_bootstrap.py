@@ -8,11 +8,13 @@ from lunar_evolution.producer_bootstrap import (
     BootstrapHandshakeFrame,
     ProducerBootstrapError,
     TrustedBootstrapDescriptor,
+    TrustedBootstrapEvidence,
     TrustedBootstrapLaunch,
     TrustedBootstrapRegistration,
     TrustedBootstrapSession,
     build_trusted_bootstrap_registration,
     parse_bootstrap_handshake_frame,
+    parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
     verify_trusted_bootstrap_registration,
 )
@@ -147,6 +149,45 @@ def test_trusted_bootstrap_happy_path_produces_passed_evidence():
     assert evidence.release_observed is True
     assert evidence.target_start_count == 1
     assert evidence.evidence_sha256 == evidence.digest()
+
+
+def test_evidence_parser_requires_canonical_self_authenticating_payload():
+    launch = _launch()
+    session = TrustedBootstrapSession(launch, "c" * 64)
+    session.accept_frame(_ready(launch))
+    session.release("nonce-001")
+    session.accept_frame(_started(launch))
+    session.record_eof()
+    evidence = session.evidence()
+
+    encoded = json.dumps(evidence.to_dict(), sort_keys=True, separators=(",", ":"))
+    assert parse_trusted_bootstrap_evidence(encoded) == evidence
+
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_evidence(json.dumps(evidence.to_dict(), indent=2))
+    assert exc.value.code == "producer_bootstrap_evidence_noncanonical"
+
+    forged = evidence.to_dict()
+    forged["target_group_identity"] = "d" * 64
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_evidence(forged)
+    assert exc.value.code == "producer_bootstrap_digest_mismatch"
+
+    forged["evidence_sha256"] = None
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_evidence(forged)
+    assert exc.value.code == "producer_bootstrap_evidence_digest_invalid"
+    assert TrustedBootstrapEvidence(**forged).evidence_sha256 is not None
+
+
+def test_registration_parser_rejects_missing_digest_for_persisted_payload():
+    launch = _launch()
+    value = build_trusted_bootstrap_registration(launch, pid=1234, pgid=1234).to_dict()
+    value["registration_sha256"] = None
+
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_registration(value, launch=launch)
+    assert exc.value.code == "producer_bootstrap_registration_digest_invalid"
 
 
 def test_terminal_frame_after_target_start_keeps_passed_evidence():

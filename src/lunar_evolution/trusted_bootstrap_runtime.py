@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from .producer_bootstrap import (
     TrustedBootstrapSession,
     build_trusted_bootstrap_registration,
     parse_bootstrap_handshake_frame,
+    parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
 )
 
@@ -198,6 +200,194 @@ def _durable_json(path: Path, value: Mapping[str, object]) -> None:
         except OSError:
             pass
         raise TrustedBootstrapRuntimeError("trusted_bootstrap_registration_unknown") from exc
+
+
+def _read_durable_bytes(name: str, *, parent: int, code: str) -> bytes:
+    """Read one bounded regular artifact and reject a replacement during the read."""
+    try:
+        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > _MAX_CONTROL_BYTES:
+            raise TrustedBootstrapRuntimeError(code)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            opened = os.fstat(fd)
+            data = bytearray()
+            while len(data) <= _MAX_CONTROL_BYTES:
+                chunk = os.read(fd, min(4096, _MAX_CONTROL_BYTES + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            after = os.fstat(fd)
+        finally:
+            os.close(fd)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    except TrustedBootstrapRuntimeError:
+        raise
+    except OSError as exc:
+        raise TrustedBootstrapRuntimeError(code) from exc
+    def identity(info: os.stat_result) -> tuple[int, ...]:
+        return (
+            info.st_mode, info.st_nlink, info.st_dev, info.st_ino,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+        )
+
+    if (
+        len(data) > _MAX_CONTROL_BYTES
+        or identity(before) != identity(opened)
+        or identity(before) != identity(after)
+        or identity(before) != identity(current)
+    ):
+        raise TrustedBootstrapRuntimeError(code)
+    return bytes(data)
+
+
+def _recovery_workspace(workspace: str | Path) -> Path:
+    if not isinstance(workspace, (str, Path)):
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_workspace_invalid")
+    try:
+        root = Path(workspace).expanduser().absolute()
+        info = os.lstat(root)
+    except (OSError, ValueError) as exc:
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_workspace_invalid") from exc
+    if not stat.S_ISDIR(info.st_mode):
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_workspace_invalid")
+    return root
+
+
+@contextmanager
+def _held_recovery_directory(path: Path):
+    """Hold the full no-follow directory chain through both artifact reads."""
+    descriptors: list[int] = []
+    links: list[tuple[int, str, int]] = []
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        descriptors.append(os.open(path.anchor, flags))
+        for part in path.parts[1:]:
+            parent = descriptors[-1]
+            try:
+                info = os.stat(part, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                yield None
+                return
+            if not stat.S_ISDIR(info.st_mode):
+                raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_registration_invalid")
+            child = os.open(part, flags, dir_fd=parent)
+            descriptors.append(child)
+            links.append((parent, part, child))
+            opened = os.fstat(child)
+            if (info.st_dev, info.st_ino) != (opened.st_dev, opened.st_ino):
+                raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_registration_invalid")
+        yield descriptors[-1]
+        for parent, part, child in reversed(links):
+            current = os.stat(part, dir_fd=parent, follow_symlinks=False)
+            held = os.fstat(child)
+            if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (held.st_dev, held.st_ino):
+                raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_registration_invalid")
+    except TrustedBootstrapRuntimeError:
+        raise
+    except OSError as exc:
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_registration_invalid") from exc
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _recovery_artifact(name: str, *, parent: int, code: str) -> bytes | None:
+    """Return a stable artifact or ``None`` only when it was absent at read start."""
+    try:
+        os.stat(name, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise TrustedBootstrapRuntimeError(code) from exc
+    return _read_durable_bytes(name, parent=parent, code=code)
+
+
+def recover_trusted_bootstrap_fixture(
+    workspace: str | Path, *, launch: TrustedBootstrapLaunch,
+) -> dict[str, object]:
+    """Read one fixture attempt's durable state without affecting its process lifecycle.
+
+    This observation-only helper validates the canonical registration and terminal evidence from
+    one journal. It does not inspect a PID, relaunch work, signal a process, or perform cleanup.
+    Those operations remain owned by the Feature 156 runner.
+    """
+    if not isinstance(launch, TrustedBootstrapLaunch):
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_launch_invalid")
+    root = _recovery_workspace(workspace)
+    batch = root / "evolution" / "producer-batches" / launch.journal_id
+    with _held_recovery_directory(batch) as parent:
+        if parent is None:
+            return {
+                "status": "recovery_required",
+                "reason": "trusted_bootstrap_registration_missing",
+                "journal_id": launch.journal_id,
+                "launch_id": launch.launch_id,
+            }
+        return _recover_from_held_directory(parent, launch=launch)
+
+
+def _recover_from_held_directory(parent: int, *, launch: TrustedBootstrapLaunch) -> dict[str, object]:
+    registration_bytes = _recovery_artifact(
+        "process-registration.json", parent=parent,
+        code="trusted_bootstrap_recovery_registration_invalid",
+    )
+    if registration_bytes is None:
+        return {
+            "status": "recovery_required",
+            "reason": "trusted_bootstrap_registration_missing",
+            "journal_id": launch.journal_id,
+            "launch_id": launch.launch_id,
+        }
+    try:
+        registration = parse_trusted_bootstrap_registration(registration_bytes, launch=launch)
+    except ProducerBootstrapError as exc:
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_registration_invalid") from exc
+
+    evidence_bytes = _recovery_artifact(
+        "trusted-bootstrap-evidence.json", parent=parent,
+        code="trusted_bootstrap_recovery_evidence_invalid",
+    )
+    if evidence_bytes is None:
+        return {
+            "status": "recovery_required",
+            "reason": "trusted_bootstrap_terminal_evidence_missing",
+            "journal_id": launch.journal_id,
+            "launch_id": launch.launch_id,
+            "registration_sha256": registration.registration_sha256,
+            "pid": registration.pid,
+            "pgid": registration.pgid,
+        }
+    try:
+        evidence = parse_trusted_bootstrap_evidence(evidence_bytes)
+    except ProducerBootstrapError as exc:
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_evidence_invalid") from exc
+    if (
+        evidence.launch_sha256 != launch.launch_sha256
+        or evidence.registration_sha256 != registration.registration_sha256
+    ):
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_evidence_binding_mismatch")
+    if evidence.status == "unknown":
+        return {
+            "status": "recovery_required",
+            "reason": "trusted_bootstrap_evidence_unknown",
+            "journal_id": launch.journal_id,
+            "launch_id": launch.launch_id,
+            "registration_sha256": registration.registration_sha256,
+            "evidence_sha256": evidence.evidence_sha256,
+            "pid": registration.pid,
+            "pgid": registration.pgid,
+        }
+    return {
+        "status": "evidence_available",
+        "bootstrap_status": evidence.status,
+        "journal_id": launch.journal_id,
+        "launch_id": launch.launch_id,
+        "registration_sha256": registration.registration_sha256,
+        "evidence_sha256": evidence.evidence_sha256,
+        "pid": registration.pid,
+        "pgid": registration.pgid,
+    }
 
 
 def _read_frame(fd: int, deadline: float) -> BootstrapHandshakeFrame | None:
@@ -584,6 +774,7 @@ __all__ = [
     "TrustedBootstrapRuntimeError",
     "TrustedBootstrapRuntimeResult",
     "build_trusted_bootstrap_descriptor",
+    "recover_trusted_bootstrap_fixture",
     "run_trusted_bootstrap_fixture",
     "trusted_bootstrap_source_path",
 ]

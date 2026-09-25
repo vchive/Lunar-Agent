@@ -349,6 +349,7 @@ def parse_trusted_bootstrap_registration(
         raise ProducerBootstrapError("producer_bootstrap_registration_schema_invalid") from exc
     if launch is not None:
         registration.bind_to(launch)
+    _sha(raw["registration_sha256"], "producer_bootstrap_registration_digest_invalid")
     return registration
 
 
@@ -493,6 +494,33 @@ class TrustedBootstrapEvidence:
 
     def digest(self) -> str:
         return _digest_without(self.to_dict(), "evidence_sha256")
+
+
+_EVIDENCE_FIELDS = frozenset({
+    "schema_version", "protocol", "launch_sha256", "registration_sha256",
+    "bootstrap_ready_observed", "release_observed", "target_started_observed",
+    "target_start_count", "target_group_identity", "pre_gate_target_work_observed",
+    "status", "failure_code", "evidence_sha256",
+})
+
+
+def parse_trusted_bootstrap_evidence(value: object) -> TrustedBootstrapEvidence:
+    """Parse one strict, self-authenticating bootstrap evidence payload."""
+    encoded: bytes | None = None
+    if isinstance(value, (str, bytes, bytearray)):
+        encoded = bytes(value, "utf-8") if isinstance(value, str) else bytes(value)
+        value = _strict_json(encoded)
+    raw = _object(value, _EVIDENCE_FIELDS, "producer_bootstrap_evidence_schema_invalid")
+    if encoded is not None and _canonical(raw) != encoded:
+        _fail("producer_bootstrap_evidence_noncanonical")
+    try:
+        evidence = TrustedBootstrapEvidence(**raw)
+    except ProducerBootstrapError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ProducerBootstrapError("producer_bootstrap_evidence_schema_invalid") from exc
+    _sha(raw["evidence_sha256"], "producer_bootstrap_evidence_digest_invalid")
+    return evidence
 
 
 class TrustedBootstrapSession:
@@ -642,6 +670,7 @@ __all__ = [
     "TrustedBootstrapSession",
     "build_trusted_bootstrap_registration",
     "parse_bootstrap_handshake_frame",
+    "parse_trusted_bootstrap_evidence",
     "parse_trusted_bootstrap_registration",
     "verify_trusted_bootstrap_registration",
 ]

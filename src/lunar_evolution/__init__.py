@@ -313,6 +313,7 @@ from .producer_bootstrap import (
     TrustedBootstrapSession,
     build_trusted_bootstrap_registration,
     parse_bootstrap_handshake_frame,
+    parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
     verify_trusted_bootstrap_registration,
 )
@@ -861,6 +862,7 @@ __all__ = [
     "parse_producer_request_evidence",
     "parse_registration_seal",
     "parse_seed_manifest",
+    "parse_trusted_bootstrap_evidence",
     "parse_trusted_bootstrap_registration",
     "preflight_acceptance_registration",
     "preflight_producer_bundle_publication",

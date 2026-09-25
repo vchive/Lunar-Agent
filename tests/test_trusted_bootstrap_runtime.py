@@ -12,12 +12,14 @@ import pytest
 
 from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
 from lunar_evolution.producer_bootstrap import (
+    TrustedBootstrapEvidence,
     TrustedBootstrapLaunch,
     parse_trusted_bootstrap_registration,
 )
 from lunar_evolution.trusted_bootstrap_runtime import (
     TrustedBootstrapRuntimeError,
     build_trusted_bootstrap_descriptor,
+    recover_trusted_bootstrap_fixture,
     run_trusted_bootstrap_fixture,
 )
 
@@ -79,6 +81,14 @@ def _launch(target: Path, *, bootstrap=None) -> TrustedBootstrapLaunch:
         gate_protocol="fd-read-one-byte-v1",
         gate_nonce="nonce-001",
     )
+
+
+def _fixture_evidence_path(workspace: Path, launch: TrustedBootstrapLaunch) -> Path:
+    return workspace / "evolution" / "producer-batches" / launch.journal_id / "trusted-bootstrap-evidence.json"
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _start_child_fixture(
@@ -445,6 +455,182 @@ def test_runtime_deadline_after_terminal_persists_unknown(
     assert exc.value.evidence.target_started_observed is True
     evidence_path = tmp_path / "evolution/producer-batches/journal-001/trusted-bootstrap-evidence.json"
     assert json.loads(evidence_path.read_text(encoding="utf-8"))["status"] == "unknown"
+
+
+def test_fixture_recovery_returns_bound_terminal_evidence_without_spawning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import lunar_evolution.trusted_bootstrap_runtime as runtime
+
+    target = _target(tmp_path)
+    launch = _launch(target)
+    result = run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+    evidence_path = _fixture_evidence_path(tmp_path, launch)
+    before = evidence_path.read_bytes()
+
+    def prohibit_spawn(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("fixture recovery must not spawn a process")
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", prohibit_spawn)
+    recovered = recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+
+    assert recovered == {
+        "status": "evidence_available",
+        "bootstrap_status": "passed",
+        "journal_id": launch.journal_id,
+        "launch_id": launch.launch_id,
+        "registration_sha256": result.registration_sha256,
+        "evidence_sha256": result.evidence.evidence_sha256,
+        "pid": result.bootstrap_pid,
+        "pgid": result.bootstrap_pgid,
+    }
+    assert evidence_path.read_bytes() == before
+
+
+def test_fixture_recovery_requires_registration_when_no_attempt_was_durable(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+
+    recovered = recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+
+    assert recovered == {
+        "status": "recovery_required",
+        "reason": "trusted_bootstrap_registration_missing",
+        "journal_id": launch.journal_id,
+        "launch_id": launch.launch_id,
+    }
+
+
+def test_fixture_recovery_requires_terminal_evidence_after_registration(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+    _fixture_evidence_path(tmp_path, launch).unlink()
+
+    recovered = recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+
+    assert recovered["status"] == "recovery_required"
+    assert recovered["reason"] == "trusted_bootstrap_terminal_evidence_missing"
+    assert recovered["journal_id"] == launch.journal_id
+    assert recovered["launch_id"] == launch.launch_id
+
+
+def test_fixture_recovery_returns_authenticated_failed_terminal_evidence(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        run_trusted_bootstrap_fixture(
+            tmp_path,
+            launch=launch,
+            descriptor=build_trusted_bootstrap_descriptor(),
+            target_executable=target,
+            on_before_release=lambda _registration: target.unlink(),
+        )
+    assert exc.value.code == "producer_bootstrap_target_start_failed"
+    assert exc.value.evidence is not None
+    assert exc.value.evidence.status == "failed"
+
+    recovered = recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+
+    assert recovered["status"] == "evidence_available"
+    assert recovered["bootstrap_status"] == "failed"
+    assert recovered["registration_sha256"] == exc.value.evidence.registration_sha256
+
+
+def test_fixture_recovery_requires_manual_resolution_for_unknown_evidence(tmp_path: Path):
+    target = _sleeping_target(tmp_path)
+    launch = _launch(target)
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        run_trusted_bootstrap_fixture(
+            tmp_path,
+            launch=launch,
+            descriptor=build_trusted_bootstrap_descriptor(),
+            target_executable=target,
+            timeout_seconds=0.2,
+        )
+    assert exc.value.code == "trusted_bootstrap_deadline_exceeded"
+    assert exc.value.evidence is not None
+    assert exc.value.evidence.status == "unknown"
+
+    recovered = recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+
+    assert recovered["status"] == "recovery_required"
+    assert recovered["reason"] == "trusted_bootstrap_evidence_unknown"
+    assert recovered["journal_id"] == launch.journal_id
+    assert recovered["launch_id"] == launch.launch_id
+
+
+def test_fixture_recovery_rejects_evidence_with_mismatched_launch_binding(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+    evidence_path = _fixture_evidence_path(tmp_path, launch)
+    forged = json.loads(evidence_path.read_text(encoding="utf-8"))
+    forged["launch_sha256"] = "f" * 64
+    forged["evidence_sha256"] = None
+    evidence_path.write_text(
+        _canonical_json(TrustedBootstrapEvidence(**forged).to_dict()),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+    assert exc.value.code == "trusted_bootstrap_recovery_evidence_binding_mismatch"
+
+
+def test_fixture_recovery_rejects_symlinked_terminal_evidence(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+    evidence_path = _fixture_evidence_path(tmp_path, launch)
+    detached = tmp_path / "detached-evidence.json"
+    detached.write_bytes(evidence_path.read_bytes())
+    evidence_path.unlink()
+    evidence_path.symlink_to(detached)
+
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+    assert exc.value.code == "trusted_bootstrap_recovery_evidence_invalid"
+
+
+def test_fixture_recovery_rejects_symlinked_journal_directory(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+    journal = _fixture_evidence_path(tmp_path, launch).parent
+    detached = tmp_path / "detached-journal"
+    journal.rename(detached)
+    journal.symlink_to(detached, target_is_directory=True)
+
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+    assert exc.value.code == "trusted_bootstrap_recovery_registration_invalid"
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), 301, True, "1"])
