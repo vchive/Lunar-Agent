@@ -438,6 +438,7 @@ from .producer_request_evidence import (
     validate_producer_request_evidence,
 )
 from .producer_request_transport import (
+    MAX_HOST_REQUEST_JOURNAL_BYTES,
     HostRequestEvent,
     HostRequestJournal,
     HostRequestJournalIdentity,
@@ -547,6 +548,7 @@ __all__ = [
     "INVENTORY_SCHEMA_VERSION",
     "MAX_BOOTSTRAP_PAYLOAD_BYTES",
     "MAX_HOLDOUTS",
+    "MAX_HOST_REQUEST_JOURNAL_BYTES",
     "MAX_INVENTORY_DEPTH",
     "MAX_INVENTORY_FILES",
     "MAX_INVENTORY_FILE_BYTES",

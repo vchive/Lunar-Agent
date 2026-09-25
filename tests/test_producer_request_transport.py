@@ -5,7 +5,7 @@ import os
 import pytest
 
 import lunar_evolution.producer_request_transport as transport
-from lunar_evolution.producer_request_transport import (
+from lunar_evolution import (
     HostRequestJournal,
     HostRequestJournalIdentity,
     HostRequestLedger,
