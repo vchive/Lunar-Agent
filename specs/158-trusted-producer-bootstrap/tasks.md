@@ -29,8 +29,8 @@ fixture-level evidence only; Feature 156's production runner and recovery path r
 
 The fixture now also has a read-only recovery observation: it holds the entire workspace-to-journal
 directory chain with no-follow descriptors and reads both durable artifacts through one held
-journal directory, rejecting symlinked or replaced ancestors and files. It requires canonical self-authenticating
-payloads; and requires the evidence launch and registration digests to match the exact supplied
+journal directory, rejecting symlinked or replaced ancestors and files. It requires canonical,
+self-authenticating payloads and exact evidence launch and registration digests for the supplied
 launch. It reports only `evidence_available` for passed/failed terminal evidence, or
 `recovery_required` for missing or unknown evidence. It never relaunches, signals, cleans up, or
 inspects a process. T158-04 remains open because the Feature 156 production runner still owns
