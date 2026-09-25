@@ -646,10 +646,13 @@ def _capture(
                     selector.unregister(stream)
                     continue
                 state = states[name]
-                state["bytes"] = min(limit + 1, int(state["bytes"]) + len(chunk))
-                if int(state["bytes"]) <= limit:
-                    state["hash"].update(chunk)  # type: ignore[union-attr]
-                else:
+                prior_bytes = int(state["bytes"])
+                retained = max(0, min(len(chunk), limit - prior_bytes))
+                if retained:
+                    state["hash"].update(chunk[:retained])  # type: ignore[union-attr]
+                observed = prior_bytes + len(chunk)
+                state["bytes"] = min(limit + 1, observed)
+                if observed > limit:
                     state["truncated"] = True
                     overflow = True
             if overflow:
@@ -746,6 +749,11 @@ def _cleanup(
         deadline=deadline,
         allow_exited_leader_initial=process.poll() is not None,
     )
+
+
+def _remaining_timeout(deadline: float, monotonic: Callable[[], float]) -> float:
+    """Return a wait timeout that cannot extend the lifecycle deadline."""
+    return max(0.0, deadline - monotonic())
 
 
 def run_producer_process(
@@ -909,7 +917,7 @@ def run_producer_process(
                 registration, process, deadline=deadline, monotonic=monotonic,
             )
             try:
-                process.wait(timeout=max(0.01, deadline - monotonic()))
+                process.wait(timeout=_remaining_timeout(deadline, monotonic))
             except subprocess.TimeoutExpired:
                 pass
             if cleanup_result.status not in {ProcessCleanupStatus.ALREADY_EXITED, ProcessCleanupStatus.CLEANED} and process.poll() is not None:
@@ -925,7 +933,7 @@ def run_producer_process(
                 gate_released, stdout, stderr, None, cleanup_result, status, failure,
             )
         try:
-            exit_code = process.wait(timeout=max(0.01, deadline - monotonic()))
+            exit_code = process.wait(timeout=_remaining_timeout(deadline, monotonic))
         except subprocess.TimeoutExpired:
             cleanup_result = _cleanup(registration, process, deadline=deadline, monotonic=monotonic)
             return _persist_receipt(

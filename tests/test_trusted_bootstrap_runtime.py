@@ -633,6 +633,48 @@ def test_fixture_recovery_rejects_symlinked_journal_directory(tmp_path: Path):
     assert exc.value.code == "trusted_bootstrap_recovery_registration_invalid"
 
 
+@pytest.mark.parametrize("ancestor", ["evolution", "producer-batches"])
+def test_fixture_recovery_rejects_symlinked_recovery_ancestor(tmp_path: Path, ancestor: str):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+
+    original = tmp_path / "evolution" / "producer-batches"
+    if ancestor == "evolution":
+        original = tmp_path / "evolution"
+    detached = tmp_path / f"detached-{ancestor}"
+    original.rename(detached)
+    original.symlink_to(detached, target_is_directory=True)
+
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+    assert exc.value.code == "trusted_bootstrap_recovery_registration_invalid"
+
+
+def test_fixture_recovery_rejects_symlinked_workspace_root(tmp_path: Path):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+
+    detached = tmp_path.with_name(f"{tmp_path.name}-detached")
+    tmp_path.rename(detached)
+    tmp_path.symlink_to(detached, target_is_directory=True)
+
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+    assert exc.value.code == "trusted_bootstrap_recovery_workspace_invalid"
+
+
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), 301, True, "1"])
 def test_runtime_rejects_invalid_or_unbounded_timeout(tmp_path: Path, timeout: object):
     target = _target(tmp_path)

@@ -1,5 +1,18 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-25 Feature 156 capture evidence and deadline tightening
+
+继续现有 Feature 156 SDD，修复两个 provider-free 生命周期证据边界：当单次 stdout/stderr
+读取跨过输出上限时，回执现在只对上限内前缀计算 SHA-256，同时保留 `limit+1` 饱和字节数和
+截断状态；进程等待的剩余时间统一零下限，墙钟到期后不会额外获得 10ms 等待。新增跨界摘要和
+截止时间单元测试，Feature 156/进程所有权/trusted bootstrap 专项回归 **96 passed**，Ruff、
+compileall 通过。本轮未调用 provider、外部 producer、WebAgent、scheduler 或真实 campaign。
+
+Feature 156 仍未完成：持久化 owner identity 还不能支持 controller crash 后的安全恢复清理，
+非 Darwin 仍是 pathname-bound prototype，trusted bootstrap 仍为 fixture-only，Feature 157
+host-observed request evidence 尚未接入；因此没有勾选 T156-05/T156-06/T156-09/T156-11/
+T156-11b/T156-12/T156-14。
+
 ## 2026-09-24 Feature 156 producer 本地进程生命周期（开发中）
 
 沿 Feature 154/155 的 SDD 新增 provider-free 本地 runner：一次性 nonce 在 workspace 范围内

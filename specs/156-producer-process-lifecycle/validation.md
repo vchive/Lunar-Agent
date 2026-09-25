@@ -67,6 +67,11 @@ grace, and the final leader wait are all clipped to that deadline; a post-deadli
 is reported as `cleanup_unverified` rather than extending the attempt. The trusted bootstrap
 fixture passes that same deadline through both normal and exceptional cleanup paths.
 
+The capture evidence path retains and hashes exactly the in-budget prefix when one non-blocking
+read crosses the stream ceiling; the receipt still records a saturated `limit + 1` observation
+and `truncated=true`. Process waits use a zero-clamped remaining timeout, so an exhausted wall
+deadline cannot add an extra wait interval.
+
 The focused process-ownership, producer-process, and trusted-bootstrap-runtime suites pass.
 New fixtures cover capture-read failure, SIGTERM failure, SIGKILL failure, cleanup uncertainty
 projection, owner-loss without a direct fallback kill, child exit after registration but before

@@ -318,6 +318,30 @@ def test_output_limit_is_bounded(tmp_path: Path):
     assert receipt.stdout_evidence.bytes_observed > intent.output_max_bytes
 
 
+def test_capture_digest_keeps_only_in_budget_prefix_when_one_read_crosses_limit():
+    read_fd, write_fd = os.pipe()
+    payload = b"a" * 100 + b"b" * 100
+    os.write(write_fd, payload)
+    os.close(write_fd)
+    try:
+        with os.fdopen(read_fd, "rb", buffering=0) as stdout:
+            process = SimpleNamespace(stdout=stdout, stderr=None, poll=lambda: 0)
+            captured, _, overflow, timed_out = producer_process._capture(
+                process, limit=100, deadline=time.monotonic() + 1.0,
+                monotonic=time.monotonic,
+            )
+        assert overflow is True
+        assert timed_out is False
+        assert captured.bytes_observed == 101
+        assert captured.truncated is True
+        assert captured.sha256 == hashlib.sha256(b"a" * 100).hexdigest()
+    finally:
+        try:
+            os.close(read_fd)
+        except OSError:
+            pass
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin immutable execution snapshots")
 def test_darwin_snapshot_survives_source_replacement_after_final_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -417,6 +441,12 @@ def test_capture_timeout_does_not_read_open_pipe_after_deadline():
         assert timed_out is True
     finally:
         os.close(write_fd)
+
+
+def test_remaining_timeout_never_extends_absolute_deadline():
+    assert producer_process._remaining_timeout(10.0, lambda: 9.25) == pytest.approx(0.75)
+    assert producer_process._remaining_timeout(10.0, lambda: 10.0) == 0.0
+    assert producer_process._remaining_timeout(10.0, lambda: 10.25) == 0.0
 
 
 def test_capture_read_failure_is_unknown(monkeypatch: pytest.MonkeyPatch):
