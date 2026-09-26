@@ -146,7 +146,8 @@ def sealed_linux_executable(
         os.fsync(sealed_fd)
         seals = 0
         for value in required:
-            assert isinstance(value, int)
+            if not isinstance(value, int):
+                raise LinuxExecutableBindingError("linux_execution_binding_unsupported")
             seals |= value
         fcntl.fcntl(sealed_fd, fcntl.F_ADD_SEALS, seals)
         if fcntl.fcntl(sealed_fd, fcntl.F_GET_SEALS) & seals != seals:

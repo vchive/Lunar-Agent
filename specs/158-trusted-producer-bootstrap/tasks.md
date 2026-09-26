@@ -90,9 +90,9 @@ source alone cannot satisfy T158-04.
 Darwin snapshot preparation now has distinct immutable paths for the bootstrap and target in one
 batch, while the ordinary producer keeps `.producer-snapshots/executable`. Formal Darwin
 trusted-bootstrap registration requires `.producer-snapshots/bootstrap`. This only reserves the
-two snapshot roles and narrows registration validation; no production pair preparer, native
-bootstrap artifact, independently bound target exec, or shared Feature 156 registration/cleanup/
-recovery and deadline path exists yet. T158-04 remains open.
+two snapshot roles and narrows registration validation; native bootstrap artifact, target exec
+handoff, and shared Feature 156 registration/cleanup/recovery and deadline path are absent.
+T158-04 remains open.
 
 The proposed formal registration now names the target execution binding separately from the
 bootstrap's: mode, role-specific snapshot path, SHA-256, and byte size are required. The formal
@@ -100,3 +100,13 @@ validator rejects rehashed path/mode/digest drift; cross-record verification and
 observation reject a rehashed size that differs from the verified target attestation. This still
 does not prove the target snapshot or sealed FD was executed or connect a production runner.
 T158-04 remains open.
+
+An unexported pair-preparation context now binds the bootstrap and target under one absolute
+deadline. Darwin returns distinct immutable snapshot paths; Linux returns two sealed memfd
+handles held through the caller's bootstrap spawn. Existing Darwin role snapshots are rejected;
+failed second preparation never yields a pair, and uncertain pre-spawn cleanup is reported.
+An unreturned published role path is retained as cleanup-unknown; formal integration still
+needs exclusive batch ownership to prevent concurrent substitution.
+This does not validate an installed allowlist,
+inherit the target FD into an actual bootstrap, publish registration, release the gate, or handle
+terminal cleanup/recovery. The Python fixture remains non-production; T158-04 remains open.

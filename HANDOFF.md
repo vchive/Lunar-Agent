@@ -1,5 +1,19 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 158 双端执行字节准备
+
+新增未导出的 `prepare_trusted_executable_pair`：同一 launch、attestation 和绝对 deadline
+下分别准备 bootstrap 与 target。Darwin 返回两份独立 immutable 快照；Linux 返回两份
+sealed memfd 的路径与需继承的 FD，且在 context 内持续持有。已有同名角色快照会拒绝复用；
+第二端准备失败不会产出 pair，并检查已返回快照的启动前清理结果，清理不确定时报错并保留现场。
+若快照已发布但创建函数尚未返回，按角色路径检测并报告同一不确定状态，不擅自删除未知 inode。
+成功的 Darwin 快照需由后续正式 runner 在确认终态后清理。
+这只是 provider-free 字节准备，不验证安装 allowlist、不消费 attestation、不启动进程、
+不发布登记或放行 gate。尚缺原生 bootstrap artifact、真实 target handoff、Feature 156
+共享登记/清理/恢复接线和完整生产验收；T158-04 仍开放。本机 Darwin 专项已通过，
+Linux sealed memfd 实跑用例在本机跳过，等待 Linux CI 验证。本轮未运行真实 provider、
+外部 producer、WebAgent 或 campaign。
+
 ## 2026-09-26 Feature 158 target 执行绑定登记契约
 
 正式 trusted-bootstrap 登记现在除 bootstrap 的 `execution_*` 外，还要求独立的 target
