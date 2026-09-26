@@ -390,6 +390,8 @@ def _recover_from_held_directory(parent: int, *, launch: TrustedBootstrapLaunch)
         or evidence.registration_sha256 != registration.registration_sha256
     ):
         raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_evidence_binding_mismatch")
+    if evidence.target_pgid is not None and evidence.target_pgid != registration.pgid:
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_recovery_target_group_mismatch")
     if evidence.status == "unknown":
         return {
             "status": "recovery_required",

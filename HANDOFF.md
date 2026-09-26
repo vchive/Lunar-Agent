@@ -1,5 +1,16 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 158 fixture 恢复组身份校验
+
+只读 fixture 恢复现在也核对终态证据中的目标启动 PGID 与持久 bootstrap 登记 PGID；
+证据中的组摘要及自摘要都重算后仍不能绕过，`passed` 和 `unknown` 均 fail-closed。
+生产接线审查确认当前 `python -m` fixture 只 pin 源文件，却执行解释器及可变导入依赖；
+目标启动仍按原路径重开。T158-04 的下一步是单独可信可执行 bootstrap artifact、
+bootstrap 与 target 各自的执行字节绑定，以及 Feature 156 共享登记/清理/恢复接线。
+Feature 156/157/158 与进程所有权组合回归 **223 passed、2 skipped**；Ruff、compileall
+与 diff check 通过。
+本轮未运行真实 provider、外部 producer、WebAgent 或 campaign。
+
 ## 2026-09-26 Feature 158 目标进程组证据绑定
 
 沿现有 SDD，trusted bootstrap 终态证据现保留目标启动帧观测的 PID/PGID，并校验二者与原

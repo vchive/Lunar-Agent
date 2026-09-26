@@ -668,6 +668,34 @@ def test_fixture_recovery_rejects_evidence_with_mismatched_launch_binding(tmp_pa
     assert exc.value.code == "trusted_bootstrap_recovery_evidence_binding_mismatch"
 
 
+@pytest.mark.parametrize("status", ["passed", "unknown"])
+def test_fixture_recovery_rejects_rehashed_target_group_mismatch(tmp_path: Path, status: str):
+    target = _target(tmp_path)
+    launch = _launch(target)
+    run_trusted_bootstrap_fixture(
+        tmp_path,
+        launch=launch,
+        descriptor=build_trusted_bootstrap_descriptor(),
+        target_executable=target,
+    )
+    evidence_path = _fixture_evidence_path(tmp_path, launch)
+    forged = json.loads(evidence_path.read_text(encoding="utf-8"))
+    forged["target_pgid"] += 1
+    forged["target_group_identity"] = hashlib.sha256(
+        _canonical_json({"pid": forged["target_pid"], "pgid": forged["target_pgid"]}).encode("utf-8")
+    ).hexdigest()
+    forged["status"] = status
+    forged["evidence_sha256"] = None
+    evidence_path.write_text(
+        _canonical_json(TrustedBootstrapEvidence(**forged).to_dict()),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        recover_trusted_bootstrap_fixture(tmp_path, launch=launch)
+    assert exc.value.code == "trusted_bootstrap_recovery_target_group_mismatch"
+
+
 def test_fixture_recovery_rejects_symlinked_terminal_evidence(tmp_path: Path):
     target = _target(tmp_path)
     launch = _launch(target)

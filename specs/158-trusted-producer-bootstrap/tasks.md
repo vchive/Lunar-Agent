@@ -81,3 +81,8 @@ target PGID that differs from the registered bootstrap PGID. Parsing is strict: 
 before these fields were added is rejected rather than upgraded implicitly. This checks only the
 reported start-time group, not subsequent group membership or the unimplemented production runner.
 T158-04 remains open.
+
+Fixture recovery now applies the same target-start PGID versus durable registration check for
+both terminal and unknown evidence. The remaining production path requires a pinned executable
+bootstrap artifact and independent target byte binding; hashing the current `python -m` fixture
+source alone cannot satisfy T158-04.

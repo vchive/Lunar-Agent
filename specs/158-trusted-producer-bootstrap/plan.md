@@ -38,3 +38,20 @@ checks to `verify_trusted_bootstrap_attempt`. Missing or unknown terminal eviden
 recovery; missing or inconsistent prerequisite records fail closed. The observer never inspects
 process liveness or grants cleanup authority. The production runner still needs platform-bound
 bootstrap execution, durable publication of these records, and explicit recovery semantics.
+
+Fixture recovery also compares the target-start PGID retained in evidence with its durable
+fixture registration before reporting either terminal or unknown evidence. This is read-only and
+does not establish continued group membership.
+
+## Production execution prerequisites
+
+The fixture's `python -m` child hashes a source file but executes an interpreter with imported
+dependencies, so it cannot serve as the production exact-byte bootstrap. A production entry needs
+a Lunar-owned executable artifact with an installation-controlled allowlist covering its execution
+closure. Feature 156 must bind that artifact to the actual spawned bytes through its platform
+mechanism, then separately bind the attested target bytes passed to the bootstrap for post-gate
+execution. The Darwin bootstrap and target need distinct immutable snapshots; Linux needs sealed
+descriptors held through the relevant exec operations. If either binding cannot be established,
+the consumed attempt remains unresolved and the gate is never released. Only after both bindings
+exist should the formal runner publish its shared registration, release the gate, and reuse the
+same process owner, lock, cleanup, receipt, and recovery path.
