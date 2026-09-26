@@ -437,6 +437,49 @@ def test_darwin_snapshot_survives_source_replacement_after_final_check(
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin immutable execution snapshots")
+def test_darwin_snapshot_roles_keep_bootstrap_and_target_separate(tmp_path: Path):
+    batch = tmp_path / "batch"
+    batch.mkdir()
+    sources = {}
+    snapshots = {}
+    try:
+        for role in ("bootstrap", "target", "producer"):
+            source = tmp_path / role
+            source.write_bytes(f"#!/bin/sh\n# {role}\n".encode())
+            source.chmod(0o755)
+            sources[role] = source
+            snapshots[role] = producer_process._snapshot_executable(
+                source, batch, producer_process._file_identity(source),
+                deadline=time.monotonic() + 5, monotonic=time.monotonic, role=role,
+            )
+
+        assert {role: snapshot.relative_path for role, snapshot in snapshots.items()} == {
+            "bootstrap": ".producer-snapshots/bootstrap",
+            "target": ".producer-snapshots/target",
+            "producer": ".producer-snapshots/executable",
+        }
+        for role, snapshot in snapshots.items():
+            path = batch / snapshot.relative_path
+            assert path.read_bytes() == sources[role].read_bytes()
+            assert os.stat(path, follow_symlinks=False).st_flags & producer_process._UF_IMMUTABLE
+        for role in ("bootstrap", "target", "producer"):
+            producer_process._remove_executable_snapshot(snapshots[role], batch)
+            assert not (batch / snapshots[role].relative_path).exists()
+    finally:
+        for snapshot in snapshots.values():
+            producer_process._remove_executable_snapshot(snapshot, batch)
+
+
+def test_snapshot_rejects_unknown_role_before_platform_binding(tmp_path: Path):
+    with pytest.raises(ProducerProcessError) as exc:
+        producer_process._snapshot_executable(
+            tmp_path / "missing", tmp_path, {},
+            deadline=time.monotonic() + 5, monotonic=time.monotonic, role="arbitrary",
+        )
+    assert exc.value.code == "producer_process_snapshot_role_invalid"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin immutable execution snapshots")
 def test_darwin_snapshot_lock_failure_rejects_before_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     producer_root, intent, attestation = _fixture(tmp_path)
 

@@ -86,3 +86,10 @@ Fixture recovery now applies the same target-start PGID versus durable registrat
 both terminal and unknown evidence. The remaining production path requires a pinned executable
 bootstrap artifact and independent target byte binding; hashing the current `python -m` fixture
 source alone cannot satisfy T158-04.
+
+Darwin snapshot preparation now has distinct immutable paths for the bootstrap and target in one
+batch, while the ordinary producer keeps `.producer-snapshots/executable`. Formal Darwin
+trusted-bootstrap registration requires `.producer-snapshots/bootstrap`. This only reserves the
+two snapshot roles and narrows registration validation; no production pair preparer, native
+bootstrap artifact, independently bound target exec, or shared Feature 156 registration/cleanup/
+recovery and deadline path exists yet. T158-04 remains open.

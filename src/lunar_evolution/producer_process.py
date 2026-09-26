@@ -44,6 +44,11 @@ _MAX_RECEIPT_BYTES = 256 * 1024
 _MAX_CAPTURE_CHUNK = 64 * 1024
 _UF_IMMUTABLE = 0x00000002
 _SNAPSHOT_RELATIVE_PATH = ".producer-snapshots/executable"
+_SNAPSHOT_PATHS = {
+    "producer": _SNAPSHOT_RELATIVE_PATH,
+    "bootstrap": ".producer-snapshots/bootstrap",
+    "target": ".producer-snapshots/target",
+}
 _RECOVERY_LOCK_PROTOCOL = "journal-flock-v1"
 
 
@@ -346,6 +351,7 @@ def _snapshot_executable(
     *,
     deadline: float,
     monotonic: Callable[[], float],
+    role: str = "producer",
 ) -> ProducerExecutableSnapshot:
     """Bind executable bytes before ``Popen`` on Darwin.
 
@@ -356,6 +362,9 @@ def _snapshot_executable(
     process creation. This function publishes only its expected receipt metadata.
     """
 
+    relative_path = _SNAPSHOT_PATHS.get(role)
+    if relative_path is None:
+        _fail("producer_process_snapshot_role_invalid")
     if sys.platform.startswith("linux"):
         return ProducerExecutableSnapshot(
             relative_path=None,
@@ -376,7 +385,7 @@ def _snapshot_executable(
         _fail("producer_process_wall_timeout")
     snapshot_dir = batch / ".producer-snapshots"
     _safe_dir(snapshot_dir, create=True)
-    snapshot = batch / _SNAPSHOT_RELATIVE_PATH
+    snapshot = batch / relative_path
     temp_name = ".executable-" + secrets.token_hex(12)
     temp_path = snapshot_dir / temp_name
     source_fd = -1
@@ -454,7 +463,7 @@ def _snapshot_executable(
         with _held_directory(snapshot_dir) as directory_fd:
             os.fsync(directory_fd)
         return ProducerExecutableSnapshot(
-            relative_path=_SNAPSHOT_RELATIVE_PATH,
+            relative_path=relative_path,
             sha256=str(locked["sha256"]),
             size=int(locked["size"]),
             binding="darwin-immutable-snapshot",

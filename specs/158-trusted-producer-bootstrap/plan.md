@@ -55,3 +55,11 @@ descriptors held through the relevant exec operations. If either binding cannot 
 the consumed attempt remains unresolved and the gate is never released. Only after both bindings
 exist should the formal runner publish its shared registration, release the gate, and reuse the
 same process owner, lock, cleanup, receipt, and recovery path.
+
+Darwin snapshot preparation now reserves separate immutable paths within one batch:
+`.producer-snapshots/bootstrap` and `.producer-snapshots/target`. The ordinary Feature 156
+producer retains `.producer-snapshots/executable`. The formal trusted-bootstrap registration
+validator requires the bootstrap path for Darwin. These role-specific names are groundwork for
+the two byte bindings, not a production pair preparer: the current fixture still executes via
+`python -m` and reopens its target by pathname. The native bootstrap artifact, separate target
+execution binding, and shared Feature 156 lifecycle integration remain prerequisites for T158-04.

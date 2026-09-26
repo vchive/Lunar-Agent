@@ -1,5 +1,16 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 158 Darwin 双端快照路径预备
+
+沿现有 SDD，Darwin 批次快照现区分 `.producer-snapshots/bootstrap` 与
+`.producer-snapshots/target`；普通 Feature 156 producer 继续使用
+`.producer-snapshots/executable`。正式 trusted-bootstrap 登记校验要求 bootstrap 路径，
+因此旧 producer 路径不能充当 bootstrap 快照。这只是双端执行字节绑定的路径预备：
+当前没有生产 pair preparer、原生可信 bootstrap artifact、独立绑定的 target exec，
+也未接入 Feature 156 共享登记/清理/恢复和单一 deadline。T158-04 仍开放；
+现有 `python -m` fixture 不能作为生产入口。本次变更未运行真实 provider、外部
+producer、WebAgent 或 campaign。
+
 ## 2026-09-26 Feature 158 fixture 恢复组身份校验
 
 只读 fixture 恢复现在也核对终态证据中的目标启动 PGID 与持久 bootstrap 登记 PGID；

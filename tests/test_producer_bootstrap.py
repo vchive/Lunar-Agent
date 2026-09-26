@@ -120,7 +120,7 @@ def _formal_registration() -> tuple[TrustedBootstrapLaunch, TrustedBootstrapDesc
             "darwin-immutable-snapshot" if sys.platform == "darwin" else "linux-sealed-memfd"
         ),
         "execution_snapshot_relative_path": (
-            ".producer-snapshots/executable" if sys.platform == "darwin" else None
+            ".producer-snapshots/bootstrap" if sys.platform == "darwin" else None
         ),
         "execution_snapshot_sha256": descriptor.bootstrap_sha256,
         "execution_snapshot_size": descriptor.size,
@@ -486,6 +486,16 @@ def test_formal_registration_binds_bootstrap_target_and_feature156_owner_lock():
     assert verify_trusted_bootstrap_process_registration(launch, descriptor, registration) == registration
     encoded = json.dumps(registration, sort_keys=True, separators=(",", ":"))
     assert verify_trusted_bootstrap_process_registration(launch, descriptor, encoded) == registration
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin snapshot registration")
+def test_formal_registration_rejects_ordinary_producer_snapshot_even_when_rehashed():
+    launch, descriptor, registration = _formal_registration()
+    registration["execution_snapshot_relative_path"] = ".producer-snapshots/executable"
+    _rehash_record(registration, "registration_sha256")
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_process_registration(launch, descriptor, registration)
+    assert exc.value.code == "producer_bootstrap_process_registration_execution_binding_mismatch"
 
 
 @pytest.mark.parametrize(

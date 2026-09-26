@@ -541,7 +541,7 @@ def verify_trusted_bootstrap_process_registration(
         "darwin-immutable-snapshot" if expected_mode == "darwin-immutable-snapshot"
         else "linux-sealed-memfd"
     )
-    expected_snapshot_path = ".producer-snapshots/executable" if expected_mode == "darwin-immutable-snapshot" else None
+    expected_snapshot_path = ".producer-snapshots/bootstrap" if expected_mode == "darwin-immutable-snapshot" else None
     if (
         raw["executable_identity"] != expected_executable_identity
         or raw["execution_binding"] != expected_binding
