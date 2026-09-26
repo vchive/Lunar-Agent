@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -12,11 +14,16 @@ from lunar_evolution.producer_bootstrap import (
     TrustedBootstrapLaunch,
     TrustedBootstrapRegistration,
     TrustedBootstrapSession,
+    build_trusted_bootstrap_launch,
     build_trusted_bootstrap_registration,
     parse_bootstrap_handshake_frame,
     parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
     verify_trusted_bootstrap_registration,
+)
+from lunar_evolution.producer_launcher import (
+    build_producer_launch_attestation,
+    build_producer_launch_intent,
 )
 
 DIGEST = "a" * 64
@@ -50,6 +57,65 @@ def _launch() -> TrustedBootstrapLaunch:
         gate_protocol="fd-read-one-byte-v1",
         gate_nonce="nonce-001",
     )
+
+
+def _producer_admission(tmp_path: Path):
+    root = tmp_path / "producer-root"
+    root.mkdir()
+    executable = root / "producer.py"
+    executable.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    executable.chmod(0o755)
+    intent = build_producer_launch_intent(
+        producer_root=root, launch_id="launch-001", journal_id="journal-001", run_id="run-001",
+        parent_task_id="parent-001", task_id="task-001", contract_sha256=DIGEST,
+        evaluator_kind="local", evaluator_fingerprint=DIGEST, runner_fingerprint=DIGEST,
+        generator_fingerprint=DIGEST, dependency_sha256=DIGEST, environment_sha256=DIGEST,
+        producer_id="fixture", producer_fingerprint=DIGEST, executable_relative="producer.py",
+        argv=("producer.py",), working_directory="work", output_directory="output",
+        request_timeout_seconds=1, max_requests=1, output_max_bytes=1024, wall_timeout_seconds=1,
+    )
+    return intent, build_producer_launch_attestation(intent, "nonce-001")
+
+
+def _production_descriptor() -> TrustedBootstrapDescriptor:
+    return TrustedBootstrapDescriptor(
+        implementation_version="bootstrap-1", bootstrap_sha256=DIGEST, size=128,
+        device=1, inode=2, mtime_ns=3, ctime_ns=4, allowlist_id="local-bootstrap",
+        platform_execution_mode="darwin-immutable-snapshot" if sys.platform == "darwin" else "linux-fd-bound",
+    )
+
+
+def test_launch_adapter_rejects_fixture_only_mode(tmp_path: Path):
+    intent, attestation = _producer_admission(tmp_path)
+    with pytest.raises(ProducerBootstrapError) as exc:
+        build_trusted_bootstrap_launch(intent, attestation, _descriptor(), gate_nonce="nonce-001")
+    assert exc.value.code == "producer_bootstrap_production_mode_required"
+
+
+def test_launch_adapter_binds_verified_intent_and_attestation(tmp_path: Path):
+    intent, attestation = _producer_admission(tmp_path)
+    launch = build_trusted_bootstrap_launch(
+        intent, attestation, _production_descriptor(), gate_nonce="nonce-001",
+    )
+    assert launch.intent_sha256 == intent.intent_sha256
+    assert launch.attestation_sha256 == attestation.attestation_sha256
+    assert launch.target_executable_identity == intent.executable_sha256
+
+
+def test_launch_adapter_rejects_attestation_drift(tmp_path: Path):
+    intent, attestation = _producer_admission(tmp_path)
+    forged = dict(attestation.to_dict())
+    forged["intent_sha256"] = "b" * 64
+    with pytest.raises(ProducerBootstrapError) as exc:
+        build_trusted_bootstrap_launch(intent, forged, _production_descriptor(), gate_nonce="nonce-001")
+    assert exc.value.code == "producer_bootstrap_launch_attestation_invalid"
+
+
+def test_launch_adapter_rejects_gate_nonce_drift(tmp_path: Path):
+    intent, attestation = _producer_admission(tmp_path)
+    with pytest.raises(ProducerBootstrapError) as exc:
+        build_trusted_bootstrap_launch(intent, attestation, _production_descriptor(), gate_nonce="nonce-002")
+    assert exc.value.code == "producer_bootstrap_gate_nonce_mismatch"
 
 
 def _ready(launch: TrustedBootstrapLaunch) -> BootstrapHandshakeFrame:

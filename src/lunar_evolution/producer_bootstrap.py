@@ -10,8 +10,18 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+
+from .producer_launcher import (
+    ProducerLaunchAttestation,
+    ProducerLaunchError,
+    ProducerLaunchIntent,
+    parse_producer_launch_attestation,
+    parse_producer_launch_intent,
+    verify_producer_launch_attestation,
+)
 
 TRUSTED_BOOTSTRAP_PROTOCOL = "lunar-trusted-producer-bootstrap-v1"
 TRUSTED_BOOTSTRAP_SCHEMA_VERSION = "1"
@@ -209,6 +219,69 @@ class TrustedBootstrapLaunch:
 
     def digest(self) -> str:
         return _digest_without(self.to_dict(), "launch_sha256")
+
+
+def build_trusted_bootstrap_launch(
+    intent: object,
+    attestation: object,
+    descriptor: TrustedBootstrapDescriptor,
+    *,
+    gate_nonce: str | None = None,
+) -> TrustedBootstrapLaunch:
+    """Project one validated producer launch into the trusted-bootstrap contract.
+
+    This is an identity-only adapter.  It does not consume the attestation, inspect the
+    executable, or start a process.  Production callers must provide a descriptor backed by
+    the platform's exact-byte execution mode; the fixture-only descriptor is intentionally
+    rejected here.
+    """
+    if not isinstance(descriptor, TrustedBootstrapDescriptor):
+        _fail("producer_bootstrap_descriptor_invalid")
+    expected_mode = (
+        "darwin-immutable-snapshot" if sys.platform == "darwin"
+        else "linux-fd-bound" if sys.platform.startswith("linux") else None
+    )
+    if descriptor.platform_execution_mode == "fixture-only":
+        _fail("producer_bootstrap_production_mode_required")
+    if expected_mode is None or descriptor.platform_execution_mode != expected_mode:
+        _fail("producer_bootstrap_platform_mode_mismatch")
+
+    # Keep the producer-launch parser and verifier as the single source of truth for the
+    # parent/child/task and executable-stat tuple. Translate failures to fixed bootstrap codes.
+    if not isinstance(intent, ProducerLaunchIntent):
+        try:
+            intent = parse_producer_launch_intent(intent)
+        except (ProducerLaunchError, TypeError, ValueError) as exc:
+            raise ProducerBootstrapError("producer_bootstrap_launch_intent_invalid") from exc
+    if not isinstance(attestation, ProducerLaunchAttestation):
+        try:
+            attestation = parse_producer_launch_attestation(attestation)
+        except (ProducerLaunchError, TypeError, ValueError) as exc:
+            raise ProducerBootstrapError("producer_bootstrap_launch_attestation_invalid") from exc
+    try:
+        verify_producer_launch_attestation(intent, attestation)
+    except (ProducerLaunchError, TypeError, ValueError) as exc:
+        raise ProducerBootstrapError("producer_bootstrap_launch_binding_mismatch") from exc
+
+    if gate_nonce is None:
+        gate_nonce = attestation.nonce
+    else:
+        _id(gate_nonce, "producer_bootstrap_gate_nonce_invalid")
+        if gate_nonce != attestation.nonce:
+            _fail("producer_bootstrap_gate_nonce_mismatch")
+    return TrustedBootstrapLaunch(
+        launch_id=intent.launch_id,
+        journal_id=intent.journal_id,
+        run_id=intent.run_id,
+        parent_task_id=intent.parent_task_id,
+        task_id=intent.task_id,
+        intent_sha256=intent.intent_sha256 or intent.digest(),
+        attestation_sha256=attestation.attestation_sha256 or attestation.digest(),
+        bootstrap_descriptor_sha256=descriptor.descriptor_sha256 or descriptor.digest(),
+        target_executable_identity=attestation.executable_sha256,
+        gate_protocol="fd-read-one-byte-v1",
+        gate_nonce=gate_nonce,
+    )
 
 
 _REGISTRATION_FIELDS = frozenset({
@@ -668,6 +741,7 @@ __all__ = [
     "TrustedBootstrapLaunch",
     "TrustedBootstrapRegistration",
     "TrustedBootstrapSession",
+    "build_trusted_bootstrap_launch",
     "build_trusted_bootstrap_registration",
     "parse_bootstrap_handshake_frame",
     "parse_trusted_bootstrap_evidence",
