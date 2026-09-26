@@ -13,6 +13,7 @@ import json
 import os
 import re
 import stat
+import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -119,7 +120,7 @@ class HostRequestJournalIdentity:
 
 @dataclass(frozen=True, slots=True)
 class HostRequestRecovery:
-    """Read-only journal replay; active requests are uncertain after a crash."""
+    """Read-only replay; active and timed-out requests remain uncertain."""
 
     snapshot: HostRequestSnapshot
     uncertain_request_ids: tuple[str, ...]
@@ -185,6 +186,7 @@ class HostRequestJournal:
         self._ordinal = 0
         self._poisoned = False
         self._claimed = False
+        self._lock = threading.Lock()
 
     @classmethod
     def create(cls, path: str | Path, identity: HostRequestJournalIdentity) -> HostRequestJournal:
@@ -223,9 +225,10 @@ class HostRequestJournal:
         return cls(fd, identity, len(header), head)
 
     def close(self) -> None:
-        if self._fd >= 0:
-            os.close(self._fd)
-            self._fd = -1
+        with self._lock:
+            if self._fd >= 0:
+                os.close(self._fd)
+                self._fd = -1
 
     def __enter__(self) -> Self:
         return self
@@ -234,6 +237,10 @@ class HostRequestJournal:
         self.close()
 
     def _append(self, kind: str, fields: dict[str, object]) -> None:
+        with self._lock:
+            self._append_locked(kind, fields)
+
+    def _append_locked(self, kind: str, fields: dict[str, object]) -> None:
         if self._poisoned or self._fd < 0:
             _fail("producer_request_transport_journal_unavailable")
         record = {
@@ -420,6 +427,11 @@ def read_host_request_journal(
             last_timestamp = ended
         else:
             _fail("producer_request_transport_journal_invalid")
+    uncertain = {sequence: request_id for sequence, (request_id, _, _) in active.items()}
+    uncertain.update(
+        (sequence, event.request_id)
+        for sequence, event in events.items() if event.status == "timed_out"
+    )
     return HostRequestRecovery(
         snapshot=HostRequestSnapshot(
             events=tuple(events[key] for key in sorted(events)),
@@ -428,7 +440,7 @@ def read_host_request_journal(
             request_timeout_seconds=expected_identity.request_timeout_seconds,
             max_requests=expected_identity.max_requests,
         ),
-        uncertain_request_ids=tuple(active[key][0] for key in sorted(active)),
+        uncertain_request_ids=tuple(uncertain[key] for key in sorted(uncertain)),
     )
 
 
@@ -458,15 +470,17 @@ class HostRequestLedger:
             or journal.identity.max_requests != max_requests
         ):
             _fail("producer_request_transport_journal_binding_mismatch")
-        if journal is not None and (journal._claimed or journal._poisoned or journal._fd < 0):
-            _fail("producer_request_transport_journal_unavailable")
+        if journal is not None:
+            with journal._lock:
+                if journal._claimed or journal._poisoned or journal._fd < 0:
+                    _fail("producer_request_transport_journal_unavailable")
+                journal._claimed = True
         self.request_timeout_seconds = request_timeout_seconds
         self.max_requests = max_requests
+        self._lock = threading.Lock()
         self._clock = monotonic_ns
         self._last_ns: int | None = None
         self._journal = journal
-        if journal is not None:
-            journal._claimed = True
         self._used_ids: set[str] = set()
         self._active: dict[RequestAdmission, None] = {}
         self._events: dict[int, HostRequestEvent] = {}
@@ -485,6 +499,10 @@ class HostRequestLedger:
 
     def admit(self, request_id: str) -> RequestAdmission:
         """Reserve capacity before the caller starts any provider I/O."""
+        with self._lock:
+            return self._admit_locked(request_id)
+
+    def _admit_locked(self, request_id: str) -> RequestAdmission:
         if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
             _fail("producer_request_transport_request_id_invalid")
         if request_id in self._used_ids:
@@ -509,6 +527,10 @@ class HostRequestLedger:
 
     def finish(self, admission: RequestAdmission, *, status: str) -> HostRequestEvent:
         """Record controller-observed completion, overriding late results as timed out."""
+        with self._lock:
+            return self._finish_locked(admission, status=status)
+
+    def _finish_locked(self, admission: RequestAdmission, *, status: str) -> HostRequestEvent:
         if type(admission) is not RequestAdmission or admission not in self._active:
             _fail("producer_request_transport_admission_invalid")
         if type(status) is not str or status not in _TERMINAL:
@@ -525,6 +547,10 @@ class HostRequestLedger:
 
     def expire(self, *, admission: RequestAdmission | None = None) -> tuple[HostRequestEvent, ...]:
         """Mark overdue admissions; caller must independently cancel their I/O."""
+        with self._lock:
+            return self._expire_locked(admission=admission)
+
+    def _expire_locked(self, *, admission: RequestAdmission | None) -> tuple[HostRequestEvent, ...]:
         now = self._now()
         expired: list[HostRequestEvent] = []
         candidates = (admission,) if admission is not None else tuple(self._active)
@@ -552,13 +578,14 @@ class HostRequestLedger:
         )
 
     def snapshot(self) -> HostRequestSnapshot:
-        return HostRequestSnapshot(
-            events=tuple(self._events[key] for key in sorted(self._events)),
-            admitted_count=self._admitted,
-            active_count=len(self._active),
-            request_timeout_seconds=self.request_timeout_seconds,
-            max_requests=self.max_requests,
-        )
+        with self._lock:
+            return HostRequestSnapshot(
+                events=tuple(self._events[key] for key in sorted(self._events)),
+                admitted_count=self._admitted,
+                active_count=len(self._active),
+                request_timeout_seconds=self.request_timeout_seconds,
+                max_requests=self.max_requests,
+            )
 
 
 __all__ = [

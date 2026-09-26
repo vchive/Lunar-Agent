@@ -10,6 +10,8 @@
 T157-05 progress: `transport-design.md` specifies the controller-owned broker boundary;
 `HostRequestLedger` implements bounded host-side admission, count, and monotonic timing,
 and `ControllerOwnedRequestBroker` now requires a controlled handle with explicit cancellation
-and terminal confirmation. `HostRequestJournal` records identity-bound, append-only, fsynced
-events and read-only crash recovery. A real outbound transport, complete egress coverage,
-protected production journal ownership, and Feature 156 integration are still required.
+and a confirmed `cancelled` terminal before claiming enforced timeout. Ledger and journal
+state transitions are serialized for concurrent broker calls. `HostRequestJournal` records
+identity-bound, append-only, fsynced events and read-only crash recovery. A real outbound
+transport, complete egress coverage, protected production journal ownership, and Feature 156
+integration are still required.

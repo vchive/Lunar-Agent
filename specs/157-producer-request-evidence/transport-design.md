@@ -10,25 +10,33 @@ that actually performs the outbound I/O calls `finish` with its own terminal res
 
 The resulting snapshot says `coverage=brokered_requests_only`. It must not be translated
 into the cooperative `ProducerRequestEvidence` DTO, whose clock is explicitly the SDK
-clock, or into a complete host-enforcement receipt. `within_broker_limits` refers only
-to admitted requests that reached a terminal event. The ledger is owned by one controller
-event loop; concurrent brokers need serialization around admission and terminal events.
+clock, or into a complete host-enforcement receipt. `within_broker_limits` is true only
+when every admitted request has a terminal event and none is timed out; it says nothing
+about requests that bypassed the broker. Ledger transitions are serialized per
+instance; journal append and close are serialized separately so concurrent admissions
+cannot reuse a sequence or interleave hash-chain records.
 
 `HostRequestJournal` now persists each admission and terminal event to a new, bounded
 append-only file. Each canonical JSON line carries an ordinal, previous-record digest,
 and self-digest. It is fsynced before the ledger state advances. The first line binds the
 exact launch/journal/run/parent/task tuple, intent digest, and request budgets. A failed
 write poisons that journal handle. Read-only recovery validates every line and reports
-unclosed admissions as uncertain, without resuming them. It rejects symlinked file and
+unclosed admissions and timed-out records as uncertain, without resuming them. A deadline
+record alone does not establish that provider I/O stopped. It rejects symlinked file and
 ancestor paths. The controller must place this file in an OS-protected directory that the
 producer cannot write; a hash chain alone does not authenticate bytes against a child
 that can edit the journal with the controller's credentials.
 
 `ControllerOwnedRequestBroker` now provides the provider-free transport boundary. It passes
 the exact controller-issued admission and deadline to a controlled transport handle, and
-requires explicit cancellation acknowledgement plus a terminal confirmation before returning
-`host_timeout_enforced=true`. A transport that only supports polling, returns an invalid
-status, or cannot confirm cancellation fails closed and leaves the timeout evidence uncertain.
+sets `host_timeout_enforced=true` only after cancellation is acknowledged and the terminal
+state is `cancelled`. An accepted
+cancellation followed by `completed` or `failed` remains unconfirmed for timeout enforcement.
+A transport that returns an invalid status or cannot confirm cancellation fails closed;
+the admission remains active without a confirmed stop, even after the deadline.
+The transport contract requires bounded `start`, `wait`, and cancellation operations and
+synchronous cleanup after a partial startup failure. The broker cannot interrupt a blocking
+transport that ignores those requirements, so these declarations are not production proof.
 The broker never stores request payloads and does not expose a producer-side transport path.
 
 ## Required production integration
@@ -44,7 +52,8 @@ The broker never stores request payloads and does not expose a producer-side tra
 3. Integrate the bounded append-only host journal with the actual transport owner, and
    isolate its directory from the producer. Recovery already treats a missing terminal
    event as uncertain, but cannot infer whether a remote request continued after a crash.
-   No producer-written file can fill that gap.
+   Timed-out records remain uncertain on replay because they do not encode an I/O-stop
+   acknowledgement. No producer-written file can fill that gap.
 4. Feature 156 can set `request_timeout_enforced` only after all three conditions above
    are tested against a fixture that bypasses the broker, one that hangs during I/O, and
    one that crashes the controller after admission. Until then, retain the existing

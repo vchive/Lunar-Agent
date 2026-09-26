@@ -4,7 +4,9 @@ The request ledger records controller observations, but it cannot interrupt an
 arbitrary blocking callable.  This module adds the small transport contract
 needed by a controlled runtime: a transport returns a handle with explicit
 ``wait`` and ``cancel`` operations.  A timeout is host-enforced only after the
-handle acknowledges cancellation and reaches a terminal state.
+handle acknowledges cancellation and confirms that I/O stopped as ``cancelled``.
+The transport must bound its own ``start``, ``wait``, and cancellation calls;
+this synchronous broker cannot interrupt a transport that ignores its timeout.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ class ControllerRequestHandle(Protocol):
     """Controlled transport handle with host-visible cancellation."""
 
     def wait(self, timeout_seconds: float) -> str | None:
-        """Return a terminal status, or ``None`` while the request is active."""
+        """Return a terminal status, or ``None`` after the bounded wait elapses."""
 
     def cancel(self) -> bool:
         """Request cancellation and report whether the transport accepted it."""
@@ -48,7 +50,7 @@ class ControllerRequestTransport(Protocol):
     """Transport owned by the controller, not by the producer process."""
 
     def start(self, admission: RequestAdmission, payload: object) -> ControllerRequestHandle:
-        """Start I/O only after the controller has durably admitted the request."""
+        """Return a valid handle after admission; clean up partial I/O on failure."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,23 +106,37 @@ class ControllerOwnedRequestBroker:
         """
         admission = self._ledger.admit(request_id)
         try:
+            self._remaining_seconds(admission)
+        except ControllerRequestBrokerError:
+            self._finish_failed(admission)
+            raise
+        try:
             handle = self._transport.start(admission, payload)
         except Exception as exc:
-            event = self._finish_failed(admission)
             raise ControllerRequestBrokerError(
-                "producer_request_broker_transport_start_failed", event=event,
+                "producer_request_broker_transport_start_failed",
             ) from exc
-        if not callable(getattr(handle, "wait", None)) or not callable(getattr(handle, "cancel", None)):
-            event = self._finish_failed(admission)
+        try:
+            valid_handle = (
+                callable(getattr(handle, "wait", None))
+                and callable(getattr(handle, "cancel", None))
+            )
+        except Exception:  # noqa: BLE001 - malformed transport handle
+            valid_handle = False
+        if not valid_handle:
             raise ControllerRequestBrokerError(
-                "producer_request_broker_handle_invalid", event=event,
+                "producer_request_broker_handle_invalid",
             )
 
-        remaining = self._remaining_seconds(admission)
+        try:
+            remaining = self._remaining_seconds(admission)
+        except ControllerRequestBrokerError:
+            self._abort_unreliable_handle(admission, handle)
+            raise
         try:
             status = handle.wait(remaining)
         except Exception as exc:
-            event = self._finish_failed(admission)
+            event = self._abort_unreliable_handle(admission, handle)
             raise ControllerRequestBrokerError(
                 "producer_request_broker_wait_failed", event=event,
             ) from exc
@@ -128,7 +144,7 @@ class ControllerOwnedRequestBroker:
             event = self._finish(admission, status)
             return BrokerRequestResult(admission, event, False, False, False)
         if status is not None:
-            event = self._finish_failed(admission)
+            event = self._abort_unreliable_handle(admission, handle)
             raise ControllerRequestBrokerError(
                 "producer_request_broker_status_invalid", event=event,
             )
@@ -144,9 +160,8 @@ class ControllerOwnedRequestBroker:
         else:
             cancel_error = None
         if not acknowledged:
-            event = self._expire(admission)
             error = ControllerRequestBrokerError(
-                "producer_request_broker_timeout_unconfirmed", event=event,
+                "producer_request_broker_timeout_unconfirmed",
             )
             if cancel_error is not None:
                 raise error from cancel_error
@@ -154,14 +169,16 @@ class ControllerOwnedRequestBroker:
         try:
             terminal = handle.wait(self._cancel_grace_seconds)
         except Exception as exc:
-            event = self._expire(admission)
             raise ControllerRequestBrokerError(
-                "producer_request_broker_cancellation_wait_failed", event=event,
+                "producer_request_broker_cancellation_wait_failed",
             ) from exc
-        if terminal not in _TERMINAL:
-            event = self._expire(admission)
+        if type(terminal) is not str or terminal not in _TERMINAL:
             raise ControllerRequestBrokerError(
-                "producer_request_broker_timeout_unconfirmed", event=event,
+                "producer_request_broker_timeout_unconfirmed",
+            )
+        if terminal != "cancelled":
+            raise ControllerRequestBrokerError(
+                "producer_request_broker_timeout_unconfirmed",
             )
         event = self._expire(admission)
         if event is None:
@@ -178,16 +195,28 @@ class ControllerOwnedRequestBroker:
         try:
             now = self._clock()
         except Exception as exc:
-            event = self._finish_failed(admission)
             raise ControllerRequestBrokerError(
-                "producer_request_broker_clock_invalid", event=event,
+                "producer_request_broker_clock_invalid",
             ) from exc
         if type(now) is not int or now < admission.started_ns or now > 2**63 - 1:
-            event = self._finish_failed(admission)
             raise ControllerRequestBrokerError(
-                "producer_request_broker_clock_invalid", event=event,
+                "producer_request_broker_clock_invalid",
             )
         return max(0.0, (admission.deadline_ns - now) / 1_000_000_000)
+
+    def _abort_unreliable_handle(
+        self, admission: RequestAdmission, handle: ControllerRequestHandle,
+    ) -> HostRequestEvent | None:
+        terminal: object = None
+        try:
+            if handle.cancel() is True:
+                terminal = handle.wait(self._cancel_grace_seconds)
+        except Exception:  # noqa: BLE001 - preserve the original boundary error
+            terminal = None
+        else:
+            if type(terminal) is str and terminal == "cancelled":
+                return self._finish(admission, "cancelled")
+        return None
 
     def _finish(self, admission: RequestAdmission, status: str) -> HostRequestEvent:
         try:

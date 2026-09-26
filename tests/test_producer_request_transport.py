@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -327,6 +330,139 @@ def test_journal_cannot_bind_to_two_ledgers(tmp_path):
         )
 
 
+def test_concurrent_admissions_reserve_unique_sequences_within_budget(tmp_path, monkeypatch):
+    identity = HostRequestJournalIdentity(**{**_identity().to_dict(), "max_requests": 2})
+    with HostRequestJournal.create(tmp_path / "requests.log", identity) as journal:
+        ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=2, journal=journal)
+        original = journal.record_admission
+
+        def slow_record(admission):
+            time.sleep(0.01)
+            original(admission)
+
+        monkeypatch.setattr(journal, "record_admission", slow_record)
+        start = Barrier(12)
+
+        def admit(index):
+            start.wait(timeout=5)
+            try:
+                return ledger.admit(f"request-{index:03d}")
+            except ProducerRequestTransportError as exc:
+                return exc.code
+
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(admit, range(12)))
+        successes = [result for result in results if isinstance(result, RequestAdmission)]
+        assert sorted(item.sequence for item in successes) == [1, 2]
+        assert results.count("producer_request_transport_budget_exceeded") == 10
+        assert ledger.snapshot().admitted_count == 2
+    recovery = read_host_request_journal(tmp_path / "requests.log", expected_identity=identity)
+    assert recovery.snapshot.admitted_count == 2
+    assert len(recovery.uncertain_request_ids) == 2
+
+
+def test_concurrent_finish_records_only_one_terminal_event(tmp_path, monkeypatch):
+    identity = _identity()
+    with HostRequestJournal.create(tmp_path / "requests.log", identity) as journal:
+        ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=2, journal=journal)
+        admission = ledger.admit("request-001")
+        original = journal.record_terminal
+
+        def slow_record(event, ended_ns):
+            time.sleep(0.01)
+            original(event, ended_ns)
+
+        monkeypatch.setattr(journal, "record_terminal", slow_record)
+        start = Barrier(2)
+
+        def finish(_index):
+            start.wait(timeout=5)
+            try:
+                return ledger.finish(admission, status="completed")
+            except ProducerRequestTransportError as exc:
+                return exc.code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(finish, range(2)))
+        assert sum(isinstance(result, transport.HostRequestEvent) for result in results) == 1
+        assert results.count("producer_request_transport_admission_invalid") == 1
+        assert len(ledger.snapshot().events) == 1
+    recovery = read_host_request_journal(tmp_path / "requests.log", expected_identity=identity)
+    assert len(recovery.snapshot.events) == 1
+    assert recovery.uncertain_request_ids == ()
+
+
+def test_concurrent_finish_and_expire_record_one_terminal_event(tmp_path, monkeypatch):
+    identity = _identity()
+    clock = Clock()
+    with HostRequestJournal.create(tmp_path / "requests.log", identity) as journal:
+        ledger = HostRequestLedger(
+            request_timeout_seconds=1, max_requests=2, monotonic_ns=clock, journal=journal,
+        )
+        admission = ledger.admit("request-001")
+        clock.value = admission.deadline_ns
+        original = journal.record_terminal
+
+        def slow_record(event, ended_ns):
+            time.sleep(0.01)
+            original(event, ended_ns)
+
+        monkeypatch.setattr(journal, "record_terminal", slow_record)
+        start = Barrier(2)
+
+        def finish():
+            start.wait(timeout=5)
+            try:
+                return ledger.finish(admission, status="completed")
+            except ProducerRequestTransportError as exc:
+                return exc.code
+
+        def expire():
+            start.wait(timeout=5)
+            try:
+                return ledger.expire(admission=admission)
+            except ProducerRequestTransportError as exc:
+                return exc.code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [pool.submit(finish), pool.submit(expire)]
+            outcomes = [result.result() for result in results]
+        assert outcomes.count("producer_request_transport_admission_invalid") == 1
+        assert len(ledger.snapshot().events) == 1
+        assert ledger.snapshot().events[0].status == "timed_out"
+    recovery = read_host_request_journal(tmp_path / "requests.log", expected_identity=identity)
+    assert len(recovery.snapshot.events) == 1
+    assert recovery.uncertain_request_ids == ("request-001",)
+
+
+def test_concurrent_journal_appends_preserve_ordinal_and_hash_chain(tmp_path, monkeypatch):
+    path = tmp_path / "requests.log"
+    with HostRequestJournal.create(path, _identity()) as journal:
+        original = transport._record_line
+
+        def slow_record_line(value):
+            if value["kind"] == "probe":
+                time.sleep(0.01)
+            return original(value)
+
+        monkeypatch.setattr(transport, "_record_line", slow_record_line)
+        start = Barrier(12)
+
+        def append(index):
+            start.wait(timeout=5)
+            journal._append("probe", {"value": index})
+
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            list(pool.map(append, range(12)))
+        assert journal._ordinal == 12
+    lines = path.read_bytes().splitlines(keepends=True)
+    assert len(lines) == 13
+    head = transport._ZERO_SHA
+    for ordinal, line in enumerate(lines):
+        record = transport._journal_record(line, ordinal, head)
+        head = record["record_sha256"]
+
+
 def test_controller_broker_admits_before_transport_and_forwards_deadline():
     clock = Clock()
     handle = ImmediateHandle()
@@ -365,8 +501,9 @@ def test_controller_broker_keeps_unconfirmed_timeout_fail_closed():
             ledger, transport, monotonic_ns=clock, cancel_grace_seconds=0.1,
         ).execute("request-001", None)
     assert exc.value.code == "producer_request_broker_timeout_unconfirmed"
-    assert exc.value.event is not None and exc.value.event.status == "timed_out"
-    assert ledger.snapshot().active_count == 0
+    assert exc.value.event is None
+    assert ledger.snapshot().active_count == 1
+    assert not ledger.snapshot().within_broker_limits
 
 
 def test_controller_broker_rejects_handle_without_cancellation():
@@ -380,7 +517,9 @@ def test_controller_broker_rejects_handle_without_cancellation():
     with pytest.raises(ControllerRequestBrokerError) as exc:
         ControllerOwnedRequestBroker(ledger, transport, monotonic_ns=clock).execute("request-001", None)
     assert exc.value.code == "producer_request_broker_handle_invalid"
-    assert exc.value.event is not None and exc.value.event.status == "failed"
+    assert exc.value.event is None
+    assert ledger.snapshot().active_count == 1
+    assert not ledger.snapshot().within_broker_limits
 
 
 def test_controller_broker_rejects_unhashable_transport_status():
@@ -397,4 +536,130 @@ def test_controller_broker_rejects_unhashable_transport_status():
     with pytest.raises(ControllerRequestBrokerError) as exc:
         ControllerOwnedRequestBroker(ledger, transport, monotonic_ns=clock).execute("request-001", None)
     assert exc.value.code == "producer_request_broker_status_invalid"
-    assert exc.value.event is not None and exc.value.event.status == "failed"
+    assert exc.value.event is None
+    assert ledger.snapshot().active_count == 1
+    assert not ledger.snapshot().within_broker_limits
+
+
+@pytest.mark.parametrize("terminal", ["completed", "failed", []])
+def test_controller_broker_never_confirms_timeout_when_cancelled_io_is_unproven(terminal):
+    class LateTerminal:
+        def __init__(self) -> None:
+            self.waits = 0
+
+        def wait(self, _timeout_seconds: float):
+            self.waits += 1
+            if self.waits == 1:
+                clock.value += 1_000_000_000
+                return None
+            return terminal
+
+        def cancel(self) -> bool:
+            return True
+
+    clock = Clock()
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    with pytest.raises(ControllerRequestBrokerError) as exc:
+        ControllerOwnedRequestBroker(
+            ledger, RecordingTransport(LateTerminal), monotonic_ns=clock,
+        ).execute("request-001", None)
+    assert exc.value.code == "producer_request_broker_timeout_unconfirmed"
+    assert exc.value.event is None
+    assert ledger.snapshot().active_count == 1
+    assert not ledger.snapshot().within_broker_limits
+
+
+@pytest.mark.parametrize("first_status", [None, []])
+def test_controller_broker_retains_early_unconfirmed_io(first_status):
+    class EarlyUnconfirmed:
+        def wait(self, _timeout_seconds: float):
+            return first_status
+
+        def cancel(self) -> bool:
+            return False
+
+    clock = Clock()
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    with pytest.raises(ControllerRequestBrokerError) as exc:
+        ControllerOwnedRequestBroker(
+            ledger, RecordingTransport(EarlyUnconfirmed), monotonic_ns=clock,
+        ).execute("request-001", None)
+    assert exc.value.code == (
+        "producer_request_broker_timeout_unconfirmed" if first_status is None
+        else "producer_request_broker_status_invalid"
+    )
+    assert exc.value.event is None
+    assert ledger.snapshot().active_count == 1
+    assert not ledger.snapshot().within_broker_limits
+
+
+def test_controller_broker_cancels_after_wait_failure():
+    class FailedWait:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def wait(self, _timeout_seconds: float):
+            if not self.cancelled:
+                raise RuntimeError("transport failed")
+            return "cancelled"
+
+        def cancel(self) -> bool:
+            self.cancelled = True
+            return True
+
+    clock = Clock()
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    with pytest.raises(ControllerRequestBrokerError) as exc:
+        ControllerOwnedRequestBroker(
+            ledger, RecordingTransport(FailedWait), monotonic_ns=clock,
+        ).execute("request-001", None)
+    assert exc.value.code == "producer_request_broker_wait_failed"
+    assert exc.value.event is not None and exc.value.event.status == "cancelled"
+    assert ledger.snapshot().active_count == 0
+
+
+def test_controller_broker_retains_invalid_wait_even_if_cleanup_completes(tmp_path):
+    class InvalidThenCompleted:
+        def __init__(self) -> None:
+            self.waits = 0
+
+        def wait(self, _timeout_seconds: float):
+            self.waits += 1
+            return [] if self.waits == 1 else "completed"
+
+        def cancel(self) -> bool:
+            return True
+
+    clock = Clock()
+    identity = _identity()
+    path = tmp_path / "requests.log"
+    with HostRequestJournal.create(path, identity) as journal:
+        ledger = HostRequestLedger(
+            request_timeout_seconds=1, max_requests=2, monotonic_ns=clock, journal=journal,
+        )
+        with pytest.raises(ControllerRequestBrokerError) as exc:
+            ControllerOwnedRequestBroker(
+                ledger, RecordingTransport(InvalidThenCompleted), monotonic_ns=clock,
+            ).execute("request-001", None)
+    assert exc.value.code == "producer_request_broker_status_invalid"
+    assert exc.value.event is None
+    assert ledger.snapshot().active_count == 1
+    assert not ledger.snapshot().within_broker_limits
+    recovery = read_host_request_journal(path, expected_identity=identity)
+    assert recovery.uncertain_request_ids == ("request-001",)
+
+
+def test_controller_broker_retains_admission_when_start_fails():
+    class FailedStart:
+        def start(self, _admission: RequestAdmission, _payload: object):
+            raise RuntimeError("transport startup failed")
+
+    clock = Clock()
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    with pytest.raises(ControllerRequestBrokerError) as exc:
+        ControllerOwnedRequestBroker(ledger, FailedStart(), monotonic_ns=clock).execute(
+            "request-001", None,
+        )
+    assert exc.value.code == "producer_request_broker_transport_start_failed"
+    assert exc.value.event is None
+    assert ledger.snapshot().active_count == 1

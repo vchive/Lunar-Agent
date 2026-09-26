@@ -1,5 +1,18 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-27 Feature 157 broker 取消与并发账本加固
+
+收紧 `ControllerOwnedRequestBroker`：只有取消被接受且 handle 返回 `cancelled`，才能标记
+`host_timeout_enforced=true`；取消后返回 `completed`/`failed`、非法或不可哈希状态均保留
+未确认超时语义。`wait` 异常和非法状态会尝试取消；没有确认 `cancelled` 时，admission
+继续保持 active，崩溃恢复会将其列为 uncertain，即使 deadline 已到。`start` 失败或返回
+无效 handle 同样不伪造终态。对独立的 ledger 超时记录，恢复也保守列入 uncertain，
+因为截止时间本身不证明 I/O 停止。ledger 的容量、序号、终态与快照操作现在串行；
+journal 追加、关闭和绑定也有互斥保护。
+新增取消竞态、异常路径及并发哈希链回归。同步接口仍依赖未来实际 transport 自己兑现
+`start`/`wait`/`cancel` 有界执行，当前没有真实 provider 出口隔离或 Feature 156 正式接线；
+T157-05/T157-06 保持开放。
+
 ## 2026-09-26 Feature 157 controlled transport boundary
 
 新增 `ControllerOwnedRequestBroker` 与 `ControllerRequestTransport`/handle 协议。broker
