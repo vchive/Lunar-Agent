@@ -4182,3 +4182,21 @@ claim。两条目录链均以 no-follow 句柄持有，文件读取有大小与 
 T158-04 保持开放，不能据此宣称对外 producer 或 scheduler 已可用。
 Feature 156/157/158 与进程所有权的五套组合测试通过（2 项跳过），Ruff、compileall 和
 `git diff --check` 通过；未运行真实 provider、外部 producer、WebAgent 或 campaign。
+## 2026-09-26 Feature 156 provider-free capture matrix
+
+在 Feature 158 Darwin 快照原子发布修复提交 `9017535` 后，补齐本轮 T156-09 的两个高风险
+provider-free 观测点。`_capture` 在一条 stdout 或 stderr 超过上限后继续使用 selector
+并发排空两条管道；每条流仍只保留上限内摘要，观测字节数饱和为 `limit + 1`，因此不会因
+先超限的一条管道让另一条满管道阻塞。新增 fixture 同时写满 stdout/stderr，专项进程和
+ownership 回归通过。
+
+新增 hostile pre-gate fixture 在读取 gate 前写入持久副作用，并在 gate 后正常完成。该用例
+明确证明普通 `run_producer_process` 只能记录 gate 顺序，不能证明任意 executable 在 gate
+释放前没有工作；这仍是 T156-12/T158-04 的负例，不是可信 bootstrap 证据。环境、shell、
+session、stdin 约束也在回归中显式断言。
+
+本轮专项 `tests/test_producer_process.py` 与 `tests/test_process_ownership.py` 通过，Ruff、
+compileall、`git diff --check` 通过。提交为 `53a3076 Complete producer capture acceptance matrix`。
+推送因当前环境无法连接 GitHub（SSH 22 refused，HTTPS 443 unreachable）未完成；恢复网络后
+执行 `git push origin codex/feature-156-producer-lifecycle`。T156-09、T156-05/06、T158-04、
+T157-05/06 和真实 provider/campaign 验收仍保持开放，未扩大外部 admission 范围。
