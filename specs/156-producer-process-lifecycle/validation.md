@@ -62,10 +62,16 @@ provider, evaluator, WebAgent, or campaign is started.
 The focused matrix must include: successful gated completion; a hostile pre-gate side-effect
 fixture; child exit before gate/broken gate delivery; nonce replay; tuple and executable
 identity drift; shell/credential rejection; registration write failure;
-full stdout/stderr pipes; deterministic output overflow; wall timeout; PID/PGID ownership loss;
+full stdout/stderr pipes; deterministic output overflow, including simultaneous stdout/stderr
+overflow; wall timeout; PID/PGID ownership loss;
 SIGTERM/SIGKILL uncertainty; controller interruption; symlinked/replaced/truncated envelope;
 unstable receipt writes; recovery with no automatic relaunch; and a replacement exactly between
 the final executable check and process creation that cannot execute un-attested bytes.
+
+The current provider-free matrix includes simultaneous stdout/stderr overflow without deadlock,
+explicit shell/session/stdin/environment assertions, and a hostile executable that writes a durable
+side effect before reading the gate. The hostile case is intentionally negative evidence: the
+ordinary runner cannot prove pre-gate non-execution, so it does not satisfy T156-12 or T158-04.
 
 ## Implementation checkpoint (2026-09-24)
 

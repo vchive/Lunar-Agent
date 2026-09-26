@@ -827,8 +827,9 @@ def _capture(
                 if observed > limit:
                     state["truncated"] = True
                     overflow = True
-            if overflow:
-                break
+            # Keep draining both descriptors after one stream crosses its limit. The
+            # evidence is saturated at limit+1, while the other pipe must still be
+            # observed to avoid a producer blocked on a full stderr/stdout pipe.
     finally:
         selector.close()
     return _stream_evidence("stdout", states["stdout"]), _stream_evidence("stderr", states["stderr"]), overflow, timed_out

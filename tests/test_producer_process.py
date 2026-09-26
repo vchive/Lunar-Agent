@@ -50,14 +50,18 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
         + ("import time\n"
            "while not pathlib.Path('../exit-before-gate').exists(): time.sleep(0.01)\n"
            "sys.exit(7)\n" if mode == "exit-before-gate" else "")
+        + ("pathlib.Path('../pre-gate-side-effect').write_text('hostile', encoding='utf-8')\n"
+           if mode == "hostile-pre-gate" else "")
         + "fd = int(os.environ['LUNAR_PRODUCER_GATE_FD'])\n"
         "if os.read(fd, 1) != b'1': sys.exit(4)\n"
         + ("registration = json.loads(pathlib.Path('../process-registration.json').read_text())\n"
            "if registration['pid'] != os.getpid() or registration['pgid'] != os.getpgrp(): sys.exit(5)\n"
            if mode == "gate-order" else "")
         + ("print('x' * 10000)\n" if mode == "overflow" else "")
+        + ("os.write(1, b'x' * 131072); os.write(2, b'y' * 131072)\n"
+           if mode == "dual-overflow" else "")
         + ("sys.exit(3)\n" if mode == "failed" else "")
-        + (f"pathlib.Path('../output/producer-result.json').write_text(json.dumps({{'schema_version':'1','producer_id':'fixture','producer_fingerprint':'{DIGEST}','producer_run_id':'run-1','status':'completed','contract_sha256':'{DIGEST}','budget':{{'requests':{3 if mode == 'over-requests' else 1}}},'materials':[]}}))\n" if mode in {"success", "gate-order", "over-requests", "descendant-pipes", "descendant-redirect", "descendant-stubborn"} else "")
+        + (f"pathlib.Path('../output/producer-result.json').write_text(json.dumps({{'schema_version':'1','producer_id':'fixture','producer_fingerprint':'{DIGEST}','producer_run_id':'run-1','status':'completed','contract_sha256':'{DIGEST}','budget':{{'requests':{3 if mode == 'over-requests' else 1}}},'materials':[]}}))\n" if mode in {"success", "gate-order", "hostile-pre-gate", "over-requests", "descendant-pipes", "descendant-redirect", "descendant-stubborn"} else "")
         + descendant_setup
         + ("pathlib.Path('../output/actual.json').write_text('external')\n"
            "pathlib.Path('../output/producer-result.json').symlink_to('actual.json')\n"
@@ -72,7 +76,8 @@ def _fixture(tmp_path: Path, *, mode: str = "success"):
         evaluator_fingerprint=DIGEST, runner_fingerprint=DIGEST, generator_fingerprint=DIGEST,
         dependency_sha256=DIGEST, environment_sha256=DIGEST, producer_id="fixture", producer_fingerprint=DIGEST,
         executable_relative="producer.py", argv=("producer.py",), working_directory="work", output_directory="output",
-        request_timeout_seconds=1, max_requests=2, output_max_bytes=1024 if mode == "overflow" else 65536,
+        request_timeout_seconds=1, max_requests=2,
+        output_max_bytes=1024 if mode in {"overflow", "dual-overflow"} else 65536,
         wall_timeout_seconds=1 if mode == "timeout" else 5,
     )
     return producer_root, intent, build_producer_launch_attestation(intent, "nonce-001")
@@ -185,6 +190,10 @@ def test_launch_environment_does_not_inherit_parent_values(tmp_path: Path, monke
         assert env["LANG"] == "C"
         assert "LUNAR_SECRET" not in env
         assert set(env) == {"PATH", "LANG", "LUNAR_PRODUCER_GATE_FD"}
+        assert kwargs["shell"] is False
+        assert kwargs["start_new_session"] is True
+        assert kwargs["close_fds"] is True
+        assert kwargs["stdin"] is subprocess.DEVNULL
         observed.append(env)
         return producer_process.subprocess.Popen(*args, **kwargs)
 
@@ -371,6 +380,27 @@ def test_output_limit_is_bounded(tmp_path: Path):
     assert receipt.status == "failed"
     assert receipt.failure_code == "producer_process_output_limit_exceeded"
     assert receipt.stdout_evidence.bytes_observed > intent.output_max_bytes
+
+
+def test_simultaneous_stdout_stderr_overflow_does_not_deadlock(tmp_path: Path):
+    producer_root, intent, attestation = _fixture(tmp_path, mode="dual-overflow")
+    started = time.monotonic()
+    receipt = run_producer_process(tmp_path, intent=intent, attestation=attestation, producer_root=producer_root)
+    assert time.monotonic() - started < intent.wall_timeout_seconds
+    assert receipt.status == "failed"
+    assert receipt.failure_code == "producer_process_output_limit_exceeded"
+    assert receipt.stdout_evidence.bytes_observed > intent.output_max_bytes
+    assert receipt.stderr_evidence.bytes_observed > intent.output_max_bytes
+    assert receipt.stdout_evidence.truncated is True
+    assert receipt.stderr_evidence.truncated is True
+
+
+def test_hostile_pre_gate_side_effect_is_observable_but_not_trusted_bootstrap(tmp_path: Path):
+    producer_root, intent, attestation = _fixture(tmp_path, mode="hostile-pre-gate")
+    receipt = run_producer_process(tmp_path, intent=intent, attestation=attestation, producer_root=producer_root)
+    assert receipt.status == "completed"
+    assert (tmp_path / "evolution/producer-batches/journal-001/pre-gate-side-effect").read_text() == "hostile"
+    assert receipt.gate_released is True
 
 
 def test_capture_digest_keeps_only_in_budget_prefix_when_one_read_crosses_limit():
