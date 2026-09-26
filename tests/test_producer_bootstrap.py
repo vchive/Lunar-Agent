@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -19,12 +20,14 @@ from lunar_evolution.producer_bootstrap import (
     parse_bootstrap_handshake_frame,
     parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
+    verify_trusted_bootstrap_process_registration,
     verify_trusted_bootstrap_registration,
 )
 from lunar_evolution.producer_launcher import (
     build_producer_launch_attestation,
     build_producer_launch_intent,
 )
+from lunar_evolution.producer_process import PRODUCER_PROCESS_PROTOCOL
 
 DIGEST = "a" * 64
 
@@ -83,6 +86,128 @@ def _production_descriptor() -> TrustedBootstrapDescriptor:
         device=1, inode=2, mtime_ns=3, ctime_ns=4, allowlist_id="local-bootstrap",
         platform_execution_mode="darwin-immutable-snapshot" if sys.platform == "darwin" else "linux-fd-bound",
     )
+
+
+def _formal_registration() -> tuple[TrustedBootstrapLaunch, TrustedBootstrapDescriptor, dict[str, object]]:
+    descriptor = _production_descriptor()
+    launch_fields = _launch().to_dict(include_digest=False)
+    launch_fields["bootstrap_descriptor_sha256"] = descriptor.descriptor_sha256
+    launch = TrustedBootstrapLaunch(**launch_fields)
+    owner = (
+        {"kind": "darwin-libproc-starttime-v1", "pid": 1234, "start_sec": 42, "start_usec": 3}
+        if sys.platform == "darwin" else
+        {"kind": "linux-proc-starttime-v1", "pid": 1234, "boot_id": "boot-id", "starttime_ticks": 42}
+    )
+    identity = {
+        "sha256": descriptor.bootstrap_sha256, "size": descriptor.size,
+        "device": descriptor.device, "inode": descriptor.inode,
+        "mtime_ns": descriptor.mtime_ns, "ctime_ns": descriptor.ctime_ns,
+    }
+    registration: dict[str, object] = {
+        "schema_version": "1", "protocol": PRODUCER_PROCESS_PROTOCOL,
+        "launch_id": launch.launch_id, "journal_id": launch.journal_id,
+        "run_id": launch.run_id, "parent_task_id": launch.parent_task_id,
+        "task_id": launch.task_id, "intent_sha256": launch.intent_sha256,
+        "attestation_sha256": launch.attestation_sha256,
+        "consumption_sha256": "c" * 64,
+        "executable_identity": _test_digest(identity),
+        "owner_identity": owner, "owner_identity_sha256": _test_digest(owner),
+        "execution_binding": (
+            "darwin-immutable-snapshot" if sys.platform == "darwin" else "linux-sealed-memfd"
+        ),
+        "execution_snapshot_relative_path": (
+            ".producer-snapshots/executable" if sys.platform == "darwin" else None
+        ),
+        "execution_snapshot_sha256": descriptor.bootstrap_sha256,
+        "execution_snapshot_size": descriptor.size,
+        "pid": 1234, "pgid": 1234,
+        "recovery_lock_protocol": "journal-flock-v1",
+        "recovery_lock_device": 5, "recovery_lock_inode": 6,
+        "gate_protocol": launch.gate_protocol, "registered_at_unix_ns": 7,
+        "launch_sha256": launch.launch_sha256,
+        "bootstrap_descriptor_sha256": descriptor.descriptor_sha256,
+        "target_executable_identity": launch.target_executable_identity,
+    }
+    registration["registration_sha256"] = _test_digest(registration)
+    return launch, descriptor, registration
+
+
+def _test_digest(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def test_formal_registration_binds_bootstrap_target_and_feature156_owner_lock():
+    launch, descriptor, registration = _formal_registration()
+    assert verify_trusted_bootstrap_process_registration(launch, descriptor, registration) == registration
+    encoded = json.dumps(registration, sort_keys=True, separators=(",", ":"))
+    assert verify_trusted_bootstrap_process_registration(launch, descriptor, encoded) == registration
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "code"),
+    [
+        ("launch_sha256", "d" * 64, "producer_bootstrap_process_registration_binding_mismatch"),
+        ("bootstrap_descriptor_sha256", "d" * 64, "producer_bootstrap_process_registration_binding_mismatch"),
+        ("target_executable_identity", "d" * 64, "producer_bootstrap_process_registration_binding_mismatch"),
+        ("task_id", "other-task", "producer_bootstrap_process_registration_binding_mismatch"),
+        ("pid", 1235, "producer_bootstrap_process_registration_process_identity_invalid"),
+        ("pgid", 1235, "producer_bootstrap_process_registration_process_identity_invalid"),
+        ("owner_identity_sha256", "d" * 64, "producer_bootstrap_process_registration_owner_identity_invalid"),
+        ("recovery_lock_inode", 0, "producer_bootstrap_process_registration_lock_identity_invalid"),
+        ("execution_snapshot_sha256", "d" * 64, "producer_bootstrap_process_registration_execution_binding_mismatch"),
+        ("execution_snapshot_size", 129, "producer_bootstrap_process_registration_execution_binding_mismatch"),
+        ("executable_identity", "d" * 64, "producer_bootstrap_process_registration_execution_binding_mismatch"),
+        ("execution_binding", "pathname_unbound", "producer_bootstrap_process_registration_execution_binding_mismatch"),
+    ],
+)
+def test_formal_registration_rejects_rehashed_identity_drift(field, replacement, code):
+    launch, descriptor, registration = _formal_registration()
+    registration[field] = replacement
+    registration["registration_sha256"] = _test_digest({
+        key: value for key, value in registration.items() if key != "registration_sha256"
+    })
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_process_registration(launch, descriptor, registration)
+    assert exc.value.code == code
+
+
+def test_formal_registration_rejects_owner_drift_even_with_rehashed_owner():
+    launch, descriptor, registration = _formal_registration()
+    owner = dict(registration["owner_identity"])
+    owner["pid"] = 1235
+    registration["owner_identity"] = owner
+    registration["owner_identity_sha256"] = _test_digest(owner)
+    registration["registration_sha256"] = _test_digest({
+        key: value for key, value in registration.items() if key != "registration_sha256"
+    })
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_process_registration(launch, descriptor, registration)
+    assert exc.value.code == "producer_bootstrap_process_registration_owner_identity_invalid"
+
+
+def test_formal_registration_rejects_fixture_descriptor_and_tampered_self_digest():
+    launch, descriptor, registration = _formal_registration()
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_process_registration(launch, _descriptor(), registration)
+    assert exc.value.code == "producer_bootstrap_production_mode_required"
+
+    registration["registered_at_unix_ns"] = 8
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_process_registration(launch, descriptor, registration)
+    assert exc.value.code == "producer_bootstrap_process_registration_digest_mismatch"
+
+
+def test_formal_registration_rejects_missing_fields_and_noncanonical_encoding():
+    launch, descriptor, registration = _formal_registration()
+    missing = dict(registration)
+    del missing["recovery_lock_device"]
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_process_registration(launch, descriptor, missing)
+    assert exc.value.code == "producer_bootstrap_process_registration_schema_invalid"
+
+    with pytest.raises(ProducerBootstrapError) as exc:
+        verify_trusted_bootstrap_process_registration(launch, descriptor, json.dumps(registration, indent=2))
+    assert exc.value.code == "producer_bootstrap_process_registration_noncanonical"
 
 
 def test_launch_adapter_rejects_fixture_only_mode(tmp_path: Path):

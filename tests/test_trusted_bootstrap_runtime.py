@@ -7,10 +7,15 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from lunar_evolution.process_ownership import ProcessCleanupResult, ProcessCleanupStatus
+from lunar_evolution.process_ownership import (
+    ProcessCleanupResult,
+    ProcessCleanupStatus,
+    cleanup_registered_process,
+)
 from lunar_evolution.producer_bootstrap import (
     TrustedBootstrapEvidence,
     TrustedBootstrapLaunch,
@@ -287,6 +292,71 @@ def test_successful_target_cleanup_removes_same_group_descendant(tmp_path: Path)
         os.killpg(result.bootstrap_pgid, 0)
 
 
+def test_bootstrap_registration_requires_os_start_identity(monkeypatch: pytest.MonkeyPatch):
+    import lunar_evolution.trusted_bootstrap_runtime as runtime
+
+    monkeypatch.setattr(runtime, "_process_owner_identity", lambda _pid: None)
+    process = SimpleNamespace(pid=999991)
+    with pytest.raises(TrustedBootstrapRuntimeError) as exc:
+        runtime._registered_bootstrap_process(process, process.pid, "launch-001")
+    assert exc.value.code == "trusted_bootstrap_owner_identity_unknown"
+
+
+@pytest.mark.parametrize("observed", [None, {"kind": "test", "pid": 999991, "start": 2}])
+def test_bootstrap_cleanup_refuses_unreadable_or_drifted_live_identity(
+    monkeypatch: pytest.MonkeyPatch, observed: object,
+):
+    import lunar_evolution.process_ownership as ownership
+    import lunar_evolution.trusted_bootstrap_runtime as runtime
+    from lunar_evolution import producer_process
+
+    original = {"kind": "test", "pid": 999991, "start": 1}
+    state = {"identity": original}
+    monkeypatch.setattr(runtime, "_process_owner_identity", lambda _pid: state["identity"])
+    monkeypatch.setattr(producer_process, "_process_owner_identity", lambda _pid: state["identity"])
+    process = SimpleNamespace(pid=999991, poll=lambda: None)
+    registration = runtime._registered_bootstrap_process(process, process.pid, "launch-001")
+    state["identity"] = observed
+    monkeypatch.setattr(ownership.os, "getpgid", lambda _pid: process.pid)
+
+    def no_signal(_pgid: int, signal_number: int) -> None:
+        if signal_number != 0:
+            pytest.fail("identity drift must prevent a group signal")
+
+    monkeypatch.setattr(ownership.os, "killpg", no_signal)
+    result = cleanup_registered_process(registration)
+    assert result.status == ProcessCleanupStatus.OWNERSHIP_LOST
+    assert result.term_sent is False
+    assert result.kill_sent is False
+
+
+def test_bootstrap_cleanup_rechecks_identity_before_sigkill(monkeypatch: pytest.MonkeyPatch):
+    import lunar_evolution.process_ownership as ownership
+    import lunar_evolution.trusted_bootstrap_runtime as runtime
+    from lunar_evolution import producer_process
+
+    original = {"kind": "test", "pid": 999991, "start": 1}
+    drifted = {"kind": "test", "pid": 999991, "start": 2}
+    observations = iter([original, drifted])
+    monkeypatch.setattr(runtime, "_process_owner_identity", lambda _pid: original)
+    monkeypatch.setattr(producer_process, "_process_owner_identity", lambda _pid: next(observations))
+    process = SimpleNamespace(pid=999991, poll=lambda: None)
+    registration = runtime._registered_bootstrap_process(process, process.pid, "launch-001")
+    monkeypatch.setattr(ownership.os, "getpgid", lambda _pid: process.pid)
+    signals: list[int] = []
+    monkeypatch.setattr(ownership.os, "killpg", lambda _pgid, number: signals.append(number))
+    clock = iter([0.0, 1.0])
+    result = cleanup_registered_process(
+        registration,
+        grace_seconds=0.01,
+        monotonic=lambda: next(clock),
+    )
+    assert result.status == ProcessCleanupStatus.OWNERSHIP_LOST
+    assert result.term_sent is True
+    assert result.kill_sent is False
+    assert signals == [0, ownership.signal.SIGTERM, 0]
+
+
 def test_unverified_cleanup_preserves_unknown_and_retries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -469,6 +539,10 @@ def test_fixture_recovery_returns_bound_terminal_evidence_without_spawning(
         launch=launch,
         descriptor=build_trusted_bootstrap_descriptor(),
         target_executable=target,
+    )
+    assert Path(result.registration_path).name == "trusted-bootstrap-registration.json"
+    Path(result.registration_path).with_name("process-registration.json").write_text(
+        "{}", encoding="utf-8",
     )
     evidence_path = _fixture_evidence_path(tmp_path, launch)
     before = evidence_path.read_bytes()

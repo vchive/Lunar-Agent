@@ -36,6 +36,7 @@ from .producer_bootstrap import (
     parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
 )
+from .producer_process import _current_process_owned, _process_owner_identity
 
 _MAX_CONTROL_BYTES = 64 * 1024
 _MAX_FRAME_BYTES = 64 * 1024
@@ -167,6 +168,20 @@ def _unknown_evidence(session: TrustedBootstrapSession) -> TrustedBootstrapEvide
         target_group_identity=observed.target_group_identity,
         pre_gate_target_work_observed=observed.pre_gate_target_work_observed,
         status="unknown",
+    )
+
+
+def _registered_bootstrap_process(
+    process: subprocess.Popen[bytes], pgid: int, launch_id: str,
+) -> RegisteredProcess:
+    owner_identity = _process_owner_identity(process.pid)
+    if owner_identity is None:
+        raise TrustedBootstrapRuntimeError("trusted_bootstrap_owner_identity_unknown")
+    return RegisteredProcess(
+        process.pid,
+        pgid,
+        owner_check=lambda: _current_process_owned(process.pid, owner_identity, process),
+        label=launch_id,
     )
 
 
@@ -329,7 +344,7 @@ def recover_trusted_bootstrap_fixture(
 
 def _recover_from_held_directory(parent: int, *, launch: TrustedBootstrapLaunch) -> dict[str, object]:
     registration_bytes = _recovery_artifact(
-        "process-registration.json", parent=parent,
+        "trusted-bootstrap-registration.json", parent=parent,
         code="trusted_bootstrap_recovery_registration_invalid",
     )
     if registration_bytes is None:
@@ -597,7 +612,7 @@ def run_trusted_bootstrap_fixture(
         raise TrustedBootstrapRuntimeError("trusted_bootstrap_target_binding_invalid")
     workspace_root = Path(workspace).resolve()
     batch = workspace_root / "evolution" / "producer-batches" / launch.journal_id
-    registration_path = batch / "process-registration.json"
+    registration_path = batch / "trusted-bootstrap-registration.json"
     evidence_path = batch / "trusted-bootstrap-evidence.json"
     launch_read, launch_write = os.pipe()
     gate_read, gate_write = os.pipe()
@@ -639,12 +654,7 @@ def run_trusted_bootstrap_fixture(
         bootstrap_pgid = os.getpgid(process.pid)
         if bootstrap_pgid != process.pid:
             raise TrustedBootstrapRuntimeError("trusted_bootstrap_process_group_invalid")
-        registration_process = RegisteredProcess(
-            process.pid,
-            bootstrap_pgid,
-            owner_check=lambda: process is not None and process.pid == bootstrap_pgid,
-            label=launch.launch_id,
-        )
+        registration_process = _registered_bootstrap_process(process, bootstrap_pgid, launch.launch_id)
         _write_all(launch_write, _canonical(control))
         os.close(launch_write)
         launch_write = -1

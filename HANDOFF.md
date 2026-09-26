@@ -1,5 +1,18 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 158 登记契约与 fixture 清理授权
+
+沿现有 SDD 增加 Feature 156 正式登记的只读可信 bootstrap 校验器：拟议登记必须精确绑定
+launch/intent/attestation、bootstrap descriptor 与目标摘要、PID/PGID、OS 启动身份、恢复锁
+device/inode，以及平台对应的执行字节摘要；重新计算登记自摘要的篡改也无法绕过跨记录绑定。
+当前 runner 仍未生成该扩展登记，也未通过该校验器释放 gate。Feature 158 fixture 的登记文件
+改名为 `trusted-bootstrap-registration.json`，避免与正式 runner 的同名不同协议登记混淆。
+fixture 清理现在按 OS 启动身份复核进程所有权；身份漂移或运行中身份不可读取时拒绝发送信号。
+
+合并专项回归 **142 passed、2 skipped**，Ruff、compileall 与 diff check 通过。T158-04 仍开放：
+真实平台字节绑定的 bootstrap 启动、共享正式登记/终态证据/恢复和单一 deadline 尚未接线。
+本轮没有调用 provider、外部 producer、WebAgent、scheduler 或真实 campaign。
+
 ## 2026-09-26 Feature 158 launch identity adapter
 
 沿现有 Feature 158/156 SDD 增加 `build_trusted_bootstrap_launch`：它从已核验的 Feature 154

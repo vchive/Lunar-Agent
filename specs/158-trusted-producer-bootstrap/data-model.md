@@ -63,3 +63,21 @@ input must contain exactly those fields. When checked against a `TrustedBootstra
 launch-owned identity must match byte-for-byte, while `pid` and `pgid` are bounded positive
 process identities. This validates the registration payload shape and cross-binding only; it does
 not itself prove that the PID/PGID exists or perform cleanup/recovery.
+
+The separate `verify_trusted_bootstrap_process_registration` check describes the proposed
+Feature 156 **formal** `process-registration.json` shape for a production bootstrap. It requires
+the exact existing Feature 156 registration fields plus `launch_sha256`,
+`bootstrap_descriptor_sha256`, and `target_executable_identity`. The bootstrap, not the target,
+is the registered executable: `executable_identity` is the Feature 156 canonical digest of the
+descriptor's SHA-256, size, device, inode, `mtime_ns`, and `ctime_ns` tuple. The execution snapshot
+SHA-256 and size must equal the descriptor bytes, and the execution binding must be the matching
+platform mode (`darwin-immutable-snapshot` or `linux-sealed-memfd`). `pathname_unbound` and
+`fixture-only` cannot pass.
+
+The formal check requires canonical JSON, an exact field set and self-digest, matching launch,
+intent, attestation, bootstrap descriptor, and target identities, a positive matching PID/PGID,
+an OS-shaped owner-start identity with its own digest and the registered PID, and a positive
+recovery-lock device/inode. It checks content only. It does not observe the OS process or lock,
+prove that executable bytes ran, consume an attestation, persist the registration, or authorize
+gate release, cleanup, or recovery. The current Feature 156 runner has not yet emitted this
+extended registration shape.

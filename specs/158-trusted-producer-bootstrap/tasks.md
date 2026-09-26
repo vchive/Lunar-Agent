@@ -42,3 +42,18 @@ launch. It reports only `evidence_available` for passed/failed terminal evidence
 `recovery_required` for missing or unknown evidence. It never relaunches, signals, cleans up, or
 inspects a process. T158-04 remains open because the Feature 156 production runner still owns
 post-interruption process authority, cleanup, and recovery integration.
+
+The provider-free formal-registration validator now checks a proposed Feature 156 registration
+against one production-mode bootstrap descriptor and launch. It requires exact bootstrap and
+target identities, the canonical registration self-digest, owner-start identity digest,
+PID/PGID, recovery-lock device/inode, and platform-specific executable byte-binding metadata.
+Adversarial tests rehash drifted fields to show these cross-record checks are independent of the
+self-digest. The Feature 156 runner does not yet emit this extended payload or call the validator;
+T158-04 remains open.
+
+The fixture now uses `trusted-bootstrap-registration.json`, separate from Feature 156's formal
+`process-registration.json`; read-only fixture recovery never reads the formal filename.
+Fixture cleanup captures the OS start identity before registration and checks it before signals,
+reusing Feature 156's bounded live-controller rule for an already reaped private group leader.
+An identity mismatch or unreadable live identity cannot authorize TERM/KILL. This is fixture
+hardening, not formal lifecycle integration.

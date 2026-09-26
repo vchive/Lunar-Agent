@@ -22,6 +22,7 @@ from .producer_launcher import (
     parse_producer_launch_intent,
     verify_producer_launch_attestation,
 )
+from .producer_process import PRODUCER_PROCESS_PROTOCOL
 
 TRUSTED_BOOTSTRAP_PROTOCOL = "lunar-trusted-producer-bootstrap-v1"
 TRUSTED_BOOTSTRAP_SCHEMA_VERSION = "1"
@@ -431,6 +432,121 @@ def verify_trusted_bootstrap_registration(
 ) -> TrustedBootstrapRegistration:
     """Validate a registration payload against its exact trusted launch identity."""
     return parse_trusted_bootstrap_registration(value, launch=launch)
+
+
+_FEATURE156_BOOTSTRAP_REGISTRATION_FIELDS = frozenset({
+    "schema_version", "protocol", "launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+    "intent_sha256", "attestation_sha256", "consumption_sha256", "executable_identity",
+    "owner_identity", "owner_identity_sha256", "execution_binding",
+    "execution_snapshot_relative_path", "execution_snapshot_sha256", "execution_snapshot_size",
+    "pid", "pgid", "recovery_lock_protocol", "recovery_lock_device", "recovery_lock_inode",
+    "gate_protocol", "registered_at_unix_ns", "registration_sha256",
+    "launch_sha256", "bootstrap_descriptor_sha256", "target_executable_identity",
+})
+
+
+def verify_trusted_bootstrap_process_registration(
+    launch: TrustedBootstrapLaunch, descriptor: TrustedBootstrapDescriptor, value: object,
+) -> dict[str, object]:
+    """Check a proposed Feature 156 registration against a production bootstrap launch.
+
+    This read-only check does not establish that the process exists, the snapshot was
+    executed, or the registration was durably published. Those are runner obligations.
+    """
+    if not isinstance(launch, TrustedBootstrapLaunch) or not isinstance(descriptor, TrustedBootstrapDescriptor):
+        _fail("producer_bootstrap_process_registration_context_invalid")
+    expected_mode = (
+        "darwin-immutable-snapshot" if sys.platform == "darwin"
+        else "linux-fd-bound" if sys.platform.startswith("linux") else None
+    )
+    if descriptor.platform_execution_mode == "fixture-only":
+        _fail("producer_bootstrap_production_mode_required")
+    if expected_mode is None or descriptor.platform_execution_mode != expected_mode:
+        _fail("producer_bootstrap_platform_mode_mismatch")
+    if launch.bootstrap_descriptor_sha256 != descriptor.digest():
+        _fail("producer_bootstrap_process_registration_binding_mismatch")
+
+    encoded: bytes | None = None
+    if isinstance(value, (str, bytes, bytearray)):
+        encoded = value.encode("utf-8") if isinstance(value, str) else bytes(value)
+        value = _strict_json(encoded)
+    raw = _object(value, _FEATURE156_BOOTSTRAP_REGISTRATION_FIELDS,
+                  "producer_bootstrap_process_registration_schema_invalid")
+    if encoded is not None and _canonical(raw) != encoded:
+        _fail("producer_bootstrap_process_registration_noncanonical")
+    if raw["schema_version"] != "1" or raw["protocol"] != PRODUCER_PROCESS_PROTOCOL:
+        _fail("producer_bootstrap_process_registration_schema_invalid")
+
+    for field in ("launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+                  "intent_sha256", "attestation_sha256", "gate_protocol"):
+        if raw[field] != getattr(launch, field):
+            _fail("producer_bootstrap_process_registration_binding_mismatch")
+    if (
+        raw["launch_sha256"] != launch.digest()
+        or raw["bootstrap_descriptor_sha256"] != descriptor.digest()
+        or raw["target_executable_identity"] != launch.target_executable_identity
+    ):
+        _fail("producer_bootstrap_process_registration_binding_mismatch")
+    _sha(raw["consumption_sha256"], "producer_bootstrap_process_registration_digest_invalid")
+
+    pid = _int(raw["pid"], minimum=2, maximum=2**63 - 1,
+               code="producer_bootstrap_process_registration_process_identity_invalid")
+    pgid = _int(raw["pgid"], minimum=2, maximum=2**63 - 1,
+                code="producer_bootstrap_process_registration_process_identity_invalid")
+    if pid != pgid:
+        _fail("producer_bootstrap_process_registration_process_identity_invalid")
+    owner = raw["owner_identity"]
+    if not isinstance(owner, dict) or owner.get("pid") != pid:
+        _fail("producer_bootstrap_process_registration_owner_identity_invalid")
+    if expected_mode == "linux-fd-bound":
+        if set(owner) != {"kind", "pid", "boot_id", "starttime_ticks"} or (
+            owner["kind"] != "linux-proc-starttime-v1" or not isinstance(owner["boot_id"], str)
+            or not owner["boot_id"] or len(owner["boot_id"]) > 128
+        ):
+            _fail("producer_bootstrap_process_registration_owner_identity_invalid")
+        _int(owner["starttime_ticks"], minimum=1, maximum=2**63 - 1,
+             code="producer_bootstrap_process_registration_owner_identity_invalid")
+    elif set(owner) != {"kind", "pid", "start_sec", "start_usec"} or owner["kind"] != "darwin-libproc-starttime-v1":
+        _fail("producer_bootstrap_process_registration_owner_identity_invalid")
+    else:
+        _int(owner["start_sec"], minimum=1, maximum=2**63 - 1,
+             code="producer_bootstrap_process_registration_owner_identity_invalid")
+        _int(owner["start_usec"], minimum=0, maximum=999_999,
+             code="producer_bootstrap_process_registration_owner_identity_invalid")
+    if raw["owner_identity_sha256"] != hashlib.sha256(_canonical(owner)).hexdigest():
+        _fail("producer_bootstrap_process_registration_owner_identity_invalid")
+
+    if raw["recovery_lock_protocol"] != "journal-flock-v1":
+        _fail("producer_bootstrap_process_registration_lock_identity_invalid")
+    for field in ("recovery_lock_device", "recovery_lock_inode"):
+        _int(raw[field], minimum=1, maximum=2**63 - 1,
+             code="producer_bootstrap_process_registration_lock_identity_invalid")
+    _int(raw["registered_at_unix_ns"], minimum=1, maximum=2**63 - 1,
+         code="producer_bootstrap_process_registration_schema_invalid")
+
+    descriptor_identity = {
+        "sha256": descriptor.bootstrap_sha256, "size": descriptor.size,
+        "device": descriptor.device, "inode": descriptor.inode,
+        "mtime_ns": descriptor.mtime_ns, "ctime_ns": descriptor.ctime_ns,
+    }
+    expected_executable_identity = hashlib.sha256(_canonical(descriptor_identity)).hexdigest()
+    expected_binding = (
+        "darwin-immutable-snapshot" if expected_mode == "darwin-immutable-snapshot"
+        else "linux-sealed-memfd"
+    )
+    expected_snapshot_path = ".producer-snapshots/executable" if expected_mode == "darwin-immutable-snapshot" else None
+    if (
+        raw["executable_identity"] != expected_executable_identity
+        or raw["execution_binding"] != expected_binding
+        or raw["execution_snapshot_relative_path"] != expected_snapshot_path
+        or raw["execution_snapshot_sha256"] != descriptor.bootstrap_sha256
+        or raw["execution_snapshot_size"] != descriptor.size
+    ):
+        _fail("producer_bootstrap_process_registration_execution_binding_mismatch")
+    _sha(raw["registration_sha256"], "producer_bootstrap_process_registration_digest_invalid")
+    if raw["registration_sha256"] != _digest_without(raw, "registration_sha256"):
+        _fail("producer_bootstrap_process_registration_digest_mismatch")
+    return dict(raw)
 
 
 _FRAME_FIELDS = frozenset({
