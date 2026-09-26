@@ -1,5 +1,18 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 158 launch identity adapter
+
+沿现有 Feature 158/156 SDD 增加 `build_trusted_bootstrap_launch`：它从已核验的 Feature 154
+launch intent 与一次性 attestation 构造严格绑定的 trusted-bootstrap launch，固定映射
+launch/journal/run/parent/task、intent/attestation、目标可执行文件摘要、bootstrap descriptor
+摘要与单一 gate nonce。`fixture-only`、非当前平台的执行模式、attestation 摘要或字段漂移均在
+入口拒绝。新增 focused 回归覆盖 fixture 晋级拒绝、正常字段绑定和 attestation 篡改；bootstrap
+与 runtime 专项 **31 passed**，Ruff、compileall、diff check 通过。
+
+这只是生产接线所需的身份边界，不是 Feature 156 生命周期接入：当前 runner 仍未启动真实
+platform-bound Lunar-owned bootstrap，登记/清理/recovery 仍未共享 bootstrap evidence，T158-04
+继续开放。未启动 provider、外部 producer、WebAgent、scheduler 或真实 campaign。
+
 ## 2026-09-26 Feature 156 崩溃后清理与锁身份
 
 外部 producer 的显式恢复现在可在登记链、一次性 nonce claim、OS 进程启动身份和原生命周期锁

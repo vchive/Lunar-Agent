@@ -4,6 +4,13 @@
 - [x] T158-02 Define exact-byte/bootstrap allowlisting and platform execution modes without papering over Feature 156 T156-11. The current allowlist is fixture-only; platform-bound production execution remains deferred.
 - [x] T158-03 Specify and implement the ready/block/release/target-start state machine in a trusted bootstrap runtime fixture.
 - [ ] T158-04 Bind bootstrap and target identities to Feature 156 registration, cleanup, recovery, and one monotonic attempt.
+
+  The current increment adds `build_trusted_bootstrap_launch`, an identity-only adapter from a
+  verified Feature 154 intent/attestation. It binds all launch identities, target executable
+  digest, bootstrap descriptor digest, and the single gate nonce. `fixture-only` and platform
+  mismatches are rejected. This is an admission boundary only; the Feature 156 runner still
+  needs a real platform-bound bootstrap, shared registration/cleanup/recovery receipts, and one
+  monotonic deadline before T158-04 can close.
 - [x] T158-05 Add controlled fixtures proving target-marker absence before release, receipt-fsync ordering, post-release start, duplicate-token and early-EOF rejection, and group retention.
 - [x] T158-06 Add a hostile direct-producer negative fixture; do not accept cooperative gate behavior as proof for arbitrary executables.
 - [x] T158-07 Defer Feature 154/156/157 integration, scheduler/default entry points, publication, and external campaign validation to a later feature.

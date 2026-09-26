@@ -2,7 +2,7 @@
 
 **Created**: 2026-09-24
 
-**Status**: Provider-free trusted-bootstrap fixture implemented; Feature 156 integration and scheduler integration remain deferred
+**Status**: Provider-free trusted-bootstrap fixture and production launch identity adapter implemented; Feature 156 lifecycle and scheduler integration remain deferred
 
 ## Problem
 
