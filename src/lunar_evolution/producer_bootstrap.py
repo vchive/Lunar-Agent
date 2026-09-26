@@ -13,6 +13,7 @@ import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from .producer_launcher import (
     ProducerLaunchAttestation,
@@ -647,6 +648,20 @@ def verify_trusted_bootstrap_attempt(
     return result
 
 
+def observe_trusted_bootstrap_attempt(
+    workspace: str | Path, *, launch: TrustedBootstrapLaunch,
+    descriptor: TrustedBootstrapDescriptor, intent: ProducerLaunchIntent | object,
+    attestation: ProducerLaunchAttestation | object,
+) -> dict[str, object]:
+    """Read one formal attempt's durable records without process authority."""
+    from .trusted_bootstrap_runtime import observe_trusted_bootstrap_attempt as observe
+
+    return observe(
+        workspace, launch=launch, descriptor=descriptor, intent=intent,
+        attestation=attestation,
+    )
+
+
 _FRAME_FIELDS = frozenset({
     "schema_version", "protocol", "sequence", "kind", "launch_sha256", "intent_sha256",
     "target_executable_identity", "observed_pid", "observed_pgid", "frame_sha256",
@@ -957,6 +972,7 @@ __all__ = [
     "TrustedBootstrapSession",
     "build_trusted_bootstrap_launch",
     "build_trusted_bootstrap_registration",
+    "observe_trusted_bootstrap_attempt",
     "parse_bootstrap_handshake_frame",
     "parse_trusted_bootstrap_evidence",
     "parse_trusted_bootstrap_registration",

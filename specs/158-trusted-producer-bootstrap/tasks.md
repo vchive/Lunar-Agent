@@ -66,3 +66,11 @@ registration, and evidence digests to the same launch. Missing or unknown eviden
 `recovery_required`; the verifier performs no filesystem or process operation. This closes a
 protocol-checking gap but does not publish these records, prove executed bytes, or authorize
 post-crash cleanup. T158-04 remains open.
+
+The formal-attempt observer now reads the batch consumption claim, the matching nonce-ledger
+claim, the formal process registration, and optional bootstrap evidence through bounded stable
+no-follow reads while holding both directory chains. It requires byte-identical claims and
+reuses the cross-record verifier; only missing or unknown terminal evidence produces
+`recovery_required`. Missing or replaced claim, ledger, or registration fails closed. This is a
+read-only observation and does not establish that registered bytes executed, authorize process
+signals, or connect the production runner to trusted bootstrap. T158-04 remains open.

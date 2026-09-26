@@ -4102,3 +4102,17 @@ attestation 与 descriptor 推导，不能直接相等比较。验证器还绑�
 fixture-only 拒绝回归。T158-04 仍开放：正式 runner 尚未产生这些 bootstrap 记录，现有 Feature
 156 恢复路径仍按目标身份解释登记字段，不能直接接入该验证器或授权 cleanup。后续需先完成
 平台字节绑定的 bootstrap 启动与目标交接、正式登记发布和终态证据，再扩展恢复语义。
+
+## 2026-09-26 Feature 158 durable formal-attempt observation
+
+新增只读 `observe_trusted_bootstrap_attempt`，从批次 journal 稳定读取一次性消费 claim、正式
+`process-registration.json` 与可选 bootstrap evidence，并从 nonce 哈希命名的台账读取对应
+claim。两条目录链均以 no-follow 句柄持有，文件读取有大小与 inode 稳定性检查；两份 claim
+必须字节相同，再交由跨记录验证器做 canonical、自摘要和 launch/target/bootstrap 绑定。
+缺失或 unknown 终态 evidence 仅返回 `recovery_required`，缺失或替换 claim、台账、登记则拒绝。
+
+这只说明持久记录在读取时一致，不启动或检查进程，也不授权信号、清理或重试。Feature 156
+正式 runner 尚未写出并消费这些 bootstrap 记录，平台执行字节绑定及故障后恢复仍待实现；
+T158-04 保持开放，不能据此宣称对外 producer 或 scheduler 已可用。
+Feature 156/157/158 与进程所有权的五套组合测试通过（2 项跳过），Ruff、compileall 和
+`git diff --check` 通过；未运行真实 provider、外部 producer、WebAgent 或 campaign。

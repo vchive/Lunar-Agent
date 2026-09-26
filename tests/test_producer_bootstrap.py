@@ -19,6 +19,7 @@ from lunar_evolution.producer_bootstrap import (
     TrustedBootstrapSession,
     build_trusted_bootstrap_launch,
     build_trusted_bootstrap_registration,
+    observe_trusted_bootstrap_attempt,
     parse_bootstrap_handshake_frame,
     parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
@@ -191,6 +192,188 @@ def _verify_attempt(records: tuple[object, ...], *, evidence: object = ...):
         launch, descriptor, intent, attestation, claim, registration,
         evidence=supplied_evidence,
     )
+
+
+def _write_attempt_records(
+    workspace: Path, records: tuple[object, ...], *, evidence: object = ...,
+) -> tuple[Path, Path, Path]:
+    launch, _, _, attestation, claim, registration, stored_evidence = records
+    batch = workspace / "evolution" / "producer-batches" / launch.journal_id
+    batch.mkdir(parents=True)
+    nonce_key = hashlib.sha256(attestation.nonce.encode("utf-8")).hexdigest()
+    ledger = workspace / "evolution" / "producer-nonces" / f"{nonce_key}.json"
+    ledger.parent.mkdir(parents=True)
+
+    def write(path: Path, value: object) -> None:
+        path.write_bytes(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+    write(batch / "attestation-consumption.json", claim)
+    write(ledger, claim)
+    write(batch / "process-registration.json", registration)
+    supplied_evidence = stored_evidence if evidence is ... else evidence
+    if supplied_evidence is not None:
+        write(
+            batch / "trusted-bootstrap-evidence.json",
+            supplied_evidence.to_dict() if isinstance(supplied_evidence, TrustedBootstrapEvidence) else supplied_evidence,
+        )
+    return batch, ledger, batch / "process-registration.json"
+
+
+def _observe_attempt(workspace: Path, records: tuple[object, ...]):
+    launch, descriptor, intent, attestation, *_ = records
+    return observe_trusted_bootstrap_attempt(
+        workspace, launch=launch, descriptor=descriptor, intent=intent, attestation=attestation,
+    )
+
+
+def test_attempt_observer_reads_durable_claim_ledger_registration_and_evidence(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    _write_attempt_records(tmp_path, records)
+    assert _observe_attempt(tmp_path, records) == _verify_attempt(records)
+
+
+@pytest.mark.parametrize("evidence_kind", ["missing", "unknown"])
+def test_attempt_observer_requires_recovery_without_terminal_evidence(tmp_path: Path, evidence_kind: str):
+    records = _attempt_records(tmp_path)
+    evidence = None
+    if evidence_kind == "unknown":
+        evidence = TrustedBootstrapEvidence(
+            launch_sha256=records[0].launch_sha256,
+            registration_sha256=records[5]["registration_sha256"],
+            bootstrap_ready_observed=True, release_observed=False,
+            target_started_observed=False, target_start_count=0,
+            target_group_identity=None, pre_gate_target_work_observed=False,
+            status="unknown",
+        )
+    _write_attempt_records(tmp_path, records, evidence=evidence)
+    result = _observe_attempt(tmp_path, records)
+    assert result["status"] == "recovery_required"
+    assert result["reason"] == (
+        "trusted_bootstrap_terminal_evidence_missing" if evidence is None else "trusted_bootstrap_evidence_unknown"
+    )
+
+
+def test_attempt_observer_rejects_missing_nonce_ledger(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    _, ledger, _ = _write_attempt_records(tmp_path, records)
+    ledger.unlink()
+    with pytest.raises(ProducerBootstrapError):
+        _observe_attempt(tmp_path, records)
+
+
+@pytest.mark.parametrize("replacement", ["different-claim", "symlink"])
+def test_attempt_observer_rejects_replaced_nonce_ledger(tmp_path: Path, replacement: str):
+    records = _attempt_records(tmp_path)
+    _, ledger, _ = _write_attempt_records(tmp_path, records)
+    if replacement == "different-claim":
+        forged = dict(records[4])
+        forged["journal_id"] = "journal-002"
+        _rehash_record(forged, "consumption_sha256")
+        ledger.write_bytes(json.dumps(forged, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    else:
+        moved = ledger.with_name("held-nonce.json")
+        ledger.rename(moved)
+        ledger.symlink_to(moved)
+    with pytest.raises(ProducerBootstrapError):
+        _observe_attempt(tmp_path, records)
+
+
+@pytest.mark.parametrize("missing_record", ["claim", "registration"])
+def test_attempt_observer_rejects_missing_required_record(tmp_path: Path, missing_record: str):
+    records = _attempt_records(tmp_path)
+    batch, _, registration = _write_attempt_records(tmp_path, records)
+    removed = batch / "attestation-consumption.json" if missing_record == "claim" else registration
+    removed.unlink()
+    with pytest.raises(ProducerBootstrapError) as failure:
+        _observe_attempt(tmp_path, records)
+    assert failure.value.code == f"producer_bootstrap_attempt_{missing_record}_missing"
+
+
+def test_attempt_observer_rejects_nonce_directory_replacement_during_read(tmp_path: Path, monkeypatch):
+    records = _attempt_records(tmp_path)
+    _, ledger, _ = _write_attempt_records(tmp_path, records)
+    nonce_directory = ledger.parent
+    replacement = nonce_directory.with_name("replacement-nonces")
+    replacement.mkdir()
+    original_open = os.open
+    replaced = False
+
+    def replace_on_ledger_open(path, flags, *args, **kwargs):
+        nonlocal replaced
+        if not replaced and str(path) == ledger.name:
+            replaced = True
+            nonce_directory.rename(nonce_directory.with_name("held-nonces"))
+            replacement.rename(nonce_directory)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", replace_on_ledger_open)
+    with pytest.raises(ProducerBootstrapError):
+        _observe_attempt(tmp_path, records)
+    assert replaced
+
+
+@pytest.mark.parametrize("changed_record", ["claim", "registration"])
+def test_attempt_observer_rejects_rehashed_record_replacement(tmp_path: Path, changed_record: str):
+    records = _attempt_records(tmp_path)
+    claim, registration = records[4], records[5]
+    if changed_record == "claim":
+        claim["executable_identity"] = registration["executable_identity"]
+        _rehash_record(claim, "consumption_sha256")
+        registration["consumption_sha256"] = claim["consumption_sha256"]
+    else:
+        registration["executable_identity"] = claim["executable_identity"]
+    _rehash_record(registration, "registration_sha256")
+    _write_attempt_records(tmp_path, records, evidence=None)
+    with pytest.raises(ProducerBootstrapError):
+        _observe_attempt(tmp_path, records)
+
+
+def test_attempt_observer_rejects_symlinked_batch_directory(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    batch, _, _ = _write_attempt_records(tmp_path, records)
+    moved = batch.with_name("held-batch")
+    batch.rename(moved)
+    batch.symlink_to(moved, target_is_directory=True)
+    with pytest.raises(ProducerBootstrapError):
+        _observe_attempt(tmp_path, records)
+
+
+def test_attempt_observer_rejects_batch_directory_replacement_during_read(tmp_path: Path, monkeypatch):
+    records = _attempt_records(tmp_path)
+    batch, _, _ = _write_attempt_records(tmp_path, records)
+    replacement = batch.with_name("replacement-batch")
+    replacement.mkdir()
+    original_open = os.open
+    replaced = False
+
+    def replace_on_registration_open(path, flags, *args, **kwargs):
+        nonlocal replaced
+        if not replaced and str(path) == "process-registration.json":
+            replaced = True
+            batch.rename(batch.with_name("held-batch"))
+            replacement.rename(batch)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", replace_on_registration_open)
+    with pytest.raises(ProducerBootstrapError):
+        _observe_attempt(tmp_path, records)
+    assert replaced
+
+
+def test_attempt_observer_has_no_process_or_file_side_effects(tmp_path: Path, monkeypatch):
+    records = _attempt_records(tmp_path)
+    _write_attempt_records(tmp_path, records)
+    files_before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("read-only observation must not launch, signal, or write")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(os, "kill", forbidden)
+    monkeypatch.setattr(os, "replace", forbidden)
+    monkeypatch.setattr(os, "mkdir", forbidden)
+    assert _observe_attempt(tmp_path, records)["status"] == "evidence_available"
+    assert files_before == {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
 
 
 def test_attempt_verifier_binds_target_claim_bootstrap_registration_and_evidence(tmp_path: Path):

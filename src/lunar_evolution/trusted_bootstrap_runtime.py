@@ -1,4 +1,4 @@
-"""Provider-free trusted bootstrap runtime fixture.
+"""Provider-free trusted bootstrap runtime fixture and read-only observation.
 
 This module is deliberately separate from the normal producer runner.  It exercises the
 Feature 158 process boundary with a Lunar-owned Python bootstrap: the bootstrap emits a
@@ -35,6 +35,12 @@ from .producer_bootstrap import (
     parse_bootstrap_handshake_frame,
     parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
+    verify_trusted_bootstrap_attempt,
+)
+from .producer_launcher import (
+    ProducerLaunchAttestation,
+    ProducerLaunchError,
+    parse_producer_launch_attestation,
 )
 from .producer_process import _current_process_owned, _process_owner_identity
 
@@ -403,6 +409,63 @@ def _recover_from_held_directory(parent: int, *, launch: TrustedBootstrapLaunch)
         "pid": registration.pid,
         "pgid": registration.pgid,
     }
+
+
+def observe_trusted_bootstrap_attempt(
+    workspace: str | Path, *, launch: TrustedBootstrapLaunch,
+    descriptor: TrustedBootstrapDescriptor, intent: object, attestation: object,
+) -> dict[str, object]:
+    """Validate the persisted formal attempt without inspecting or controlling processes."""
+    if not isinstance(launch, TrustedBootstrapLaunch):
+        raise ProducerBootstrapError("producer_bootstrap_attempt_launch_invalid")
+    try:
+        parsed_attestation = parse_producer_launch_attestation(
+            attestation.to_dict() if isinstance(attestation, ProducerLaunchAttestation) else attestation,
+        )
+    except (ProducerLaunchError, TypeError, ValueError) as exc:
+        raise ProducerBootstrapError("producer_bootstrap_attempt_admission_invalid") from exc
+
+    try:
+        root = _recovery_workspace(workspace)
+        batch = root / "evolution" / "producer-batches" / launch.journal_id
+        nonce_key = hashlib.sha256(parsed_attestation.nonce.encode("utf-8")).hexdigest()
+        nonce_directory = root / "evolution" / "producer-nonces"
+        with _held_recovery_directory(batch) as journal_fd:
+            if journal_fd is None:
+                raise ProducerBootstrapError("producer_bootstrap_attempt_claim_missing")
+            claim = _recovery_artifact(
+                "attestation-consumption.json", parent=journal_fd,
+                code="producer_bootstrap_attempt_claim_invalid",
+            )
+            if claim is None:
+                raise ProducerBootstrapError("producer_bootstrap_attempt_claim_missing")
+            with _held_recovery_directory(nonce_directory) as nonce_fd:
+                if nonce_fd is None:
+                    raise ProducerBootstrapError("producer_bootstrap_attempt_nonce_ledger_missing")
+                ledger_claim = _recovery_artifact(
+                    f"{nonce_key}.json", parent=nonce_fd,
+                    code="producer_bootstrap_attempt_nonce_ledger_invalid",
+                )
+                if ledger_claim is None:
+                    raise ProducerBootstrapError("producer_bootstrap_attempt_nonce_ledger_missing")
+                if ledger_claim != claim:
+                    raise ProducerBootstrapError("producer_bootstrap_attempt_nonce_ledger_mismatch")
+                registration = _recovery_artifact(
+                    "process-registration.json", parent=journal_fd,
+                    code="producer_bootstrap_attempt_registration_invalid",
+                )
+                if registration is None:
+                    raise ProducerBootstrapError("producer_bootstrap_attempt_registration_missing")
+                evidence = _recovery_artifact(
+                    "trusted-bootstrap-evidence.json", parent=journal_fd,
+                    code="producer_bootstrap_attempt_evidence_invalid",
+                )
+                return verify_trusted_bootstrap_attempt(
+                    launch, descriptor, intent, parsed_attestation, claim, registration,
+                    evidence=evidence,
+                )
+    except TrustedBootstrapRuntimeError as exc:
+        raise ProducerBootstrapError(exc.code) from exc
 
 
 def _read_frame(fd: int, deadline: float) -> BootstrapHandshakeFrame | None:

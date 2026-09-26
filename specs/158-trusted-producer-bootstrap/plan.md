@@ -28,3 +28,13 @@ platform-bound exact-byte execution and Feature 156 registration/recovery owners
 external producer can use this boundary. The one-time target PGID observation cannot prove that a
 target or its descendants never leave the registered group after start; production admission must
 resolve that escape boundary before claiming complete cleanup or trusted pre-gate containment.
+
+## Implemented formal observation slice
+
+The formal-attempt observer reads the Feature 156 batch claim, its nonce ledger counterpart,
+formal registration, and optional bootstrap evidence while holding no-follow directory chains.
+It compares the claim bytes exactly and delegates canonical, digest, and cross-record identity
+checks to `verify_trusted_bootstrap_attempt`. Missing or unknown terminal evidence requires
+recovery; missing or inconsistent prerequisite records fail closed. The observer never inspects
+process liveness or grants cleanup authority. The production runner still needs platform-bound
+bootstrap execution, durable publication of these records, and explicit recovery semantics.
