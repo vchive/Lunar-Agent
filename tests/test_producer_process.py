@@ -205,6 +205,35 @@ def test_launch_environment_does_not_inherit_parent_values(tmp_path: Path, monke
     assert len(observed) == 1
 
 
+def test_process_creation_uses_isolated_no_shell_contract(tmp_path: Path):
+    producer_root, intent, attestation = _fixture(tmp_path)
+    observed: dict[str, object] = {}
+
+    def checked_popen(*args, **kwargs):
+        observed["argv"] = args[0]
+        observed.update(kwargs)
+        return producer_process.subprocess.Popen(*args, **kwargs)
+
+    receipt = run_producer_process(
+        tmp_path,
+        intent=intent,
+        attestation=attestation,
+        producer_root=producer_root,
+        popen_factory=checked_popen,
+    )
+    assert receipt.status == "completed"
+    assert isinstance(observed["argv"], list)
+    assert observed["argv"] == list(intent.argv)
+    assert observed["shell"] is False
+    assert observed["start_new_session"] is True
+    assert observed["close_fds"] is True
+    assert observed["stdin"] is subprocess.DEVNULL
+    assert observed["stdout"] is subprocess.PIPE
+    assert observed["stderr"] is subprocess.PIPE
+    assert observed["cwd"] == str(tmp_path / "evolution/producer-batches/journal-001/work")
+    assert len(observed["pass_fds"]) == 1
+
+
 def test_attestation_nonce_is_consumed_once(tmp_path: Path):
     producer_root, intent, attestation = _fixture(tmp_path)
     run_producer_process(tmp_path, intent=intent, attestation=attestation, producer_root=producer_root)
