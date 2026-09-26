@@ -823,6 +823,66 @@ def test_replaced_envelope_during_read_is_rejected(tmp_path: Path, monkeypatch: 
     assert receipt.envelope_evidence is None
 
 
+@pytest.mark.parametrize("mutation", ["truncate", "append"])
+def test_envelope_mutation_after_open_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str):
+    output = tmp_path / "output"
+    output.mkdir()
+    envelope = output / "producer-result.json"
+    payload = b'{"budget":{"requests":1}}'
+    envelope.write_bytes(payload)
+    original_open = os.open
+    original_read = os.read
+    target_fd: int | None = None
+    mutated = False
+
+    def tracking_open(path, flags, *args, **kwargs):
+        nonlocal target_fd
+        fd = original_open(path, flags, *args, **kwargs)
+        if path == envelope.name and kwargs.get("dir_fd") is not None:
+            target_fd = fd
+        return fd
+
+    def mutate_after_first_read(fd: int, size: int) -> bytes:
+        nonlocal mutated
+        data = original_read(fd, size)
+        if fd == target_fd and data and not mutated:
+            mutated = True
+            if mutation == "truncate":
+                envelope.write_bytes(b"")
+            else:
+                envelope.write_bytes(payload + b" ")
+        return data
+
+    monkeypatch.setattr(producer_process.os, "open", tracking_open)
+    monkeypatch.setattr(producer_process.os, "read", mutate_after_first_read)
+    with pytest.raises(ProducerProcessError) as exc:
+        producer_process._read_envelope(
+            envelope,
+            relative_path="output/producer-result.json",
+            limit=1024,
+            deadline=time.monotonic() + 1.0,
+            monotonic=time.monotonic,
+        )
+    assert mutated is True
+    assert exc.value.code == "producer_process_envelope_changed"
+
+
+def test_atomic_receipt_fsync_failure_does_not_publish_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    target = tmp_path / "batch" / "execution-receipt.json"
+
+    def fail_fsync(_fd: int) -> None:
+        raise OSError("receipt fsync failed")
+
+    monkeypatch.setattr(producer_process.os, "fsync", fail_fsync)
+    with pytest.raises(ProducerProcessError) as exc:
+        producer_process._atomic_json(target, {"schema_version": "1"})
+    assert exc.value.code == "producer_process_receipt_write_unknown"
+    assert not target.exists()
+    assert not list(target.parent.glob(".producer-receipt-*"))
+
+
 def test_replaced_output_directory_during_read_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     producer_root, intent, attestation = _fixture(tmp_path)
     batch = tmp_path / "evolution/producer-batches/journal-001"
