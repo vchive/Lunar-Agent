@@ -1,5 +1,16 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 158 目标进程组证据绑定
+
+沿现有 SDD，trusted bootstrap 终态证据现保留目标启动帧观测的 PID/PGID，并校验二者与原
+`target_group_identity` 摘要一致。正式跨记录校验和只读持久观察会拒绝目标启动 PGID 与
+bootstrap 登记 PGID 不同的证据，即使其摘要已重算。旧证据缺少新增字段时严格拒绝，
+不做隐式升级。此校验只覆盖启动瞬间的组身份；目标之后是否脱组仍未证明。
+Feature 156/157/158 与进程所有权组合回归 **221 passed、2 skipped**；Ruff、compileall
+与 diff check 通过。
+Feature 156 正式 runner 尚未接入生产 bootstrap，T158-04 仍开放。本轮未运行真实
+provider、外部 producer、WebAgent 或 campaign。
+
 ## 2026-09-26 Feature 158 登记契约与 fixture 清理授权
 
 沿现有 SDD 增加 Feature 156 正式登记的只读可信 bootstrap 校验器：拟议登记必须精确绑定

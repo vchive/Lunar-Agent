@@ -638,6 +638,8 @@ def verify_trusted_bootstrap_attempt(
         or observed.registration_sha256 != registered["registration_sha256"]
     ):
         _fail("producer_bootstrap_attempt_evidence_binding_mismatch")
+    if observed.target_pgid is not None and observed.target_pgid != registered["pgid"]:
+        _fail("producer_bootstrap_attempt_target_group_mismatch")
     result["evidence_sha256"] = observed.evidence_sha256
     if observed.status == "unknown":
         result["reason"] = "trusted_bootstrap_evidence_unknown"
@@ -743,6 +745,8 @@ class TrustedBootstrapEvidence:
     target_started_observed: bool
     target_start_count: int
     target_group_identity: str | None
+    target_pid: int | None
+    target_pgid: int | None
     pre_gate_target_work_observed: bool
     status: str
     failure_code: str | None = None
@@ -761,8 +765,21 @@ class TrustedBootstrapEvidence:
         )):
             _fail("producer_bootstrap_evidence_boolean_invalid")
         _int(self.target_start_count, minimum=0, maximum=1, code="producer_bootstrap_target_count_invalid")
+        if self.target_started_observed != (self.target_start_count == 1):
+            _fail("producer_bootstrap_target_count_invalid")
         if self.target_group_identity is not None:
             _sha(self.target_group_identity)
+        if self.target_start_count == 1:
+            for value in (self.target_pid, self.target_pgid):
+                _int(value, minimum=2, maximum=2**63 - 1, code="producer_bootstrap_process_identity_invalid")
+            if self.target_group_identity != hashlib.sha256(
+                _canonical({"pid": self.target_pid, "pgid": self.target_pgid})
+            ).hexdigest():
+                _fail("producer_bootstrap_target_group_identity_mismatch")
+        elif any(value is not None for value in (
+            self.target_group_identity, self.target_pid, self.target_pgid,
+        )):
+            _fail("producer_bootstrap_target_group_identity_unexpected")
         if self.status not in _STATUSES:
             _fail("producer_bootstrap_status_invalid")
         if self.status == "failed" and not self.failure_code:
@@ -787,6 +804,7 @@ class TrustedBootstrapEvidence:
             "bootstrap_ready_observed": self.bootstrap_ready_observed, "release_observed": self.release_observed,
             "target_started_observed": self.target_started_observed, "target_start_count": self.target_start_count,
             "target_group_identity": self.target_group_identity,
+            "target_pid": self.target_pid, "target_pgid": self.target_pgid,
             "pre_gate_target_work_observed": self.pre_gate_target_work_observed,
             "status": self.status, "failure_code": self.failure_code,
         }
@@ -801,7 +819,8 @@ class TrustedBootstrapEvidence:
 _EVIDENCE_FIELDS = frozenset({
     "schema_version", "protocol", "launch_sha256", "registration_sha256",
     "bootstrap_ready_observed", "release_observed", "target_started_observed",
-    "target_start_count", "target_group_identity", "pre_gate_target_work_observed",
+    "target_start_count", "target_group_identity", "target_pid", "target_pgid",
+    "pre_gate_target_work_observed",
     "status", "failure_code", "evidence_sha256",
 })
 
@@ -841,6 +860,8 @@ class TrustedBootstrapSession:
         self.target_start_count = 0
         self.pre_gate_target_work_observed = False
         self.target_group_identity: str | None = None
+        self.target_pid: int | None = None
+        self.target_pgid: int | None = None
         self.failure_code: str | None = None
 
     def _check_frame(self, frame: BootstrapHandshakeFrame) -> None:
@@ -883,6 +904,8 @@ class TrustedBootstrapSession:
             self.target_group_identity = hashlib.sha256(
                 _canonical({"pid": frame.observed_pid, "pgid": frame.observed_pgid})
             ).hexdigest()
+            self.target_pid = frame.observed_pid
+            self.target_pgid = frame.observed_pgid
             self.state = "target_started"
             return
         if frame.kind == "target_start_failed":
@@ -953,6 +976,8 @@ class TrustedBootstrapSession:
             target_started_observed=self.target_start_count == 1,
             target_start_count=self.target_start_count,
             target_group_identity=self.target_group_identity,
+            target_pid=self.target_pid,
+            target_pgid=self.target_pgid,
             pre_gate_target_work_observed=self.pre_gate_target_work_observed,
             status="passed" if passed else ("failed" if self.failure_code else "unknown"),
             failure_code=self.failure_code,

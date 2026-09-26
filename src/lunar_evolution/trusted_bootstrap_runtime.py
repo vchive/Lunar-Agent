@@ -172,6 +172,8 @@ def _unknown_evidence(session: TrustedBootstrapSession) -> TrustedBootstrapEvide
         target_started_observed=observed.target_started_observed,
         target_start_count=observed.target_start_count,
         target_group_identity=observed.target_group_identity,
+        target_pid=observed.target_pid,
+        target_pgid=observed.target_pgid,
         pre_gate_target_work_observed=observed.pre_gate_target_work_observed,
         status="unknown",
     )

@@ -102,6 +102,12 @@ group and may not create a new session. A target that escapes the group, starts 
 starts more than once is `unknown`/`recovery_required`; cleanup never signals an unverified PID or
 PGID.
 
+Durable bootstrap evidence retains the target-start frame's observed PID and PGID as well as the
+SHA-256 of their canonical pair. A recorded start requires both values and a matching pair digest;
+an unstarted attempt requires all three to be absent. Formal cross-record observation also requires
+the target's start-time PGID to equal the registered bootstrap PGID. This checks the start frame,
+not whether the target or its descendants later leave that group.
+
 The bootstrap does not consume a second attestation. It receives the already consumed, exact
 launch record and cannot widen budgets. Timeout, handshake uncertainty, target start uncertainty,
 or cleanup uncertainty retain Feature 156's terminal unknown semantics and never trigger a retry.

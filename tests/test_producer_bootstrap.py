@@ -173,7 +173,8 @@ def _attempt_records(tmp_path: Path):
         registration_sha256=registration["registration_sha256"],
         bootstrap_ready_observed=True, release_observed=True,
         target_started_observed=True, target_start_count=1,
-        target_group_identity=_test_digest({"pid": 1234, "pgid": 1234}),
+        target_group_identity=_test_digest({"pid": 1235, "pgid": 1234}),
+        target_pid=1235, target_pgid=1234,
         pre_gate_target_work_observed=False, status="passed",
     )
     return launch, descriptor, intent, attestation, claim, registration, evidence
@@ -242,7 +243,8 @@ def test_attempt_observer_requires_recovery_without_terminal_evidence(tmp_path: 
             registration_sha256=records[5]["registration_sha256"],
             bootstrap_ready_observed=True, release_observed=False,
             target_started_observed=False, target_start_count=0,
-            target_group_identity=None, pre_gate_target_work_observed=False,
+            target_group_identity=None, target_pid=None, target_pgid=None,
+            pre_gate_target_work_observed=False,
             status="unknown",
         )
     _write_attempt_records(tmp_path, records, evidence=evidence)
@@ -378,6 +380,8 @@ def test_attempt_observer_has_no_process_or_file_side_effects(tmp_path: Path, mo
 
 def test_attempt_verifier_binds_target_claim_bootstrap_registration_and_evidence(tmp_path: Path):
     records = _attempt_records(tmp_path)
+    assert records[6].target_pid != records[5]["pid"]
+    assert records[6].target_pgid == records[5]["pgid"]
     result = _verify_attempt(records)
     assert result["status"] == "evidence_available"
     assert result["bootstrap_status"] == "passed"
@@ -421,6 +425,29 @@ def test_attempt_verifier_rejects_rehashed_evidence_registration_substitution(tm
         _verify_attempt(records, evidence=forged)
 
 
+def test_attempt_verifier_rejects_rehashed_target_group_substitution(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    forged = records[6].to_dict()
+    forged["target_pgid"] = 9999
+    forged["target_group_identity"] = _test_digest({"pid": forged["target_pid"], "pgid": 9999})
+    _rehash_record(forged, "evidence_sha256")
+    with pytest.raises(ProducerBootstrapError) as exc:
+        _verify_attempt(records, evidence=forged)
+    assert exc.value.code == "producer_bootstrap_attempt_target_group_mismatch"
+
+
+def test_attempt_observer_rejects_rehashed_target_group_substitution(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    forged = records[6].to_dict()
+    forged["target_pgid"] = 9999
+    forged["target_group_identity"] = _test_digest({"pid": forged["target_pid"], "pgid": 9999})
+    _rehash_record(forged, "evidence_sha256")
+    _write_attempt_records(tmp_path, records, evidence=forged)
+    with pytest.raises(ProducerBootstrapError) as exc:
+        _observe_attempt(tmp_path, records)
+    assert exc.value.code == "producer_bootstrap_attempt_target_group_mismatch"
+
+
 def test_attempt_verifier_requires_recovery_for_missing_or_unknown_evidence(tmp_path: Path):
     records = _attempt_records(tmp_path)
     assert _verify_attempt(records, evidence=None)["status"] == "recovery_required"
@@ -429,7 +456,8 @@ def test_attempt_verifier_requires_recovery_for_missing_or_unknown_evidence(tmp_
         registration_sha256=records[5]["registration_sha256"],
         bootstrap_ready_observed=True, release_observed=False,
         target_started_observed=False, target_start_count=0,
-        target_group_identity=None, pre_gate_target_work_observed=False,
+        target_group_identity=None, target_pid=None, target_pgid=None,
+        pre_gate_target_work_observed=False,
         status="unknown",
     )
     assert _verify_attempt(records, evidence=unknown)["status"] == "recovery_required"
@@ -656,6 +684,7 @@ def test_trusted_bootstrap_happy_path_produces_passed_evidence():
     assert evidence.status == "passed"
     assert evidence.release_observed is True
     assert evidence.target_start_count == 1
+    assert (evidence.target_pid, evidence.target_pgid) == (1234, 1234)
     assert evidence.evidence_sha256 == evidence.digest()
 
 
@@ -679,13 +708,31 @@ def test_evidence_parser_requires_canonical_self_authenticating_payload():
     forged["target_group_identity"] = "d" * 64
     with pytest.raises(ProducerBootstrapError) as exc:
         parse_trusted_bootstrap_evidence(forged)
-    assert exc.value.code == "producer_bootstrap_digest_mismatch"
+    assert exc.value.code == "producer_bootstrap_target_group_identity_mismatch"
 
+    missing_digest = evidence.to_dict()
+    missing_digest["evidence_sha256"] = None
+    with pytest.raises(ProducerBootstrapError) as exc:
+        parse_trusted_bootstrap_evidence(missing_digest)
+    assert exc.value.code == "producer_bootstrap_evidence_digest_invalid"
     forged["evidence_sha256"] = None
     with pytest.raises(ProducerBootstrapError) as exc:
+        TrustedBootstrapEvidence(**forged)
+    assert exc.value.code == "producer_bootstrap_target_group_identity_mismatch"
+
+    for field in ("target_pid", "target_pgid"):
+        missing = evidence.to_dict()
+        del missing[field]
+        with pytest.raises(ProducerBootstrapError) as exc:
+            parse_trusted_bootstrap_evidence(missing)
+        assert exc.value.code == "producer_bootstrap_evidence_schema_invalid"
+
+    forged = evidence.to_dict()
+    forged["target_pgid"] = 9999
+    _rehash_record(forged, "evidence_sha256")
+    with pytest.raises(ProducerBootstrapError) as exc:
         parse_trusted_bootstrap_evidence(forged)
-    assert exc.value.code == "producer_bootstrap_evidence_digest_invalid"
-    assert TrustedBootstrapEvidence(**forged).evidence_sha256 is not None
+    assert exc.value.code == "producer_bootstrap_target_group_identity_mismatch"
 
 
 def test_registration_parser_rejects_missing_digest_for_persisted_payload():

@@ -74,3 +74,10 @@ reuses the cross-record verifier; only missing or unknown terminal evidence prod
 `recovery_required`. Missing or replaced claim, ledger, or registration fails closed. This is a
 read-only observation and does not establish that registered bytes executed, authorize process
 signals, or connect the production runner to trusted bootstrap. T158-04 remains open.
+
+The evidence DTO now persists the target-start frame's PID/PGID and requires its group digest to
+match that exact pair. The formal cross-record verifier and durable observer reject a rehashed
+target PGID that differs from the registered bootstrap PGID. Parsing is strict: evidence written
+before these fields were added is rejected rather than upgraded implicitly. This checks only the
+reported start-time group, not subsequent group membership or the unimplemented production runner.
+T158-04 remains open.
