@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .producer_launcher import (
+    MAX_OUTPUT_BYTES,
     ProducerLaunchAttestation,
     ProducerLaunchError,
     ProducerLaunchIntent,
@@ -443,6 +444,8 @@ _FEATURE156_BOOTSTRAP_REGISTRATION_FIELDS = frozenset({
     "pid", "pgid", "recovery_lock_protocol", "recovery_lock_device", "recovery_lock_inode",
     "gate_protocol", "registered_at_unix_ns", "registration_sha256",
     "launch_sha256", "bootstrap_descriptor_sha256", "target_executable_identity",
+    "target_execution_binding", "target_execution_snapshot_relative_path",
+    "target_execution_snapshot_sha256", "target_execution_snapshot_size",
 })
 
 _FEATURE156_CONSUMPTION_FIELDS = frozenset({
@@ -550,6 +553,15 @@ def verify_trusted_bootstrap_process_registration(
         or raw["execution_snapshot_size"] != descriptor.size
     ):
         _fail("producer_bootstrap_process_registration_execution_binding_mismatch")
+    expected_target_path = ".producer-snapshots/target" if expected_mode == "darwin-immutable-snapshot" else None
+    if (
+        raw["target_execution_binding"] != expected_binding
+        or raw["target_execution_snapshot_relative_path"] != expected_target_path
+        or raw["target_execution_snapshot_sha256"] != launch.target_executable_identity
+    ):
+        _fail("producer_bootstrap_process_registration_target_binding_mismatch")
+    _int(raw["target_execution_snapshot_size"], minimum=1, maximum=MAX_OUTPUT_BYTES,
+         code="producer_bootstrap_process_registration_target_binding_mismatch")
     _sha(raw["registration_sha256"], "producer_bootstrap_process_registration_digest_invalid")
     if raw["registration_sha256"] != _digest_without(raw, "registration_sha256"):
         _fail("producer_bootstrap_process_registration_digest_mismatch")
@@ -621,6 +633,8 @@ def verify_trusted_bootstrap_attempt(
     registered = verify_trusted_bootstrap_process_registration(launch, descriptor, registration)
     if registered["consumption_sha256"] != claim["consumption_sha256"]:
         _fail("producer_bootstrap_attempt_registration_binding_mismatch")
+    if registered["target_execution_snapshot_size"] != parsed_attestation.executable_size:
+        _fail("producer_bootstrap_attempt_target_binding_mismatch")
     result: dict[str, object] = {
         "status": "recovery_required", "reason": "trusted_bootstrap_terminal_evidence_missing",
         "journal_id": launch.journal_id, "launch_id": launch.launch_id,

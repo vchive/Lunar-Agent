@@ -74,6 +74,13 @@ SHA-256 and size must equal the descriptor bytes, and the execution binding must
 platform mode (`darwin-immutable-snapshot` or `linux-sealed-memfd`). `pathname_unbound` and
 `fixture-only` cannot pass.
 
+The formal registration also carries `target_execution_binding`,
+`target_execution_snapshot_relative_path`, `target_execution_snapshot_sha256`, and
+`target_execution_snapshot_size`. The target binding must use the platform's byte-bound mode,
+the Darwin target path must be `.producer-snapshots/target` (Linux has no snapshot path), and its
+SHA-256 must match the launch target identity. The formal attempt verifier also compares the
+recorded target snapshot size with the verified attestation.
+
 The formal check requires canonical JSON, an exact field set and self-digest, matching launch,
 intent, attestation, bootstrap descriptor, and target identities, a positive matching PID/PGID,
 an OS-shaped owner-start identity with its own digest and the registered PID, and a positive
@@ -81,3 +88,6 @@ recovery-lock device/inode. It checks content only. It does not observe the OS p
 prove that executable bytes ran, consume an attestation, persist the registration, or authorize
 gate release, cleanup, or recovery. The current Feature 156 runner has not yet emitted this
 extended registration shape.
+The Linux target FD is not represented by a durable FD number: the production bootstrap must
+receive and retain that sealed descriptor until target exec, and the runner must prove that
+handoff separately. The existing Python fixture still reopens the target pathname after release.

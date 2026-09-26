@@ -1,5 +1,16 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 158 target 执行绑定登记契约
+
+正式 trusted-bootstrap 登记现在除 bootstrap 的 `execution_*` 外，还要求独立的 target
+绑定模式、快照路径、SHA-256 和字节大小。Darwin target 必须使用
+`.producer-snapshots/target`，Linux target 以 sealed memfd 模式登记且无路径；跨记录校验
+会将 target 大小与已核验 attestation 对齐。重新计算登记摘要也不能绕过模式、路径、摘要或
+大小校验。此处只收紧持久登记契约，尚无生产 pair preparer、原生 bootstrap 和实际 FD/快照
+handoff，也未接入 Feature 156 生命周期；T158-04 仍开放。本轮未运行真实 provider、
+外部 producer、WebAgent 或 campaign。Feature 156/157/158 与进程所有权组合回归、
+Ruff、compileall 和 diff check 均通过。
+
 ## 2026-09-26 Feature 158 Darwin 双端快照路径预备
 
 沿现有 SDD，Darwin 批次快照现区分 `.producer-snapshots/bootstrap` 与

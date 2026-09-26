@@ -63,3 +63,9 @@ validator requires the bootstrap path for Darwin. These role-specific names are 
 the two byte bindings, not a production pair preparer: the current fixture still executes via
 `python -m` and reopens its target by pathname. The native bootstrap artifact, separate target
 execution binding, and shared Feature 156 lifecycle integration remain prerequisites for T158-04.
+
+The proposed formal registration now includes separate target binding mode, snapshot path,
+SHA-256, and size alongside the bootstrap execution fields. The formal validator checks platform
+mode, role-specific path, and target digest; cross-record observation checks target size against
+the attestation. These fields are a strict proposed registration contract, not proof that a
+sealed target FD was inherited or that an immutable target snapshot was actually executed.

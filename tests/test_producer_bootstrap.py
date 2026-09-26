@@ -124,6 +124,14 @@ def _formal_registration() -> tuple[TrustedBootstrapLaunch, TrustedBootstrapDesc
         ),
         "execution_snapshot_sha256": descriptor.bootstrap_sha256,
         "execution_snapshot_size": descriptor.size,
+        "target_execution_binding": (
+            "darwin-immutable-snapshot" if sys.platform == "darwin" else "linux-sealed-memfd"
+        ),
+        "target_execution_snapshot_relative_path": (
+            ".producer-snapshots/target" if sys.platform == "darwin" else None
+        ),
+        "target_execution_snapshot_sha256": launch.target_executable_identity,
+        "target_execution_snapshot_size": 128,
         "pid": 1234, "pgid": 1234,
         "recovery_lock_protocol": "journal-flock-v1",
         "recovery_lock_device": 5, "recovery_lock_inode": 6,
@@ -166,6 +174,8 @@ def _attempt_records(tmp_path: Path):
         "consumption_sha256": claim["consumption_sha256"],
         "launch_sha256": launch.launch_sha256,
         "target_executable_identity": launch.target_executable_identity,
+        "target_execution_snapshot_sha256": launch.target_executable_identity,
+        "target_execution_snapshot_size": intent.executable_size,
     })
     _rehash_record(registration, "registration_sha256")
     evidence = TrustedBootstrapEvidence(
@@ -390,6 +400,27 @@ def test_attempt_verifier_binds_target_claim_bootstrap_registration_and_evidence
     assert verify_trusted_bootstrap_attempt(*records) == result
 
 
+def test_attempt_verifier_rejects_rehashed_target_snapshot_size_drift(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    registration = records[5]
+    registration["target_execution_snapshot_size"] += 1
+    _rehash_record(registration, "registration_sha256")
+    with pytest.raises(ProducerBootstrapError) as exc:
+        _verify_attempt(records, evidence=None)
+    assert exc.value.code == "producer_bootstrap_attempt_target_binding_mismatch"
+
+
+def test_attempt_observer_rejects_rehashed_target_snapshot_size_drift(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    registration = records[5]
+    registration["target_execution_snapshot_size"] += 1
+    _rehash_record(registration, "registration_sha256")
+    _write_attempt_records(tmp_path, records, evidence=None)
+    with pytest.raises(ProducerBootstrapError) as exc:
+        _observe_attempt(tmp_path, records)
+    assert exc.value.code == "producer_bootstrap_attempt_target_binding_mismatch"
+
+
 @pytest.mark.parametrize("swapped_field", ["target_claim", "bootstrap_registration"])
 def test_attempt_verifier_rejects_rehashed_target_bootstrap_identity_swap(tmp_path: Path, swapped_field: str):
     records = _attempt_records(tmp_path)
@@ -511,6 +542,10 @@ def test_formal_registration_rejects_ordinary_producer_snapshot_even_when_rehash
         ("recovery_lock_inode", 0, "producer_bootstrap_process_registration_lock_identity_invalid"),
         ("execution_snapshot_sha256", "d" * 64, "producer_bootstrap_process_registration_execution_binding_mismatch"),
         ("execution_snapshot_size", 129, "producer_bootstrap_process_registration_execution_binding_mismatch"),
+        ("target_execution_binding", "pathname_unbound", "producer_bootstrap_process_registration_target_binding_mismatch"),
+        ("target_execution_snapshot_relative_path", ".producer-snapshots/executable", "producer_bootstrap_process_registration_target_binding_mismatch"),
+        ("target_execution_snapshot_sha256", "d" * 64, "producer_bootstrap_process_registration_target_binding_mismatch"),
+        ("target_execution_snapshot_size", 0, "producer_bootstrap_process_registration_target_binding_mismatch"),
         ("executable_identity", "d" * 64, "producer_bootstrap_process_registration_execution_binding_mismatch"),
         ("execution_binding", "pathname_unbound", "producer_bootstrap_process_registration_execution_binding_mismatch"),
     ],

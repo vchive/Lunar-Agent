@@ -93,3 +93,10 @@ trusted-bootstrap registration requires `.producer-snapshots/bootstrap`. This on
 two snapshot roles and narrows registration validation; no production pair preparer, native
 bootstrap artifact, independently bound target exec, or shared Feature 156 registration/cleanup/
 recovery and deadline path exists yet. T158-04 remains open.
+
+The proposed formal registration now names the target execution binding separately from the
+bootstrap's: mode, role-specific snapshot path, SHA-256, and byte size are required. The formal
+validator rejects rehashed path/mode/digest drift; cross-record verification and durable
+observation reject a rehashed size that differs from the verified target attestation. This still
+does not prove the target snapshot or sealed FD was executed or connect a production runner.
+T158-04 remains open.
