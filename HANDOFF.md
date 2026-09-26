@@ -1,5 +1,16 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Feature 157 controlled transport boundary
+
+新增 `ControllerOwnedRequestBroker` 与 `ControllerRequestTransport`/handle 协议。broker
+先通过 `HostRequestLedger` 登记，再把同一个 admission/deadline 交给受控 transport；只有
+transport 明确确认取消并进入终态，才返回 `host_timeout_enforced=true`。只支持轮询、返回
+非法状态、取消不确认或取消后不进入终态的 transport 均 fail-closed，并保留 timeout 不确定
+语义。新增成功、deadline 取消确认、取消不确认和无取消句柄回归；模块从顶层 API 导出。
+这仍是 provider-free transport boundary，不是实际 provider broker，也没有完成出口隔离、
+受保护生产 journal 或 Feature 156 接线；T157-05/T157-06 继续开放。本轮未运行真实 provider、
+外部 producer、WebAgent、scheduler 或 campaign。
+
 ## 2026-09-26 Darwin 快照原子拒绝覆盖
 
 共享快照发布已从可覆盖的重命名改为原子 create-only 链接；普通 producer、bootstrap、target

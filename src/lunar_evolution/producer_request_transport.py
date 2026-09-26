@@ -523,16 +523,19 @@ class HostRequestLedger:
         self._events[event.sequence] = event
         return event
 
-    def expire(self) -> tuple[HostRequestEvent, ...]:
+    def expire(self, *, admission: RequestAdmission | None = None) -> tuple[HostRequestEvent, ...]:
         """Mark overdue admissions; caller must independently cancel their I/O."""
         now = self._now()
         expired: list[HostRequestEvent] = []
-        for admission in tuple(self._active):
-            if now >= admission.deadline_ns:
-                event = self._terminal_event(admission, now, "timed_out")
+        candidates = (admission,) if admission is not None else tuple(self._active)
+        for candidate in candidates:
+            if candidate not in self._active:
+                _fail("producer_request_transport_admission_invalid")
+            if now >= candidate.deadline_ns:
+                event = self._terminal_event(candidate, now, "timed_out")
                 if self._journal is not None:
                     self._journal.record_terminal(event, now)
-                del self._active[admission]
+                del self._active[candidate]
                 self._events[event.sequence] = event
                 expired.append(event)
         return tuple(expired)

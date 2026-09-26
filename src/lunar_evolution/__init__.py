@@ -181,6 +181,13 @@ from .candidate_workspace import (
     parse_candidate_workspace_plan,
     validate_candidate_workspace_plan,
 )
+from .controller_request_broker import (
+    BrokerRequestResult,
+    ControllerOwnedRequestBroker,
+    ControllerRequestBrokerError,
+    ControllerRequestHandle,
+    ControllerRequestTransport,
+)
 from .conversational import (
     CallableContractCompiler,
     CompilationQuestion,
@@ -601,6 +608,7 @@ __all__ = [
     "BenchmarkTaskError",
     "BenchmarkTaskEvaluatorIdentity",
     "BootstrapHandshakeFrame",
+    "BrokerRequestResult",
     "BundleDeliveryResult",
     "BundleGroup",
     "CallableContractCompiler",
@@ -647,6 +655,10 @@ __all__ = [
     "ContractCandidateRunner",
     "ContractCompilationError",
     "ContractCompiler",
+    "ControllerOwnedRequestBroker",
+    "ControllerRequestBrokerError",
+    "ControllerRequestHandle",
+    "ControllerRequestTransport",
     "DataProfileError",
     "DeepEffectTrialConfig",
     "DeepEffectTrialRunner",

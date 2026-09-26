@@ -6,6 +6,8 @@ import pytest
 
 import lunar_evolution.producer_request_transport as transport
 from lunar_evolution import (
+    ControllerOwnedRequestBroker,
+    ControllerRequestBrokerError,
     HostRequestJournal,
     HostRequestJournalIdentity,
     HostRequestLedger,
@@ -21,6 +23,62 @@ class Clock:
 
     def __call__(self) -> int:
         return self.value
+
+
+class ImmediateHandle:
+    def __init__(self, status: str = "completed") -> None:
+        self.status = status
+        self.waits: list[float] = []
+        self.cancelled = False
+
+    def wait(self, timeout_seconds: float) -> str:
+        self.waits.append(timeout_seconds)
+        return self.status
+
+    def cancel(self) -> bool:
+        self.cancelled = True
+        return True
+
+
+class CancelOnDeadlineHandle:
+    def __init__(self, clock: Clock) -> None:
+        self.clock = clock
+        self.waits: list[float] = []
+        self.cancelled = False
+
+    def wait(self, timeout_seconds: float) -> str | None:
+        self.waits.append(timeout_seconds)
+        if not self.cancelled:
+            self.clock.value += 1_000_000_000
+            return None
+        return "cancelled"
+
+    def cancel(self) -> bool:
+        self.cancelled = True
+        return True
+
+
+class NonCancellableHandle:
+    def __init__(self, clock: Clock) -> None:
+        self.clock = clock
+
+    def wait(self, _timeout_seconds: float) -> None:
+        self.clock.value += 1_000_000_000
+
+    def cancel(self) -> bool:
+        return False
+
+
+class RecordingTransport:
+    def __init__(self, handle_factory) -> None:
+        self.handle_factory = handle_factory
+        self.admissions: list[RequestAdmission] = []
+        self.payloads: list[object] = []
+
+    def start(self, admission: RequestAdmission, payload: object):
+        self.admissions.append(admission)
+        self.payloads.append(payload)
+        return self.handle_factory()
 
 
 def _identity() -> HostRequestJournalIdentity:
@@ -267,3 +325,76 @@ def test_journal_cannot_bind_to_two_ledgers(tmp_path):
             "producer_request_transport_journal_unavailable",
             lambda: HostRequestLedger(request_timeout_seconds=1, max_requests=2, journal=journal),
         )
+
+
+def test_controller_broker_admits_before_transport_and_forwards_deadline():
+    clock = Clock()
+    handle = ImmediateHandle()
+    transport = RecordingTransport(lambda: handle)
+    ledger = HostRequestLedger(request_timeout_seconds=2, max_requests=1, monotonic_ns=clock)
+    result = ControllerOwnedRequestBroker(
+        ledger, transport, monotonic_ns=clock, cancel_grace_seconds=0.1,
+    ).execute("request-001", {"opaque": True})
+    assert transport.payloads == [{"opaque": True}]
+    assert transport.admissions[0].deadline_ns == clock.value + 2_000_000_000
+    assert handle.waits == [2.0]
+    assert result.event.status == "completed"
+    assert not result.host_timeout_enforced
+
+
+def test_controller_broker_requires_cancel_ack_and_terminal_confirmation():
+    clock = Clock()
+    handle = CancelOnDeadlineHandle(clock)
+    transport = RecordingTransport(lambda: handle)
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    result = ControllerOwnedRequestBroker(
+        ledger, transport, monotonic_ns=clock, cancel_grace_seconds=0.1,
+    ).execute("request-001", None)
+    assert result.event.status == "timed_out"
+    assert result.cancellation_requested and result.cancellation_acknowledged
+    assert result.host_timeout_enforced
+    assert ledger.snapshot().active_count == 0
+
+
+def test_controller_broker_keeps_unconfirmed_timeout_fail_closed():
+    clock = Clock()
+    transport = RecordingTransport(lambda: NonCancellableHandle(clock))
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    with pytest.raises(ControllerRequestBrokerError) as exc:
+        ControllerOwnedRequestBroker(
+            ledger, transport, monotonic_ns=clock, cancel_grace_seconds=0.1,
+        ).execute("request-001", None)
+    assert exc.value.code == "producer_request_broker_timeout_unconfirmed"
+    assert exc.value.event is not None and exc.value.event.status == "timed_out"
+    assert ledger.snapshot().active_count == 0
+
+
+def test_controller_broker_rejects_handle_without_cancellation():
+    class WaitOnly:
+        def wait(self, _timeout_seconds: float) -> str:
+            return "completed"
+
+    clock = Clock()
+    transport = RecordingTransport(WaitOnly)
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    with pytest.raises(ControllerRequestBrokerError) as exc:
+        ControllerOwnedRequestBroker(ledger, transport, monotonic_ns=clock).execute("request-001", None)
+    assert exc.value.code == "producer_request_broker_handle_invalid"
+    assert exc.value.event is not None and exc.value.event.status == "failed"
+
+
+def test_controller_broker_rejects_unhashable_transport_status():
+    class BadStatus:
+        def wait(self, _timeout_seconds: float):
+            return []
+
+        def cancel(self) -> bool:
+            return True
+
+    clock = Clock()
+    transport = RecordingTransport(BadStatus)
+    ledger = HostRequestLedger(request_timeout_seconds=1, max_requests=1, monotonic_ns=clock)
+    with pytest.raises(ControllerRequestBrokerError) as exc:
+        ControllerOwnedRequestBroker(ledger, transport, monotonic_ns=clock).execute("request-001", None)
+    assert exc.value.code == "producer_request_broker_status_invalid"
+    assert exc.value.event is not None and exc.value.event.status == "failed"

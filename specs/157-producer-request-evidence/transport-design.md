@@ -24,6 +24,13 @@ ancestor paths. The controller must place this file in an OS-protected directory
 producer cannot write; a hash chain alone does not authenticate bytes against a child
 that can edit the journal with the controller's credentials.
 
+`ControllerOwnedRequestBroker` now provides the provider-free transport boundary. It passes
+the exact controller-issued admission and deadline to a controlled transport handle, and
+requires explicit cancellation acknowledgement plus a terminal confirmation before returning
+`host_timeout_enforced=true`. A transport that only supports polling, returns an invalid
+status, or cannot confirm cancellation fails closed and leaves the timeout evidence uncertain.
+The broker never stores request payloads and does not expose a producer-side transport path.
+
 ## Required production integration
 
 1. The controller must own the actual request transport. Only its broker can call the
@@ -44,5 +51,6 @@ that can edit the journal with the controller's credentials.
    declaration-only and process-wall-time semantics.
 
 The current implementation completes bounded host accounting and a fixture-level durable
-journal. It does not implement the broker, egress restriction, cancellation, protected
-production journal ownership, or Feature 156 integration, so T157-05 and T157-06 remain open.
+journal. It does not supply a real provider transport, enforce producer egress isolation, own a
+protected production journal directory, or integrate with Feature 156, so T157-05 and T157-06
+remain open.
