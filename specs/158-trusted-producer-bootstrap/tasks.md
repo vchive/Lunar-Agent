@@ -107,6 +107,8 @@ handles held through the caller's bootstrap spawn. Existing Darwin role snapshot
 failed second preparation never yields a pair, and uncertain pre-spawn cleanup is reported.
 An unreturned published role path is retained as cleanup-unknown; formal integration still
 needs exclusive batch ownership to prevent concurrent substitution.
+The shared Darwin publisher now rejects a role path created between preflight and publication
+without replacing its bytes; provider-free fault injection covers producer, bootstrap, and target.
 This does not validate an installed allowlist,
 inherit the target FD into an actual bootstrap, publish registration, release the gate, or handle
 terminal cleanup/recovery. The Python fixture remains non-production; T158-04 remains open.

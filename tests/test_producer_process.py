@@ -480,6 +480,33 @@ def test_snapshot_rejects_unknown_role_before_platform_binding(tmp_path: Path):
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin immutable execution snapshots")
+@pytest.mark.parametrize("role", ("producer", "bootstrap", "target"))
+def test_darwin_snapshot_publication_cannot_replace_racing_role_path(tmp_path: Path, monkeypatch, role: str):
+    batch = tmp_path / "batch"
+    batch.mkdir()
+    source = tmp_path / "bootstrap"
+    source.write_bytes(b"#!/bin/sh\nexit 0\n")
+    source.chmod(0o755)
+    real_link = producer_process.os.link
+    snapshot_name = "executable" if role == "producer" else role
+    snapshot_path = batch / ".producer-snapshots" / snapshot_name
+
+    def occupy_before_publish(src, dst, **kwargs):
+        snapshot_path.write_bytes(b"previous attempt")
+        return real_link(src, dst, **kwargs)
+
+    monkeypatch.setattr(producer_process.os, "link", occupy_before_publish)
+    with pytest.raises(ProducerProcessError) as exc:
+        producer_process._snapshot_executable(
+            source, batch, producer_process._file_identity(source),
+            deadline=time.monotonic() + 5, monotonic=time.monotonic, role=role,
+        )
+    assert exc.value.code == "producer_process_execution_binding_unknown"
+    assert snapshot_path.read_bytes() == b"previous attempt"
+    assert list(snapshot_path.parent.glob(".executable-*")) == []
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires Darwin immutable execution snapshots")
 def test_darwin_snapshot_lock_failure_rejects_before_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     producer_root, intent, attestation = _fixture(tmp_path)
 

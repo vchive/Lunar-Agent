@@ -438,11 +438,19 @@ def _snapshot_executable(
         os.fsync(target_fd)
         os.close(target_fd)
         target_fd = -1
-        # Publish the copy under its final private name before setting the
-        # immutable flag; an immutable inode cannot be renamed on Darwin.
-        os.replace(temp_path, snapshot)
-        published = True
+        # Publish without replacing an existing attempt's role path. The temp link
+        # must be removed before identity checks, which require one hard link.
         with _held_directory(snapshot_dir) as directory_fd:
+            try:
+                os.link(
+                    temp_name, snapshot.name,
+                    src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                _fail("producer_process_execution_binding_unknown")
+            published = True
+            os.unlink(temp_name, dir_fd=directory_fd)
             os.fsync(directory_fd)
         staged = _file_identity(snapshot)
         if staged["sha256"] != expected_identity["sha256"] or staged["size"] != expected_identity["size"]:

@@ -83,3 +83,8 @@ target FD into a child, releases the gate, or performs recovery. T158-04 remains
 Publication can fail before a snapshot object is returned; a remaining role path is then
 reported as cleanup-unknown and retained because its inode is not owned by the preparer.
 The formal runner must hold exclusive batch ownership across preparation and publication.
+The shared Darwin snapshot publisher now uses an atomic create-only hard link for all three
+roles, followed by removal of its temporary name before immutable verification. A conflicting
+role path cannot be overwritten even if it appears after the preparer's initial absence check.
+This does not prevent replacement of a private batch directory by an untrusted concurrent owner;
+formal admission still requires exclusive ownership and held-directory validation through spawn.

@@ -1,5 +1,13 @@
 # Lunar Evolution 交接记录
 
+## 2026-09-26 Darwin 快照原子拒绝覆盖
+
+共享快照发布已从可覆盖的重命名改为原子 create-only 链接；普通 producer、bootstrap、target
+三种角色即使在准备检查之后出现同名路径，也不能被新快照覆盖。临时硬链接在 immutable 校验前
+移除；发布中途失败仍保留 unknown/恢复语义。三角色竞争注入专项通过。正式 Feature 158
+接线仍需独占批次、原生 bootstrap、真实 target handoff 和共享登记/清理/恢复；T158-04 开放。
+本轮未运行真实 provider、外部 producer、WebAgent 或 campaign。
+
 ## 2026-09-26 Feature 158 双端执行字节准备
 
 新增未导出的 `prepare_trusted_executable_pair`：同一 launch、attestation 和绝对 deadline
