@@ -321,6 +321,7 @@ from .producer_bootstrap import (
     parse_bootstrap_handshake_frame,
     parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
+    verify_trusted_bootstrap_attempt,
     verify_trusted_bootstrap_process_registration,
     verify_trusted_bootstrap_registration,
 )
@@ -935,6 +936,7 @@ __all__ = [
     "validate_producer_request_evidence",
     "verify_candidate_source_bundle",
     "verify_producer_launch_attestation",
+    "verify_trusted_bootstrap_attempt",
     "verify_trusted_bootstrap_process_registration",
     "verify_trusted_bootstrap_registration",
 ]

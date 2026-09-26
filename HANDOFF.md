@@ -4088,3 +4088,17 @@ evidence 返回 `recovery_required`。该路径不 spawn/relaunch、不检查或
 T158-04 仍保持开放。Feature 156 production runner 的 post-crash owner check、受权 cleanup 和
 正式 recovery integration 尚未完成，fixture 的 `RegisteredProcess.owner_check` 不能授权故障后的
 信号操作；没有扩大 scheduler、外部 producer、WebAgent 或真实 campaign 的接入范围。
+
+## 2026-09-26 Feature 158 formal attempt cross-record observation
+
+新增只读 `verify_trusted_bootstrap_attempt`，显式核对正式消费 claim、production bootstrap
+登记和可选终态 evidence。Feature 156 claim 的 `executable_identity` 是目标程序完整 stat
+元组摘要，正式 bootstrap 登记的同名字段是 bootstrap 完整 stat 元组摘要；两者分别由已核验
+attestation 与 descriptor 推导，不能直接相等比较。验证器还绑定 launch/intent/attestation、
+一次性 consumption、登记和终态 evidence 的摘要链；缺失或 unknown evidence 只返回
+`recovery_required`。它不读文件、不检查或 signal 进程，也不写恢复回执。
+
+新增重新摘要后的目标/bootstrap 身份互换、跨 journal、evidence 替换、缺失/unknown 和
+fixture-only 拒绝回归。T158-04 仍开放：正式 runner 尚未产生这些 bootstrap 记录，现有 Feature
+156 恢复路径仍按目标身份解释登记字段，不能直接接入该验证器或授权 cleanup。后续需先完成
+平台字节绑定的 bootstrap 启动与目标交接、正式登记发布和终态证据，再扩展恢复语义。

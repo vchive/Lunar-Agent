@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from lunar_evolution.producer_bootstrap import (
     parse_bootstrap_handshake_frame,
     parse_trusted_bootstrap_evidence,
     parse_trusted_bootstrap_registration,
+    verify_trusted_bootstrap_attempt,
     verify_trusted_bootstrap_process_registration,
     verify_trusted_bootstrap_registration,
 )
@@ -134,6 +137,137 @@ def _formal_registration() -> tuple[TrustedBootstrapLaunch, TrustedBootstrapDesc
 
 def _test_digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _attempt_records(tmp_path: Path):
+    intent, attestation = _producer_admission(tmp_path)
+    descriptor = _production_descriptor()
+    launch = build_trusted_bootstrap_launch(intent, attestation, descriptor, gate_nonce=attestation.nonce)
+    claim: dict[str, object] = {
+        "schema_version": "1", "protocol": PRODUCER_PROCESS_PROTOCOL,
+        "consumption_id": intent.launch_id, "launch_id": intent.launch_id,
+        "journal_id": intent.journal_id, "run_id": intent.run_id,
+        "parent_task_id": intent.parent_task_id, "task_id": intent.task_id,
+        "intent_sha256": intent.intent_sha256,
+        "attestation_sha256": attestation.attestation_sha256,
+        "nonce": attestation.nonce,
+        "executable_identity": _test_digest({
+            "sha256": intent.executable_sha256, "size": intent.executable_size,
+            "device": intent.executable_device, "inode": intent.executable_inode,
+            "mtime_ns": intent.executable_mtime_ns, "ctime_ns": intent.executable_ctime_ns,
+        }),
+    }
+    claim["consumption_sha256"] = _test_digest(claim)
+    _, _, registration = _formal_registration()
+    registration.update({
+        "intent_sha256": launch.intent_sha256,
+        "attestation_sha256": launch.attestation_sha256,
+        "consumption_sha256": claim["consumption_sha256"],
+        "launch_sha256": launch.launch_sha256,
+        "target_executable_identity": launch.target_executable_identity,
+    })
+    _rehash_record(registration, "registration_sha256")
+    evidence = TrustedBootstrapEvidence(
+        launch_sha256=launch.launch_sha256,
+        registration_sha256=registration["registration_sha256"],
+        bootstrap_ready_observed=True, release_observed=True,
+        target_started_observed=True, target_start_count=1,
+        target_group_identity=_test_digest({"pid": 1234, "pgid": 1234}),
+        pre_gate_target_work_observed=False, status="passed",
+    )
+    return launch, descriptor, intent, attestation, claim, registration, evidence
+
+
+def _rehash_record(record: dict[str, object], digest_field: str) -> None:
+    record[digest_field] = _test_digest({key: value for key, value in record.items() if key != digest_field})
+
+
+def _verify_attempt(records: tuple[object, ...], *, evidence: object = ...):
+    launch, descriptor, intent, attestation, claim, registration, stored_evidence = records
+    supplied_evidence = stored_evidence if evidence is ... else evidence
+    if isinstance(supplied_evidence, TrustedBootstrapEvidence):
+        supplied_evidence = supplied_evidence.to_dict()
+    return verify_trusted_bootstrap_attempt(
+        launch, descriptor, intent, attestation, claim, registration,
+        evidence=supplied_evidence,
+    )
+
+
+def test_attempt_verifier_binds_target_claim_bootstrap_registration_and_evidence(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    result = _verify_attempt(records)
+    assert result["status"] == "evidence_available"
+    assert result["bootstrap_status"] == "passed"
+    assert result["registration_sha256"] == records[5]["registration_sha256"]
+    assert result["evidence_sha256"] == records[6].evidence_sha256
+    assert verify_trusted_bootstrap_attempt(*records) == result
+
+
+@pytest.mark.parametrize("swapped_field", ["target_claim", "bootstrap_registration"])
+def test_attempt_verifier_rejects_rehashed_target_bootstrap_identity_swap(tmp_path: Path, swapped_field: str):
+    records = _attempt_records(tmp_path)
+    claim, registration = records[4], records[5]
+    if swapped_field == "target_claim":
+        claim["executable_identity"] = registration["executable_identity"]
+        _rehash_record(claim, "consumption_sha256")
+        registration["consumption_sha256"] = claim["consumption_sha256"]
+    else:
+        registration["executable_identity"] = claim["executable_identity"]
+    _rehash_record(registration, "registration_sha256")
+    with pytest.raises(ProducerBootstrapError):
+        _verify_attempt(records, evidence=None)
+
+
+def test_attempt_verifier_rejects_rehashed_cross_journal_claim(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    claim, registration = records[4], records[5]
+    claim["journal_id"] = "journal-002"
+    _rehash_record(claim, "consumption_sha256")
+    registration["consumption_sha256"] = claim["consumption_sha256"]
+    _rehash_record(registration, "registration_sha256")
+    with pytest.raises(ProducerBootstrapError):
+        _verify_attempt(records, evidence=None)
+
+
+def test_attempt_verifier_rejects_rehashed_evidence_registration_substitution(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    forged = records[6].to_dict()
+    forged["registration_sha256"] = "d" * 64
+    _rehash_record(forged, "evidence_sha256")
+    with pytest.raises(ProducerBootstrapError):
+        _verify_attempt(records, evidence=forged)
+
+
+def test_attempt_verifier_requires_recovery_for_missing_or_unknown_evidence(tmp_path: Path):
+    records = _attempt_records(tmp_path)
+    assert _verify_attempt(records, evidence=None)["status"] == "recovery_required"
+    unknown = TrustedBootstrapEvidence(
+        launch_sha256=records[0].launch_sha256,
+        registration_sha256=records[5]["registration_sha256"],
+        bootstrap_ready_observed=True, release_observed=False,
+        target_started_observed=False, target_start_count=0,
+        target_group_identity=None, pre_gate_target_work_observed=False,
+        status="unknown",
+    )
+    assert _verify_attempt(records, evidence=unknown)["status"] == "recovery_required"
+
+
+def test_attempt_verifier_rejects_fixture_only_and_has_no_process_or_file_side_effects(tmp_path: Path, monkeypatch):
+    records = _attempt_records(tmp_path)
+    files_before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("read-only verifier must not launch or signal a process")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(os, "kill", forbidden)
+    assert _verify_attempt(records)["status"] == "evidence_available"
+    assert files_before == {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    fixture_records = (records[0], _descriptor(), *records[2:])
+    with pytest.raises(ProducerBootstrapError) as exc:
+        _verify_attempt(fixture_records)
+    assert exc.value.code == "producer_bootstrap_production_mode_required"
 
 
 def test_formal_registration_binds_bootstrap_target_and_feature156_owner_lock():

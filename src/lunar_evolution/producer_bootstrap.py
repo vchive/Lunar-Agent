@@ -444,6 +444,12 @@ _FEATURE156_BOOTSTRAP_REGISTRATION_FIELDS = frozenset({
     "launch_sha256", "bootstrap_descriptor_sha256", "target_executable_identity",
 })
 
+_FEATURE156_CONSUMPTION_FIELDS = frozenset({
+    "schema_version", "protocol", "consumption_id", "launch_id", "journal_id", "run_id",
+    "parent_task_id", "task_id", "intent_sha256", "attestation_sha256", "nonce",
+    "executable_identity", "consumption_sha256",
+})
+
 
 def verify_trusted_bootstrap_process_registration(
     launch: TrustedBootstrapLaunch, descriptor: TrustedBootstrapDescriptor, value: object,
@@ -547,6 +553,98 @@ def verify_trusted_bootstrap_process_registration(
     if raw["registration_sha256"] != _digest_without(raw, "registration_sha256"):
         _fail("producer_bootstrap_process_registration_digest_mismatch")
     return dict(raw)
+
+
+def verify_trusted_bootstrap_attempt(
+    launch: TrustedBootstrapLaunch,
+    descriptor: TrustedBootstrapDescriptor,
+    intent: ProducerLaunchIntent | object,
+    attestation: ProducerLaunchAttestation | object,
+    consumption: object,
+    registration: object,
+    evidence: object | None = None,
+) -> dict[str, object]:
+    """Observe one proposed formal attempt without granting process or cleanup authority.
+
+    A Feature 156 consumption claim names the target's stat-tuple digest, while the formal
+    process registration names the executed bootstrap's stat-tuple digest. Keep those identities
+    separate and bind both to the verified launch before examining terminal evidence.
+    """
+    if not isinstance(launch, TrustedBootstrapLaunch):
+        _fail("producer_bootstrap_attempt_launch_invalid")
+    try:
+        parsed_intent = parse_producer_launch_intent(intent.to_dict() if isinstance(intent, ProducerLaunchIntent) else intent)
+        parsed_attestation = parse_producer_launch_attestation(
+            attestation.to_dict() if isinstance(attestation, ProducerLaunchAttestation) else attestation,
+        )
+    except (ProducerLaunchError, TypeError, ValueError) as exc:
+        raise ProducerBootstrapError("producer_bootstrap_attempt_admission_invalid") from exc
+    expected_launch = build_trusted_bootstrap_launch(
+        parsed_intent, parsed_attestation, descriptor, gate_nonce=launch.gate_nonce,
+    )
+    if launch != expected_launch:
+        _fail("producer_bootstrap_attempt_launch_mismatch")
+
+    encoded: bytes | None = None
+    if isinstance(consumption, (str, bytes, bytearray)):
+        encoded = consumption.encode("utf-8") if isinstance(consumption, str) else bytes(consumption)
+        consumption = _strict_json(encoded)
+    claim = _object(consumption, _FEATURE156_CONSUMPTION_FIELDS,
+                    "producer_bootstrap_attempt_consumption_schema_invalid")
+    if encoded is not None and _canonical(claim) != encoded:
+        _fail("producer_bootstrap_attempt_consumption_noncanonical")
+    if claim["schema_version"] != "1" or claim["protocol"] != PRODUCER_PROCESS_PROTOCOL:
+        _fail("producer_bootstrap_attempt_consumption_schema_invalid")
+    for field in ("launch_id", "journal_id", "run_id", "parent_task_id", "task_id",
+                  "intent_sha256", "attestation_sha256"):
+        if claim[field] != getattr(launch, field):
+            _fail("producer_bootstrap_attempt_consumption_binding_mismatch")
+    target_identity = {
+        "sha256": parsed_attestation.executable_sha256,
+        "size": parsed_attestation.executable_size,
+        "device": parsed_attestation.executable_device,
+        "inode": parsed_attestation.executable_inode,
+        "mtime_ns": parsed_attestation.executable_mtime_ns,
+        "ctime_ns": parsed_attestation.executable_ctime_ns,
+    }
+    if (
+        claim["consumption_id"] != launch.launch_id
+        or claim["nonce"] != parsed_attestation.nonce
+        or claim["executable_identity"] != hashlib.sha256(_canonical(target_identity)).hexdigest()
+    ):
+        _fail("producer_bootstrap_attempt_consumption_binding_mismatch")
+    _sha(claim["consumption_sha256"], "producer_bootstrap_attempt_consumption_digest_invalid")
+    if claim["consumption_sha256"] != _digest_without(claim, "consumption_sha256"):
+        _fail("producer_bootstrap_attempt_consumption_digest_mismatch")
+
+    registered = verify_trusted_bootstrap_process_registration(launch, descriptor, registration)
+    if registered["consumption_sha256"] != claim["consumption_sha256"]:
+        _fail("producer_bootstrap_attempt_registration_binding_mismatch")
+    result: dict[str, object] = {
+        "status": "recovery_required", "reason": "trusted_bootstrap_terminal_evidence_missing",
+        "journal_id": launch.journal_id, "launch_id": launch.launch_id,
+        "consumption_sha256": claim["consumption_sha256"],
+        "registration_sha256": registered["registration_sha256"],
+        "pid": registered["pid"], "pgid": registered["pgid"],
+    }
+    if evidence is None:
+        return result
+    observed = parse_trusted_bootstrap_evidence(
+        evidence.to_dict() if isinstance(evidence, TrustedBootstrapEvidence) else evidence,
+    )
+    if (
+        observed.launch_sha256 != launch.digest()
+        or observed.registration_sha256 != registered["registration_sha256"]
+    ):
+        _fail("producer_bootstrap_attempt_evidence_binding_mismatch")
+    result["evidence_sha256"] = observed.evidence_sha256
+    if observed.status == "unknown":
+        result["reason"] = "trusted_bootstrap_evidence_unknown"
+        return result
+    result.pop("reason")
+    result["status"] = "evidence_available"
+    result["bootstrap_status"] = observed.status
+    return result
 
 
 _FRAME_FIELDS = frozenset({

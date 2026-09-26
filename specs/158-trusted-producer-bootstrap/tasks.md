@@ -57,3 +57,12 @@ Fixture cleanup captures the OS start identity before registration and checks it
 reusing Feature 156's bounded live-controller rule for an already reaped private group leader.
 An identity mismatch or unreadable live identity cannot authorize TERM/KILL. This is fixture
 hardening, not formal lifecycle integration.
+
+The formal-attempt cross-record verifier now accepts an explicit verified intent/attestation,
+trusted launch and descriptor, one Feature 156 consumption claim, one proposed formal process
+registration, and optional terminal bootstrap evidence. It validates the claim's target stat-tuple
+digest separately from the registration's bootstrap stat-tuple digest, then binds consumption,
+registration, and evidence digests to the same launch. Missing or unknown evidence yields only
+`recovery_required`; the verifier performs no filesystem or process operation. This closes a
+protocol-checking gap but does not publish these records, prove executed bytes, or authorize
+post-crash cleanup. T158-04 remains open.

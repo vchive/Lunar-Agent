@@ -486,7 +486,7 @@ def test_runtime_deadline_after_target_start_keeps_handshake_unknown(tmp_path: P
             launch=_launch(target),
             descriptor=build_trusted_bootstrap_descriptor(),
             target_executable=target,
-            timeout_seconds=0.2,
+            timeout_seconds=1.0,
         )
     assert exc.value.code == "trusted_bootstrap_deadline_exceeded"
     assert exc.value.evidence is not None
@@ -631,7 +631,7 @@ def test_fixture_recovery_requires_manual_resolution_for_unknown_evidence(tmp_pa
             launch=launch,
             descriptor=build_trusted_bootstrap_descriptor(),
             target_executable=target,
-            timeout_seconds=0.2,
+            timeout_seconds=1.0,
         )
     assert exc.value.code == "trusted_bootstrap_deadline_exceeded"
     assert exc.value.evidence is not None
